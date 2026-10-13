@@ -80,6 +80,8 @@ final class MarkupEditorWindowController: NSObject {
             session.isSaving = false
             guard saved else { return }
             session.savedDocument = document
+            // Edits made while the save ran are not in the file: keep the window so they are not lost.
+            guard session.model.finishedDocument() == document else { return }
             session.closesWithoutAsking = true
             session.window?.close()
         }
@@ -98,8 +100,11 @@ final class MarkupEditorWindowController: NSObject {
 extension MarkupEditorWindowController: NSWindowDelegate {
     /// Asks before throwing away annotations that were not saved.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard let session = session(of: sender), !session.closesWithoutAsking,
-              session.model.finishedDocument() != session.savedDocument else { return true }
+        guard sender.attachedSheet == nil else { return false }
+        guard let session = session(of: sender), EditorClosing.needsConfirmation(
+            current: session.model.finishedDocument(), saved: session.savedDocument,
+            closesWithoutAsking: session.closesWithoutAsking
+        ) else { return true }
         let alert = NSAlert()
         alert.messageText = "Bỏ các thay đổi chưa lưu?"
         alert.informativeText = "Các chú thích vừa thêm sẽ mất nếu đóng cửa sổ này."

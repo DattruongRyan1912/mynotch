@@ -102,6 +102,7 @@ extension ScreenshotModule {
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             do {
+                // A hard link shares the stored file's inode, so the drag costs no copy; a copy is the fallback.
                 try FileManager.default.linkItem(at: source, to: copy)
             } catch {
                 try FileManager.default.copyItem(at: source, to: copy)
