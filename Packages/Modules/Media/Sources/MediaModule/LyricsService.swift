@@ -20,14 +20,24 @@ final class LyricsService {
     private let userAgent: String
     /// A call holds the turn from its start until the spacing after its answer has passed.
     private var isBusy = false
-    private var waiters: [CheckedContinuation<Bool, Never>] = []
+    private var waiters: [(id: Int, continuation: CheckedContinuation<Bool, Never>)] = []
+    private var nextWaiterID = 0
     private var spacingTimer: ScheduledAction?
     /// Set while lrclib's `Retry-After` runs.
     private var cooldownTimer: ScheduledAction?
+    private var cooldownWaiters: [@MainActor () -> Void] = []
     private var isShutDown = false
 
     /// Calls waiting for their turn (for tests).
     var queuedCount: Int { waiters.count }
+
+    /// True while lrclib's `Retry-After` runs: new lookups answer `.unavailable` without a request.
+    var isCoolingDown: Bool { cooldownTimer != nil }
+
+    /// Runs `action` once the current cooldown ends (a second rate limit extends it); dropped on shut down.
+    func afterCooldown(_ action: @escaping @MainActor () -> Void) {
+        cooldownWaiters.append(action)
+    }
 
     /// - Parameter appVersion: the app's `CFBundleShortVersionString`, for the User-Agent lrclib asks clients to send.
     init(
@@ -47,7 +57,9 @@ final class LyricsService {
     /// Cancelling the caller cancels the request in flight; a cancelled call still waiting its turn sends nothing.
     func lyrics(for track: TrackKey) async -> LyricsResult {
         if let cached = cache.load(track) { return cached }
-        guard await takeTurn() else { return .unavailable("Lyrics service stopped") }
+        guard await takeTurn() else {
+            return .unavailable(Task.isCancelled ? "Lookup cancelled" : "Lyrics service stopped")
+        }
         guard !Task.isCancelled else {
             passTurn()
             return .unavailable("Lookup cancelled")
@@ -70,10 +82,11 @@ final class LyricsService {
         spacingTimer = nil
         cooldownTimer?.cancel()
         cooldownTimer = nil
+        cooldownWaiters = []
         isBusy = false
         let waiting = waiters
         waiters = []
-        for waiter in waiting { waiter.resume(returning: false) }
+        for waiter in waiting { waiter.continuation.resume(returning: false) }
     }
 
     // MARK: request
@@ -145,7 +158,13 @@ final class LyricsService {
 
     private func startCooldown(seconds: Int) {
         cooldownTimer?.cancel()
-        cooldownTimer = scheduler.schedule(after: .seconds(seconds)) { [weak self] in self?.cooldownTimer = nil }
+        cooldownTimer = scheduler.schedule(after: .seconds(seconds)) { [weak self] in
+            guard let self else { return }
+            cooldownTimer = nil
+            let ending = cooldownWaiters
+            cooldownWaiters = []
+            for action in ending { action() }
+        }
     }
 
     // MARK: turns
@@ -157,7 +176,20 @@ final class LyricsService {
             isBusy = true
             return true
         }
-        return await withCheckedContinuation { waiters.append($0) }
+        let id = nextWaiterID
+        nextWaiterID += 1
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { waiters.append((id, $0)) }
+        } onCancel: {
+            // Back on the main actor, after the continuation is queued even when the task was cancelled already.
+            Task { @MainActor [weak self] in self?.leaveQueue(id) }
+        }
+    }
+
+    /// A cancelled call stops waiting; it never had the turn, so there is none to pass on.
+    private func leaveQueue(_ id: Int) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: index).continuation.resume(returning: false)
     }
 
     /// Hands the turn to the longest waiting call, or frees it.
@@ -167,7 +199,7 @@ final class LyricsService {
         if waiters.isEmpty {
             isBusy = false
         } else {
-            waiters.removeFirst().resume(returning: true)
+            waiters.removeFirst().continuation.resume(returning: true)
         }
     }
 }

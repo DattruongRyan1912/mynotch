@@ -27,7 +27,11 @@ nonisolated final class SampleRing: @unchecked Sendable {
         let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: bufferList))
         var channelCount = 0
         var frameCount = Int.max
-        for buffer in buffers where buffer.mData != nil && buffer.mNumberChannels > 0 {
+        var index = 0
+        while index < buffers.count {
+            let buffer = buffers[index]
+            index += 1
+            guard buffer.mData != nil, buffer.mNumberChannels > 0 else { continue }
             let channels = Int(buffer.mNumberChannels)
             channelCount += channels
             frameCount = min(frameCount, Int(buffer.mDataByteSize) / (channels * MemoryLayout<Float>.size))
@@ -35,14 +39,24 @@ nonisolated final class SampleRing: @unchecked Sendable {
         guard channelCount > 0, frameCount > 0 else { return }
         let start = written.load(ordering: .relaxed)
         let scale = 1 / Float(channelCount)
-        for frame in 0..<frameCount {
+        // `while` rather than `for … in 0..<n`: at -Onone the range iterators allocate, and this runs on the IO thread.
+        var frame = 0
+        while frame < frameCount {
             var sum: Float = 0
-            for buffer in buffers {
+            var bufferIndex = 0
+            while bufferIndex < buffers.count {
+                let buffer = buffers[bufferIndex]
+                bufferIndex += 1
                 guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
                 let channels = Int(buffer.mNumberChannels)
-                for channel in 0..<channels { sum += data[frame * channels + channel] }
+                var channel = 0
+                while channel < channels {
+                    sum += data[frame * channels + channel]
+                    channel += 1
+                }
             }
             storage[(start + frame) % capacity] = sum * scale
+            frame += 1
         }
         written.store(start + frameCount, ordering: .releasing)
     }
@@ -54,6 +68,7 @@ nonisolated final class SampleRing: @unchecked Sendable {
         let end = written.load(ordering: .acquiring)
         guard count < capacity, end >= count else { return nil }
         frame.withUnsafeMutableBufferPointer { destination in
+            // Plain loads are intended: one producer, aligned `Float`s, ordered by the fence below.
             for index in 0..<count { destination[index] = storage[(end - count + index) % capacity] }
         }
         // The writer fills slots past `written` before publishing them, so keep half the free space as a margin

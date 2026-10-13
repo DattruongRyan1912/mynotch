@@ -50,6 +50,8 @@ private nonisolated final class SystemAudioTapSession: @unchecked Sendable {
     /// Device changes arrive in bursts (a new default device often changes the sample rate too).
     static let rebuildDelay = DispatchTimeInterval.milliseconds(300)
 
+    static let rebuildRetryDelays: [DispatchTimeInterval] = [.seconds(1), .seconds(3)]
+
     private let queue = DispatchQueue(label: "io.lucasvu.mynotch.media.spectrum", qos: .userInitiated)
     private let bandCount: Int
     private let emit: @Sendable (SpectrumEvent) -> Void
@@ -94,9 +96,28 @@ private nonisolated final class SystemAudioTapSession: @unchecked Sendable {
         do {
             try setUp()
         } catch {
+            fail(error)
+        }
+    }
+
+    private func fail(_ error: any Error) {
+        tearDown()
+        isStopped = true
+        emit(.failed(error.localizedDescription))
+    }
+
+    /// A rebuild right after a device change can hit a device that is not ready yet, so it tries again after
+    /// each of these delays before giving up. The first start does not retry: it fails on a real problem.
+    private func rebuild(retryDelays: ArraySlice<DispatchTimeInterval> = SystemAudioTapSession.rebuildRetryDelays[...]) {
+        guard !isStopped else { return }
+        tearDown()
+        do {
+            try setUp()
+        } catch {
+            guard let delay = retryDelays.first else { return fail(error) }
+            logger.notice("Rebuilding the system audio tap failed, retrying: \(error.localizedDescription, privacy: .public)")
             tearDown()
-            isStopped = true
-            emit(.failed(error.localizedDescription))
+            queue.asyncAfter(deadline: .now() + delay) { self.rebuild(retryDelays: retryDelays.dropFirst()) }
         }
     }
 
@@ -193,8 +214,7 @@ private nonisolated final class SystemAudioTapSession: @unchecked Sendable {
             self.isRebuildPending = false
             guard !self.isStopped else { return }
             self.logger.notice("Rebuilding the system audio tap after an output device change")
-            self.tearDown()
-            self.build()
+            self.rebuild()
         }
     }
 

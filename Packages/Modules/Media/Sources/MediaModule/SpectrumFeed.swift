@@ -37,6 +37,8 @@ final class SpectrumFeed {
             cancelStopTimer()
             guard !isRunning else { return }
             isRunning = true
+            // A new tap session judges the permission afresh and never reports "not denied" itself.
+            store.setSpectrumPermissionLikelyDenied(false)
             source.start { [weak self] event in self?.receive(event) }
         } else if isRunning && stopTimer == nil {
             stopTimer = scheduler.schedule(after: Self.stopDelay) { [weak self] in self?.stop() }

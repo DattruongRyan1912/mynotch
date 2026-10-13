@@ -53,9 +53,10 @@ import Testing
         )
     }
 
-    /// Lets the process and its callbacks run until `condition` holds, for at most two seconds.
+    /// Lets the process and its callbacks run until `condition` holds. The limit only matters when something is
+    /// wrong, so it is generous: starting a shell can take seconds on a machine that is very busy.
     func eventually(_ condition: () -> Bool) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(2)
+        let deadline = ContinuousClock.now + .seconds(30)
         while !condition() {
             guard ContinuousClock.now < deadline else { return false }
             try? await Task.sleep(for: .milliseconds(10))

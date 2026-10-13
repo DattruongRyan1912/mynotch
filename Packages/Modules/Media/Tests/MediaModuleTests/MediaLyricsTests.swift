@@ -219,6 +219,72 @@ import Testing
         #expect(store.syncedLyrics == nil)
     }
 
+    // MARK: rate limits
+
+    @Test func aRateLimitedTrackIsAskedAgainWhenTheCooldownEnds() async {
+        enableLyrics()
+        client.reply(LrclibReplies.busy(retryAfter: "10"))
+        await harness.registry.bootstrap()
+        playTrack()
+        await settle { !client.requests.isEmpty }
+        await settle { false }
+        #expect(client.requests.count == 1)
+
+        client.reply(LrclibReplies.found())
+        harness.scheduler.advance(by: .seconds(9))
+        await settle { client.requests.count > 1 }
+        #expect(client.requests.count == 1)
+        harness.scheduler.advance(by: .seconds(1))
+        await settle { store.syncedLyrics != nil }
+        #expect(store.syncedLyrics == LrclibReplies.firstTwoLines)
+        #expect(client.requests.count == 2)
+    }
+
+    @Test func theRetryHappensOnlyOnce() async {
+        enableLyrics()
+        client.reply(LrclibReplies.busy(retryAfter: "10"))
+        await harness.registry.bootstrap()
+        playTrack()
+        await settle { !client.requests.isEmpty }
+        harness.scheduler.advance(by: .seconds(10))
+        await settle { client.requests.count == 2 }
+        #expect(client.requests.count == 2)
+        await settle { false }
+        harness.scheduler.advance(by: .seconds(3600))
+        await settle { client.requests.count > 2 }
+        #expect(client.requests.count == 2)
+    }
+
+    @Test func otherFailuresAreNotRetried() async {
+        enableLyrics()
+        client.reply(HTTPReply(status: 500))
+        await harness.registry.bootstrap()
+        playTrack()
+        await settle { !client.requests.isEmpty }
+        await settle { false }
+        harness.scheduler.advance(by: .seconds(3600))
+        await settle { client.requests.count > 1 }
+        #expect(client.requests.count == 1)
+    }
+
+    @Test func aTrackChangeDuringTheCooldownDropsTheOldRetry() async {
+        enableLyrics()
+        client.reply(LrclibReplies.busy(retryAfter: "10"))
+        await harness.registry.bootstrap()
+        playTrack("A")
+        await settle { !client.requests.isEmpty }
+        await settle { false }
+
+        // B waits out the cooldown too and gets its own retry; A's is gone.
+        playTrack("B")
+        harness.scheduler.advance(by: .seconds(1))
+        await settle { false }
+        client.reply(LrclibReplies.found())
+        harness.scheduler.advance(by: .seconds(9))
+        await settle { store.syncedLyrics != nil }
+        #expect(client.requests.compactMap { queryValue("track_name", of: $0) } == ["A", "B"])
+    }
+
     // MARK: lifecycle
 
     @Test func stoppingClearsTheLyricsAndDropsAnAnswerStillOnItsWay() async {

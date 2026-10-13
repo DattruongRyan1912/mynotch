@@ -231,6 +231,21 @@ import Testing
         #expect(client.requests.count == 2)
     }
 
+    @Test func afterCooldownRunsWhenTheCooldownEnds() async {
+        let service = makeService()
+        var calls = 0
+        #expect(!service.isCoolingDown)
+        client.reply(LrclibReplies.busy(retryAfter: "10"))
+        _ = await service.lyrics(for: key("A"))
+        #expect(service.isCoolingDown)
+        service.afterCooldown { calls += 1 }
+        scheduler.advance(by: .seconds(10) - .milliseconds(1))
+        #expect(calls == 0)
+        scheduler.advance(by: .milliseconds(1))
+        #expect(calls == 1)
+        #expect(!service.isCoolingDown)
+    }
+
     @Test func aSecondRateLimitStartsAnotherCooldown() async {
         let service = makeService()
         client.reply(LrclibReplies.busy(retryAfter: "10"))
@@ -367,6 +382,19 @@ import Testing
         // Only so that a regression ends in a failed expectation rather than a call that waits for ever.
         scheduler.advance(by: .seconds(1))
         #expect(await next.value == .synced(LrclibReplies.firstTwoLines))
+    }
+
+    @Test func cancellingLeavesTheQueueAtOnce() async {
+        let service = makeService()
+        client.reply(LrclibReplies.found())
+        _ = await service.lyrics(for: key("A"))
+        let cancelled = Task { await service.lyrics(for: key("B")) }
+        await settle { service.queuedCount == 1 }
+        cancelled.cancel()
+        // No time passes: the call is gone without waiting for its turn, and says it was cancelled.
+        #expect(await cancelled.value.reason == "Lookup cancelled")
+        #expect(service.queuedCount == 0)
+        #expect(client.requests.count == 1)
     }
 
     @Test func shuttingDownReleasesWaitingCallsAndStopsFurtherRequests() async {

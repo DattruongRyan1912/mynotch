@@ -164,6 +164,24 @@ import Testing
         #expect(store.spectrumBands == [0.4, 0.4, 0.4, 0.4])
     }
 
+    /// A new tap session starts a fresh silence detector that never says "not denied", so the feed clears the
+    /// verdict itself when it starts the tap again.
+    @Test func aRestartedTapStartsWithoutTheOldDeniedVerdict() async {
+        await startTap()
+        spectrum.emit(.permissionLikelyDenied(true))
+        #expect(store.spectrumPermissionLikelyDenied)
+
+        source.emit(AdapterLines.playing(false))
+        harness.scheduler.advance(by: .seconds(2))
+        #expect(!spectrum.isStarted)
+        source.emit(AdapterLines.playing(true))
+        #expect(spectrum.isStarted)
+        #expect(!store.spectrumPermissionLikelyDenied)
+
+        spectrum.emit(.bands([0.4, 0.4, 0.4, 0.4]))
+        #expect(store.spectrumBands == [0.4, 0.4, 0.4, 0.4])
+    }
+
     @Test func turningTheSettingOffClearsTheHint() async {
         await startTap()
         spectrum.emit(.permissionLikelyDenied(true))

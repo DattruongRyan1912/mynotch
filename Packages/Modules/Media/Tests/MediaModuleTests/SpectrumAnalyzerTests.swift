@@ -86,6 +86,31 @@ import Testing
         #expect(abs(falling - 0.85 * settled) < 0.001)
     }
 
+    /// A sine of `decibels` dBFS has amplitude 10^(dB/20); its band power is that squared (plus up to 1.5x from
+    /// the Hann window's neighbouring bins), so the level is (dB + 60) / 60 above the -60 dB floor: -40 dB is
+    /// 1/3, up to 0.363 with the neighbours. 4/N→2/N, a -80 dB floor or a rectangular window all move it.
+    @Test func absoluteLevelsFollowTheDecibelScale() {
+        let band = Self.band(of: 1000, bandCount: 8)
+        func level(atDecibels decibels: Double) -> Float {
+            var analyzer = SpectrumAnalyzer(bandCount: 8, sampleRate: 48_000)
+            let amplitude = Float(pow(10, decibels / 20))
+            return Self.settled(&analyzer, on: Self.sines([1000], amplitude: amplitude, sampleRate: 48_000))[band]
+        }
+        #expect(abs(level(atDecibels: -40) - 0.36) < 0.05)
+        #expect(abs(level(atDecibels: -60) - 0.03) < 0.03)
+        #expect(level(atDecibels: -20) > 0.64 && level(atDecibels: -20) < 0.7)
+    }
+
+    /// The Hann window keeps a loud sine out of distant bands; a rectangular window would leak into them.
+    @Test func aLoudSineDoesNotLeakIntoDistantBands() {
+        var analyzer = SpectrumAnalyzer(bandCount: 16, sampleRate: 48_000)
+        let levels = Self.settled(&analyzer, on: Self.sines([1000], amplitude: 0.5, sampleRate: 48_000))
+        let peak = Self.band(of: 1000, bandCount: 16)
+        for band in levels.indices where abs(band - peak) >= 3 {
+            #expect(levels[band] < 0.02)
+        }
+    }
+
     @Test func brokenSamplesReadAsSilence() {
         var analyzer = SpectrumAnalyzer(bandCount: 4, sampleRate: 48_000)
         _ = Self.settled(&analyzer, on: Self.sines([1000], sampleRate: 48_000))

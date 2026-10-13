@@ -61,6 +61,8 @@ public final class MediaModule: FeatureModule {
     /// Track the lyrics were asked for (or are shown for); nil while lyrics are off or the track has no key.
     private var lyricsTrack: TrackKey?
     private var lyricsTask: Task<Void, Never>?
+    /// Counts track changes, so a retry planned for an earlier track finds out it is stale.
+    private var lyricsEpoch = 0
     /// Track the published activity belongs to; nil while none is published. Compared so the activity is
     /// set once per track: everything that changes while a track plays is read by its views from `store`.
     private var publishedTrack: TrackIdentity?
@@ -253,15 +255,21 @@ public final class MediaModule: FeatureModule {
         lyricsTask?.cancel()
         lyricsTask = nil
         lyricsTrack = track
+        lyricsEpoch += 1
         store.showLyrics(nil)
-        guard let track, let lyricsService else { return }
+        guard let track else { return }
+        fetchLyrics(for: track, mayRetry: true)
+    }
+
+    private func fetchLyrics(for track: TrackKey, mayRetry: Bool) {
+        guard let lyricsService else { return }
         lyricsTask = Task { [weak self] in
             let result = await lyricsService.lyrics(for: track)
-            self?.receiveLyrics(result, for: track)
+            self?.receiveLyrics(result, for: track, mayRetry: mayRetry)
         }
     }
 
-    private func receiveLyrics(_ result: LyricsResult, for track: TrackKey) {
+    private func receiveLyrics(_ result: LyricsResult, for track: TrackKey, mayRetry: Bool) {
         // The track may have changed while the answer was on its way.
         guard track == lyricsTrack else { return }
         switch result {
@@ -269,6 +277,13 @@ public final class MediaModule: FeatureModule {
             store.showLyrics(lines)
         case .unavailable(let reason):
             context?.logger.info("Lyrics unavailable: \(reason, privacy: .public)")
+            // A rate limit is no verdict on the track: ask once more when lrclib is open again.
+            guard mayRetry, let lyricsService, lyricsService.isCoolingDown else { return }
+            let epoch = lyricsEpoch
+            lyricsService.afterCooldown { [weak self] in
+                guard let self, lyricsEpoch == epoch else { return }
+                fetchLyrics(for: track, mayRetry: false)
+            }
         case .plain, .instrumental, .notFound:
             break
         }
