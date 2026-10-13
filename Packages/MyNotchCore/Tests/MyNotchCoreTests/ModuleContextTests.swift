@@ -11,6 +11,7 @@ private final class StubPresenter: NotchPresenter {
 
 private final class StubPermissions: PermissionCenter {
     func status(of permission: Permission) -> PermissionStatus { .granted }
+    func request(_ permission: Permission) async -> PermissionStatus { .granted }
     func openSystemSettings(for permission: Permission) {}
 }
 

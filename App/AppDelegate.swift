@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings: settings, registry: registry, permissions: permissions, hotkeys: hotkeys
     )
     private var statusItem: StatusItemController?
+    private var permissionPolling: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = MainMenu.make(settingsTarget: self, settingsAction: #selector(showSettings))
@@ -35,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         screens.start()
         Task { await registry.bootstrap() }
+        observePermissionPolling()
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshPermissions() }
         }
@@ -50,5 +52,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshPermissions() {
         Task { await registry.refreshPermissions() }
+    }
+
+    /// TCC posts no notification when a permission changes, so poll while a module waits for one.
+    private func observePermissionPolling() {
+        Task { [weak self, registry] in
+            for await needed in Observations({ registry.needsPermissionPolling }) {
+                self?.setPermissionPolling(needed)
+            }
+        }
+    }
+
+    private func setPermissionPolling(_ enabled: Bool) {
+        if enabled, permissionPolling == nil {
+            permissionPolling = Task { [registry] in
+                // `Task.sleep` throws once the task is cancelled, which ends the loop.
+                while (try? await Task.sleep(for: .seconds(2))) != nil {
+                    await registry.refreshPermissions()
+                }
+            }
+        } else if !enabled {
+            permissionPolling?.cancel()
+            permissionPolling = nil
+        }
     }
 }

@@ -41,10 +41,21 @@ targets:
         LSUIElement: true
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSHumanReadableCopyright: "MyNotch — personal build"
+        # Asking for a permission without its usage description crashes the app.
+        NSCalendarsFullAccessUsageDescription: "MyNotch hiển thị lịch sắp tới trong notch."
+        NSRemindersFullAccessUsageDescription: "MyNotch hiển thị lời nhắc trong notch."
+        NSBluetoothAlwaysUsageDescription: "MyNotch hiển thị pin của thiết bị Bluetooth trong notch."
+        NSAppleEventsUsageDescription: "MyNotch điều khiển ứng dụng khác, ví dụ trình phát nhạc, từ notch."
+        NSMicrophoneUsageDescription: "MyNotch dùng micro cho các tính năng ghi âm trong notch."
     entitlements:
       path: App/MyNotch.entitlements
       properties:
         com.apple.security.app-sandbox: false
+        # Hardened Runtime blocks these resources unless the matching entitlement is present.
+        com.apple.security.personal-information.calendars: true
+        com.apple.security.automation.apple-events: true
+        com.apple.security.device.audio-input: true
+        com.apple.security.device.bluetooth: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch

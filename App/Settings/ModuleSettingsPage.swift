@@ -23,20 +23,8 @@ struct ModuleSettingsPage: View {
                     if case .failed = registry.state(of: id) { retryButton }
                     if case .unavailable = registry.state(of: id) { retryButton }
                 }
-                if !descriptor.permissions.isEmpty {
-                    Section("Quyền hệ thống") {
-                        ForEach(descriptor.permissions, id: \.self) { permission in
-                            LabeledContent(permission.displayName) {
-                                if permissions.status(of: permission) == .granted {
-                                    Text("Đã cấp").foregroundStyle(.green)
-                                } else {
-                                    Button("Cấp quyền") { permissions.openSystemSettings(for: permission) }
-                                }
-                            }
-                        }
-                    }
-                    .id(permissionRevision)
-                }
+                permissionSection("Quyền hệ thống", descriptor.permissions)
+                permissionSection("Quyền tuỳ chọn", descriptor.optionalPermissions)
                 if let settingsView = registry.settingsView(for: id) {
                     Section("Cài đặt") { settingsView }
                 }
@@ -51,6 +39,43 @@ struct ModuleSettingsPage: View {
 
     private var retryButton: some View {
         Button("Thử lại") { Task { await registry.retry(id) } }
+    }
+
+    @ViewBuilder
+    private func permissionSection(_ title: String, _ list: [Permission]) -> some View {
+        if !list.isEmpty {
+            Section(title) {
+                ForEach(list, id: \.self) { permission in
+                    PermissionRow(permission: permission, registry: registry, permissions: permissions)
+                }
+            }
+            .id(permissionRevision)
+        }
+    }
+}
+
+/// TCC posts no notification when a permission changes, so the status is re-read every 2 s while the row is on screen.
+private struct PermissionRow: View {
+    let permission: Permission
+    let registry: ModuleRegistry
+    let permissions: any PermissionCenter
+
+    var body: some View {
+        LabeledContent(permission.displayName) {
+            TimelineView(.periodic(from: .now, by: 2)) { _ in
+                let status = permissions.status(of: permission)
+                HStack {
+                    switch status {
+                    case .granted: Text("Đã cấp").foregroundStyle(.green)
+                    case .denied: Text("Chưa cấp").foregroundStyle(.orange)
+                    case .notDetermined: Text("Chưa xin").foregroundStyle(.secondary)
+                    }
+                    if status != .granted {
+                        Button("Cấp quyền") { Task { await registry.grant(permission) } }
+                    }
+                }
+            }
+        }
     }
 }
 

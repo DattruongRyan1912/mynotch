@@ -5,9 +5,20 @@ import SwiftUI
 /// Permission center whose answers tests set directly. Unknown permissions are denied.
 public final class FakePermissionCenter: PermissionCenter {
     public var statuses: [Permission: PermissionStatus] = [:]
+    /// The user's answer to every `request` prompt.
+    public var requestResult: PermissionStatus = .granted
+    public private(set) var requested: [Permission] = []
+    public private(set) var openedSettings: [Permission] = []
     public init() {}
     public func status(of permission: Permission) -> PermissionStatus { statuses[permission] ?? .denied }
-    public func openSystemSettings(for permission: Permission) {}
+
+    public func request(_ permission: Permission) async -> PermissionStatus {
+        requested.append(permission)
+        statuses[permission] = requestResult
+        return requestResult
+    }
+
+    public func openSystemSettings(for permission: Permission) { openedSettings.append(permission) }
 }
 
 /// Presenter that records requests.

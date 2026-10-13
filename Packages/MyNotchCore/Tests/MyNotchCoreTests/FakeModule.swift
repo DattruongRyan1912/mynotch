@@ -15,10 +15,13 @@ final class FakeModule: FeatureModule {
     /// Environment passed to the latest `makeSettingsView` call.
     private(set) var settingsEnvironment: ModuleSettingsEnvironment?
 
-    init(_ id: ModuleID, order: Int = 0, defaultEnabled: Bool = true, permissions: [Permission] = []) {
+    init(
+        _ id: ModuleID, order: Int = 0, defaultEnabled: Bool = true,
+        permissions: [Permission] = [], optionalPermissions: [Permission] = []
+    ) {
         descriptor = ModuleDescriptor(
-            id: id, displayName: id.rawValue, systemImage: "circle",
-            defaultEnabled: defaultEnabled, permissions: permissions, order: order
+            id: id, displayName: id.rawValue, systemImage: "circle", defaultEnabled: defaultEnabled,
+            permissions: permissions, optionalPermissions: optionalPermissions, order: order
         )
     }
 

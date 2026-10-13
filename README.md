@@ -37,8 +37,9 @@ Kiểm tra toàn bộ (test mọi package rồi build app):
 
 1. Tạo package trong `Packages/Modules/<Tên>/`; chép `Packages/Modules/Battery/Package.swift` làm mẫu (macOS 26, phụ thuộc đường dẫn tới MyNotchCore/NotchUI, `.defaultIsolation(MainActor.self)`, test dùng `MyNotchTestSupport`). Viết một class theo `FeatureModule`.
 2. Khai báo package trong `project.yml` (mục `packages` và `dependencies` của target MyNotch).
-3. Thêm một dòng vào `App/ModuleList.swift`.
-4. `xcodegen generate`. `scripts/verify.sh` tự chạy test của mọi package trong `Packages/Modules/`.
+3. Module cần quyền mới: thêm usage description và entitlement tương ứng vào `project.yml`.
+4. Thêm một dòng vào `App/ModuleList.swift`.
+5. `xcodegen generate`. `scripts/verify.sh` tự chạy test của mọi package trong `Packages/Modules/`.
 
 ## Bản Release
 

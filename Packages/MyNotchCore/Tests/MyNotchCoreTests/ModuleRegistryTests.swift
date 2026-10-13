@@ -39,6 +39,51 @@ import MyNotchTestSupport
         #expect(harness.registry.state(of: "needy") == .running)
     }
 
+    @Test func grantRequestsAnUndeterminedPermissionAndStartsTheModule() async {
+        let module = FakeModule("needy", permissions: [.calendars])
+        let harness = Harness([module])
+        harness.permissions.statuses[.calendars] = .notDetermined
+        await harness.registry.bootstrap()
+        #expect(harness.registry.state(of: "needy") == .needsPermission(.calendars))
+        await harness.registry.grant(.calendars)
+        #expect(harness.permissions.requested == [.calendars])
+        #expect(harness.permissions.openedSettings.isEmpty)
+        #expect(harness.registry.state(of: "needy") == .running)
+        #expect(module.startCount == 1)
+    }
+
+    @Test func grantOpensSystemSettingsForADeniedPermission() async {
+        let module = FakeModule("needy", permissions: [.accessibility])
+        let harness = Harness([module])
+        await harness.registry.bootstrap()
+        await harness.registry.grant(.accessibility)
+        #expect(harness.permissions.openedSettings == [.accessibility])
+        #expect(harness.permissions.requested.isEmpty)
+        #expect(harness.registry.state(of: "needy") == .needsPermission(.accessibility))
+        #expect(module.startCount == 0)
+    }
+
+    @Test func deniedOptionalPermissionsDoNotBlockStart() async {
+        let module = FakeModule("m", optionalPermissions: [.microphone, .bluetooth])
+        let harness = Harness([module])
+        await harness.registry.bootstrap()
+        #expect(harness.permissions.status(of: .microphone) == .denied)
+        #expect(harness.registry.state(of: "m") == .running)
+        #expect(!harness.registry.needsPermissionPolling)
+    }
+
+    @Test func pollsForPermissionsOnlyWhileAModuleWaitsForOne() async {
+        let module = FakeModule("needy", permissions: [.bluetooth])
+        let harness = Harness([module])
+        #expect(!harness.registry.needsPermissionPolling)
+        await harness.registry.bootstrap()
+        #expect(harness.registry.needsPermissionPolling)
+        harness.permissions.statuses[.bluetooth] = .granted
+        await harness.registry.refreshPermissions()
+        #expect(harness.registry.state(of: "needy") == .running)
+        #expect(!harness.registry.needsPermissionPolling)
+    }
+
     @Test func disablingStopsAndRemovesActivitiesAndTab() async {
         let module = FakeModule("m")
         module.activityOnStart = activity("live")

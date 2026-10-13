@@ -83,9 +83,20 @@ public final class ModuleRegistry {
     /// Restarts enabled modules that were waiting for a permission that is now granted.
     public func refreshPermissions() async {
         guard !isPaused else { return }
-        await reconcile(modules.filter {
-            if case .needsPermission = state(of: $0.descriptor.id) { true } else { false }
-        })
+        await reconcile(modules.filter(waitsForPermission))
+    }
+
+    /// TCC sends no notification when a permission changes, so the app polls `refreshPermissions()` while this is true.
+    public var needsPermissionPolling: Bool { modules.contains(where: waitsForPermission) }
+
+    /// Prompts while the system still can; after an answer only System Settings can change it.
+    public func grant(_ permission: Permission) async {
+        if permissions.status(of: permission) == .notDetermined {
+            _ = await permissions.request(permission)
+        } else {
+            permissions.openSystemSettings(for: permission)
+        }
+        await refreshPermissions()
     }
 
     public func pauseAll() async {
@@ -117,6 +128,10 @@ public final class ModuleRegistry {
 
     private func module(_ id: ModuleID) -> (any FeatureModule)? {
         modules.first { $0.descriptor.id == id }
+    }
+
+    private func waitsForPermission(_ module: any FeatureModule) -> Bool {
+        if case .needsPermission = state(of: module.descriptor.id) { true } else { false }
     }
 
     private func wantsRunning(_ module: any FeatureModule) -> Bool {
