@@ -3,16 +3,6 @@ import Testing
 @testable import MyNotchCore
 import MyNotchTestSupport
 
-/// Ignores cancellation, standing in for a timer that fires even though a later `set` rescheduled it.
-final class UncancellableScheduler: Scheduler {
-    let base = ManualScheduler()
-
-    func schedule(after delay: Duration, _ action: @escaping @MainActor () -> Void) -> ScheduledAction {
-        base.schedule(after: delay, action)
-        return ScheduledAction()
-    }
-}
-
 @Suite struct ActivityCenterTests {
     @Test func highestPriorityWinsThenMostRecent() {
         let center = ActivityCenter(scheduler: ManualScheduler())
@@ -41,6 +31,7 @@ final class UncancellableScheduler: Scheduler {
         center.set(activity("x", expiresAfter: .seconds(4)), from: "m")
         scheduler.advance(by: .seconds(3))
         center.set(activity("x", expiresAfter: .seconds(4)), from: "m")
+        #expect(scheduler.pendingCount == 1)
         scheduler.advance(by: .seconds(3))
         #expect(center.current?.id == "m/x")
         scheduler.advance(by: .seconds(1))
@@ -52,9 +43,21 @@ final class UncancellableScheduler: Scheduler {
         let center = ActivityCenter(scheduler: scheduler)
         center.set(activity("x", expiresAfter: .seconds(4)), from: "m")
         center.set(activity("x"), from: "m")
+        #expect(scheduler.pendingCount == 0)
         scheduler.advance(by: .seconds(60))
         #expect(center.current?.id == "m/x")
-        #expect(scheduler.pendingCount == 0)
+    }
+
+    @Test func raiseKeepsAPendingExpiry() {
+        let scheduler = ManualScheduler()
+        let center = ActivityCenter(scheduler: scheduler)
+        center.set(activity("x", expiresAfter: .seconds(4)), from: "m")
+        center.set(activity("y"), from: "m")
+        center.raise(id: "x", from: "m")
+        #expect(center.current?.id == "m/x")
+        scheduler.advance(by: .seconds(4))
+        #expect(center.entries.map(\.id) == ["m/y"])
+        #expect(center.current?.id == "m/y")
     }
 
     @Test func staleExpiryDoesNotRemoveAnUpdatedActivity() {
@@ -85,11 +88,16 @@ final class UncancellableScheduler: Scheduler {
         let center = ActivityCenter(scheduler: ManualScheduler())
         center.set(activity("a"), from: "m")
         center.set(activity("b"), from: "m")
+        let before = center.current
         nonisolated(unsafe) var changes = 0
         withObservationTracking { _ = center.current } onChange: { changes += 1 }
-        center.set(activity("b"), from: "m")
+        // expiresAfter stands in for new content: AnyView leading/trailing can't be compared.
+        center.set(activity("b", expiresAfter: .seconds(10)), from: "m")
         #expect(changes == 1)
         #expect(center.current?.id == "m/b")
+        #expect(center.current?.sequence == before?.sequence)
+        #expect(center.current?.revision != before?.revision)
+        #expect(center.current?.activity.expiresAfter == .seconds(10))
         #expect(center.entries.map(\.id) == ["m/a", "m/b"])
     }
 

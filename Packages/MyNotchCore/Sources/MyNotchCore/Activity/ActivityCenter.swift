@@ -44,9 +44,9 @@ public final class ActivityCenter {
         expiries.removeValue(forKey: key)?.cancel()
         if let lifetime = activity.expiresAfter {
             let expectedRevision = revision
-            expiries[key] = scheduler.schedule(after: lifetime) { [weak self] in
+            expiries[key] = scheduler.schedule(after: lifetime) { [weak self, id = activity.id] in
                 guard let self, self.entries.contains(where: { $0.id == key && $0.revision == expectedRevision }) else { return }
-                self.clear(id: activity.id, from: module)
+                self.clear(id: id, from: module)
             }
         }
         recompute()
