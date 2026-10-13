@@ -1,0 +1,71 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MyNotch — Lịch và Lời nhắc (dự án con 6)</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-mục-tiêu">1. Mục tiêu</a><a class="h2" href="#2-thiết-kế">2. Thiết kế</a><a class="h3" href="#2-1-cài-đặt-module-calendar">2.1 Cài đặt (<code>module.calendar.*</code>)</a><a class="h2" href="#3-kiểm-thử">3. Kiểm thử</a></nav><main><h1 id="mynotch-lịch-và-lời-nhắc-dự-án-con-6">MyNotch — Lịch và Lời nhắc (dự án con 6)</h1>
+<ul>
+<li><strong>Ngày:</strong> 2026-10-13</li>
+<li><strong>Trạng thái:</strong> Thiết kế</li>
+<li><strong>Nguồn:</strong> EventKit trong SDK macOS 26.5. API full-access đã được xác minh.</li>
+</ul>
+<h2 id="1-mục-tiêu">1. Mục tiêu</h2>
+<p><strong>Trong phạm vi:</strong></p>
+<ul>
+<li>Tab "Lịch":</li>
+<li>sự kiện hôm nay và sự kiện kế tiếp trong 7 ngày;</li>
+<li>lời nhắc chưa xong đến hạn hôm nay, kể cả quá hạn.</li>
+<li>Live activity "Họp sau N phút": hiện từ 5 phút trước giờ bắt đầu, có nút "Tham gia" khi tìm thấy link họp.</li>
+<li>Đánh dấu hoàn thành lời nhắc; mở sự kiện trong Calendar.</li>
+</ul>
+<p><strong>Ngoài phạm vi:</strong> tạo hoặc sửa sự kiện, danh sách người tham dự, tích hợp lịch bên thứ ba ngoài EventKit.</p>
+<h2 id="2-thiết-kế">2. Thiết kế</h2>
+<p>Package <code>Packages/Modules/Calendar</code>, product <code>CalendarModule</code>.</p>
+<p><strong>Quyền:</strong></p>
+<table><thead><tr><th>Quyền</th><th>Loại</th><th>Ghi chú</th></tr></thead><tbody>
+<tr><td><code>.calendars</code></td><td>Bắt buộc</td><td></td></tr>
+<tr><td><code>.reminders</code></td><td>Tuỳ chọn</td><td>Chỉ xin khi người dùng bật mục lời nhắc, tránh hai hộp thoại liên tiếp</td></tr>
+</tbody></table>
+<p><code>project.yml</code> đã có usage description và entitlement <code>com.apple.security.personal-information.calendars</code> từ dự án con 0.5. Lời nhắc không cần entitlement riêng.</p>
+<table><thead><tr><th>Thành phần</th><th>Vai trò</th></tr></thead><tbody>
+<tr><td><code>CalendarService</code></td><td>Actor nonisolated, giữ một <code>EKEventStore</code>. Ánh xạ sang struct <code>Sendable</code> (<code>AgendaEvent</code>, <code>AgendaReminder</code>). <code>events(matching:)</code> là hàm đồng bộ nên chạy ngoài main.</td></tr>
+<tr><td><code>AgendaBuilder</code></td><td>Thuần: lọc sự kiện bị huỷ hoặc mình đã từ chối, tách sự kiện cả ngày, chọn "kế tiếp" (sự kiện không phải cả ngày đầu tiên có <code>endDate &gt; now</code>).</td></tr>
+<tr><td><code>MeetingLinkDetector</code></td><td>Thuần: tìm link họp lần lượt trong <code>URL</code>, <code>location</code>, <code>notes</code> theo bảng mẫu (Zoom, Google Meet, Teams, Webex, FaceTime).</td></tr>
+<tr><td><code>UpcomingMeetingPolicy</code></td><td>Thuần: khi nào hiện, cập nhật hoặc ẩn activity họp (từ 5 phút trước tới 5 phút sau giờ bắt đầu, hoặc tới khi người dùng bấm Tham gia).</td></tr>
+<tr><td><code>CalendarModule</code></td><td>Làm mới khi có <code>EKEventStoreChanged</code> (gom 1 giây), khi qua ngày mới (<code>NSCalendarDayChanged</code>), khi máy thức dậy, và mỗi phút một lần cho đếm ngược.</td></tr>
+</tbody></table>
+<p><strong>Mở sự kiện:</strong> <code>ical://ekevent/&lt;calendarItemIdentifier&gt;</code>. Đây là đường dẫn không được công bố; nếu không mở được thì mở Calendar.app.</p>
+<h3 id="2-1-cài-đặt-module-calendar">2.1 Cài đặt (<code>module.calendar.*</code>)</h3>
+<table><thead><tr><th>Khoá</th><th>Mặc định</th></tr></thead><tbody>
+<tr><td><code>showReminders</code></td><td>false (bật thì xin quyền Reminders)</td></tr>
+<tr><td><code>meetingLeadMinutes</code></td><td>5 (1…30)</td></tr>
+<tr><td><code>hiddenCalendarIDs</code></td><td>[]</td></tr>
+<tr><td><code>showAllDay</code></td><td>true</td></tr>
+</tbody></table>
+<h2 id="3-kiểm-thử">3. Kiểm thử</h2>
+<table><thead><tr><th>Phần</th><th>Test tự động</th></tr></thead><tbody>
+<tr><td><code>AgendaBuilder</code></td><td>Huỷ/từ chối bị bỏ, cả ngày, chọn kế tiếp, qua nửa đêm</td></tr>
+<tr><td><code>MeetingLinkDetector</code></td><td>Từng nhà cung cấp, thứ tự ưu tiên <code>URL</code> &gt; <code>location</code> &gt; <code>notes</code>, không khớp</td></tr>
+<tr><td><code>UpcomingMeetingPolicy</code></td><td>ManualScheduler: trước 5 phút, đúng giờ, quá 5 phút, đã bấm Tham gia</td></tr>
+<tr><td>Module</td><td><code>CalendarService</code> giả</td></tr>
+</tbody></table>
+<p><strong>Kiểm thử tay:</strong> hộp thoại quyền; sự kiện thật có link Meet/Zoom; hoàn thành lời nhắc; đổi lịch trong Calendar.app thì tab cập nhật.</p></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>
