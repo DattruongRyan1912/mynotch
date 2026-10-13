@@ -6,7 +6,7 @@ public final class ModuleContext {
     public let settings: ModuleSettings
     public let activities: ActivityPublisher
     public let lockScreen: LockScreenPublisher
-    public let presenter: any NotchPresenter
+    public let presenter: ModulePresenter
     public let hotkeys: ModuleHotkeys
     public let services: ModuleServices
     public let permissions: any PermissionCenter
@@ -25,7 +25,7 @@ public final class ModuleContext {
         settings: ModuleSettings,
         activities: ActivityPublisher,
         lockScreen: LockScreenPublisher,
-        presenter: any NotchPresenter,
+        presenter: ModulePresenter,
         hotkeys: ModuleHotkeys,
         services: ModuleServices,
         permissions: any PermissionCenter,
@@ -67,6 +67,7 @@ public final class ModuleContext {
         moduleScheduler.invalidate()
         activities.invalidate()
         lockScreen.invalidate()
+        presenter.invalidate()
         hotkeys.invalidate()
         services.invalidate()
     }

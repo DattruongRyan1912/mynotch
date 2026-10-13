@@ -197,7 +197,7 @@ public final class ModuleRegistry {
             settings: moduleSettings[id]!,
             activities: ActivityPublisher(center: activities, module: id),
             lockScreen: LockScreenPublisher(center: lockScreen, module: id),
-            presenter: presenter,
+            presenter: ModulePresenter(presenter: presenter, module: id),
             hotkeys: ModuleHotkeys(registry: hotkeys, module: id),
             services: ModuleServices(registry: services, module: id),
             permissions: permissions,

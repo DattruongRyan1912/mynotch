@@ -3,10 +3,13 @@ import Testing
 @testable import MyNotchCore
 import MyNotchTestSupport
 
-private final class StubPresenter: NotchPresenter {
-    func open(tab: ModuleID) {}
-    func showToast(_ content: AnyView, duration: Duration) {}
-    func close() {}
+fileprivate final class StubPresenter: NotchPresenter {
+    private(set) var opened: [ModuleID] = []
+    private(set) var toasts = 0
+    private(set) var closes = 0
+    func open(tab: ModuleID) { opened.append(tab) }
+    func showToast(_ content: AnyView, duration: Duration) { toasts += 1 }
+    func close() { closes += 1 }
 }
 
 private final class StubPermissions: PermissionCenter {
@@ -16,13 +19,15 @@ private final class StubPermissions: PermissionCenter {
 }
 
 @Suite struct ModuleContextTests {
-    func makeContext(activities: ActivityCenter, scheduler: ManualScheduler = ManualScheduler()) -> ModuleContext {
+    fileprivate func makeContext(
+        activities: ActivityCenter, scheduler: ManualScheduler = ManualScheduler(), presenter: StubPresenter = StubPresenter()
+    ) -> ModuleContext {
         ModuleContext(
             id: "m",
             settings: ModuleSettings(store: SettingsStore(defaults: makeIsolatedDefaults()), module: "m"),
             activities: ActivityPublisher(center: activities, module: "m"),
             lockScreen: LockScreenPublisher(center: LockScreenContentCenter(), module: "m"),
-            presenter: StubPresenter(),
+            presenter: ModulePresenter(presenter: presenter, module: "m"),
             hotkeys: ModuleHotkeys(registry: HotkeyRegistry(backend: FakeHotkeyBackend()), module: "m"),
             services: ModuleServices(registry: ServiceRegistry(scheduler: scheduler), module: "m"),
             permissions: StubPermissions(),
@@ -103,5 +108,28 @@ private final class StubPermissions: PermissionCenter {
         base.advance(by: .seconds(2))
         #expect(!fired)
         #expect(base.pendingCount == 0)
+    }
+
+    @Test func thePresenterOpensOnlyThisModulesTabAndForwardsToastsAndClose() {
+        let presenter = StubPresenter()
+        let context = makeContext(activities: ActivityCenter(scheduler: ManualScheduler()), presenter: presenter)
+        context.presenter.open()
+        context.presenter.showToast(AnyView(EmptyView()), duration: .seconds(1))
+        context.presenter.close()
+        #expect(presenter.opened == ["m"])
+        #expect(presenter.toasts == 1)
+        #expect(presenter.closes == 1)
+    }
+
+    @Test func thePresenterIsInertAfterCancelAll() {
+        let presenter = StubPresenter()
+        let context = makeContext(activities: ActivityCenter(scheduler: ManualScheduler()), presenter: presenter)
+        context.cancelAll()
+        context.presenter.open()
+        context.presenter.showToast(AnyView(EmptyView()), duration: .seconds(1))
+        context.presenter.close()
+        #expect(presenter.opened.isEmpty)
+        #expect(presenter.toasts == 0)
+        #expect(presenter.closes == 0)
     }
 }

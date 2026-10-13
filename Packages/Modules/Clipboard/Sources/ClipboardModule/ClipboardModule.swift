@@ -163,7 +163,7 @@ public final class ClipboardModule: FeatureModule {
 
     /// The ⌃⌥V shortcut.
     func openTab() {
-        context?.presenter.open(tab: descriptor.id)
+        context?.presenter.open()
     }
 
     /// A short message over the open tab, where activities stay hidden until the notch closes.

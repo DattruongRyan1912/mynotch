@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import MyNotchCore
 import MyNotchTestSupport
@@ -280,6 +281,25 @@ import MyNotchTestSupport
         harness.scheduler.advance(by: .seconds(10))
         #expect(module.serviceTexts == ["xin chào"])
         #expect(lateTexts.isEmpty)
+    }
+
+    @Test func aModulesPresenterOpensItsOwnTabUntilItStops() async throws {
+        let module = FakeModule("m")
+        let harness = Harness([module])
+        await harness.registry.bootstrap()
+        let context = try #require(module.context)
+        context.presenter.open()
+        context.presenter.close()
+        #expect(harness.presenter.openedTabs == ["m"])
+        #expect(harness.presenter.closeCount == 1)
+
+        await harness.registry.setEnabled(false, for: "m")
+        context.presenter.open()
+        context.presenter.showToast(AnyView(EmptyView()), duration: .seconds(1))
+        context.presenter.close()
+        #expect(harness.presenter.openedTabs == ["m"])
+        #expect(harness.presenter.toastCount == 0)
+        #expect(harness.presenter.closeCount == 1)
     }
 
     @Test func serviceRegisteredByAFailedStartIsRemoved() async {

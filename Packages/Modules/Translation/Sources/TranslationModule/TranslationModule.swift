@@ -174,6 +174,6 @@ public final class TranslationModule: FeatureModule {
 
     private func showTab(_ context: ModuleContext) {
         state.focusRequest += 1
-        context.presenter.open(tab: descriptor.id)
+        context.presenter.open()
     }
 }
