@@ -8,5 +8,6 @@ public protocol FeatureModule: AnyObject {
     /// Called only after a successful `start`; start and stop of one module never overlap.
     func stop() async
     func makeTab() -> NotchTab?
+    /// Rows for the module's section in Settings — no Form; the page provides it. nil when there is nothing to configure.
     func makeSettingsView() -> AnyView?
 }

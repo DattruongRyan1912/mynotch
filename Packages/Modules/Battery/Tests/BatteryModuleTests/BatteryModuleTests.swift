@@ -10,8 +10,13 @@ final class FakePowerSource: PowerSourceReading {
 
     init(_ snapshot: PowerSourceSnapshot?) { self.snapshot = snapshot }
 
+    var isObserving: Bool { onChange != nil }
+
     func read() -> PowerSourceSnapshot? { snapshot }
-    func startObserving(_ onChange: @escaping @MainActor () -> Void) { self.onChange = onChange }
+    func startObserving(_ onChange: @escaping @MainActor () -> Void) -> Bool {
+        self.onChange = onChange
+        return true
+    }
     func stopObserving() { onChange = nil }
 
     func emit(_ snapshot: PowerSourceSnapshot) {
@@ -91,5 +96,25 @@ final class FakePowerSource: PowerSourceReading {
         harness.settings.set(15, for: SettingKey("module.battery.lowThreshold", default: 20, clampedTo: 5...50))
         for _ in 0..<100 where harness.activities.current != nil { await Task.yield() }
         #expect(harness.activities.current == nil)
+    }
+
+    @Test func disableStopsObservingAndReenableRestarts() async {
+        let source = FakePowerSource(PowerSourceSnapshot(percent: 15, isCharging: false, isOnAC: false))
+        let module = BatteryModule(reader: source)
+        let harness = RegistryHarness([module])
+        await harness.registry.bootstrap()
+        #expect(source.isObserving)
+        await harness.registry.setEnabled(false, for: "battery")
+        #expect(!source.isObserving)
+        #expect(module.state.snapshot == nil)
+        await harness.registry.setEnabled(true, for: "battery")
+        #expect(source.isObserving)
+        #expect(harness.activities.current?.id == "battery/low")
+    }
+
+    @Test func durationFormatting() {
+        #expect(BatteryTabView.format(45) == "45 phút")
+        #expect(BatteryTabView.format(60) == "1 giờ")
+        #expect(BatteryTabView.format(135) == "2 giờ 15 phút")
     }
 }

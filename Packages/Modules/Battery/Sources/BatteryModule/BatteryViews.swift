@@ -47,7 +47,8 @@ struct BatteryTabView: View {
     }
 
     static func format(_ minutes: Int) -> String {
-        minutes >= 60 ? "\(minutes / 60) giờ \(minutes % 60) phút" : "\(minutes) phút"
+        guard minutes >= 60 else { return "\(minutes) phút" }
+        return minutes % 60 == 0 ? "\(minutes / 60) giờ" : "\(minutes / 60) giờ \(minutes % 60) phút"
     }
 }
 
@@ -73,15 +74,15 @@ struct BatteryActivityPercent: View {
     }
 }
 
+/// Plain rows: the Settings page provides the Form and the section.
 struct BatterySettingsView: View {
     @Binding var lowThreshold: Int
     @Binding var notifyOnCharge: Bool
 
     var body: some View {
-        Form {
+        Group {
             Stepper("Ngưỡng pin yếu: \(lowThreshold)%", value: $lowThreshold, in: 5...50, step: 5)
             Toggle("Thông báo khi cắm sạc", isOn: $notifyOnCharge)
         }
-        .formStyle(.grouped)
     }
 }

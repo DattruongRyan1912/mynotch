@@ -47,7 +47,9 @@ public final class BatteryModule: FeatureModule {
         publishedLowPercent = nil
         lastThreshold = nil
         apply(snapshot, previous: nil)
-        reader.startObserving { [weak self] in self?.refresh() }
+        if !reader.startObserving({ [weak self] in self?.refresh() }) {
+            context.logger.error("Power source notifications unavailable; battery data will not update")
+        }
         if let keys = settingKeys {
             let settings = context.settings
             context.run { [weak self] in
@@ -73,7 +75,7 @@ public final class BatteryModule: FeatureModule {
 
     public func makeSettingsView() -> AnyView? {
         guard let context, let keys = settingKeys else {
-            return AnyView(Text("Bật module để chỉnh cài đặt").foregroundStyle(.secondary))
+            return AnyView(Text("Cài đặt hiện khi module đang chạy").foregroundStyle(.secondary))
         }
         return AnyView(BatterySettingsView(
             lowThreshold: context.settings.binding(keys.lowThreshold),
