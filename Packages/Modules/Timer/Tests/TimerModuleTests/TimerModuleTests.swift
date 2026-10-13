@@ -244,17 +244,27 @@ struct TimerFixture {
 
     // MARK: Lock screen
 
-    @Test func aRunningTimerOffersItsTimeToTheLockScreen() async {
+    @Test func aRunningCountdownOffersItsRemainingTimeToTheLockScreen() async {
         let fixture = TimerFixture()
         await fixture.start()
         #expect(fixture.harness.lockScreen.current == nil)
         fixture.module.startCountdown(minutes: 5)
         #expect(fixture.harness.lockScreen.current?.module == "timer")
         #expect(fixture.harness.lockScreen.current?.priority == .high)
+    }
 
-        fixture.module.cancel()
+    @Test func aStopwatchIsNeverOfferedToTheLockScreen() async {
+        let fixture = TimerFixture()
+        await fixture.start()
         fixture.module.startStopwatch()
-        #expect(fixture.harness.lockScreen.current?.module == "timer")
+        #expect(fixture.harness.activities.current?.id == "timer/timer")
+        #expect(fixture.harness.lockScreen.current == nil)
+
+        // Replacing a countdown with a stopwatch takes the countdown off.
+        fixture.module.startCountdown(minutes: 5)
+        #expect(fixture.harness.lockScreen.current != nil)
+        fixture.module.startStopwatch()
+        #expect(fixture.harness.lockScreen.current == nil)
     }
 
     @Test func pausingFinishingAndCancellingTakeTheTimeOffTheLockScreen() async {
@@ -336,11 +346,12 @@ struct TimerFixture {
         #expect(valid.error == nil)
     }
 
-    @Test func theCountdownTextCountsDownFromAFixedLowerBound() {
+    @Test func theTabAndTheLockScreenCountDownFromTheSameFixedRange() {
         let end = Date(timeIntervalSinceReferenceDate: 5_000)
-        #expect(TimerTabView.countdownRange(to: end) == TimerTabView.countdownRange(to: end))
-        #expect(TimerTabView.countdownRange(to: end).upperBound == end)
-        #expect(TimerTabView.countdownRange(to: end).lowerBound < end.addingTimeInterval(-86_400 * 365))
+        let range = TimerTabView.countdownRange(to: end)
+        #expect(range.upperBound == end)
+        #expect(range.lowerBound == .distantPast)
+        #expect(TimerLockScreenView(endDate: end).range == range)
     }
 
     @Test func disablingStopsTheTimerAndRemovesTheActivity() async {

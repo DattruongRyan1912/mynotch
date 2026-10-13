@@ -3,20 +3,21 @@ import Testing
 @testable import NotchUI
 
 // The C stand-ins below take the place of SkyLight's functions, so nothing here reaches the private framework.
-// They share one log; only `callsReachSkyLightInOrder` uses it, so tests running in parallel cannot mix entries up.
+// They share one log and one space id, so the tests that use them are in a serialized suite.
 nonisolated(unsafe) private var skyLightLog: [String] = []
+nonisolated(unsafe) private var fakeSpaceID: UInt64 = 123
 
 private nonisolated func fakeMainConnectionID() -> Int32 {
     skyLightLog.append("connection")
     return 9
 }
 
-private nonisolated func fakeSpaceCreate(_ connection: Int32, _ flags: Int, _ options: UnsafeRawPointer?) -> UInt {
+private nonisolated func fakeSpaceCreate(_ connection: Int32, _ flags: Int, _ options: UnsafeRawPointer?) -> UInt64 {
     skyLightLog.append("create \(connection) \(flags) \(options == nil ? "nil" : "options")")
-    return 123
+    return fakeSpaceID
 }
 
-private nonisolated func fakeSetAbsoluteLevel(_ connection: Int32, _ space: Int, _ level: Int32) -> Int32 {
+private nonisolated func fakeSetAbsoluteLevel(_ connection: Int32, _ space: UInt64, _ level: Int32) -> Int32 {
     skyLightLog.append("level \(connection) \(space) \(level)")
     return 0
 }
@@ -26,7 +27,7 @@ private nonisolated func fakeShowSpaces(_ connection: Int32, _ spaces: CFArray) 
     return 0
 }
 
-private nonisolated func fakeAddWindows(_ connection: Int32, _ space: Int, _ windows: CFArray, _ options: Int32) -> Int32 {
+private nonisolated func fakeAddWindows(_ connection: Int32, _ space: UInt64, _ windows: CFArray, _ options: Int32) -> Int32 {
     skyLightLog.append("add \(connection) \(space) \(numbers(windows)) \(options)")
     return 0
 }
@@ -54,7 +55,7 @@ private func inertSymbols(except missing: String? = nil) -> (String) -> UnsafeMu
     { name in name == missing ? nil : UnsafeMutableRawPointer(bitPattern: 0x10) }
 }
 
-@Suite struct SkyLightShimTests {
+@Suite(.serialized) struct SkyLightShimTests {
     @Test func aLibraryThatCannotBeLoadedIsUnavailableAndEverythingIsANoOp() {
         let shim = SystemSkyLightShim(libraryPath: "/nonexistent/SkyLight.framework/SkyLight")
         #expect(!shim.isAvailable)
@@ -76,17 +77,22 @@ private func inertSymbols(except missing: String? = nil) -> (String) -> UnsafeMu
         shim.detach(windowNumber: 5)
     }
 
-    @Test func callsReachSkyLightInOrder() {
+    private func shimWithFakeFunctions() -> SystemSkyLightShim {
         skyLightLog = []
         let functions: [String: UnsafeMutableRawPointer] = [
             "SLSMainConnectionID": pointer(fakeMainConnectionID as @convention(c) () -> Int32),
-            "SLSSpaceCreate": pointer(fakeSpaceCreate as @convention(c) (Int32, Int, UnsafeRawPointer?) -> UInt),
-            "SLSSpaceSetAbsoluteLevel": pointer(fakeSetAbsoluteLevel as @convention(c) (Int32, Int, Int32) -> Int32),
+            "SLSSpaceCreate": pointer(fakeSpaceCreate as @convention(c) (Int32, Int, UnsafeRawPointer?) -> UInt64),
+            "SLSSpaceSetAbsoluteLevel": pointer(fakeSetAbsoluteLevel as @convention(c) (Int32, UInt64, Int32) -> Int32),
             "SLSShowSpaces": pointer(fakeShowSpaces as @convention(c) (Int32, CFArray) -> Int32),
-            "SLSSpaceAddWindowsAndRemoveFromSpaces": pointer(fakeAddWindows as @convention(c) (Int32, Int, CFArray, Int32) -> Int32),
+            "SLSSpaceAddWindowsAndRemoveFromSpaces": pointer(fakeAddWindows as @convention(c) (Int32, UInt64, CFArray, Int32) -> Int32),
             "SLSRemoveWindowsFromSpaces": pointer(fakeRemoveWindows as @convention(c) (Int32, CFArray, CFArray) -> Int32),
         ]
-        let shim = SystemSkyLightShim(resolve: { functions[$0] })
+        return SystemSkyLightShim(resolve: { functions[$0] })
+    }
+
+    @Test func callsReachSkyLightInOrder() {
+        fakeSpaceID = 123
+        let shim = shimWithFakeFunctions()
         #expect(shim.isAvailable)
         #expect(skyLightLog.isEmpty)
 
@@ -101,6 +107,18 @@ private func inertSymbols(except missing: String? = nil) -> (String) -> UnsafeMu
         #expect(skyLightLog == [
             "connection", "create 9 1 nil", "level 9 123 400", "show 9 [123]",
             "add 9 123 [77] 7", "remove 9 [77] [123]",
+        ])
+    }
+
+    @Test func aSpaceIdWiderThan32BitsIsPassedBackWhole() {
+        fakeSpaceID = 0x1_0000_0007
+        let shim = shimWithFakeFunctions()
+        shim.makeLockScreenSpace()
+        shim.attach(windowNumber: 77)
+        shim.detach(windowNumber: 77)
+        #expect(skyLightLog == [
+            "connection", "create 9 1 nil", "level 9 4294967303 400", "show 9 [4294967303]",
+            "add 9 4294967303 [77] 7", "remove 9 [77] [4294967303]",
         ])
     }
 }

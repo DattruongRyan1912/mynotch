@@ -7,17 +7,20 @@ final class LockStateObserver {
     nonisolated static let screenIsUnlocked = Notification.Name("com.apple.screenIsUnlocked")
 
     nonisolated enum Event {
-        case locked, unlocked, displaySlept, displayWoke, sessionResigned, sessionBecameActive
+        case locked, unlocked, displaySlept, displayWoke, sessionBecameActive
+
+        /// A display waking and a session coming back are when a missed lock or unlock notification is noticed.
+        var reconcilesWithSession: Bool { self == .displayWoke || self == .sessionBecameActive }
     }
 
+    /// There is no "session in front" flag on purpose: macOS may report the session leaving on a plain lock,
+    /// and hiding on it would silently switch the widget off.
     nonisolated struct State: Equatable {
         var isLocked: Bool
         var isDisplayAsleep = false
-        /// False while another user's session is in front (fast user switching).
-        var isSessionActive = true
 
-        /// Locked, with the display on and this user's session in front: the only time the lock screen can be seen.
-        var isLockScreenVisible: Bool { isLocked && !isDisplayAsleep && isSessionActive }
+        /// Locked with the display on: the only time the lock screen can be seen.
+        var isLockScreenVisible: Bool { isLocked && !isDisplayAsleep }
 
         mutating func apply(_ event: Event) {
             switch event {
@@ -26,8 +29,7 @@ final class LockStateObserver {
             case .unlocked: (isLocked, isDisplayAsleep) = (false, false)
             case .displaySlept: isDisplayAsleep = true
             case .displayWoke: isDisplayAsleep = false
-            case .sessionResigned: isSessionActive = false
-            case .sessionBecameActive: isSessionActive = true
+            case .sessionBecameActive: break
             }
         }
     }
@@ -57,7 +59,6 @@ final class LockStateObserver {
         observe(distributed, Self.screenIsUnlocked, as: .unlocked)
         observe(workspace, NSWorkspace.screensDidSleepNotification, as: .displaySlept)
         observe(workspace, NSWorkspace.screensDidWakeNotification, as: .displayWoke)
-        observe(workspace, NSWorkspace.sessionDidResignActiveNotification, as: .sessionResigned)
         observe(workspace, NSWorkspace.sessionDidBecomeActiveNotification, as: .sessionBecameActive)
     }
 
@@ -80,6 +81,8 @@ final class LockStateObserver {
         guard let onChange else { return }
         var new = state
         new.apply(event)
+        // The session is the truth: a notification missed while the screen was asleep must not leave the panel up (or down).
+        if event.reconcilesWithSession { new.isLocked = isScreenLocked() }
         guard new != state else { return }
         state = new
         onChange(new)

@@ -41,7 +41,7 @@ public final class LockScreenModule: FeatureModule {
     /// Keeps the widget up for the moment the lock screen fades, so it doesn't vanish a beat before it.
     static let hideDelay = Duration.milliseconds(300)
 
-    /// Made in `start`, so SkyLight is not loaded while the module is off.
+    /// Called once, on the first `start`, so SkyLight is not loaded while the module is off.
     private let makeShim: () -> any SkyLightShim
     private let makeWindow: (AnyView) -> (any LockScreenWindow)?
     private let distributedCenter: NotificationCenter
@@ -79,10 +79,11 @@ public final class LockScreenModule: FeatureModule {
     }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
-        let shim = makeShim()
+        // Kept across stops: the SkyLight space belongs to the shim, so a new shim would make another one every time.
+        let shim = self.shim ?? makeShim()
+        self.shim = shim
         guard shim.isAvailable else { throw .unavailable(reason: Self.unavailableReason) }
         self.context = context
-        self.shim = shim
         let observer = LockStateObserver(distributed: distributedCenter, workspace: workspaceCenter, isScreenLocked: isScreenLocked)
         self.observer = observer
         observer.start { [weak self] state in self?.stateChanged(state) }
@@ -95,7 +96,6 @@ public final class LockScreenModule: FeatureModule {
         observer?.stop()
         observer = nil
         hide()
-        shim = nil
         context = nil
     }
 

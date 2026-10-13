@@ -52,23 +52,42 @@ final class FakeSession {
     var isLocked = false
 }
 
+/// A private center that counts how many observers were removed from it.
+nonisolated final class CountingNotificationCenter: NotificationCenter, @unchecked Sendable {
+    nonisolated(unsafe) private(set) var removals = 0
+
+    override func removeObserver(_ observer: Any) {
+        removals += 1
+        super.removeObserver(observer)
+    }
+}
+
+final class Counter {
+    var count = 0
+}
+
 @MainActor
 struct LockScreenFixture {
     let log = EventLog()
     let shim: FakeSkyLightShim
     let factory: WindowFactory
     let session = FakeSession()
-    let distributed = NotificationCenter()
-    let workspace = NotificationCenter()
+    /// How many times the module asked for a shim.
+    let shimsMade = Counter()
+    let distributed = CountingNotificationCenter()
+    let workspace = CountingNotificationCenter()
     let module: LockScreenModule
     let harness: RegistryHarness
 
     init() {
-        let shim = FakeSkyLightShim(log: log), factory = WindowFactory(log: log), session = session
+        let shim = FakeSkyLightShim(log: log), factory = WindowFactory(log: log), session = session, shimsMade = shimsMade
         self.shim = shim
         self.factory = factory
         module = LockScreenModule(
-            makeShim: { shim },
+            makeShim: {
+                shimsMade.count += 1
+                return shim
+            },
             makeWindow: { _ in factory.make() },
             distributedCenter: distributed,
             workspaceCenter: workspace,
@@ -87,12 +106,15 @@ struct LockScreenFixture {
         harness.lockScreen.set(AnyView(Text(module.rawValue)), priority: priority, from: module)
     }
 
+    /// The notification and the session dictionary agree, as they do on a real Mac.
     func lock() async {
+        session.isLocked = true
         distributed.post(name: LockStateObserver.screenIsLocked, object: nil)
         await drainMainQueue()
     }
 
     func unlock() async {
+        session.isLocked = false
         distributed.post(name: LockStateObserver.screenIsUnlocked, object: nil)
         await drainMainQueue()
     }
@@ -253,6 +275,52 @@ struct LockScreenFixture {
         await fixture.lock()
         fixture.harness.scheduler.advance(by: .seconds(5))
         #expect(fixture.log.entries.count == 5)
+    }
+
+    @Test func aDisableEnableCycleReusesTheSameShimSoTheSpaceIsMadeOnce() async {
+        let fixture = LockScreenFixture()
+        fixture.offer("media")
+        #expect(fixture.shimsMade.count == 0)
+        await fixture.enable()
+        await fixture.lock()
+        await fixture.harness.registry.setEnabled(false, for: "lockscreen")
+        await fixture.enable()
+        await fixture.lock()
+        #expect(fixture.shimsMade.count == 1)
+        #expect(fixture.log.entries.suffix(3) == ["makeSpace", "show 102", "attach 102"])
+    }
+
+    @Test func stoppingRemovesEveryObserverItAdded() async {
+        let fixture = LockScreenFixture()
+        await fixture.enable()
+        #expect(fixture.distributed.removals == 0)
+        #expect(fixture.workspace.removals == 0)
+        await fixture.harness.registry.setEnabled(false, for: "lockscreen")
+        #expect(fixture.distributed.removals == 2)
+        #expect(fixture.workspace.removals == 3)
+    }
+
+    @Test func aMissedUnlockIsRecoveredWhenTheDisplayWakes() async {
+        let fixture = LockScreenFixture()
+        fixture.offer("media")
+        await fixture.enable()
+        await fixture.lock()
+        // The unlock notification never arrived, but the session is no longer locked.
+        fixture.session.isLocked = false
+        await fixture.wakeDisplay()
+        fixture.harness.scheduler.advance(by: LockScreenModule.hideDelay)
+        #expect(fixture.log.entries.suffix(2) == ["detach 101", "dismiss 101"])
+    }
+
+    @Test func aPlainLockStillShowsWhenMacOSAlsoReportsTheSessionLeaving() async {
+        let fixture = LockScreenFixture()
+        fixture.offer("media")
+        await fixture.enable()
+        fixture.workspace.post(name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
+        await fixture.lock()
+        fixture.workspace.post(name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
+        await drainMainQueue()
+        #expect(fixture.log.entries == ["makeSpace", "show 101", "attach 101"])
     }
 
     @Test func enablingAgainAfterStoppingWorks() async {

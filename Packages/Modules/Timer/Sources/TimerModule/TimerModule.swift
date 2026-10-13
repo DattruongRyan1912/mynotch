@@ -110,15 +110,18 @@ public final class TimerModule: FeatureModule {
         }
     }
 
-    /// The lock screen shows only a running time; finished, paused and idle timers leave it.
+    /// The lock screen shows only the remaining time of a running countdown; everything else leaves it.
     private func publish(in context: ModuleContext) {
         let now = now()
         switch state.model {
         case .countdown(let endDate):
-            publishRunning(systemImage: "hourglass", range: now...max(endDate, now), countsDown: true, in: context)
+            context.activities.set(TimerActivity.running(
+                systemImage: "hourglass", range: now...max(endDate, now), countsDown: true))
+            context.lockScreen.set(AnyView(TimerLockScreenView(endDate: endDate)), priority: .high)
         case .stopwatch(let accumulated, let startedAt):
-            publishRunning(
-                systemImage: "stopwatch", range: startedAt.addingTimeInterval(-accumulated)...Date.distantFuture, countsDown: false, in: context)
+            context.activities.set(TimerActivity.running(
+                systemImage: "stopwatch", range: startedAt.addingTimeInterval(-accumulated)...Date.distantFuture, countsDown: false))
+            context.lockScreen.clear()
         case .finished:
             context.activities.set(TimerActivity.finished(expiresAfter: Self.finishedLifetime))
             context.lockScreen.clear()
@@ -126,12 +129,6 @@ public final class TimerModule: FeatureModule {
             context.activities.clear(id: Self.activityID)
             context.lockScreen.clear()
         }
-    }
-
-    private func publishRunning(systemImage: String, range: ClosedRange<Date>, countsDown: Bool, in context: ModuleContext) {
-        context.activities.set(TimerActivity.running(systemImage: systemImage, range: range, countsDown: countsDown))
-        context.lockScreen.set(
-            AnyView(TimerLockScreenView(systemImage: systemImage, range: range, countsDown: countsDown)), priority: .high)
     }
 
     private func scheduleFinish(on scheduler: any Scheduler) {

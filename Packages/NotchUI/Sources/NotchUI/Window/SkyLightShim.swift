@@ -25,11 +25,11 @@ public final class SystemSkyLightShim: SkyLightShim {
 
     private struct Functions {
         let mainConnectionID: @convention(c) () -> Int32
-        // The space and flag arguments are pointer-sized, so the call is right whichever width the library reads.
-        let spaceCreate: @convention(c) (Int32, Int, UnsafeRawPointer?) -> UInt
-        let setAbsoluteLevel: @convention(c) (Int32, Int, Int32) -> Int32
+        // A space id is a 64-bit `size_t`, and the flag argument of `SLSSpaceCreate` is pointer-sized.
+        let spaceCreate: @convention(c) (Int32, Int, UnsafeRawPointer?) -> UInt64
+        let setAbsoluteLevel: @convention(c) (Int32, UInt64, Int32) -> Int32
         let showSpaces: @convention(c) (Int32, CFArray) -> Int32
-        let addWindowsAndRemoveFromSpaces: @convention(c) (Int32, Int, CFArray, Int32) -> Int32
+        let addWindowsAndRemoveFromSpaces: @convention(c) (Int32, UInt64, CFArray, Int32) -> Int32
         let removeWindowsFromSpaces: @convention(c) (Int32, CFArray, CFArray) -> Int32
 
         /// nil when any of the six is missing.
@@ -41,16 +41,16 @@ public final class SystemSkyLightShim: SkyLightShim {
                   let addWindows = resolve("SLSSpaceAddWindowsAndRemoveFromSpaces"),
                   let removeWindows = resolve("SLSRemoveWindowsFromSpaces") else { return nil }
             self.mainConnectionID = unsafeBitCast(mainConnectionID, to: (@convention(c) () -> Int32).self)
-            self.spaceCreate = unsafeBitCast(spaceCreate, to: (@convention(c) (Int32, Int, UnsafeRawPointer?) -> UInt).self)
-            self.setAbsoluteLevel = unsafeBitCast(setAbsoluteLevel, to: (@convention(c) (Int32, Int, Int32) -> Int32).self)
+            self.spaceCreate = unsafeBitCast(spaceCreate, to: (@convention(c) (Int32, Int, UnsafeRawPointer?) -> UInt64).self)
+            self.setAbsoluteLevel = unsafeBitCast(setAbsoluteLevel, to: (@convention(c) (Int32, UInt64, Int32) -> Int32).self)
             self.showSpaces = unsafeBitCast(showSpaces, to: (@convention(c) (Int32, CFArray) -> Int32).self)
-            self.addWindowsAndRemoveFromSpaces = unsafeBitCast(addWindows, to: (@convention(c) (Int32, Int, CFArray, Int32) -> Int32).self)
+            self.addWindowsAndRemoveFromSpaces = unsafeBitCast(addWindows, to: (@convention(c) (Int32, UInt64, CFArray, Int32) -> Int32).self)
             self.removeWindowsFromSpaces = unsafeBitCast(removeWindows, to: (@convention(c) (Int32, CFArray, CFArray) -> Int32).self)
         }
     }
 
     private let functions: Functions?
-    private var space: (connection: Int32, id: Int)?
+    private var space: (connection: Int32, id: UInt64)?
 
     public var isAvailable: Bool { functions != nil }
 
@@ -72,8 +72,7 @@ public final class SystemSkyLightShim: SkyLightShim {
     public func makeLockScreenSpace() {
         guard let functions, space == nil else { return }
         let connection = functions.mainConnectionID()
-        // The id fits in 32 bits; the call reads the result at the width of a pointer and keeps only those bits.
-        let id = Int(UInt32(truncatingIfNeeded: functions.spaceCreate(connection, 1, nil)))
+        let id = functions.spaceCreate(connection, 1, nil)
         _ = functions.setAbsoluteLevel(connection, id, Self.lockScreenLevel)
         _ = functions.showSpaces(connection, [id] as CFArray)
         space = (connection, id)

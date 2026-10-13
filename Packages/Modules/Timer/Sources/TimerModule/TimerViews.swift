@@ -27,17 +27,17 @@ enum TimerActivity {
     }
 }
 
-/// Lock screen widget: the running time and nothing else.
+/// Lock screen widget: the remaining time of a running countdown and nothing else.
 struct TimerLockScreenView: View {
-    let systemImage: String
-    let range: ClosedRange<Date>
-    let countsDown: Bool
+    let endDate: Date
+
+    var range: ClosedRange<Date> { TimerTabView.countdownRange(to: endDate) }
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: systemImage)
+            Image(systemName: "hourglass")
                 .font(.system(size: 20, weight: .semibold))
-            Text(timerInterval: range, pauseTime: nil, countsDown: countsDown)
+            Text(timerInterval: range, pauseTime: nil, countsDown: true)
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
                 .monospacedDigit()
         }

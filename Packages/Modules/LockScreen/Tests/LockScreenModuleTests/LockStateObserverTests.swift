@@ -16,11 +16,14 @@ func drainMainQueue() async {
 final class NotificationFixture {
     let distributed = NotificationCenter()
     let workspace = NotificationCenter()
+    /// What the session dictionary would say. The lock and unlock helpers keep it in step with their notification, as macOS does.
+    let session = FakeSession()
     private(set) var changes: [LockStateObserver.State] = []
     let observer: LockStateObserver
 
     init(initiallyLocked: Bool = false) {
-        observer = LockStateObserver(distributed: distributed, workspace: workspace, isScreenLocked: { initiallyLocked })
+        session.isLocked = initiallyLocked
+        observer = LockStateObserver(distributed: distributed, workspace: workspace, isScreenLocked: { [session] in session.isLocked })
         observer.start { [unowned self] in changes.append($0) }
     }
 
@@ -29,8 +32,16 @@ final class NotificationFixture {
         await drainMainQueue()
     }
 
-    func lock() async { await post(LockStateObserver.screenIsLocked, on: distributed) }
-    func unlock() async { await post(LockStateObserver.screenIsUnlocked, on: distributed) }
+    func lock() async {
+        session.isLocked = true
+        await post(LockStateObserver.screenIsLocked, on: distributed)
+    }
+
+    func unlock() async {
+        session.isLocked = false
+        await post(LockStateObserver.screenIsUnlocked, on: distributed)
+    }
+
     func sleepDisplay() async { await post(NSWorkspace.screensDidSleepNotification, on: workspace) }
     func wakeDisplay() async { await post(NSWorkspace.screensDidWakeNotification, on: workspace) }
     func resignSession() async { await post(NSWorkspace.sessionDidResignActiveNotification, on: workspace) }
@@ -75,12 +86,43 @@ final class NotificationFixture {
         #expect(fixture.observer.state.isLockScreenVisible)
     }
 
-    @Test func leavingTheSessionHidesTheLockScreenUntilItIsBack() async {
+    @Test func leavingTheSessionDoesNotHideTheLockScreen() async {
+        // A plain lock may post this too, and gating on it would silently switch the widget off.
         let fixture = NotificationFixture(initiallyLocked: true)
         await fixture.resignSession()
-        #expect(!fixture.observer.state.isLockScreenVisible)
+        #expect(fixture.observer.state.isLockScreenVisible)
+        #expect(fixture.changes.isEmpty)
+    }
+
+    @Test func wakingTheDisplayRecoversFromAMissedUnlock() async {
+        let fixture = NotificationFixture(initiallyLocked: true)
+        fixture.session.isLocked = false
+        await fixture.wakeDisplay()
+        #expect(!fixture.observer.state.isLocked)
+        #expect(fixture.changes.map(\.isLockScreenVisible) == [false])
+    }
+
+    @Test func theSessionComingBackRecoversFromAMissedUnlock() async {
+        let fixture = NotificationFixture(initiallyLocked: true)
+        fixture.session.isLocked = false
+        await fixture.activateSession()
+        #expect(!fixture.observer.state.isLocked)
+    }
+
+    @Test func wakingTheDisplayRecoversFromAMissedLock() async {
+        let fixture = NotificationFixture()
+        fixture.session.isLocked = true
+        await fixture.wakeDisplay()
+        #expect(fixture.observer.state.isLockScreenVisible)
+    }
+
+    @Test func wakingWhileStillLockedKeepsTheLockScreen() async {
+        let fixture = NotificationFixture(initiallyLocked: true)
+        await fixture.sleepDisplay()
+        await fixture.wakeDisplay()
         await fixture.activateSession()
         #expect(fixture.observer.state.isLockScreenVisible)
+        #expect(fixture.changes.map(\.isLockScreenVisible) == [false, true])
     }
 
     @Test func unlockingForgetsASleepWhoseWakeWasMissed() async {
@@ -129,12 +171,13 @@ final class NotificationFixture {
         var state = LockStateObserver.State(isLocked: false)
         state.apply(.locked)
         state.apply(.displaySlept)
-        state.apply(.sessionResigned)
-        #expect(state == .init(isLocked: true, isDisplayAsleep: true, isSessionActive: false))
+        #expect(state == .init(isLocked: true, isDisplayAsleep: true))
+        #expect(!state.isLockScreenVisible)
+        state.apply(.displayWoke)
+        #expect(state == .init(isLocked: true, isDisplayAsleep: false))
+        state.apply(.displaySlept)
         state.apply(.unlocked)
-        #expect(state == .init(isLocked: false, isDisplayAsleep: false, isSessionActive: false))
-        state.apply(.sessionBecameActive)
-        #expect(state == .init(isLocked: false))
+        #expect(state == .init(isLocked: false, isDisplayAsleep: false))
     }
 
     @Test func sessionDictionaryParsing() {
