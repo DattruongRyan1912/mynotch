@@ -22,7 +22,10 @@ public final class ShortcutsModule: FeatureModule {
     private var context: ModuleContext?
     private var keys: ShortcutsSettingKeys?
     private var isListing = false
-    /// Title of the hotkey registered for each favourite, so a refresh registers again only what changed.
+    /// When the list last came back from the CLI.
+    private var lastListed: ContinuousClock.Instant?
+    /// Title of the hotkey registered under each hotkey name (the keys are the names that are registered), so a refresh
+    /// registers again only what changed and a hotkey that is no longer wanted can be removed.
     private var hotkeyTitles: [String: String] = [:]
 
     public convenience init() {
@@ -68,6 +71,12 @@ public final class ShortcutsModule: FeatureModule {
 
     // MARK: List
 
+    /// For the tab, which opens often: lists again only when there is no list to show or it is `maxAge` old.
+    func refreshIfStale(maxAge: Duration = .seconds(60)) async {
+        if let lastListed, !state.shortcuts.isEmpty, ContinuousClock.now - lastListed < maxAge { return }
+        await refresh()
+    }
+
     /// Asks the CLI for the list again. Without a running module it still works, for the Settings rows.
     func refresh() async {
         guard !isListing else { return }
@@ -79,6 +88,7 @@ public final class ShortcutsModule: FeatureModule {
         }
         do {
             state.shortcuts = try await cli.list()
+            lastListed = .now
             state.listError = nil
             syncHotkeys()
         } catch is CancellationError {
@@ -97,25 +107,28 @@ public final class ShortcutsModule: FeatureModule {
 
     // MARK: Hotkeys
 
-    /// One hotkey per favourite. Registering again replaces the handler and keeps the key the user recorded, so
-    /// a hotkey is registered again only when its title changes, which happens once the list gives the shortcut's
-    /// name. A hotkey of a shortcut taken off the favourites stays registered until the module stops
-    /// (`ModuleHotkeys` cannot remove one), but does nothing.
+    /// One hotkey per favourite, in the order the user picked them. Registering again replaces the handler and keeps
+    /// the key the user recorded, so a hotkey is registered only when it is new or its title changes, which happens
+    /// once the list gives the shortcut's name. The hotkey of a shortcut taken off the favourites is removed.
     private func syncHotkeys() {
         guard let context, let keys else { return }
-        for id in context.settings.value(keys.favorites) {
+        let favorites = context.settings.value(keys.favorites).map { (id: $0, hotkey: ShortcutFavorites.hotkeyName(for: $0)) }
+        let wanted = Set(favorites.map(\.hotkey))
+        for hotkey in hotkeyTitles.keys where !wanted.contains(hotkey) {
+            context.hotkeys.unregister(hotkey)
+            hotkeyTitles[hotkey] = nil
+        }
+        for (id, hotkey) in favorites {
             let title = "Chạy \(name(of: id))"
-            guard hotkeyTitles[id] != title else { continue }
-            hotkeyTitles[id] = title
-            context.hotkeys.register(ShortcutFavorites.hotkeyName(for: id), title: title) { [weak self] in
-                guard let self, let context = self.context, let keys = self.keys,
-                      context.settings.value(keys.favorites).contains(id) else { return }
-                self.run(id)
-            }
+            guard hotkeyTitles[hotkey] != title else { continue }
+            hotkeyTitles[hotkey] = title
+            context.hotkeys.register(hotkey, title: title) { [weak self] in self?.run(id) }
         }
     }
 
     /// Settings can change while the module runs; the hotkeys follow. The tracking fires once, so it is armed again.
+    /// Stopping needs no cancelling: the context check ends the chain at the next change, and until then the one
+    /// tracking left armed holds only the stopped context and a weak reference to the module.
     private func observeFavorites(_ context: ModuleContext) {
         guard let keys else { return }
         withObservationTracking {

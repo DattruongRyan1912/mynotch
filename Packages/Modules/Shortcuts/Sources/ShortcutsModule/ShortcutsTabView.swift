@@ -10,7 +10,7 @@ struct ShortcutsTabView: View {
     var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .task { await module.refresh() }
+            .task { await module.refreshIfStale() }
     }
 
     @ViewBuilder private var content: some View {

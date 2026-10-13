@@ -99,6 +99,26 @@ struct ShortcutsFixture {
         #expect(!module.state.isLoading)
     }
 
+    @Test func theTabListsAgainOnlyWhenTheListIsOldOrEmpty() async {
+        await module.refreshIfStale()
+        await module.refreshIfStale()
+        #expect(fixture.cli.listCount == 1)
+        // Older than the age it is given: listed again.
+        await module.refreshIfStale(maxAge: .zero)
+        #expect(fixture.cli.listCount == 2)
+    }
+
+    @Test func theTabTriesAgainWhileThereIsNoListToShow() async {
+        fixture.cli.listing = .failure(ShortcutsCLIError.failed("nope"))
+        await module.refreshIfStale()
+        await module.refreshIfStale()
+        #expect(fixture.cli.listCount == 2)
+        fixture.cli.listing = .success([])
+        await module.refreshIfStale()
+        await module.refreshIfStale()
+        #expect(fixture.cli.listCount == 4)
+    }
+
     @Test func startingListsTheShortcutsOnlyWhenThereAreFavouritesToName() async {
         await fixture.start()
         try? await Task.sleep(for: .milliseconds(60))
@@ -146,13 +166,40 @@ struct ShortcutsFixture {
         #expect(fixture.harness.hotkeys.registrations.count == 2)
     }
 
-    @Test func aHotkeyOfAShortcutThatIsNoLongerFavouriteDoesNothing() async {
+    @Test func aShortcutTakenOffTheFavouritesLosesItsHotkey() async {
+        fixture.favorites = [alpha.id, beta.id]
+        await fixture.start()
+        fixture.favorites = [beta.id]
+        await settle { fixture.harness.hotkeys.registrations.map(\.id) == ["shortcuts_run_BBBBBBBB_1111_2222_3333_444444444444"] }
+        #expect(fixture.harness.hotkeys.registrations.map(\.id) == ["shortcuts_run_BBBBBBBB_1111_2222_3333_444444444444"])
+        // The handler is gone, not just ignored; the other favourite's hotkey still works.
+        #expect(!fixture.harness.hotkeyBackend.trigger("shortcuts_run_AAAAAAAA_1111_2222_3333_444444444444"))
+        #expect(fixture.harness.hotkeyBackend.trigger("shortcuts_run_BBBBBBBB_1111_2222_3333_444444444444"))
+        await settle { fixture.cli.ran == [beta.id] }
+        #expect(fixture.cli.ran == [beta.id])
+
+        fixture.favorites = []
+        await settle { fixture.harness.hotkeys.registrations.isEmpty }
+        #expect(fixture.harness.hotkeys.registrations.isEmpty)
+    }
+
+    @Test func aFavouriteAddedAgainGetsItsHotkeyBack() async {
         fixture.favorites = [alpha.id]
         await fixture.start()
         fixture.favorites = []
-        fixture.harness.hotkeyBackend.trigger("shortcuts_run_AAAAAAAA_1111_2222_3333_444444444444")
-        try? await Task.sleep(for: .milliseconds(60))
-        #expect(fixture.cli.ran.isEmpty)
+        await settle { fixture.harness.hotkeys.registrations.isEmpty }
+        fixture.favorites = [alpha.id]
+        await settle { fixture.harness.hotkeys.registrations.count == 1 }
+        #expect(fixture.harness.hotkeyBackend.trigger("shortcuts_run_AAAAAAAA_1111_2222_3333_444444444444"))
+        await settle { fixture.cli.ran == [alpha.id] }
+        #expect(fixture.cli.ran == [alpha.id])
+    }
+
+    @Test func hotkeysFollowTheOrderOfTheFavourites() async {
+        fixture.favorites = [beta.id, alpha.id]
+        await fixture.start()
+        await settle { fixture.harness.hotkeys.registrations.map(\.title) == ["Chạy Beta", "Chạy Alpha"] }
+        #expect(fixture.harness.hotkeys.registrations.map(\.title) == ["Chạy Beta", "Chạy Alpha"])
     }
 
     @Test func hotkeysTitleTheShortcutByNameOnceTheListIsKnown() async {
