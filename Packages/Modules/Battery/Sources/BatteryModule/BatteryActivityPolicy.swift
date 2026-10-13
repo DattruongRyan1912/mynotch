@@ -11,14 +11,18 @@ nonisolated struct BatteryActivityPolicy: Equatable, Sendable {
         var lowActive: Bool
     }
 
-    func decide(previous: PowerSourceSnapshot?, current: PowerSourceSnapshot, lowActive: Bool) -> Decision {
+    /// "Plugged in" (isOnAC) suppresses the low-battery activity even if the battery still drains under load.
+    /// - Parameter previousThreshold: threshold used for the previous decision; when the user lowered it,
+    ///   the hysteresis band no longer keeps an existing low activity alive.
+    func decide(previous: PowerSourceSnapshot?, current: PowerSourceSnapshot, lowActive: Bool, previousThreshold: Int? = nil) -> Decision {
         let pluggedIn = previous.map { !$0.isOnAC && current.isOnAC } ?? false
+        let thresholdLowered = previousThreshold.map { lowThreshold < $0 } ?? false
         let low: Bool
         if current.isOnAC {
             low = false
         } else if current.percent <= lowThreshold {
             low = true
-        } else if lowActive, current.percent <= lowThreshold + Self.hysteresis {
+        } else if lowActive, !thresholdLowered, current.percent <= lowThreshold + Self.hysteresis {
             low = true
         } else {
             low = false
