@@ -41,7 +41,12 @@ final class SettingsWindowController: NSObject {
 
 extension SettingsWindowController: NSWindowDelegate {
     /// Minimizing keeps the window, and so the Dock icon that brings it back; only closing returns to a menu bar app.
+    /// Modules open their own titled windows too (language installer, markup editor); stay a regular app while any is visible.
     func windowWillClose(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        let closing = notification.object as? NSWindow
+        let otherTitledWindowVisible = NSApp.windows.contains {
+            $0 !== closing && $0.isVisible && $0.styleMask.contains(.titled)
+        }
+        if !otherTitledWindowVisible { NSApp.setActivationPolicy(.accessory) }
     }
 }

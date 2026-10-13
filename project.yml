@@ -26,6 +26,10 @@ packages:
     path: Packages/Modules/Battery
   ClipboardModule:
     path: Packages/Modules/Clipboard
+  MediaModule:
+    path: Packages/Modules/Media
+  TranslationModule:
+    path: Packages/Modules/Translation
   KeyboardShortcuts:
     url: https://github.com/sindresorhus/KeyboardShortcuts
     exactVersion: 3.1.0
@@ -43,6 +47,8 @@ targets:
       - package: NotchUI
       - package: BatteryModule
       - package: ClipboardModule
+      - package: MediaModule
+      - package: TranslationModule
       - package: KeyboardShortcuts
       # Copied into Contents/Frameworks for perl to load; the app binary never links it.
       - target: MediaRemoteAdapter
