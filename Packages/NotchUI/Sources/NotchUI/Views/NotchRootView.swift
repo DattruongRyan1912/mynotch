@@ -15,22 +15,21 @@ struct NotchRootView: View {
         return registry.tabs.first { $0.id == id }
     }
 
-    private var contentHeight: CGFloat { selectedTab?.contentHeight ?? NotchTab.defaultHeight }
+    private var contentHeight: CGFloat { registry.contentHeight(for: state) }
 
     var body: some View {
         let size = geometry.shapeSize(for: state, contentHeight: contentHeight)
         let radii = geometry.cornerRadii(for: state)
-        ZStack(alignment: .top) {
-            NotchShape(topRadius: radii.top, bottomRadius: radii.bottom)
-                .fill(NotchTokens.background)
-            content
-                .padding(.horizontal, radii.top)
-        }
-        .frame(width: size.width, height: size.height)
-        .contentShape(NotchShape(topRadius: radii.top, bottomRadius: radii.bottom))
-        .onTapGesture { model.click() }
-        .animation(NotchTokens.spring, value: state)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        let shape = NotchShape(topRadius: radii.top, bottomRadius: radii.bottom)
+        shape
+            .fill(NotchTokens.background)
+            .overlay(alignment: .top) { content.padding(.horizontal, radii.top) }
+            .clipShape(shape)
+            .frame(width: size.width, height: size.height)
+            .contentShape(shape)
+            .onTapGesture { model.click() }
+            .animation(NotchTokens.spring, value: state)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     @ViewBuilder private var content: some View {
@@ -54,7 +53,7 @@ struct NotchRootView: View {
                         .padding(.bottom, 6)
                 }
                 if let selectedTab {
-                    selectedTab.content.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    selectedTab.content.frame(maxWidth: .infinity, maxHeight: .infinity).id(selectedTab.id)
                 } else {
                     Text("Chưa có module nào đang chạy")
                         .foregroundStyle(NotchTokens.secondaryText)
@@ -62,7 +61,7 @@ struct NotchRootView: View {
                 }
             }
         case .toast:
-            expanded { model.toastContent }
+            expanded { model.toastContent.frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
     }
 
@@ -72,6 +71,9 @@ struct NotchRootView: View {
             content()
         }
         .padding([.horizontal, .bottom], NotchTokens.padding)
-        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)).animation(NotchTokens.spring.delay(0.08)))
+        .transition(.asymmetric(
+            insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)).animation(NotchTokens.spring.delay(0.08)),
+            removal: .opacity.animation(.easeOut(duration: 0.1))
+        ))
     }
 }

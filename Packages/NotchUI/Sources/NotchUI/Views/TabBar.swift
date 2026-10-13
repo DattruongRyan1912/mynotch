@@ -16,9 +16,11 @@ struct TabBar: View {
                         .frame(width: 30, height: 24)
                         .foregroundStyle(tab.id == selected ? NotchTokens.primaryText : NotchTokens.secondaryText)
                         .background(tab.id == selected ? Color.white.opacity(0.14) : .clear, in: Capsule())
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 .help(tab.title)
+                .accessibilityAddTraits(tab.id == selected ? .isSelected : [])
             }
         }
     }

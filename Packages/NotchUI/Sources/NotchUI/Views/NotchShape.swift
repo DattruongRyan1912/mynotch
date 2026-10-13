@@ -16,8 +16,8 @@ public struct NotchShape: Shape {
     }
 
     public func path(in rect: CGRect) -> Path {
-        let top = min(topRadius, rect.width / 4)
-        let bottom = min(bottomRadius, rect.height / 2, (rect.width - 2 * top) / 2)
+        let top = min(topRadius, rect.width / 4, rect.height / 2)
+        let bottom = min(bottomRadius, rect.height - top, (rect.width - 2 * top) / 2)
         var path = Path()
         path.move(to: CGPoint(x: rect.minX, y: rect.minY))
         path.addQuadCurve(to: CGPoint(x: rect.minX + top, y: rect.minY + top), control: CGPoint(x: rect.minX + top, y: rect.minY))

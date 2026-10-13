@@ -8,6 +8,7 @@ public struct NotchTab: Identifiable {
     public let id: ModuleID
     public let title: String
     public let systemImage: String
+    /// Height of the area below the notch, including the notch's inner padding (14pt) and, when two or more tabs exist, the tab bar (30pt).
     public let preferredHeight: CGFloat?
     public let content: AnyView
 
