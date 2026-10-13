@@ -12,6 +12,8 @@ final class FakeModule: FeatureModule {
     private(set) var startCount = 0
     private(set) var stopCount = 0
     private(set) var context: ModuleContext?
+    /// Environment passed to the latest `makeSettingsView` call.
+    private(set) var settingsEnvironment: ModuleSettingsEnvironment?
 
     init(_ id: ModuleID, order: Int = 0, defaultEnabled: Bool = true, permissions: [Permission] = []) {
         descriptor = ModuleDescriptor(
@@ -34,7 +36,10 @@ final class FakeModule: FeatureModule {
         NotchTab(id: descriptor.id, title: descriptor.displayName, systemImage: "circle", content: AnyView(EmptyView()))
     }
 
-    func makeSettingsView() -> AnyView? { nil }
+    func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? {
+        settingsEnvironment = environment
+        return AnyView(EmptyView())
+    }
 }
 
 typealias Harness = RegistryHarness

@@ -28,10 +28,14 @@ public final class BatteryModule: FeatureModule {
     private var publishedLowPercent: Int?
     /// Threshold used for the previous decision, so lowering it in Settings dismisses the alert.
     private var lastThreshold: Int?
-    private var settingKeys: (lowThreshold: SettingKey<Int>, notifyOnCharge: SettingKey<Bool>)?
 
     public init(reader: any PowerSourceReading = IOKitPowerSource()) {
         self.reader = reader
+    }
+
+    /// Setting names and defaults in one place, shared by the running module and the Settings rows.
+    static func keys(_ settings: ModuleSettings) -> (lowThreshold: SettingKey<Int>, notifyOnCharge: SettingKey<Bool>) {
+        (settings.key("lowThreshold", default: 20, clampedTo: 5...50), settings.key("notifyOnCharge", default: true))
     }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
@@ -39,10 +43,6 @@ public final class BatteryModule: FeatureModule {
             throw .unavailable(reason: "Máy không có pin")
         }
         self.context = context
-        settingKeys = (
-            context.settings.key("lowThreshold", default: 20, clampedTo: 5...50),
-            context.settings.key("notifyOnCharge", default: true)
-        )
         lowActive = false
         publishedLowPercent = nil
         lastThreshold = nil
@@ -50,12 +50,11 @@ public final class BatteryModule: FeatureModule {
         if !reader.startObserving({ [weak self] in self?.refresh() }) {
             context.logger.error("Power source notifications unavailable; battery data will not update")
         }
-        if let keys = settingKeys {
-            let settings = context.settings
-            context.run { [weak self] in
-                for await _ in Observations({ (settings.value(keys.lowThreshold), settings.value(keys.notifyOnCharge)) }) {
-                    self?.settingsChanged()
-                }
+        let settings = context.settings
+        let keys = Self.keys(settings)
+        context.run { [weak self] in
+            for await _ in Observations({ (settings.value(keys.lowThreshold), settings.value(keys.notifyOnCharge)) }) {
+                self?.settingsChanged()
             }
         }
     }
@@ -73,13 +72,11 @@ public final class BatteryModule: FeatureModule {
         NotchTab(id: descriptor.id, title: "Battery", systemImage: "battery.100percent", preferredHeight: 130, content: AnyView(BatteryTabView(state: state)))
     }
 
-    public func makeSettingsView() -> AnyView? {
-        guard let context, let keys = settingKeys else {
-            return AnyView(Text("Cài đặt hiện khi module đang chạy").foregroundStyle(.secondary))
-        }
+    public func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? {
+        let keys = Self.keys(environment.settings)
         return AnyView(BatterySettingsView(
-            lowThreshold: context.settings.binding(keys.lowThreshold),
-            notifyOnCharge: context.settings.binding(keys.notifyOnCharge)
+            lowThreshold: environment.settings.binding(keys.lowThreshold),
+            notifyOnCharge: environment.settings.binding(keys.notifyOnCharge)
         ))
     }
 
@@ -95,7 +92,8 @@ public final class BatteryModule: FeatureModule {
 
     private func apply(_ snapshot: PowerSourceSnapshot, previous: PowerSourceSnapshot?) {
         state.snapshot = snapshot
-        guard let context, let keys = settingKeys else { return }
+        guard let context else { return }
+        let keys = Self.keys(context.settings)
         let threshold = context.settings.value(keys.lowThreshold)
         state.lowThreshold = threshold
         let policy = BatteryActivityPolicy(

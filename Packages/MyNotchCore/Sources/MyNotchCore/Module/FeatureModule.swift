@@ -9,5 +9,6 @@ public protocol FeatureModule: AnyObject {
     func stop() async
     func makeTab() -> NotchTab?
     /// Rows for the module's section in Settings — no Form; the page provides it. nil when there is nothing to configure.
-    func makeSettingsView() -> AnyView?
+    /// Called whether or not the module runs, so the rows use `environment`, never state from `start`.
+    func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView?
 }

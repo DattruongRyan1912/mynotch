@@ -16,6 +16,8 @@ public final class ModuleRegistry {
     @ObservationIgnored private let presenter: any NotchPresenter
     @ObservationIgnored private let scheduler: any Scheduler
     @ObservationIgnored private let storageRoot: StorageRoot
+    /// One per module for the registry's lifetime, shared by its context and its Settings rows.
+    @ObservationIgnored private let moduleSettings: [ModuleID: ModuleSettings]
     @ObservationIgnored private var contexts: [ModuleID: ModuleContext] = [:]
     @ObservationIgnored private var tabCache: [ModuleID: NotchTab] = [:]
     /// Last queued lifecycle change per module; the next one waits for it, so start and stop never overlap.
@@ -41,6 +43,9 @@ public final class ModuleRegistry {
         self.presenter = presenter
         self.scheduler = scheduler
         self.storageRoot = storageRoot
+        moduleSettings = Dictionary(uniqueKeysWithValues: sorted.map {
+            ($0.descriptor.id, ModuleSettings(store: settings, module: $0.descriptor.id))
+        })
         for module in sorted { states[module.descriptor.id] = .disabled }
     }
 
@@ -93,8 +98,15 @@ public final class ModuleRegistry {
         await bootstrap()
     }
 
+    /// Built whether or not the module runs, so it can be configured while disabled.
     public func settingsView(for id: ModuleID) -> AnyView? {
-        module(id)?.makeSettingsView()
+        guard let module = module(id), let settings = moduleSettings[id] else { return nil }
+        return module.makeSettingsView(ModuleSettingsEnvironment(
+            settings: settings,
+            storage: storageRoot.storage(for: id),
+            permissions: permissions,
+            isRunning: state(of: id) == .running
+        ))
     }
 
     private func module(_ id: ModuleID) -> (any FeatureModule)? {
@@ -141,7 +153,7 @@ public final class ModuleRegistry {
         states[id] = .starting
         let context = ModuleContext(
             id: id,
-            settings: ModuleSettings(store: settings, module: id),
+            settings: moduleSettings[id]!,
             activities: ActivityPublisher(center: activities, module: id),
             presenter: presenter,
             hotkeys: ModuleHotkeys(registry: hotkeys, module: id),

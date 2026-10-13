@@ -49,7 +49,7 @@ final class GatedModule: FeatureModule {
     }
 
     func makeTab() -> NotchTab? { NotchTab(id: descriptor.id, title: "t", systemImage: "circle", content: AnyView(EmptyView())) }
-    func makeSettingsView() -> AnyView? { nil }
+    func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? { nil }
 }
 
 @Suite struct RaceTests {

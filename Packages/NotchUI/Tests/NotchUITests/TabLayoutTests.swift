@@ -16,7 +16,7 @@ private final class TabModule: FeatureModule {
     func makeTab() -> NotchTab? {
         NotchTab(id: descriptor.id, title: "T", systemImage: "circle", preferredHeight: height, content: AnyView(EmptyView()))
     }
-    func makeSettingsView() -> AnyView? { nil }
+    func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? { nil }
 }
 
 @Suite struct TabLayoutTests {

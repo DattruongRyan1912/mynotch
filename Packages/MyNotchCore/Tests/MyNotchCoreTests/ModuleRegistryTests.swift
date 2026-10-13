@@ -144,6 +144,34 @@ import MyNotchTestSupport
         #expect(harness.scheduler.pendingCount == 0)
     }
 
+    @Test func settingsViewIsBuiltWhileTheModuleIsDisabled() async throws {
+        let module = FakeModule("m", defaultEnabled: false)
+        let harness = Harness([module])
+        await harness.registry.bootstrap()
+        #expect(harness.registry.settingsView(for: "m") != nil)
+        let disabled = try #require(module.settingsEnvironment)
+        #expect(!disabled.isRunning)
+        #expect(module.startCount == 0)
+        #expect(disabled.storage.directory == harness.storageRoot.storage(for: "m").directory)
+        #expect(disabled.permissions === harness.permissions)
+
+        await harness.registry.setEnabled(true, for: "m")
+        #expect(harness.registry.settingsView(for: "m") != nil)
+        #expect(module.settingsEnvironment?.isRunning == true)
+    }
+
+    @Test func settingsViewSharesTheRunningModuleSettings() async throws {
+        let module = FakeModule("m")
+        let harness = Harness([module])
+        await harness.registry.bootstrap()
+        _ = harness.registry.settingsView(for: "m")
+        let environment = try #require(module.settingsEnvironment)
+        environment.settings.set(7, for: environment.settings.key("volume", default: 1))
+
+        let context = try #require(module.context)
+        #expect(context.settings.value(context.settings.key("volume", default: 1)) == 7)
+    }
+
     @Test func tabsFollowDescriptorOrder() async {
         let late = FakeModule("late", order: 2)
         let early = FakeModule("early", order: 1)
