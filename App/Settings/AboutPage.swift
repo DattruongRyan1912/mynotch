@@ -3,6 +3,7 @@ import SwiftUI
 struct AboutPage: View {
     private let libraries: [(name: String, license: String, url: String)] = [
         ("KeyboardShortcuts", "MIT", "https://github.com/sindresorhus/KeyboardShortcuts"),
+        ("mediaremote-adapter", "BSD-3-Clause", "https://github.com/ungive/mediaremote-adapter"),
     ]
 
     var body: some View {

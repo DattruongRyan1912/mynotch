@@ -11,6 +11,12 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
+settingGroups:
+  # Shared by the app and the frameworks it embeds, so both always sign the same way.
+  signing:
+    CODE_SIGN_STYLE: Automatic
+    # Ad-hoc ("Sign to Run Locally"). For stable TCC permissions set DEVELOPMENT_TEAM and change CODE_SIGN_IDENTITY to "Apple Development".
+    CODE_SIGN_IDENTITY: "-"
 packages:
   MyNotchCore:
     path: Packages/MyNotchCore
@@ -27,11 +33,19 @@ targets:
     platform: macOS
     sources:
       - path: App
+      # Run by /usr/bin/perl, which loads the embedded MediaRemoteAdapter.framework.
+      - path: Vendor/mediaremote-adapter/bin/mediaremote-adapter.pl
+        buildPhase: resources
     dependencies:
       - package: MyNotchCore
       - package: NotchUI
       - package: BatteryModule
       - package: KeyboardShortcuts
+      # Copied into Contents/Frameworks for perl to load; the app binary never links it.
+      - target: MediaRemoteAdapter
+        embed: true
+        link: false
+        codeSign: true
     info:
       path: App/Info.plist
       properties:
@@ -58,11 +72,44 @@ targets:
         com.apple.security.device.audio-input: true
         com.apple.security.device.bluetooth: true
     settings:
+      groups: [signing]
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch
         PRODUCT_NAME: MyNotch
         ENABLE_HARDENED_RUNTIME: YES
-        CODE_SIGN_STYLE: Automatic
-        # Ad-hoc ("Sign to Run Locally"). For stable TCC permissions set DEVELOPMENT_TEAM and change CODE_SIGN_IDENTITY to "Apple Development".
-        CODE_SIGN_IDENTITY: "-"
         COMBINE_HIDPI_IMAGES: YES
+  # Vendored ungive/mediaremote-adapter (see Vendor/mediaremote-adapter/VENDORED.md); the test client is not built.
+  MediaRemoteAdapter:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Vendor/mediaremote-adapter/src/adapter
+        headerVisibility: project
+      - path: Vendor/mediaremote-adapter/src/private
+        headerVisibility: project
+      - path: Vendor/mediaremote-adapter/src/utility
+        headerVisibility: project
+      - path: Vendor/mediaremote-adapter/include/MediaRemoteAdapter.h
+        headerVisibility: project
+    dependencies:
+      - sdk: Foundation.framework
+      - sdk: CoreFoundation.framework
+      - sdk: AppKit.framework
+      - sdk: CoreServices.framework
+      - sdk: ImageIO.framework
+      - sdk: UniformTypeIdentifiers.framework
+    settings:
+      groups: [signing]
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch.MediaRemoteAdapter
+        GENERATE_INFOPLIST_FILE: YES
+        CLANG_ENABLE_OBJC_ARC: YES
+        # perl looks the adapter_* functions up by name, so every symbol must stay exported.
+        GCC_SYMBOLS_PRIVATE_EXTERN: NO
+        OTHER_CFLAGS: ["$(inherited)", "-fvisibility=default"]
+        HEADER_SEARCH_PATHS: ["$(SRCROOT)/Vendor/mediaremote-adapter/src", "$(SRCROOT)/Vendor/mediaremote-adapter/include"]
+        # Upstream declares its C functions as `void f();`, which floods the build log with one warning per use.
+        CLANG_WARN_STRICT_PROTOTYPES: NO
+        DEFINES_MODULE: NO
+        SKIP_INSTALL: YES
+        ENABLE_HARDENED_RUNTIME: YES
