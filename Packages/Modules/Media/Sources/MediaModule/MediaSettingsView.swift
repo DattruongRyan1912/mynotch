@@ -6,11 +6,14 @@ import UniformTypeIdentifiers
 struct MediaSettingsView: View {
     /// System Settings › Privacy & Security › Screen & System Audio Recording, where "System Audio Recording Only" is.
     static let audioCaptureSettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")!
+    /// Says what leaves the Mac, because lyrics are the one feature here that talks to a server.
+    static let lyricsExplanation = "Khi bật, tên bài, nghệ sĩ, album và thời lượng của mỗi bài mới được gửi tới lrclib.net để lấy lời."
 
     @Binding var showActivity: Bool
     @Binding var pauseGraceSeconds: Int
     @Binding var hiddenApps: [String]
     @Binding var realSpectrum: Bool
+    @Binding var lyrics: Bool
     /// Only for the permission hint; the module keeps the store for its whole life, running or not.
     let store: NowPlayingStore
 
@@ -35,6 +38,10 @@ struct MediaSettingsView: View {
                     Text("Không nhận được âm thanh hệ thống")
                     Text("Có thể quyền đã bị từ chối. Bật MyNotch trong Quyền riêng tư & Bảo mật › Ghi màn hình & âm thanh hệ thống.")
                 }
+            }
+            Toggle(isOn: $lyrics) {
+                Text("Lời bài hát đồng bộ từ lrclib.net")
+                Text(Self.lyricsExplanation)
             }
         }
     }

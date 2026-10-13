@@ -43,12 +43,14 @@ enum AdapterLines {
     static func track(
         _ title: String = "Song",
         artist: String = "Artist",
+        album: String? = nil,
         playing: Bool = true,
         bundle: String = "com.example.Player",
         parent: String? = nil,
         elapsed: Double = 30,
         duration: Double = 200,
-        artworkBase64: String? = nil
+        artworkBase64: String? = nil,
+        isAdvertisement: Bool = false
     ) -> String {
         var payload: [String: Any] = [
             "bundleIdentifier": bundle, "title": title, "artist": artist, "playing": playing,
@@ -56,6 +58,8 @@ enum AdapterLines {
             "timestampEpochMicros": Int(Date().timeIntervalSince1970 * 1_000_000), "playbackRate": 1,
         ]
         payload["parentApplicationBundleIdentifier"] = parent
+        payload["album"] = album
+        if isAdvertisement { payload["isAdvertisement"] = true }
         if let artworkBase64 {
             payload["artworkData"] = artworkBase64
             payload["artworkMimeType"] = "image/png"

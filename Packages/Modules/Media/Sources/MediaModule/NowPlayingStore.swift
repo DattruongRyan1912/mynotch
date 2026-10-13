@@ -26,6 +26,9 @@ final class NowPlayingStore {
     /// Bars on screen right now (beside the notch, in the tab, one per screen); the tap only runs while there are some.
     private(set) var spectrumViewCount = 0
 
+    /// Synced lyrics of the current track; nil while there are none (lyrics off, still fetching, no entry, unsynced).
+    private(set) var syncedLyrics: [LyricLine]?
+
     @ObservationIgnored private var reducer = NowPlayingReducer()
     @ObservationIgnored private let lookUpApp: @MainActor (String) -> PlayerApp?
     /// Revision of `artworkImage`'s bytes; the image is decoded only when it changes.
@@ -61,6 +64,7 @@ final class NowPlayingStore {
         reducer = NowPlayingReducer()
         update(.empty)
         showInActivity(artwork: nil, icon: nil, isPlaying: false)
+        showLyrics(nil)
         if failureMessage != nil { failureMessage = nil }
     }
 
@@ -71,6 +75,17 @@ final class NowPlayingStore {
 
     func setSpectrumPermissionLikelyDenied(_ likelyDenied: Bool) {
         if likelyDenied != spectrumPermissionLikelyDenied { spectrumPermissionLikelyDenied = likelyDenied }
+    }
+
+    /// Assigns only a real change, so the lyric row is redrawn only for new lyrics.
+    func showLyrics(_ lines: [LyricLine]?) {
+        if lines != syncedLyrics { syncedLyrics = lines }
+    }
+
+    /// The lyric line being sung at `date`, by the playback clock; nil before the first line or without lyrics.
+    func lyric(at date: Date) -> LyricLine? {
+        guard let syncedLyrics, let position = position(at: date) else { return nil }
+        return syncedLyrics.line(at: position)
     }
 
     /// Called by each bars view as it appears and disappears.

@@ -14,12 +14,15 @@ struct MediaSettingsKeys {
     let hiddenApps: SettingKey<[String]>
     /// Bars follow the music through a system audio tap, which needs the system audio recording permission.
     let realSpectrum: SettingKey<Bool>
+    /// Synced lyrics from lrclib.net. Off by default: it sends each new track's name, artist, album and length there.
+    let lyrics: SettingKey<Bool>
 
     init(_ settings: ModuleSettings) {
         showActivity = settings.key("showActivity", default: true)
         pauseGraceSeconds = settings.key("pauseGraceSeconds", default: 5, clampedTo: Self.pauseGraceRange)
         hiddenApps = settings.key("hiddenApps", default: [])
         realSpectrum = settings.key("realSpectrum", default: false)
+        lyrics = settings.key("lyrics", default: false)
     }
 }
 
@@ -46,12 +49,18 @@ public final class MediaModule: FeatureModule {
     /// nil when the app was built without the adapter; `start` then reports the module unavailable.
     private let makeSource: ((any Scheduler) -> any NowPlayingSource)?
     private let spectrum: any SpectrumSource
+    private let lyricsClient: any HTTPClient
     private var source: (any NowPlayingSource)?
     private var spectrumFeed: SpectrumFeed?
     private var context: ModuleContext?
     private var policy = ActivityPolicy()
     private var showActivity = true
     private var realSpectrum = false
+    private var lyricsEnabled = false
+    private var lyricsService: LyricsService?
+    /// Track the lyrics were asked for (or are shown for); nil while lyrics are off or the track has no key.
+    private var lyricsTrack: TrackKey?
+    private var lyricsTask: Task<Void, Never>?
     /// Track the published activity belongs to; nil while none is published. Compared so the activity is
     /// set once per track: everything that changes while a track plays is read by its views from `store`.
     private var publishedTrack: TrackIdentity?
@@ -65,29 +74,34 @@ public final class MediaModule: FeatureModule {
         if let adapterScript, let adapterFramework {
             self.init(
                 makeSource: { scheduler in AdapterProcess(script: adapterScript, framework: adapterFramework, scheduler: scheduler) },
-                spectrum: spectrum
+                spectrum: spectrum,
+                lyricsClient: URLSessionHTTPClient()
             )
         } else {
-            self.init(makeSource: nil, spectrum: spectrum)
+            self.init(makeSource: nil, spectrum: spectrum, lyricsClient: URLSessionHTTPClient())
         }
     }
 
-    /// For tests: lines come from `source` instead of perl, levels from `spectrum` instead of a system audio tap.
+    /// For tests: lines come from `source` instead of perl, levels from `spectrum` instead of a system audio tap,
+    /// lyrics from `lyricsClient` instead of lrclib.net. No default for the client, so no test reaches the network by accident.
     convenience init(
         source: any NowPlayingSource,
         spectrum: any SpectrumSource,
+        lyricsClient: any HTTPClient,
         lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed
     ) {
-        self.init(makeSource: { _ in source }, spectrum: spectrum, lookUpApp: lookUpApp)
+        self.init(makeSource: { _ in source }, spectrum: spectrum, lyricsClient: lyricsClient, lookUpApp: lookUpApp)
     }
 
     private init(
         makeSource: ((any Scheduler) -> any NowPlayingSource)?,
         spectrum: any SpectrumSource,
+        lyricsClient: any HTTPClient,
         lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed
     ) {
         self.makeSource = makeSource
         self.spectrum = spectrum
+        self.lyricsClient = lyricsClient
         store = NowPlayingStore(lookUpApp: lookUpApp)
     }
 
@@ -100,6 +114,12 @@ public final class MediaModule: FeatureModule {
         policy = ActivityPolicy()
         publishedTrack = nil
         spectrumFeed = SpectrumFeed(source: spectrum, store: store, scheduler: context.scheduler, logger: context.logger)
+        lyricsTrack = nil
+        lyricsService = LyricsService(
+            client: lyricsClient,
+            cacheDirectory: context.storage.cachesDirectory.appending(path: "lyrics", directoryHint: .isDirectory),
+            scheduler: context.scheduler
+        )
         applySettings(context.settings)
         registerHotkeys(context.hotkeys)
         let settings = context.settings
@@ -108,7 +128,7 @@ public final class MediaModule: FeatureModule {
             let changes = Observations {
                 (
                     settings.value(keys.showActivity), settings.value(keys.pauseGraceSeconds),
-                    settings.value(keys.hiddenApps), settings.value(keys.realSpectrum)
+                    settings.value(keys.hiddenApps), settings.value(keys.realSpectrum), settings.value(keys.lyrics)
                 )
             }
             for await _ in changes { self?.settingsChanged() }
@@ -130,6 +150,11 @@ public final class MediaModule: FeatureModule {
         source = nil
         spectrumFeed?.shutDown()
         spectrumFeed = nil
+        lyricsTask?.cancel()
+        lyricsTask = nil
+        lyricsTrack = nil
+        lyricsService?.shutDown()
+        lyricsService = nil
         context = nil
         cancelDeadline()
         policy = ActivityPolicy()
@@ -151,6 +176,7 @@ public final class MediaModule: FeatureModule {
             pauseGraceSeconds: environment.settings.binding(keys.pauseGraceSeconds),
             hiddenApps: environment.settings.binding(keys.hiddenApps),
             realSpectrum: environment.settings.binding(keys.realSpectrum),
+            lyrics: environment.settings.binding(keys.lyrics),
             store: store
         ))
     }
@@ -192,6 +218,7 @@ public final class MediaModule: FeatureModule {
         cancelDeadline()
         refreshActivity()
         updateSpectrum()
+        refreshLyrics()
     }
 
     private func settingsChanged() {
@@ -206,6 +233,7 @@ public final class MediaModule: FeatureModule {
         policy.pauseGrace = TimeInterval(settings.value(keys.pauseGraceSeconds))
         policy.hiddenBundleIDs = Set(settings.value(keys.hiddenApps))
         realSpectrum = settings.value(keys.realSpectrum)
+        lyricsEnabled = settings.value(keys.lyrics)
     }
 
     private func evaluate(at now: Date) {
@@ -213,6 +241,37 @@ public final class MediaModule: FeatureModule {
         scheduleDeadline(from: now)
         refreshActivity()
         updateSpectrum()
+        refreshLyrics()
+    }
+
+    /// Asks for lyrics when another track starts while the setting is on; drops them when the setting turns off,
+    /// the track has no key (an advertisement, no length) or nothing plays. Position and play-state updates leave
+    /// the key as it is, so they never fetch.
+    private func refreshLyrics() {
+        let track = lyricsEnabled ? TrackKey(store.state) : nil
+        guard track != lyricsTrack else { return }
+        lyricsTask?.cancel()
+        lyricsTask = nil
+        lyricsTrack = track
+        store.showLyrics(nil)
+        guard let track, let lyricsService else { return }
+        lyricsTask = Task { [weak self] in
+            let result = await lyricsService.lyrics(for: track)
+            self?.receiveLyrics(result, for: track)
+        }
+    }
+
+    private func receiveLyrics(_ result: LyricsResult, for track: TrackKey) {
+        // The track may have changed while the answer was on its way.
+        guard track == lyricsTrack else { return }
+        switch result {
+        case .synced(let lines):
+            store.showLyrics(lines)
+        case .unavailable(let reason):
+            context?.logger.info("Lyrics unavailable: \(reason, privacy: .public)")
+        case .plain, .instrumental, .notFound:
+            break
+        }
     }
 
     /// The tap runs only while the setting is on, something plays and some bars are on screen.

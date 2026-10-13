@@ -41,13 +41,17 @@ struct MediaTabView: View {
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 PlaybackProgressView(store: store, seek: actions.seek)
+                CurrentLyricView(store: store)
                 Spacer(minLength: 2)
                 TransportControls(isPlaying: store.state.isPlaying, send: actions.send)
                     .frame(maxWidth: .infinity)
                     // An overlay, so the buttons stay centred under the progress bar.
                     .overlay(alignment: .trailing) { NowPlayingBars(store: store) }
             }
-            .frame(height: Self.artworkSize)
+            // The cover's height, or a little more when the lyric row is there. Not stretched to the space
+            // available, which would pull the column out of line with the cover.
+            .frame(minHeight: Self.artworkSize)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
