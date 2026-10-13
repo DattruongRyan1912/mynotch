@@ -3,13 +3,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# makeIsolatedDefaults() leaves one MyNotchTests.<uuid> suite on disk per test.
-# cfprefsd writes them a few seconds after each test process exits, so clean up at both ends.
-cleanup_test_defaults() {
+# makeIsolatedDefaults() leaves one MyNotchTests.<uuid> suite on disk per test, and RegistryHarness storage
+# leaves a MyNotchTests-<uuid> temporary folder once a module creates its directories.
+# cfprefsd writes the suites a few seconds after each test process exits, so clean up at both ends.
+cleanup_test_files() {
     find "$HOME/Library/Preferences" -maxdepth 1 -name 'MyNotchTests.*.plist' -delete || true
+    find "${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR)}" -maxdepth 1 -name 'MyNotchTests-*' -exec rm -rf {} + || true
 }
-cleanup_test_defaults
-trap cleanup_test_defaults EXIT
+cleanup_test_files
+trap cleanup_test_files EXIT
 
 echo "==> xcodegen generate"
 xcodegen generate --quiet

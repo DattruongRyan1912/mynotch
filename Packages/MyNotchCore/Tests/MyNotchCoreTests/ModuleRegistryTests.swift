@@ -103,6 +103,47 @@ import MyNotchTestSupport
         #expect(fired)
     }
 
+    @Test func stoppingCancelsPendingScheduledActions() async throws {
+        let module = FakeModule("m")
+        let harness = Harness([module])
+        await harness.registry.bootstrap()
+        let context = try #require(module.context)
+        var fired = false
+        let handle = context.scheduler.schedule(after: .seconds(1)) { fired = true }
+        await harness.registry.setEnabled(false, for: "m")
+        #expect(handle.isCancelled)
+        harness.scheduler.advance(by: .seconds(1))
+        #expect(!fired)
+        #expect(harness.scheduler.pendingCount == 0)
+    }
+
+    @Test func schedulingAfterStopReturnsACancelledHandleThatNeverFires() async throws {
+        let module = FakeModule("m")
+        let harness = Harness([module])
+        await harness.registry.bootstrap()
+        let context = try #require(module.context)
+        await harness.registry.setEnabled(false, for: "m")
+        var fired = false
+        let handle = context.scheduler.schedule(after: .seconds(1)) { fired = true }
+        #expect(handle.isCancelled)
+        harness.scheduler.advance(by: .seconds(1))
+        #expect(!fired)
+        #expect(harness.scheduler.pendingCount == 0)
+    }
+
+    @Test func actionScheduledByAFailedStartNeverFires() async {
+        let module = FakeModule("m")
+        var fired = false
+        module.actionOnStart = { fired = true }
+        module.startError = .failed(reason: "boom")
+        let harness = Harness([module])
+        await harness.registry.bootstrap()
+        #expect(harness.registry.state(of: "m") == .failed(reason: "boom"))
+        harness.scheduler.advance(by: .seconds(1))
+        #expect(!fired)
+        #expect(harness.scheduler.pendingCount == 0)
+    }
+
     @Test func tabsFollowDescriptorOrder() async {
         let late = FakeModule("late", order: 2)
         let early = FakeModule("early", order: 1)

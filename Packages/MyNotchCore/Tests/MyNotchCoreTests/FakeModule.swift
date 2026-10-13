@@ -7,6 +7,8 @@ final class FakeModule: FeatureModule {
     let descriptor: ModuleDescriptor
     var startError: ModuleError?
     var activityOnStart: LiveActivity?
+    /// Scheduled one second after `start` through the context's scheduler.
+    var actionOnStart: (@MainActor () -> Void)?
     private(set) var startCount = 0
     private(set) var stopCount = 0
     private(set) var context: ModuleContext?
@@ -22,6 +24,7 @@ final class FakeModule: FeatureModule {
         startCount += 1
         self.context = context
         if let activityOnStart { context.activities.set(activityOnStart) }
+        if let actionOnStart { context.scheduler.schedule(after: .seconds(1), actionOnStart) }
         if let startError { throw startError }
     }
 

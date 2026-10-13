@@ -15,7 +15,7 @@ private final class StubPermissions: PermissionCenter {
 }
 
 @Suite struct ModuleContextTests {
-    func makeContext(activities: ActivityCenter) -> ModuleContext {
+    func makeContext(activities: ActivityCenter, scheduler: ManualScheduler = ManualScheduler()) -> ModuleContext {
         ModuleContext(
             id: "m",
             settings: ModuleSettings(store: SettingsStore(defaults: makeIsolatedDefaults()), module: "m"),
@@ -24,7 +24,7 @@ private final class StubPermissions: PermissionCenter {
             hotkeys: ModuleHotkeys(registry: HotkeyRegistry(), module: "m"),
             permissions: StubPermissions(),
             storage: ModuleStorage(directory: URL(filePath: "/support/m/"), cachesDirectory: URL(filePath: "/caches/m/")),
-            scheduler: ManualScheduler()
+            scheduler: scheduler
         )
     }
 
@@ -55,5 +55,33 @@ private final class StubPermissions: PermissionCenter {
         await Task.yield()
         #expect(!lateRan)
         #expect(context.runningTaskCount == 0)
+    }
+
+    @Test func scheduledActionsAreForgottenOnceFiredOrCancelled() throws {
+        let base = ManualScheduler()
+        let context = makeContext(activities: ActivityCenter(scheduler: base), scheduler: base)
+        let scheduler = try #require(context.scheduler as? ModuleScheduler)
+        var fired = 0
+        context.scheduler.schedule(after: .seconds(1)) { fired += 1 }
+        context.scheduler.schedule(after: .seconds(5)) { fired += 10 }.cancel()
+        #expect(scheduler.pendingCount == 1)
+        base.advance(by: .seconds(5))
+        #expect(fired == 1)
+        #expect(scheduler.pendingCount == 0)
+    }
+
+    @Test func cancelAllCancelsPendingScheduledActions() throws {
+        let base = ManualScheduler()
+        let context = makeContext(activities: ActivityCenter(scheduler: base), scheduler: base)
+        let scheduler = try #require(context.scheduler as? ModuleScheduler)
+        var fired = false
+        context.scheduler.schedule(after: .seconds(1)) { fired = true }
+        context.scheduler.schedule(after: .seconds(2)) { fired = true }
+        #expect(scheduler.pendingCount == 2)
+        context.cancelAll()
+        #expect(scheduler.pendingCount == 0)
+        base.advance(by: .seconds(2))
+        #expect(!fired)
+        #expect(base.pendingCount == 0)
     }
 }

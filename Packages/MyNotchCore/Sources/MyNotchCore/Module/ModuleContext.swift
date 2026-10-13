@@ -9,10 +9,11 @@ public final class ModuleContext {
     public let hotkeys: ModuleHotkeys
     public let permissions: any PermissionCenter
     public let storage: ModuleStorage
-    /// Shared with the app; actions are not cancelled when the module stops, so cancel their handles in `stop()`.
-    public let scheduler: any Scheduler
+    /// Delays for the module; actions still pending are cancelled when the module stops.
+    public var scheduler: any Scheduler { moduleScheduler }
     public let logger: Logger
 
+    private let moduleScheduler: ModuleScheduler
     private var tasks: [Int: Task<Void, Never>] = [:]
     private var nextTaskID = 0
     private var isActive = true
@@ -34,7 +35,7 @@ public final class ModuleContext {
         self.hotkeys = hotkeys
         self.permissions = permissions
         self.storage = storage
-        self.scheduler = scheduler
+        self.moduleScheduler = ModuleScheduler(base: scheduler)
         self.logger = Log.logger(category: id.rawValue)
     }
 
@@ -57,6 +58,7 @@ public final class ModuleContext {
         isActive = false
         tasks.values.forEach { $0.cancel() }
         tasks.removeAll()
+        moduleScheduler.invalidate()
         activities.invalidate()
         hotkeys.invalidate()
     }
