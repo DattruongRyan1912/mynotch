@@ -29,6 +29,14 @@ struct ShortcutActivityText: View {
 
 /// What a shortcut returned, over the open tab, with a button to copy all of it.
 struct ShortcutOutputToast: View {
+    /// The toast shows four lines, so a long output is cut well before layout has to measure all of it. Copying
+    /// still gives the whole text.
+    static let previewLimit = 600
+
+    static func preview(of text: String) -> String {
+        text.dropFirst(previewLimit).isEmpty ? text : String(text.prefix(previewLimit)) + "…"
+    }
+
     let text: String
     let copy: () -> Void
 
@@ -36,7 +44,7 @@ struct ShortcutOutputToast: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text(text)
+            Text(Self.preview(of: text))
                 .font(.callout)
                 .foregroundStyle(NotchTokens.primaryText)
                 .lineLimit(4)

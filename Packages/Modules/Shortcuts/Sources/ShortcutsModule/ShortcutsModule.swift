@@ -22,6 +22,8 @@ public final class ShortcutsModule: FeatureModule {
     private var context: ModuleContext?
     private var keys: ShortcutsSettingKeys?
     private var isListing = false
+    /// Title of the hotkey registered for each favourite, so a refresh registers again only what changed.
+    private var hotkeyTitles: [String: String] = [:]
 
     public convenience init() {
         self.init(cli: SystemShortcutsCLI(), pasteboard: .general)
@@ -37,9 +39,13 @@ public final class ShortcutsModule: FeatureModule {
         self.context = context
         let keys = ShortcutsSettingKeys(context.settings)
         self.keys = keys
+        hotkeyTitles = [:]
         syncHotkeys()
         observeFavorites(context)
-        context.run { [weak self] in await self?.refresh() }
+        // The list names the favourites (hotkey titles, "Đã chạy X"); without any, the tab and Settings load it when opened.
+        if !context.settings.value(keys.favorites).isEmpty {
+            context.run { [weak self] in await self?.refresh() }
+        }
     }
 
     public func stop() async {
@@ -92,12 +98,16 @@ public final class ShortcutsModule: FeatureModule {
     // MARK: Hotkeys
 
     /// One hotkey per favourite. Registering again replaces the handler and keeps the key the user recorded, so
-    /// this also renames a hotkey once the list gives the shortcut's name. A hotkey of a shortcut taken off the
-    /// favourites stays registered until the module stops (`ModuleHotkeys` cannot remove one), but does nothing.
+    /// a hotkey is registered again only when its title changes, which happens once the list gives the shortcut's
+    /// name. A hotkey of a shortcut taken off the favourites stays registered until the module stops
+    /// (`ModuleHotkeys` cannot remove one), but does nothing.
     private func syncHotkeys() {
         guard let context, let keys else { return }
         for id in context.settings.value(keys.favorites) {
-            context.hotkeys.register(ShortcutFavorites.hotkeyName(for: id), title: "Chạy \(name(of: id))") { [weak self] in
+            let title = "Chạy \(name(of: id))"
+            guard hotkeyTitles[id] != title else { continue }
+            hotkeyTitles[id] = title
+            context.hotkeys.register(ShortcutFavorites.hotkeyName(for: id), title: title) { [weak self] in
                 guard let self, let context = self.context, let keys = self.keys,
                       context.settings.value(keys.favorites).contains(id) else { return }
                 self.run(id)

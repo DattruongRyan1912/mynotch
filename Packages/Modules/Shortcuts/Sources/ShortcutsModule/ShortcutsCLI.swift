@@ -49,12 +49,19 @@ nonisolated struct SystemShortcutsCLI: ShortcutsCLI {
         ShortcutListParser.parse(try await output(of: ["list", "--show-identifiers"]).standardOutput)
     }
 
+    /// `id` comes from persisted settings, so it must be a list identifier (a UUID) before it can reach the command
+    /// line, where a leading "-" would be read as an option.
     func run(id: String) async throws -> String? {
+        guard UUID(uuidString: id) != nil else { throw ShortcutsCLIError.failed("Mã shortcut không hợp lệ") }
         let file = FileManager.default.temporaryDirectory.appending(path: "MyNotch-shortcut-\(UUID().uuidString).txt")
         defer { try? FileManager.default.removeItem(at: file) }
         _ = try await output(of: ["run", id, "-o", file.path(percentEncoded: false), "--output-type", "public.plain-text"])
-        guard let data = try? Data(contentsOf: file), let text = String(data: data, encoding: .utf8) else { return nil }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A shortcut can return any amount of text; only the first bytes are read. The cut may split a character,
+        // so the decoding is lossy rather than failing.
+        guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: SystemProcessRunner.maxOutputBytes) else { return nil }
+        let trimmed = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 
@@ -81,6 +88,16 @@ nonisolated struct SystemShortcutsCLI: ShortcutsCLI {
 
 /// Runs a real process off the main actor.
 nonisolated struct SystemProcessRunner: ProcessRunning {
+    /// How much of each output stream is kept; the rest is read and dropped so the process never blocks on a full pipe.
+    static let maxOutputBytes = 64 * 1024
+
+    /// How long a process gets to react to the termination request before it is killed.
+    let killGrace: Duration
+
+    init(killGrace: Duration = .seconds(2)) {
+        self.killGrace = killGrace
+    }
+
     func run(executable: String, arguments: [String]) async throws -> ProcessOutput {
         let process = Process()
         process.executableURL = URL(filePath: executable)
@@ -96,7 +113,7 @@ nonisolated struct SystemProcessRunner: ProcessRunning {
                 throw ShortcutsCLIError.launchFailed("Không mở được \(executable)")
             }
             // Cancelled between the check and the launch: the handler found nothing to stop.
-            if Task.isCancelled { process.terminate() }
+            if Task.isCancelled { terminate(process) }
             async let standardOutput = Self.readAll(output)
             async let standardError = Self.readAll(errors)
             let (out, err) = await (standardOutput, standardError)
@@ -104,14 +121,30 @@ nonisolated struct SystemProcessRunner: ProcessRunning {
             try Task.checkCancellation()
             return ProcessOutput(status: process.terminationStatus, standardOutput: out, standardError: err)
         } onCancel: {
-            if process.isRunning { process.terminate() }
+            if process.isRunning { terminate(process) }
         }
     }
 
-    /// Ends at the pipe's end of file, which the exit of the process (and its children) brings.
+    /// Asks the process to end, and kills it when it ignores that, so a timeout or cancel is final.
+    private func terminate(_ process: Process) {
+        process.terminate()
+        let grace = killGrace
+        Task {
+            try? await Task.sleep(for: grace)
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        }
+    }
+
+    /// Ends at the pipe's end of file, which the exit of the process (and its children) brings. Keeps the first
+    /// `maxOutputBytes` and reads the rest only to drop it.
     @concurrent
     private static func readAll(_ pipe: Pipe) async -> String {
-        String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let handle = pipe.fileHandleForReading
+        var kept = Data()
+        while let chunk = try? handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
+            kept.append(chunk.prefix(maxOutputBytes - kept.count))
+        }
+        return String(decoding: kept, as: UTF8.self)
     }
 
     @concurrent

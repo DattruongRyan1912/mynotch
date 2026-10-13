@@ -2,6 +2,8 @@ import AppKit
 import KeyboardShortcuts
 import MyNotchCore
 import MyNotchTestSupport
+import Observation
+import Synchronization
 import Testing
 @testable import ShortcutsModule
 
@@ -97,6 +99,18 @@ struct ShortcutsFixture {
         #expect(!module.state.isLoading)
     }
 
+    @Test func startingListsTheShortcutsOnlyWhenThereAreFavouritesToName() async {
+        await fixture.start()
+        try? await Task.sleep(for: .milliseconds(60))
+        #expect(fixture.cli.listCount == 0)
+
+        let withFavourites = ShortcutsFixture()
+        withFavourites.favorites = [alpha.id]
+        await withFavourites.start()
+        await settle { withFavourites.cli.listCount == 1 }
+        #expect(withFavourites.cli.listCount == 1)
+    }
+
     // MARK: Hotkeys
 
     @Test func registersAHotkeyPerFavourite() async {
@@ -146,6 +160,20 @@ struct ShortcutsFixture {
         await fixture.start()
         await settle { fixture.harness.hotkeys.registrations.first?.title == "Chạy Alpha" }
         #expect(fixture.harness.hotkeys.registrations.first?.title == "Chạy Alpha")
+    }
+
+    @Test func refreshingAgainLeavesTheRegisteredHotkeysAlone() async {
+        fixture.favorites = [alpha.id, beta.id]
+        await fixture.start()
+        await settle { Set(fixture.harness.hotkeys.registrations.map(\.title)) == ["Chạy Alpha", "Chạy Beta"] }
+        let changed = Mutex(false)
+        withObservationTracking {
+            _ = fixture.harness.hotkeys.registrations
+        } onChange: {
+            changed.withLock { $0 = true }
+        }
+        await module.refresh()
+        #expect(!changed.withLock { $0 })
     }
 
     @Test func stoppingRemovesTheHotkeys() async {
@@ -223,5 +251,15 @@ struct ShortcutsFixture {
         #expect(module.state.running.isEmpty)
         #expect(module.state.lastResult == nil)
         #expect(fixture.harness.activities.current == nil)
+    }
+
+    // MARK: Output toast
+
+    @Test func theToastShowsOnlyTheStartOfALongOutput() {
+        #expect(ShortcutOutputToast.preview(of: "ngắn") == "ngắn")
+        let exact = String(repeating: "a", count: ShortcutOutputToast.previewLimit)
+        #expect(ShortcutOutputToast.preview(of: exact) == exact)
+        let long = String(repeating: "é", count: 64 * 1024)
+        #expect(ShortcutOutputToast.preview(of: long) == String(repeating: "é", count: ShortcutOutputToast.previewLimit) + "…")
     }
 }
