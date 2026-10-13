@@ -2,7 +2,7 @@
 """Render a MyNotch spec (a small Markdown subset) to a standalone HTML page.
 
 Supports: headings, paragraphs, bullet/numbered lists, GFM tables,
-fenced code blocks, inline code, bold, italics and links.
+fenced code blocks (``` or ~~~), inline code, bold, italics and links.
 
 Usage: scripts/md2html.py input.md [output.html]
 """
@@ -84,12 +84,13 @@ def render(md: str) -> tuple[str, str, list[tuple[int, str, str]]]:
 
     while i < len(lines):
         line = lines[i]
-        if line.startswith("```"):
+        if fence := re.match(r"^(`{3,}|~{3,})", line):
             flush_para(); close_list()
-            lang = line[3:].strip()
+            marker = fence.group(1)
+            lang = line[len(marker):].strip()
             block = []
             i += 1
-            while i < len(lines) and not lines[i].startswith("```"):
+            while i < len(lines) and lines[i].rstrip() != marker:
                 block.append(lines[i]); i += 1
             cls = f' class="language-{html.escape(lang)}"' if lang else ""
             out.append(f"<pre><code{cls}>{html.escape(chr(10).join(block))}</code></pre>")

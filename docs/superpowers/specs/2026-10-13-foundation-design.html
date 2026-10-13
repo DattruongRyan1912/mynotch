@@ -19,7 +19,7 @@ table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:b
 th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
 th{background:var(--card)}
 @media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
-</style></head><body><div class="layout"><nav><a class="h2" href="#1-bối-cảnh-và-mục-tiêu">1. Bối cảnh và mục tiêu</a><a class="h2" href="#2-phạm-vi">2. Phạm vi</a><a class="h2" href="#3-ràng-buộc-kỹ-thuật">3. Ràng buộc kỹ thuật</a><a class="h2" href="#4-kiến-trúc">4. Kiến trúc</a><a class="h3" href="#4-1-cấu-trúc-thư-mục">4.1 Cấu trúc thư mục</a><a class="h3" href="#4-2-quy-tắc-phụ-thuộc">4.2 Quy tắc phụ thuộc</a><a class="h3" href="#4-3-api-module-mynotchcore">4.3 API module (<code>MyNotchCore</code>)</a><a class="h3" href="#4-4-moduleregistry">4.4 <code>ModuleRegistry</code></a><a class="h2" href="#5-notchui">5. NotchUI</a><a class="h3" href="#5-1-cửa-sổ">5.1 Cửa sổ</a><a class="h3" href="#5-2-hình-học-notchgeometry">5.2 Hình học (<code>NotchGeometry</code>)</a><a class="h3" href="#5-3-đa-màn-hình-screenmanager">5.3 Đa màn hình (<code>ScreenManager</code>)</a><a class="h3" href="#5-4-state-machine-notchviewmodel">5.4 State machine (<code>NotchViewModel</code>)</a><a class="h3" href="#5-5-ẩn-khi-fullscreen-fullscreendetector">5.5 Ẩn khi fullscreen (<code>FullscreenDetector</code>)</a><a class="h3" href="#5-6-giao-diện-và-animation">5.6 Giao diện và animation</a><a class="h2" href="#6-khung-ứng-dụng">6. Khung ứng dụng</a><a class="h3" href="#6-1-menu-bar">6.1 Menu bar</a><a class="h3" href="#6-2-settings">6.2 Settings</a><a class="h3" href="#6-3-lưu-cài-đặt">6.3 Lưu cài đặt</a><a class="h3" href="#6-4-phím-tắt">6.4 Phím tắt</a><a class="h3" href="#6-5-quyền-permissioncenter">6.5 Quyền (<code>PermissionCenter</code>)</a><a class="h3" href="#6-6-log">6.6 Log</a><a class="h2" href="#7-module-mẫu-battery">7. Module mẫu: Battery</a><a class="h2" href="#8-xử-lý-lỗi">8. Xử lý lỗi</a><a class="h2" href="#9-kiểm-thử-và-kiểm-chứng">9. Kiểm thử và kiểm chứng</a><a class="h2" href="#10-tiêu-chí-hoàn-thành">10. Tiêu chí hoàn thành</a><a class="h2" href="#11-lộ-trình-các-dự-án-con">11. Lộ trình các dự án con</a><a class="h2" href="#12-rủi-ro-và-điểm-cần-kiểm-chứng">12. Rủi ro và điểm cần kiểm chứng</a></nav><main><h1 id="mynotch-thiết-kế-nền-tảng-dự-án-con-0">MyNotch — Thiết kế Nền tảng (dự án con 0)</h1>
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-bối-cảnh-và-mục-tiêu">1. Bối cảnh và mục tiêu</a><a class="h2" href="#2-phạm-vi">2. Phạm vi</a><a class="h2" href="#3-ràng-buộc-kỹ-thuật">3. Ràng buộc kỹ thuật</a><a class="h2" href="#4-kiến-trúc">4. Kiến trúc</a><a class="h3" href="#4-1-cấu-trúc-thư-mục">4.1 Cấu trúc thư mục</a><a class="h3" href="#4-2-quy-tắc-phụ-thuộc">4.2 Quy tắc phụ thuộc</a><a class="h3" href="#4-3-api-module-mynotchcore">4.3 API module (<code>MyNotchCore</code>)</a><a class="h3" href="#4-4-moduleregistry">4.4 <code>ModuleRegistry</code></a><a class="h2" href="#5-notchui">5. NotchUI</a><a class="h3" href="#5-1-cửa-sổ">5.1 Cửa sổ</a><a class="h3" href="#5-2-hình-học-notchgeometry">5.2 Hình học (<code>NotchGeometry</code>)</a><a class="h3" href="#5-3-đa-màn-hình-screenmanager">5.3 Đa màn hình (<code>ScreenManager</code>)</a><a class="h3" href="#5-4-state-machine-notchviewmodel">5.4 State machine (<code>NotchViewModel</code>)</a><a class="h3" href="#5-5-ẩn-khi-fullscreen-fullscreendetector">5.5 Ẩn khi fullscreen (<code>FullscreenDetector</code>)</a><a class="h3" href="#5-6-giao-diện-và-animation">5.6 Giao diện và animation</a><a class="h2" href="#6-khung-ứng-dụng">6. Khung ứng dụng</a><a class="h3" href="#6-1-menu-bar">6.1 Menu bar</a><a class="h3" href="#6-2-settings">6.2 Settings</a><a class="h3" href="#6-3-lưu-cài-đặt">6.3 Lưu cài đặt</a><a class="h3" href="#6-4-phím-tắt">6.4 Phím tắt</a><a class="h3" href="#6-5-quyền-permissioncenter">6.5 Quyền (<code>PermissionCenter</code>)</a><a class="h3" href="#6-6-log">6.6 Log</a><a class="h2" href="#7-module-mẫu-battery">7. Module mẫu: Battery</a><a class="h2" href="#8-xử-lý-lỗi">8. Xử lý lỗi</a><a class="h2" href="#9-kiểm-thử-và-kiểm-chứng">9. Kiểm thử và kiểm chứng</a><a class="h2" href="#10-tiêu-chí-hoàn-thành">10. Tiêu chí hoàn thành</a><a class="h2" href="#11-lộ-trình-các-dự-án-con">11. Lộ trình các dự án con</a><a class="h2" href="#12-rủi-ro-và-điểm-cần-kiểm-chứng">12. Rủi ro và điểm cần kiểm chứng</a><a class="h2" href="#13-điều-chỉnh-khi-lập-kế-hoạch-2026-10-13">13. Điều chỉnh khi lập kế hoạch (2026-10-13)</a></nav><main><h1 id="mynotch-thiết-kế-nền-tảng-dự-án-con-0">MyNotch — Thiết kế Nền tảng (dự án con 0)</h1>
 <ul>
 <li><strong>Ngày:</strong> 2026-10-13</li>
 <li><strong>Trạng thái:</strong> Đã duyệt thiết kế, chờ review spec</li>
@@ -60,7 +60,7 @@ th{background:var(--card)}
 <tr><td>Công cụ</td><td>Xcode 26.6 (17F113), Swift 6.3, Swift 6 language mode, strict concurrency <code>complete</code></td></tr>
 <tr><td>Sinh project</td><td>XcodeGen (<code>project.yml</code>); không commit <code>MyNotch.xcodeproj</code></td></tr>
 <tr><td>Bundle ID / tên</td><td><code>io.lucasvu.mynotch</code> / <code>MyNotch</code></td></tr>
-<tr><td>Ký</td><td>Apple Development (Apple ID miễn phí), <code>DEVELOPMENT_TEAM</code> đặt trong <code>project.yml</code></td></tr>
+<tr><td>Ký</td><td>Ad-hoc ("Sign to Run Locally") cho nền tảng; đặt <code>DEVELOPMENT_TEAM</code> (Apple ID miễn phí) khi module đầu tiên cần quyền hệ thống</td></tr>
 <tr><td>Sandbox</td><td>Tắt; Hardened Runtime bật</td></tr>
 <tr><td>Dock</td><td>Ẩn (<code>LSUIElement = YES</code>); chỉ có icon menu bar</td></tr>
 <tr><td>Mạng / telemetry</td><td>Không gửi dữ liệu ra ngoài</td></tr>
@@ -68,8 +68,7 @@ th{background:var(--card)}
 </tbody></table>
 <p><strong>Thư viện bên thứ ba</strong> (ghim version chính xác lúc triển khai, ghi vào <code>Package.resolved</code>, liệt kê ở trang About):</p>
 <table><thead><tr><th>Thư viện</th><th>Dùng cho</th><th>License</th></tr></thead><tbody>
-<tr><td><a href="https://github.com/sindresorhus/Defaults">Defaults</a></td><td>Lưu cài đặt có kiểu</td><td>MIT</td></tr>
-<tr><td><a href="https://github.com/sindresorhus/KeyboardShortcuts">KeyboardShortcuts</a></td><td>Phím tắt toàn cục, giao diện ghi phím</td><td>MIT</td></tr>
+<tr><td><a href="https://github.com/sindresorhus/KeyboardShortcuts">KeyboardShortcuts</a> 3.1.0</td><td>Phím tắt toàn cục, giao diện ghi phím</td><td>MIT</td></tr>
 <tr><td><a href="https://github.com/yonaskolb/XcodeGen">XcodeGen</a></td><td>Sinh <code>.xcodeproj</code> (công cụ dev, không nhúng vào app)</td><td>MIT</td></tr>
 </tbody></table>
 <h2 id="4-kiến-trúc">4. Kiến trúc</h2>
@@ -77,14 +76,17 @@ th{background:var(--card)}
 <pre><code>MyNotch/
 ├── project.yml
 ├── App/
-│   ├── MyNotchApp.swift          # @main, NSApplicationDelegateAdaptor
+│   ├── main.swift                # NSApplication + AppDelegate, activation policy .accessory
 │   ├── AppDelegate.swift         # composition root: tạo registry, ScreenManager, menu bar
+│   ├── StatusItemController.swift
+│   ├── LaunchAtLogin.swift
+│   ├── AppSettings.swift         # key app.*
 │   ├── ModuleList.swift          # danh sách module, nơi DUY NHẤT ghép module
 │   ├── Settings/                 # SettingsWindowController + các trang General/Interface/Modules/About
 │   ├── Info.plist
 │   └── MyNotch.entitlements
 ├── Packages/
-│   ├── MyNotchCore/              # không phụ thuộc AppKit UI ngoài kiểu cơ bản
+│   ├── MyNotchCore/              # + target MyNotchTestSupport (ManualScheduler, fake) cho test
 │   ├── NotchUI/                  # phụ thuộc MyNotchCore
 │   └── Modules/
 │       └── Battery/              # package BatteryModule, phụ thuộc MyNotchCore + NotchUI
@@ -125,9 +127,10 @@ public struct ModuleDescriptor: Sendable {
     public let settings: ModuleSettings        // chỉ đọc/ghi key &quot;module.&lt;id&gt;.*&quot;
     public let activities: ActivityPublisher   // set/clear live activity của module
     public let presenter: NotchPresenter       // mở tab, toast, đóng notch
-    public let hotkeys: HotkeyRegistry         // đăng ký KeyboardShortcuts.Name + handler
+    public let hotkeys: ModuleHotkeys          // đăng ký phím tắt, tự gỡ khi module stop
     public let permissions: PermissionCenter   // kiểm tra/xin quyền
     public let logger: Logger                  // os.Logger, category = module id
+    public func run(_ operation: @escaping @MainActor () async -&gt; Void) // task tự cancel khi stop
 }</code></pre>
 <p><strong>Thay đổi so với bản phác ở bước brainstorm:</strong> live activity không còn là thuộc tính <code>activity</code> trên protocol. Module chủ động phát activity qua <code>context.activities.set(_:)</code> và gỡ bằng <code>clear()</code>. Như vậy registry không phải theo dõi thuộc tính của từng module, và mọi activity của module đó tự động bị gỡ khi module stop.</p>
 <pre><code class="language-swift">public struct LiveActivity: Identifiable {
@@ -174,8 +177,8 @@ running  → stopping → disabled</code></pre>
 <li><strong>Tắt module:</strong></li>
 </ul>
 <ol>
-<li>Gọi <code>stop()</code>, đợi tối đa 2 giây.</li>
-<li>Hủy task của module.</li>
+<li>Gọi <code>stop()</code> và đợi hàm này trả về.</li>
+<li>Hủy các task module đã tạo qua <code>context.run</code>.</li>
 <li><code>ActivityPublisher</code> gỡ mọi activity của module.</li>
 <li>Gỡ tab của module, gỡ các phím tắt module đã đăng ký.</li>
 </ol>
@@ -236,7 +239,7 @@ running  → stopping → disabled</code></pre>
 <li><code>openDelay</code> = 150ms (cho phép 0–1000)</li>
 <li><code>closeDelay</code> = 300ms (cho phép 0–1000)</li>
 </ul>
-<p>Đồng hồ được inject dạng <code>any Clock&lt;Duration&gt;</code> để test được.</p>
+<p>Thời gian được inject qua protocol <code>Scheduler</code> (<code>TaskScheduler</code> khi chạy thật, <code>ManualScheduler</code> trong test). <code>compact</code> không phải trạng thái lưu trữ: <code>displayState</code> trả về <code>compact</code> khi <code>state == .closed</code> và đang có activity.</p>
 <table><thead><tr><th>Từ</th><th>Sự kiện</th><th>Đến</th></tr></thead><tbody>
 <tr><td><code>closed</code>/<code>compact</code></td><td>con trỏ ở trong notch liên tục ≥ <code>openDelay</code></td><td><code>open(lastTab ?? firstTab)</code></td></tr>
 <tr><td><code>closed</code>/<code>compact</code></td><td>click vào notch</td><td><code>open(lastTab ?? firstTab)</code></td></tr>
@@ -290,12 +293,12 @@ running  → stopping → disabled</code></pre>
 <p>Settings mở từ mục "Open Settings…" trong menu bar. Vì app không có Dock icon và notch không nhận focus, phím ⌘, chỉ có tác dụng khi chính cửa sổ Settings đang được chọn.</p>
 <h3 id="6-3-lưu-cài-đặt">6.3 Lưu cài đặt</h3>
 <ul>
-<li>Dùng <code>Defaults</code> trên <code>UserDefaults.standard</code>. Key toàn cục có tiền tố <code>app.</code> hoặc <code>interface.</code>.</li>
+<li><code>SettingsStore</code> tự viết (khoảng 70 dòng): mỗi <code>SettingKey&lt;Value: Codable&gt;</code> lưu dạng JSON trong <code>UserDefaults.standard</code>, có giá trị mặc định và tùy chọn kẹp khoảng (<code>clampedTo:</code>). Store là <code>@Observable</code> nên SwiftUI tự cập nhật. Key toàn cục có tiền tố <code>app.</code> hoặc <code>interface.</code>.</li>
 <li><code>ModuleSettings</code> bọc key với tiền tố <code>module.&lt;id&gt;.</code>. Module không tạo được key nằm ngoài namespace của nó.</li>
 </ul>
 <h3 id="6-4-phím-tắt">6.4 Phím tắt</h3>
 <ul>
-<li><code>HotkeyRegistry</code> bọc <code>KeyboardShortcuts</code>. Module đăng ký <code>(name, defaultShortcut?, handler)</code>. Registry tự gỡ handler khi module stop.</li>
+<li><code>HotkeyRegistry</code> bọc <code>KeyboardShortcuts</code>. Module đăng ký <code>(name, initialShortcut?, handler)</code> qua <code>context.hotkeys</code>. Tên thật là <code>&lt;module id | app&gt;_&lt;name&gt;</code> vì KeyboardShortcuts cấm dấu <code>.</code>. Registry tự gỡ handler khi module stop.</li>
 <li>Settings hiển thị <code>KeyboardShortcuts.Recorder</code> cho mọi phím tắt đã đăng ký, và cảnh báo khi hai tên trùng tổ hợp phím.</li>
 </ul>
 <h3 id="6-5-quyền-permissioncenter">6.5 Quyền (<code>PermissionCenter</code>)</h3>
@@ -378,6 +381,17 @@ running  → stopping → disabled</code></pre>
 <tr><td>Global mouse monitor tốn CPU khi rê chuột liên tục</td><td>Chỉ tính <code>hitRect</code> bằng phép so sánh hình chữ nhật. Kiểm tra CPU trong Activity Monitor khi rê chuột liên tục 30 giây</td></tr>
 <tr><td>Chứng chỉ Apple Development có thời hạn; hết hạn thì macOS không mở app</td><td>Build lại trong Xcode để ký bằng chứng chỉ mới. Ghi chú trong README</td></tr>
 <tr><td>Phím tắt mặc định ⌃⌥N trùng với app khác</td><td>Settings cảnh báo trùng; người dùng gán lại được</td></tr>
+</tbody></table>
+<h2 id="13-điều-chỉnh-khi-lập-kế-hoạch-2026-10-13">13. Điều chỉnh khi lập kế hoạch (2026-10-13)</h2>
+<p>Prototype đầy đủ (42 unit test, build app thành công) cho thấy cần các điều chỉnh sau. Các mục ở trên đã được sửa theo.</p>
+<table><thead><tr><th>Điều chỉnh</th><th>Lý do</th></tr></thead><tbody>
+<tr><td>Bỏ thư viện Defaults, dùng <code>SettingsStore</code> tự viết</td><td>Defaults 9.0.9 kéo theo <code>swift-syntax</code> và cấm dấu <code>.</code> trong tên key, xung đột với namespace <code>module.&lt;id&gt;.*</code></td></tr>
+<tr><td><code>main.swift</code> thay cho <code>@main struct App</code></td><td>App chỉ dùng AppKit + menu bar, không cần scene SwiftUI</td></tr>
+<tr><td>Mọi package dùng <code>.defaultIsolation(MainActor.self)</code>; kiểu dữ liệu thuần đánh dấu <code>nonisolated</code></td><td>Giảm chú thích concurrency; đúng mô hình app UI</td></tr>
+<tr><td><code>Scheduler</code> thay cho <code>Clock</code></td><td>Test hover/toast/hết hạn activity bằng <code>ManualScheduler</code>, không cần viết Clock giả</td></tr>
+<tr><td>Không có giới hạn 2 giây khi <code>stop()</code></td><td>Đua task với một module <code>@MainActor</code> phức tạp mà không cần thiết; module tự chịu trách nhiệm dừng nhanh</td></tr>
+<tr><td>Ký ad-hoc mặc định</td><td>Nền tảng không cần quyền hệ thống; tránh bắt buộc thêm tài khoản vào Xcode ngay từ đầu</td></tr>
+<tr><td>Thêm target <code>MyNotchTestSupport</code></td><td>Dùng chung fake và <code>ManualScheduler</code> giữa test của các package</td></tr>
 </tbody></table></main></div><script>
 document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
 b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});

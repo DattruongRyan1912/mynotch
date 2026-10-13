@@ -9,3 +9,6 @@ xcuserdata/
 
 # macOS
 .DS_Store
+
+# Dependencies are pinned with exact versions in Package.swift / project.yml
+Package.resolved

@@ -43,7 +43,7 @@ Kết quả điều tra OneNotch 2.0.5 (build 67) bằng REA:
 | Công cụ | Xcode 26.6 (17F113), Swift 6.3, Swift 6 language mode, strict concurrency `complete` |
 | Sinh project | XcodeGen (`project.yml`); không commit `MyNotch.xcodeproj` |
 | Bundle ID / tên | `io.lucasvu.mynotch` / `MyNotch` |
-| Ký | Apple Development (Apple ID miễn phí), `DEVELOPMENT_TEAM` đặt trong `project.yml` |
+| Ký | Ad-hoc ("Sign to Run Locally") cho nền tảng; đặt `DEVELOPMENT_TEAM` (Apple ID miễn phí) khi module đầu tiên cần quyền hệ thống |
 | Sandbox | Tắt; Hardened Runtime bật |
 | Dock | Ẩn (`LSUIElement = YES`); chỉ có icon menu bar |
 | Mạng / telemetry | Không gửi dữ liệu ra ngoài |
@@ -53,8 +53,7 @@ Kết quả điều tra OneNotch 2.0.5 (build 67) bằng REA:
 
 | Thư viện | Dùng cho | License |
 |---|---|---|
-| [Defaults](https://github.com/sindresorhus/Defaults) | Lưu cài đặt có kiểu | MIT |
-| [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) | Phím tắt toàn cục, giao diện ghi phím | MIT |
+| [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) 3.1.0 | Phím tắt toàn cục, giao diện ghi phím | MIT |
 | [XcodeGen](https://github.com/yonaskolb/XcodeGen) | Sinh `.xcodeproj` (công cụ dev, không nhúng vào app) | MIT |
 
 ## 4. Kiến trúc
@@ -65,14 +64,17 @@ Kết quả điều tra OneNotch 2.0.5 (build 67) bằng REA:
 MyNotch/
 ├── project.yml
 ├── App/
-│   ├── MyNotchApp.swift          # @main, NSApplicationDelegateAdaptor
+│   ├── main.swift                # NSApplication + AppDelegate, activation policy .accessory
 │   ├── AppDelegate.swift         # composition root: tạo registry, ScreenManager, menu bar
+│   ├── StatusItemController.swift
+│   ├── LaunchAtLogin.swift
+│   ├── AppSettings.swift         # key app.*
 │   ├── ModuleList.swift          # danh sách module, nơi DUY NHẤT ghép module
 │   ├── Settings/                 # SettingsWindowController + các trang General/Interface/Modules/About
 │   ├── Info.plist
 │   └── MyNotch.entitlements
 ├── Packages/
-│   ├── MyNotchCore/              # không phụ thuộc AppKit UI ngoài kiểu cơ bản
+│   ├── MyNotchCore/              # + target MyNotchTestSupport (ManualScheduler, fake) cho test
 │   ├── NotchUI/                  # phụ thuộc MyNotchCore
 │   └── Modules/
 │       └── Battery/              # package BatteryModule, phụ thuộc MyNotchCore + NotchUI
@@ -117,9 +119,10 @@ public struct ModuleDescriptor: Sendable {
     public let settings: ModuleSettings        // chỉ đọc/ghi key "module.<id>.*"
     public let activities: ActivityPublisher   // set/clear live activity của module
     public let presenter: NotchPresenter       // mở tab, toast, đóng notch
-    public let hotkeys: HotkeyRegistry         // đăng ký KeyboardShortcuts.Name + handler
+    public let hotkeys: ModuleHotkeys          // đăng ký phím tắt, tự gỡ khi module stop
     public let permissions: PermissionCenter   // kiểm tra/xin quyền
     public let logger: Logger                  // os.Logger, category = module id
+    public func run(_ operation: @escaping @MainActor () async -> Void) // task tự cancel khi stop
 }
 ```
 
@@ -170,8 +173,8 @@ running  → stopping → disabled
   1. Kiểm tra các quyền trong `descriptor.permissions`. Thiếu quyền nào thì chuyển sang `needsPermission`, không gọi `start`.
   2. Gọi `start(context)` trong một `Task` riêng. Thành công thì chuyển sang `running`. `start` ném `ModuleError` thì chuyển sang trạng thái lỗi tương ứng.
 - **Tắt module:**
-  1. Gọi `stop()`, đợi tối đa 2 giây.
-  2. Hủy task của module.
+  1. Gọi `stop()` và đợi hàm này trả về.
+  2. Hủy các task module đã tạo qua `context.run`.
   3. `ActivityPublisher` gỡ mọi activity của module.
   4. Gỡ tab của module, gỡ các phím tắt module đã đăng ký.
 - **Thử lại:** nút Retry trong Settings sẽ tắt rồi bật lại module.
@@ -231,7 +234,7 @@ Hai thông số thời gian, lấy từ cài đặt:
 - `openDelay` = 150ms (cho phép 0–1000)
 - `closeDelay` = 300ms (cho phép 0–1000)
 
-Đồng hồ được inject dạng `any Clock<Duration>` để test được.
+Thời gian được inject qua protocol `Scheduler` (`TaskScheduler` khi chạy thật, `ManualScheduler` trong test). `compact` không phải trạng thái lưu trữ: `displayState` trả về `compact` khi `state == .closed` và đang có activity.
 
 | Từ | Sự kiện | Đến |
 |---|---|---|
@@ -293,12 +296,12 @@ Settings mở từ mục "Open Settings…" trong menu bar. Vì app không có D
 
 ### 6.3 Lưu cài đặt
 
-- Dùng `Defaults` trên `UserDefaults.standard`. Key toàn cục có tiền tố `app.` hoặc `interface.`.
+- `SettingsStore` tự viết (khoảng 70 dòng): mỗi `SettingKey<Value: Codable>` lưu dạng JSON trong `UserDefaults.standard`, có giá trị mặc định và tùy chọn kẹp khoảng (`clampedTo:`). Store là `@Observable` nên SwiftUI tự cập nhật. Key toàn cục có tiền tố `app.` hoặc `interface.`.
 - `ModuleSettings` bọc key với tiền tố `module.<id>.`. Module không tạo được key nằm ngoài namespace của nó.
 
 ### 6.4 Phím tắt
 
-- `HotkeyRegistry` bọc `KeyboardShortcuts`. Module đăng ký `(name, defaultShortcut?, handler)`. Registry tự gỡ handler khi module stop.
+- `HotkeyRegistry` bọc `KeyboardShortcuts`. Module đăng ký `(name, initialShortcut?, handler)` qua `context.hotkeys`. Tên thật là `<module id | app>_<name>` vì KeyboardShortcuts cấm dấu `.`. Registry tự gỡ handler khi module stop.
 - Settings hiển thị `KeyboardShortcuts.Recorder` cho mọi phím tắt đã đăng ký, và cảnh báo khi hai tên trùng tổ hợp phím.
 
 ### 6.5 Quyền (`PermissionCenter`)
@@ -391,3 +394,18 @@ Settings mở từ mục "Open Settings…" trong menu bar. Vì app không có D
 | Global mouse monitor tốn CPU khi rê chuột liên tục | Chỉ tính `hitRect` bằng phép so sánh hình chữ nhật. Kiểm tra CPU trong Activity Monitor khi rê chuột liên tục 30 giây |
 | Chứng chỉ Apple Development có thời hạn; hết hạn thì macOS không mở app | Build lại trong Xcode để ký bằng chứng chỉ mới. Ghi chú trong README |
 | Phím tắt mặc định ⌃⌥N trùng với app khác | Settings cảnh báo trùng; người dùng gán lại được |
+
+## 13. Điều chỉnh khi lập kế hoạch (2026-10-13)
+
+Prototype đầy đủ (42 unit test, build app thành công) cho thấy cần các điều chỉnh sau. Các mục ở trên đã được sửa theo.
+
+| Điều chỉnh | Lý do |
+|---|---|
+| Bỏ thư viện Defaults, dùng `SettingsStore` tự viết | Defaults 9.0.9 kéo theo `swift-syntax` và cấm dấu `.` trong tên key, xung đột với namespace `module.<id>.*` |
+| `main.swift` thay cho `@main struct App` | App chỉ dùng AppKit + menu bar, không cần scene SwiftUI |
+| Mọi package dùng `.defaultIsolation(MainActor.self)`; kiểu dữ liệu thuần đánh dấu `nonisolated` | Giảm chú thích concurrency; đúng mô hình app UI |
+| `Scheduler` thay cho `Clock` | Test hover/toast/hết hạn activity bằng `ManualScheduler`, không cần viết Clock giả |
+| Không có giới hạn 2 giây khi `stop()` | Đua task với một module `@MainActor` phức tạp mà không cần thiết; module tự chịu trách nhiệm dừng nhanh |
+| Ký ad-hoc mặc định | Nền tảng không cần quyền hệ thống; tránh bắt buộc thêm tài khoản vào Xcode ngay từ đầu |
+| Thêm target `MyNotchTestSupport` | Dùng chung fake và `ManualScheduler` giữa test của các package |
+
