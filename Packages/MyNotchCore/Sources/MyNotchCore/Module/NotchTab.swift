@@ -10,13 +10,24 @@ public struct NotchTab: Identifiable {
     public let systemImage: String
     /// Height of the area below the notch, including the notch's inner padding (14pt) and, when two or more tabs exist, the tab bar (30pt).
     public let preferredHeight: CGFloat?
+    /// Set by tabs with text fields or keyboard navigation. The notch panel then takes keyboard focus
+    /// while the tab is shown, without activating MyNotch, so the app in front stays active.
+    public let acceptsKeyboard: Bool
     public let content: AnyView
 
-    public init(id: ModuleID, title: String, systemImage: String, preferredHeight: CGFloat? = nil, content: AnyView) {
+    public init(
+        id: ModuleID,
+        title: String,
+        systemImage: String,
+        preferredHeight: CGFloat? = nil,
+        acceptsKeyboard: Bool = false,
+        content: AnyView
+    ) {
         self.id = id
         self.title = title
         self.systemImage = systemImage
         self.preferredHeight = preferredHeight
+        self.acceptsKeyboard = acceptsKeyboard
         self.content = content
     }
 

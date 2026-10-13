@@ -16,6 +16,11 @@ import Testing
         #expect(tab(300).contentHeight == 300)
     }
 
+    @Test func tabsDoNotTakeTheKeyboardUnlessTheyAskForIt() {
+        #expect(!NotchTab(id: "x", title: "X", systemImage: "circle", content: AnyView(EmptyView())).acceptsKeyboard)
+        #expect(NotchTab(id: "x", title: "X", systemImage: "circle", acceptsKeyboard: true, content: AnyView(EmptyView())).acceptsKeyboard)
+    }
+
     @Test func moduleErrorsMapToStates() {
         #expect(ModuleState(.needsPermission(.accessibility)) == .needsPermission(.accessibility))
         #expect(ModuleState(.unavailable(reason: "r")) == .unavailable(reason: "r"))

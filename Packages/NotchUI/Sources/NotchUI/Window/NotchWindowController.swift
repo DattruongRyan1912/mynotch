@@ -34,6 +34,8 @@ final class NotchWindowController {
         hosting = FirstMouseHostingView(rootView: NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry))
         hosting.frame = CGRect(origin: .zero, size: geometry.panelSize)
         panel.contentView = hosting
+        panel.onCancel = { [weak model] in model?.close() }
+        panel.onResignKey = { [weak self] in self?.panelDidResignKey() }
         observe()
     }
 
@@ -60,6 +62,7 @@ final class NotchWindowController {
         } else {
             if model.isPointerInside { model.pointerExited() }
             model.close()
+            panel.allowsKeyStatus = false
             panel.ignoresMouseEvents = true
             panel.orderOut(nil)
         }
@@ -86,6 +89,7 @@ final class NotchWindowController {
     func close() {
         observation?.cancel()
         observation = nil
+        panel.allowsKeyStatus = false
         panel.orderOut(nil)
         panel.close()
     }
@@ -100,14 +104,42 @@ final class NotchWindowController {
         return geometry.hitRect(for: state, contentHeight: registry.contentHeight(for: state), in: screenFrame)
     }
 
+    /// Gives the panel the keyboard while an open tab accepts it, and hands it back to the app in front otherwise.
+    /// The panel is non-activating, so MyNotch never becomes the active app.
+    private func setTakesKeyboard(_ takesKeyboard: Bool) {
+        guard takesKeyboard != panel.allowsKeyStatus else { return }
+        panel.allowsKeyStatus = takesKeyboard
+        if takesKeyboard {
+            // An ordered-out panel must not take the keyboard where nobody can see it.
+            if isVisible { panel.makeKey() }
+        } else if isVisible, panel.isKeyWindow {
+            // Ordering out returns key status to the app in front; ordering back in leaves it there.
+            panel.orderOut(nil)
+            panel.orderFrontRegardless()
+        }
+    }
+
+    /// The user moved the keyboard elsewhere (another app or another MyNotch window), so the notch closes unless
+    /// pinned. Resigning because the keyboard is no longer wanted (tab switch, toast, close) changes nothing.
+    private func panelDidResignKey() {
+        guard panel.allowsKeyStatus, model.state.isExpanded, !model.isPinned else { return }
+        model.close()
+    }
+
     private func observe() {
         observation = Task { [weak self, activities, registry, model] in
-            for await (hasActivity, _, _) in Observations({
-                (activities.current != nil, model.displayState, registry.contentHeight(for: model.displayState))
+            for await (hasActivity, _, _, wantsKeyboard) in Observations({
+                (
+                    activities.current != nil,
+                    model.displayState,
+                    registry.contentHeight(for: model.displayState),
+                    NotchKeyboardPolicy.wantsKeyboard(state: model.displayState, tabs: registry.tabs)
+                )
             }) {
                 guard let self else { return }
                 self.model.hasActivity = hasActivity
                 self.refreshHitTesting()
+                self.setTakesKeyboard(wantsKeyboard)
             }
         }
     }

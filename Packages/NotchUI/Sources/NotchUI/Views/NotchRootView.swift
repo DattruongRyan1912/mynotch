@@ -10,8 +10,14 @@ struct NotchRootView: View {
 
     private var state: NotchState { model.displayState }
 
-    private var selectedTab: NotchTab? {
-        guard case .open(let id) = state, let id else { return nil }
+    /// The open tab, or the tab a toast covers.
+    private var shownTab: NotchTab? {
+        let id: ModuleID? = switch state {
+        case .open(let id): id
+        case .toast: model.tabUnderToast
+        case .closed, .compact: nil
+        }
+        guard let id else { return nil }
         return registry.tabs.first { $0.id == id }
     }
 
@@ -27,7 +33,11 @@ struct NotchRootView: View {
         let shape = NotchShape(topRadius: radii.top, bottomRadius: radii.bottom)
         shape
             .fill(NotchTokens.background)
-            .overlay(alignment: .top) { content.padding(.horizontal, radii.top) }
+            .overlay(alignment: .top) {
+                content
+                    .padding(.horizontal, radii.top)
+                    .environment(\.notch, NotchHandle(model: model))
+            }
             .clipShape(shape)
             .frame(width: size.width, height: size.height)
             .contentShape(shape)
@@ -51,22 +61,38 @@ struct NotchRootView: View {
                 .frame(height: geometry.notchSize.height)
                 .transition(.opacity)
             }
-        case .open:
+        case .open, .toast:
+            // One branch for both, so a tab covered by a toast keeps its identity and its SwiftUI state
+            // (search text, focus, scroll position): it stays alive underneath, invisible and inert.
             expanded {
-                if registry.tabs.count >= 2 {
-                    TabBar(tabs: registry.tabs, selected: selectedTab?.id) { model.open(tab: $0) }
-                        .padding(.bottom, 6)
-                }
-                if let selectedTab {
-                    selectedTab.content.frame(maxWidth: .infinity, maxHeight: .infinity).id(selectedTab.id)
-                } else {
-                    Text("Chưa có module nào đang chạy")
-                        .foregroundStyle(NotchTokens.secondaryText)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ZStack {
+                    if isOpen || model.tabUnderToast != nil {
+                        tabPage
+                            .opacity(isOpen ? 1 : 0)
+                            .allowsHitTesting(isOpen)
+                            .accessibilityHidden(!isOpen)
+                    }
+                    if !isOpen {
+                        model.toastContent.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
             }
-        case .toast:
-            expanded { model.toastContent.frame(maxWidth: .infinity, maxHeight: .infinity) }
+        }
+    }
+
+    private var tabPage: some View {
+        VStack(spacing: 0) {
+            if registry.tabs.count >= 2 {
+                TabBar(tabs: registry.tabs, selected: shownTab?.id) { model.open(tab: $0) }
+                    .padding(.bottom, 6)
+            }
+            if let shownTab {
+                shownTab.content.frame(maxWidth: .infinity, maxHeight: .infinity).id(shownTab.id)
+            } else {
+                Text("Chưa có module nào đang chạy")
+                    .foregroundStyle(NotchTokens.secondaryText)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
 

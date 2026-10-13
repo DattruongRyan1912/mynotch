@@ -11,7 +11,9 @@ public final class NotchViewModel {
     public private(set) var isPointerInside = false
     /// Set by the owner when the activity center has something to show.
     public var hasActivity = false
-    /// Keeps the notch open until unpinned or explicitly closed.
+    /// Keeps the notch open until unpinned or explicitly closed. Any window of MyNotch other than the notch
+    /// (Settings, alerts, sheets, popovers, menus) counts as outside, so a module pins the notch while it
+    /// shows such auxiliary UI.
     public var isPinned = false {
         didSet {
             guard isPinned != oldValue else { return }
@@ -19,6 +21,9 @@ public final class NotchViewModel {
         }
     }
     public private(set) var isDragging = false
+    /// The open tab a toast covers; the toast returns to it instead of closing the notch, and the view keeps
+    /// it alive underneath so its state (search text, focus, scroll position) survives the toast.
+    public private(set) var tabUnderToast: ModuleID?
 
     /// What the view should render: `closed` becomes `compact` while an activity is live.
     public var displayState: NotchState {
@@ -33,8 +38,6 @@ public final class NotchViewModel {
     @ObservationIgnored private var toastTimer: ScheduledAction?
     /// A toast is shown for at least its duration; only after that may a pointer exit close it.
     @ObservationIgnored private var toastExpired = true
-    /// The open tab a toast covers; the toast returns to it instead of closing the notch.
-    @ObservationIgnored private var stateUnderToast: NotchState?
 
     public init(
         scheduler: any Scheduler,
@@ -80,7 +83,7 @@ public final class NotchViewModel {
         pendingClose?.cancel()
         toastTimer?.cancel()
         toastExpired = true
-        stateUnderToast = nil
+        tabUnderToast = nil
         let tabs = availableTabs()
         let resolved = [tab, lastTab].compactMap { $0 }.first(where: tabs.contains) ?? tabs.first
         lastTab = resolved ?? lastTab
@@ -96,7 +99,7 @@ public final class NotchViewModel {
         pendingClose?.cancel()
         toastTimer?.cancel()
         // A toast replacing another toast keeps the tab the first one covered.
-        if case .open = state { stateUnderToast = state }
+        if case .open(let tab?) = state { tabUnderToast = tab }
         toastContent = content
         toastExpired = false
         state = .toast
@@ -105,8 +108,9 @@ public final class NotchViewModel {
         }
     }
 
-    /// Closes the expanded notch for a click anywhere else. Pinned notches stay open because
-    /// a module's menu or popover lives outside the notch; so do notches with a drag in progress.
+    /// Closes the expanded notch for a click anywhere else, including any MyNotch window other than the notch
+    /// (Settings, alerts, sheets, popovers, menus). Pinned notches stay open, so a module pins the notch for any
+    /// auxiliary UI it shows; so do notches with a drag in progress.
     public func clickedOutside() {
         guard state.isExpanded, !isPinned, !isDragging else { return }
         close()
@@ -118,7 +122,7 @@ public final class NotchViewModel {
         pendingClose?.cancel()
         toastTimer?.cancel()
         toastExpired = true
-        stateUnderToast = nil
+        tabUnderToast = nil
         toastContent = nil
         state = .closed
         isPinned = false
@@ -132,10 +136,9 @@ public final class NotchViewModel {
 
     private func toastDidExpire() {
         toastExpired = true
-        if let covered = stateUnderToast {
-            stateUnderToast = nil
-            toastContent = nil
-            state = covered
+        if let covered = tabUnderToast {
+            // Resolved like any open, so a tab whose module stopped meanwhile falls back to another one.
+            open(tab: covered)
             scheduleCloseIfPointerOutside()
         } else if !isPointerInside, !isPinned, !isDragging {
             close()

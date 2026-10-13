@@ -17,10 +17,24 @@ final class NotchPanel: NSPanel {
         allowsToolTipsWhenApplicationIsInactive = true
     }
 
-    /// Tabs that need typing (e.g. a search field) can opt in later.
+    /// True only while an open tab accepts keyboard input; the panel never takes the keyboard otherwise.
     var allowsKeyStatus = false
     override var canBecomeKey: Bool { allowsKeyStatus }
     override var canBecomeMain: Bool { false }
+
+    /// Esc (or ⌘.) that no view in the tab handled.
+    var onCancel: (() -> Void)?
+    /// Called after key status moved to another window, e.g. the user clicked into another app.
+    var onResignKey: (() -> Void)?
+
+    override func cancelOperation(_ sender: Any?) {
+        onCancel?()
+    }
+
+    override func resignKey() {
+        super.resignKey()
+        onResignKey?()
+    }
 }
 
 /// Hosting view that accepts the first click even though the app is not active.

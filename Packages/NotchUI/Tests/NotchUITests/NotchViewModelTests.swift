@@ -251,6 +251,37 @@ import Testing
         #expect(model.state == .open("clipboard"))
     }
 
+    @Test func toastOverATabWhoseModuleStoppedFallsBackToTheFirstTab() {
+        var tabs: [ModuleID] = ["battery", "clipboard"]
+        let model = NotchViewModel(scheduler: scheduler, availableTabs: { tabs }, delays: { (.milliseconds(150), .milliseconds(300)) })
+        model.open(tab: "clipboard")
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        tabs = ["battery"]
+        scheduler.advance(by: .seconds(2))
+        #expect(model.state == .open("battery"))
+    }
+
+    @Test func tabUnderToastNamesTheCoveredTabOnlyWhileAToastCoversIt() {
+        let model = makeModel()
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        #expect(model.tabUnderToast == nil)
+        scheduler.advance(by: .seconds(2))
+
+        model.open(tab: "clipboard")
+        #expect(model.tabUnderToast == nil)
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        #expect(model.tabUnderToast == "clipboard")
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        #expect(model.tabUnderToast == "clipboard")
+        scheduler.advance(by: .seconds(2))
+        #expect(model.state == .open("clipboard"))
+        #expect(model.tabUnderToast == nil)
+
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        model.close()
+        #expect(model.tabUnderToast == nil)
+    }
+
     @Test func closingDuringAToastOverATabForgetsTheTab() {
         let model = makeModel()
         model.open(tab: "clipboard")
