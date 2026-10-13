@@ -18,9 +18,24 @@ import Testing
     /// `nonisolated` because test arguments are built off the main actor.
     nonisolated static let rtf = Data("{\\rtf1\\ansi Xin {\\b chào}}".utf8)
 
-    func writeAndRead(_ content: ClipboardContent, imageURL: URL? = nil, plainTextOnly: Bool = false) throws -> PasteboardSnapshot {
-        access.write(content, imageURL: imageURL, plainTextOnly: plainTextOnly)
+    static let sourceType = "org.nspasteboard.source"
+
+    func writeAndRead(
+        _ content: ClipboardContent, imageURL: URL? = nil, plainTextOnly: Bool = false, sourceBundleID: String? = nil
+    ) throws -> PasteboardSnapshot {
+        try #require(access.write(content, imageURL: imageURL, plainTextOnly: plainTextOnly, sourceBundleID: sourceBundleID))
         return try #require(access.snapshot())
+    }
+
+    /// Another app's text is on the pasteboard; a write that cannot happen must leave it exactly as it was.
+    func expectWriteFailsWithoutTouchingThePasteboard(_ content: ClipboardContent, imageURL: URL?) throws {
+        pasteboard.clearContents()
+        pasteboard.setString("keep me", forType: .string)
+        let changeCount = access.changeCount
+
+        #expect(!access.write(content, imageURL: imageURL, plainTextOnly: false))
+        #expect(access.changeCount == changeCount)
+        #expect(try #require(access.snapshot()).string == "keep me")
     }
 
     /// What the monitor would record if the marker were missing, so a write must read back as the content written.
@@ -78,13 +93,14 @@ import Testing
         #expect(unmarked(snapshot) == .content(content, imageData: png))
     }
 
-    @Test func filesRoundTripWithTheMarkerOnTheFirstItem() throws {
+    @Test func filesRoundTripWithTheMarkersOnTheFirstItem() throws {
         let urls = [URL(fileURLWithPath: "/tmp/MyNotchTests/a.txt"), URL(fileURLWithPath: "/tmp/MyNotchTests/b c.txt")]
-        let snapshot = try writeAndRead(.files(urls))
+        let snapshot = try writeAndRead(.files(urls), sourceBundleID: "com.apple.finder")
 
         #expect(snapshot.fileURLs == urls)
         #expect(pasteboard.pasteboardItems?.count == 2)
         #expect(snapshot.types.contains(ClipboardClassifier.ownWriteType))
+        #expect(snapshot.types.contains(Self.sourceType))
         #expect(unmarked(snapshot) == .content(.files(urls), imageData: nil))
     }
 
@@ -96,6 +112,26 @@ import Testing
         #expect(access.changeCount > before)
         #expect(snapshot.fileURLs.isEmpty)
         #expect(pasteboard.pasteboardItems?.count == 1)
+    }
+
+    @Test func theSourceAppIsRecordedOnlyWhenKnown() throws {
+        _ = try writeAndRead(.text("Xin chào"), sourceBundleID: "com.apple.Safari")
+        #expect(pasteboard.pasteboardItems?.first?.string(forType: .init(Self.sourceType)) == "com.apple.Safari")
+
+        let withoutSource = try writeAndRead(.text("Xin chào"))
+        #expect(!withoutSource.types.contains(Self.sourceType))
+    }
+
+    @Test func contentThatCannotBeWrittenLeavesThePasteboardUntouched() throws {
+        let image = ClipboardContent.image(ClipboardImage(fileName: "a.png", pixelWidth: 1, pixelHeight: 1, byteCount: 4))
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let emptyFile = directory.appending(path: "empty.png")
+        try Data().write(to: emptyFile)
+
+        try expectWriteFailsWithoutTouchingThePasteboard(image, imageURL: nil)
+        try expectWriteFailsWithoutTouchingThePasteboard(image, imageURL: directory.appending(path: "missing.png"))
+        try expectWriteFailsWithoutTouchingThePasteboard(image, imageURL: emptyFile)
+        try expectWriteFailsWithoutTouchingThePasteboard(.files([]), imageURL: nil)
     }
 
     @Test func tiffIsReadOnlyWithoutPNG() throws {

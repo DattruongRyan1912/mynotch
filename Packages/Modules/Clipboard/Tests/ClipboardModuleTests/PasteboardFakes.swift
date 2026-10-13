@@ -7,6 +7,7 @@ final class FakePasteboard: PasteboardAccess {
         let content: ClipboardContent
         let imageURL: URL?
         let plainTextOnly: Bool
+        let sourceBundleID: String?
     }
 
     private(set) var changeCount = 0
@@ -25,9 +26,10 @@ final class FakePasteboard: PasteboardAccess {
         return current
     }
 
-    func write(_ content: ClipboardContent, imageURL: URL?, plainTextOnly: Bool) {
-        writes.append(Write(content: content, imageURL: imageURL, plainTextOnly: plainTextOnly))
+    func write(_ content: ClipboardContent, imageURL: URL?, plainTextOnly: Bool, sourceBundleID: String?) -> Bool {
+        writes.append(Write(content: content, imageURL: imageURL, plainTextOnly: plainTextOnly, sourceBundleID: sourceBundleID))
         copy(PasteboardSnapshot(types: [ClipboardClassifier.ownWriteType, "public.utf8-plain-text"], string: content.plainText))
+        return true
     }
 }
 

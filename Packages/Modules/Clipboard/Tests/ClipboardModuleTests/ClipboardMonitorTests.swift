@@ -19,8 +19,9 @@ import Testing
     var excluded: Set<String> = []
     var frontmost: (bundleID: String?, name: String?) = ("com.apple.Safari", "Safari")
     var captures: [Capture] = []
+    var stopOnCapture = false
 
-    lazy var monitor = ClipboardMonitor(
+    lazy var monitor: ClipboardMonitor = ClipboardMonitor(
         pasteboard: pasteboard, scheduler: scheduler,
         frontmostApp: { [unowned self] in frontmost },
         shouldCapture: { [unowned self] in
@@ -28,6 +29,7 @@ import Testing
         },
         onCapture: { [unowned self] content, imageData, app in
             captures.append(Capture(content: content, imageData: imageData, bundleID: app.bundleID, appName: app.name))
+            if stopOnCapture { monitor.stop() }
         }
     )
 
@@ -52,7 +54,7 @@ import Testing
         #expect(captures.isEmpty)
     }
 
-    @Test func aChangeIsCapturedOnceAtTheNextTickWithTheFrontmostAppAsSource() {
+    @Test func aChangeIsCapturedOnceAtTheNextTick() {
         monitor.start()
         pasteboard.copy(Self.text("Xin chào"))
 
@@ -112,6 +114,34 @@ import Testing
         #expect(captures.isEmpty)
     }
 
+    @Test func aCopyIsAttributedToTheAppInFrontAtThePreviousTick() {
+        monitor.start()
+        frontmost = ("com.apple.Notes", "Notes")
+        scheduler.advance(by: Self.interval)
+        pasteboard.copy(Self.text("from Notes"))
+        frontmost = ("com.apple.TextEdit", "TextEdit")
+        scheduler.advance(by: Self.interval)
+
+        #expect(captures == [Capture(content: .text("from Notes"), imageData: nil, bundleID: "com.apple.Notes", appName: "Notes")])
+    }
+
+    /// The copy happened between two ticks, so it is skipped when the app in front at either tick is excluded.
+    @Test(arguments: zip(
+        ["com.1password.1password", "com.apple.Safari"],
+        ["com.apple.Safari", "com.1password.1password"]
+    ))
+    func aCopyAcrossAnAppSwitchIsSkippedWhenEitherAppIsExcluded(before: String, after: String) {
+        excluded = ["com.1password.1password"]
+        frontmost = (before, nil)
+        monitor.start()
+        pasteboard.copy(Self.text("hunter2"))
+        frontmost = (after, nil)
+        scheduler.advance(by: Self.interval)
+
+        #expect(pasteboard.snapshotCount == 0)
+        #expect(captures.isEmpty)
+    }
+
     @Test func ownWritesAreReadButNotCaptured() {
         monitor.start()
         pasteboard.write(.text("again"), imageURL: nil, plainTextOnly: false)
@@ -131,6 +161,19 @@ import Testing
         #expect(scheduler.pendingCount == 0)
         #expect(pasteboard.snapshotCount == 0)
         #expect(captures.isEmpty)
+    }
+
+    @Test func stopFromInsideOnCaptureLeavesNoPendingTick() {
+        stopOnCapture = true
+        monitor.start()
+        pasteboard.copy(Self.text("last"))
+        scheduler.advance(by: Self.interval)
+        pasteboard.copy(Self.text("ignored"))
+        scheduler.advance(by: .seconds(1))
+
+        #expect(scheduler.pendingCount == 0)
+        #expect(captures.map(\.content) == [.text("last")])
+        #expect(pasteboard.snapshotCount == 1)
     }
 
     @Test func startingAgainKeepsASinglePoll() {

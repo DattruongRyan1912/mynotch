@@ -7,13 +7,24 @@ protocol PasteboardAccess: AnyObject {
     /// The first item's types and data plus the file URLs of every item; nil when the pasteboard is empty.
     func snapshot() -> PasteboardSnapshot?
     /// Replaces the content and always adds `ClipboardClassifier.ownWriteType`, so the monitor skips the write.
-    /// `plainTextOnly` drops the RTF of rich text.
-    func write(_ content: ClipboardContent, imageURL: URL?, plainTextOnly: Bool)
+    /// `plainTextOnly` drops the RTF of rich text; `sourceBundleID` tells other clipboard managers where the item came from.
+    /// Returns false and leaves the user's clipboard untouched when the content cannot be written (missing image, no files).
+    @discardableResult
+    func write(_ content: ClipboardContent, imageURL: URL?, plainTextOnly: Bool, sourceBundleID: String?) -> Bool
+}
+
+extension PasteboardAccess {
+    @discardableResult
+    func write(_ content: ClipboardContent, imageURL: URL?, plainTextOnly: Bool) -> Bool {
+        write(content, imageURL: imageURL, plainTextOnly: plainTextOnly, sourceBundleID: nil)
+    }
 }
 
 /// `PasteboardAccess` on an `NSPasteboard`; tests pass a private named pasteboard instead of `.general`.
 final class SystemPasteboard: PasteboardAccess {
     private static let marker = NSPasteboard.PasteboardType(ClipboardClassifier.ownWriteType)
+    /// nspasteboard.org convention naming the app the content came from.
+    private static let source = NSPasteboard.PasteboardType("org.nspasteboard.source")
 
     private let pasteboard: NSPasteboard
 
@@ -39,16 +50,20 @@ final class SystemPasteboard: PasteboardAccess {
         )
     }
 
-    func write(_ content: ClipboardContent, imageURL: URL?, plainTextOnly: Bool) {
+    @discardableResult
+    func write(_ content: ClipboardContent, imageURL: URL?, plainTextOnly: Bool, sourceBundleID: String?) -> Bool {
+        // Items are complete, markers included, before the clipboard is cleared, so a failure leaves it as it was.
+        guard let items = Self.items(for: content, imageURL: imageURL, plainTextOnly: plainTextOnly),
+              let first = items.first else { return false }
+        first.setData(Data(), forType: Self.marker)
+        if let sourceBundleID { first.setString(sourceBundleID, forType: Self.source) }
         pasteboard.clearContents()
-        if case .files(let urls) = content {
-            // NSURL writes the types Finder and other apps expect for every file; the marker goes on the first item.
-            pasteboard.writeObjects(urls.map { $0 as NSURL })
-            pasteboard.pasteboardItems?.first?.setData(Data(), forType: Self.marker)
-            return
-        }
+        return pasteboard.writeObjects(items)
+    }
+
+    /// One item per file so multi-file copies paste whole, one item for everything else; nil for an unreadable image.
+    private static func items(for content: ClipboardContent, imageURL: URL?, plainTextOnly: Bool) -> [NSPasteboardItem]? {
         let item = NSPasteboardItem()
-        item.setData(Data(), forType: Self.marker)
         switch content {
         case .text(let text):
             item.setString(text, forType: .string)
@@ -61,10 +76,16 @@ final class SystemPasteboard: PasteboardAccess {
         case .color(let hex):
             item.setString(hex, forType: .string)
         case .image:
-            if let png = imageURL.flatMap({ try? Data(contentsOf: $0) }) { item.setData(png, forType: .png) }
-        case .files:
-            break
+            guard let png = imageURL.flatMap({ try? Data(contentsOf: $0) }), !png.isEmpty else { return nil }
+            item.setData(png, forType: .png)
+        case .files(let urls):
+            // The same `public.file-url` items `NSURL` writes, built here so the first can carry the markers.
+            return urls.map { url in
+                let fileItem = NSPasteboardItem()
+                fileItem.setString(url.absoluteString, forType: .fileURL)
+                return fileItem
+            }
         }
-        pasteboard.writeObjects([item])
+        return [item]
     }
 }
