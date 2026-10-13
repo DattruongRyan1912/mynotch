@@ -23,8 +23,25 @@ import Testing
 
     deinit { try? FileManager.default.removeItem(at: root) }
 
-    func makeStore() -> CaptureStore {
-        CaptureStore(directory: directory, cachesDirectory: cachesDirectory, logger: Logger(subsystem: "MyNotchTests", category: "CaptureStore"))
+    func makeStore(thumbnailCache: NSCache<NSString, CGImage> = NSCache()) -> CaptureStore {
+        CaptureStore(
+            directory: directory, cachesDirectory: cachesDirectory,
+            logger: Logger(subsystem: "MyNotchTests", category: "CaptureStore"), thumbnailCache: thumbnailCache
+        )
+    }
+
+    /// Keeps every entry, so a test about cache hits does not depend on when the system purges an NSCache.
+    nonisolated final class RetainingCache: NSCache<NSString, CGImage> {
+        private let entries = OSAllocatedUnfairLock(initialState: [String: CGImage]())
+        override func object(forKey key: NSString) -> CGImage? {
+            let key = key as String
+            return entries.withLock { $0[key] }
+        }
+        override func setObject(_ object: CGImage, forKey key: NSString) {
+            let key = key as String
+            entries.withLock { $0[key] = object }
+        }
+        override func removeAllObjects() { entries.withLock { $0.removeAll() } }
     }
 
     static func image(width: Int, height: Int, gray: CGFloat = 0.5) throws -> CGImage {
@@ -373,7 +390,7 @@ import Testing
     }
 
     @Test func thumbnailIsCachedInMemoryAndOnDisk() async throws {
-        let store = makeStore()
+        let store = makeStore(thumbnailCache: RetainingCache())
         let record = try await store.add(Self.image(width: 400, height: 200), keepCount: 30)
 
         let first = try #require(await store.thumbnail(for: record.id, maxPixel: 100))

@@ -3,12 +3,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# makeIsolatedDefaults() leaves one MyNotchTests.<uuid> suite on disk per test, and RegistryHarness storage
-# leaves a MyNotchTests-<uuid> temporary folder once a module creates its directories.
-# cfprefsd writes the suites a few seconds after each test process exits, so clean up at both ends.
+# makeIsolatedDefaults() removes its MyNotchTests.<uuid> suite when released, but a test process that ends within
+# seconds of that leaves the plist behind, and RegistryHarness storage leaves a MyNotchTests-<uuid> temporary folder
+# once a module creates its directories. cfprefsd writes the suites a few seconds after each test process exits,
+# so clean up at both ends.
 # Only items untouched for 15 minutes go, so test runs in other worktrees are never disturbed.
 cleanup_test_files() {
-    find "$HOME/Library/Preferences" -maxdepth 1 -name 'MyNotchTests.*.plist' -mmin +15 -delete || true
+    # cfprefsd is asked to forget each domain first, otherwise `defaults domains` keeps listing it.
+    find "$HOME/Library/Preferences" -maxdepth 1 -name 'MyNotchTests.*.plist' -mmin +15 -print0 |
+        while IFS= read -r -d '' plist; do
+            defaults delete "$(basename "$plist" .plist)" >/dev/null 2>&1 || true
+            rm -f "$plist"
+        done || true
     find "${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR)}" -maxdepth 1 -name 'MyNotchTests-*' -mmin +15 -exec rm -rf {} + || true
 }
 cleanup_test_files

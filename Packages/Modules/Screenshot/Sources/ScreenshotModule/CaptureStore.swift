@@ -19,14 +19,16 @@ final class CaptureStore {
     private let capturesDirectory: URL
     private let thumbnailsDirectory: URL
     private let logger: Logger
-    private let thumbnails = NSCache<NSString, CGImage>()
+    private let thumbnails: NSCache<NSString, CGImage>
     /// Bumped when a capture's thumbnails are discarded, so one decoded meanwhile is not cached.
     private var thumbnailRevisions: [UUID: Int] = [:]
 
-    init(directory: URL, cachesDirectory: URL, logger: Logger) {
+    /// `thumbnailCache` is a parameter so tests can use one that never evicts: NSCache drops entries under memory pressure.
+    init(directory: URL, cachesDirectory: URL, logger: Logger, thumbnailCache: NSCache<NSString, CGImage> = NSCache()) {
         capturesDirectory = directory.appending(path: "captures", directoryHint: .isDirectory)
         thumbnailsDirectory = cachesDirectory.appending(path: "thumbnails", directoryHint: .isDirectory)
         self.logger = logger
+        thumbnails = thumbnailCache
     }
 
     /// Re-reads the index and reconciles it with the PNGs on disk; see `reconciledRecords()`.
