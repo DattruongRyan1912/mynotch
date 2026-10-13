@@ -18,6 +18,9 @@ import Testing
         fixture.harness.scheduler.advance(by: .milliseconds(599))
         translator.edit("Hello, how are you today?")
         fixture.harness.scheduler.advance(by: .milliseconds(599))
+        #expect(translator.translation == nil)
+        #expect(!fixture.state.isTranslating)
+        await settle()
         #expect(fixture.engine.requests.isEmpty)
         fixture.harness.scheduler.advance(by: .milliseconds(1))
         await fixture.translated()
@@ -29,10 +32,21 @@ import Testing
         let translator = try await startedTranslator()
         translator.edit("Hello, how are you today?")
         translator.translate()
+        let returned = translator.translation
         await fixture.translated()
         #expect(fixture.engine.requests.count == 1)
         fixture.harness.scheduler.advance(by: .seconds(1))
+        #expect(translator.translation == returned)
+        await settle()
         #expect(fixture.engine.requests.count == 1)
+    }
+
+    @Test func returnTranslatesTheTextTheFieldShows() async throws {
+        let translator = try await startedTranslator()
+        translator.submit("Hello, how are you today?")
+        #expect(fixture.state.input == "Hello, how are you today?")
+        await fixture.translated()
+        #expect(fixture.engine.requests.map(\.text) == ["Hello, how are you today?"])
     }
 
     @Test func clearingTheInputClearsTheResultAtOnce() async throws {
@@ -40,10 +54,13 @@ import Testing
         translator.edit("Hello, how are you today?")
         translator.translate()
         await fixture.translated()
+        let translated = translator.translation
         translator.edit("  ")
         #expect(fixture.state.output.isEmpty)
         #expect(fixture.state.detectedSource == nil)
         fixture.harness.scheduler.advance(by: .seconds(1))
+        #expect(translator.translation == translated)
+        await settle()
         #expect(fixture.engine.requests.count == 1)
     }
 

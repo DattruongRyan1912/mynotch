@@ -22,6 +22,8 @@ struct LanguageInstallerView: View {
     @State private var configuration: TranslationSession.Configuration?
     @State private var current: PairStatus?
     @State private var isDownloading = false
+    /// Bumped by every download attempt, so a superseded attempt doesn't report over the current one.
+    @State private var attempt = 0
     @State private var failure: String?
     @State private var watchesSystemSettings = false
 
@@ -38,8 +40,13 @@ struct LanguageInstallerView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
-                Button("Tải về", action: download)
-                    .disabled(isDownloading || current != .supported)
+                if isDownloading {
+                    // The sheet may never show for a menu bar app; asking again cancels the stuck attempt.
+                    Button("Thử lại", action: download)
+                } else {
+                    Button("Tải về", action: download)
+                        .disabled(current != .supported)
+                }
                 Button("Mở cài đặt hệ thống", action: openSystemSettings)
                 Spacer()
                 Button("Xong", action: close)
@@ -49,12 +56,15 @@ struct LanguageInstallerView: View {
         .padding(20)
         .frame(width: 440)
         .translationTask(configuration) { session in
+            let started = attempt
+            var error: (any Error)?
             do {
                 try await session.prepareTranslation()
-                failure = nil
-            } catch {
-                failure = "Chưa tải được gói: \(error.localizedDescription)"
+            } catch let caught {
+                error = caught
             }
+            guard started == attempt else { return }
+            failure = error.map { "Chưa tải được gói: \($0.localizedDescription)" }
             isDownloading = false
             await refresh()
         }
@@ -95,7 +105,10 @@ struct LanguageInstallerView: View {
         }
     }
 
+    /// Shows the system download sheet; while one attempt waits, invalidating the configuration cancels it and
+    /// starts another.
     private func download() {
+        attempt += 1
         isDownloading = true
         failure = nil
         if configuration == nil {

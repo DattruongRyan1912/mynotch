@@ -43,12 +43,15 @@ final class LanguageInstallerWindow: NSObject, LanguageInstalling {
 }
 
 extension LanguageInstallerWindow: NSWindowDelegate {
-    /// Back to a menu bar app, unless another titled window (Settings) still needs the Dock icon.
+    /// Back to a menu bar app, unless another titled window (Settings) still needs the Dock icon, which a minimized
+    /// window does too: the Dock is the way back to it.
     func windowWillClose(_ notification: Notification) {
         guard let closing = notification.object as? NSWindow else { return }
         // Dropping the content ends the view's status polling.
         closing.contentViewController = nil
-        let othersVisible = NSApp.windows.contains { $0 !== closing && $0.isVisible && $0.styleMask.contains(.titled) }
-        if !othersVisible { NSApp.setActivationPolicy(.accessory) }
+        let othersShown = NSApp.windows.contains {
+            $0 !== closing && ($0.isVisible || $0.isMiniaturized) && $0.styleMask.contains(.titled)
+        }
+        if !othersShown { NSApp.setActivationPolicy(.accessory) }
     }
 }

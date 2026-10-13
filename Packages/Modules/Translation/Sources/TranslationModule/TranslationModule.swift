@@ -27,8 +27,8 @@ public final class TranslationModule: FeatureModule {
     private let pasteboard: NSPasteboard
     private let shortcut: KeyboardShortcuts.Shortcut?
     private var context: ModuleContext?
-    /// The shortcut's selection read; text arriving another way supersedes it.
-    private var selectionRead: Task<Void, Never>?
+    /// The shortcut's selection read; tests await it. A new press, Services text or stopping supersedes it.
+    private(set) var selectionRead: Task<Void, Never>?
 
     /// The module the app runs: Apple's on-device engine, the system Accessibility API and the general pasteboard.
     public convenience init() {
@@ -99,6 +99,7 @@ public final class TranslationModule: FeatureModule {
         state.pairStatus = nil
         state.isTranslating = false
         state.error = nil
+        state.isReadingSelection = false
     }
 
     public func makeTab() -> NotchTab? {
@@ -129,25 +130,35 @@ public final class TranslationModule: FeatureModule {
         ))
     }
 
-    /// The shortcut: reads the selection, then opens the tab with it.
-    func translateSelection() async {
-        guard let context else { return }
-        selection.useChromiumAccessibility = context.settings.value(TranslationKeys(context.settings).useChromiumAccessibility)
-        let text = await selection.selectedText()
-        // Stopped, restarted or superseded while the app was being read.
-        guard !Task.isCancelled, self.context === context else { return }
-        open(with: text)
-    }
-
-    /// Opens the tab with `text`, translated right away if the user wants that. Without text (no Accessibility,
-    /// nothing selected) the tab opens empty, ready for typing.
-    func open(with text: String?) {
+    /// The shortcut. The tab opens at once, empty and saying it is reading, since a slow app can take most of a
+    /// second to answer; the selection fills it when the read ends. Nothing read leaves it empty, ready for typing.
+    func selectionShortcutPressed() {
         guard let context, let translator else { return }
         selectionRead?.cancel()
+        translator.receive(nil, translate: false)
+        state.isReadingSelection = true
+        showTab(context)
+        selection.useChromiumAccessibility = context.settings.value(TranslationKeys(context.settings).useChromiumAccessibility)
+        selectionRead = Task { [weak self, selection] in
+            let text = await selection.selectedText()
+            // A newer press, Services text or stopping took over while the app was being read.
+            guard let self, !Task.isCancelled else { return }
+            selectionRead = nil
+            state.isReadingSelection = false
+            // Text typed meanwhile is what the user wants translated.
+            guard state.input.isEmpty else { return }
+            receive(text)
+        }
+    }
+
+    /// Opens the tab with `text` (from Services), translated right away if the user wants that.
+    func open(with text: String?) {
+        guard let context else { return }
+        selectionRead?.cancel()
         selectionRead = nil
-        translator.receive(text, translate: context.settings.value(TranslationKeys(context.settings).autoTranslateOnOpen))
-        state.focusRequest += 1
-        context.presenter.open(tab: descriptor.id)
+        state.isReadingSelection = false
+        receive(text)
+        showTab(context)
     }
 
     /// The banner's "Cài đặt…" button.
@@ -156,8 +167,13 @@ public final class TranslationModule: FeatureModule {
         installer.install(pair) { [weak self] in self?.translator?.languagePackChanged() }
     }
 
-    private func selectionShortcutPressed() {
-        selectionRead?.cancel()
-        selectionRead = Task { [weak self] in await self?.translateSelection() }
+    private func receive(_ text: String?) {
+        guard let context, let translator else { return }
+        translator.receive(text, translate: context.settings.value(TranslationKeys(context.settings).autoTranslateOnOpen))
+    }
+
+    private func showTab(_ context: ModuleContext) {
+        state.focusRequest += 1
+        context.presenter.open(tab: descriptor.id)
     }
 }

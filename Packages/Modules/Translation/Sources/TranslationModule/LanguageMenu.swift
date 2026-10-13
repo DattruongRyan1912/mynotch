@@ -9,8 +9,9 @@ enum LanguageMenu {
         case separator
     }
 
-    /// Shows the menu at the pointer, with the selected entry under it, and returns once it closes.
-    static func show(_ entries: [Entry], notch: NotchHandle) {
+    /// Shows the menu at the pointer, with the selected entry under it, and returns once it closes: true after a pick.
+    /// A pick leaves the notch pinned, for the caller to keep it open while the new translation arrives.
+    static func show(_ entries: [Entry], notch: NotchHandle) -> Bool {
         let menu = NSMenu()
         menu.autoenablesItems = false
         var selected: NSMenuItem?
@@ -28,8 +29,9 @@ enum LanguageMenu {
             }
         }
         notch.setPinned(true)
-        menu.popUp(positioning: selected, at: NSEvent.mouseLocation, in: nil)
-        notch.setPinned(false)
+        let picked = menu.popUp(positioning: selected, at: NSEvent.mouseLocation, in: nil)
+        if !picked { notch.setPinned(false) }
+        return picked
     }
 }
 

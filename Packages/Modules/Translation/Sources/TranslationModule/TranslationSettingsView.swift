@@ -15,8 +15,9 @@ struct TranslationSettingsView: View {
 
     var body: some View {
         Group {
-            languagePicker("Cặp ưa thích: ngôn ngữ 1", selection: $preferredPair.first)
-            languagePicker("Cặp ưa thích: ngôn ngữ 2", selection: $preferredPair.second)
+            // A pair of one language would leave the flip rule nothing to flip to.
+            languagePicker("Cặp ưa thích: ngôn ngữ 1", selection: $preferredPair.first, excluding: preferredPair.second)
+            languagePicker("Cặp ưa thích: ngôn ngữ 2", selection: $preferredPair.second, excluding: preferredPair.first)
             languagePicker("Dịch sang", selection: $targetLanguage)
             Toggle(isOn: $autoTranslateOnOpen) {
                 Text("Dịch ngay khi mở")
@@ -78,17 +79,17 @@ struct TranslationSettingsView: View {
         }
     }
 
-    private func languagePicker(_ title: String, selection: Binding<String>) -> some View {
+    private func languagePicker(_ title: String, selection: Binding<String>, excluding excluded: String? = nil) -> some View {
         Picker(title, selection: selection) {
-            ForEach(options(including: selection.wrappedValue), id: \.self) { identifier in
+            ForEach(Self.options(available: available, including: selection.wrappedValue, excluding: excluded), id: \.self) { identifier in
                 Text(SupportedLanguages.name(of: Locale.Language(identifier: identifier))).tag(identifier)
             }
         }
     }
 
-    /// Translation's languages by identifier; the current value stays listed while they load.
-    private func options(including current: String) -> [String] {
-        let identifiers = available.map(\.minimalIdentifier)
+    /// Translation's languages by identifier, without `excluded`. The current value stays listed while they load.
+    static func options(available: [Locale.Language], including current: String, excluding excluded: String?) -> [String] {
+        let identifiers = available.map(\.minimalIdentifier).filter { $0 != excluded || $0 == current }
         return identifiers.contains(current) ? identifiers : [current] + identifiers
     }
 }

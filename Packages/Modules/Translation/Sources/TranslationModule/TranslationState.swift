@@ -26,6 +26,8 @@ final class TranslationState {
     var languages: [Locale.Language] = []
     /// Bumped whenever the module opens the tab; the input field takes focus on each change.
     var focusRequest = 0
+    /// The shortcut opened the tab and the selection is still being read.
+    var isReadingSelection = false
 
     /// The direction shown in the menus, once the source is known.
     var currentPair: LanguagePair? {

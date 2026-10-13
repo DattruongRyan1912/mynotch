@@ -63,6 +63,34 @@ final class FakeInstaller: LanguageInstalling {
     }
 }
 
+/// Stands in for the selection reader's retry pauses: returns at once unless `holds`, then waits for `release()`
+/// or for the read to be cancelled.
+final class PauseGate {
+    var holds = false
+    private var waiting: CheckedContinuation<Void, any Error>?
+
+    var isWaiting: Bool { waiting != nil }
+
+    func pause() async throws {
+        guard holds else { return }
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { waiting = $0 }
+        } onCancel: {
+            Task { @MainActor in self.finish(throwing: CancellationError()) }
+        }
+    }
+
+    func release() {
+        finish(throwing: nil)
+    }
+
+    private func finish(throwing error: (any Error)?) {
+        guard let waiting else { return }
+        self.waiting = nil
+        if let error { waiting.resume(throwing: error) } else { waiting.resume() }
+    }
+}
+
 extension Locale.Language {
     static let vi = Locale.Language(identifier: "vi")
     static let en = Locale.Language(identifier: "en")
@@ -72,4 +100,10 @@ extension Locale.Language {
 /// Waits for main-actor work started by the code under test (tasks, observations) to make `condition` true.
 func eventually(_ condition: () -> Bool) async {
     for _ in 0..<200 where !condition() { await Task.yield() }
+}
+
+/// Lets every task the code under test started run, so a check that nothing happened isn't vacuous: the engine
+/// records a request only once the translation task runs.
+func settle() async {
+    for _ in 0..<50 { await Task.yield() }
 }

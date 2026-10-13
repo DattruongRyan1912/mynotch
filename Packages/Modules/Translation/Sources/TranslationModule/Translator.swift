@@ -94,6 +94,13 @@ final class Translator {
         }
     }
 
+    /// Return. `text` is what the field shows, which can differ from the input while an input method composes.
+    func submit(_ text: String) {
+        guard !isStopped else { return }
+        state.input = text
+        translate()
+    }
+
     /// nil picks the source by detection.
     func setSource(_ language: Locale.Language?) {
         state.source = language

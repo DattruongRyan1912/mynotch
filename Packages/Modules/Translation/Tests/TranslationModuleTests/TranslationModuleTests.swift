@@ -9,6 +9,7 @@ import Testing
 struct ModuleFixture {
     let engine = FakeEngine()
     let accessibility = FakeAccessibility()
+    let pauses = PauseGate()
     let installer = FakeInstaller()
     let pasteboard = NSPasteboard(name: NSPasteboard.Name("MyNotchTests.\(UUID().uuidString)"))
     let module: TranslationModule
@@ -17,7 +18,7 @@ struct ModuleFixture {
     init() {
         module = TranslationModule(
             engine: engine,
-            selection: SelectionReader(accessibility: accessibility) { _ in },
+            selection: SelectionReader(accessibility: accessibility) { [pauses] _ in try await pauses.pause() },
             languages: SupportedLanguages { [.vi, .en, .ja] },
             installer: installer,
             pasteboard: pasteboard,
@@ -36,6 +37,16 @@ struct ModuleFixture {
     /// Waits for the translation the last action started.
     func translated() async {
         await module.translator?.translation?.value
+    }
+
+    /// ⌃⌥T, until the selection read it started has finished.
+    func pressShortcutAndRead() async {
+        module.selectionShortcutPressed()
+        await module.selectionRead?.value
+    }
+
+    func focus(_ bundleID: String) {
+        accessibility.application = FocusedApplication(processID: 42, bundleID: bundleID)
     }
 
     func set<Value>(_ value: Value, for key: (TranslationKeys) -> SettingKey<Value>) {
@@ -77,9 +88,10 @@ struct ModuleFixture {
     @Test func selectionOpensTheTabAndTranslates() async {
         await fixture.start()
         fixture.accessibility.selections = ["Hello, how are you today?"]
-        await fixture.module.translateSelection()
+        await fixture.pressShortcutAndRead()
         #expect(fixture.harness.presenter.openedTabs == ["translation"])
         #expect(fixture.state.input == "Hello, how are you today?")
+        #expect(!fixture.state.isReadingSelection)
         await fixture.translated()
         #expect(fixture.state.output == "Hello, how are you today? [en→vi]")
         #expect(fixture.state.detectedSource?.minimalIdentifier == "en")
@@ -88,16 +100,91 @@ struct ModuleFixture {
         #expect(!fixture.state.isTranslating)
     }
 
+    @Test func shortcutOpensTheTabBeforeTheSelectionIsRead() async {
+        await fixture.start()
+        fixture.focus("com.google.Chrome")
+        fixture.accessibility.selections = [nil, "Hello, how are you today?"]
+        fixture.pauses.holds = true
+        let focusRequest = fixture.state.focusRequest
+        fixture.module.selectionShortcutPressed()
+        #expect(fixture.harness.presenter.openedTabs == ["translation"])
+        #expect(fixture.state.isReadingSelection)
+        #expect(fixture.state.input.isEmpty)
+        #expect(fixture.state.focusRequest == focusRequest + 1)
+
+        await eventually { fixture.pauses.isWaiting }
+        fixture.pauses.release()
+        await fixture.module.selectionRead?.value
+        #expect(!fixture.state.isReadingSelection)
+        #expect(fixture.state.input == "Hello, how are you today?")
+        await fixture.translated()
+        #expect(fixture.state.output == "Hello, how are you today? [en→vi]")
+        #expect(fixture.harness.presenter.openedTabs == ["translation"])
+    }
+
+    @Test func aSecondPressSupersedesTheFirstRead() async {
+        await fixture.start()
+        fixture.focus("com.google.Chrome")
+        fixture.pauses.holds = true
+        fixture.module.selectionShortcutPressed()
+        await eventually { fixture.pauses.isWaiting }
+        let first = fixture.module.selectionRead
+
+        fixture.focus("com.apple.Safari")
+        fixture.accessibility.selections = [nil, "Good morning, my friend"]
+        fixture.pauses.holds = false
+        fixture.module.selectionShortcutPressed()
+        await first?.value
+        await fixture.module.selectionRead?.value
+        #expect(fixture.state.input == "Good morning, my friend")
+        #expect(!fixture.state.isReadingSelection)
+        await fixture.translated()
+        await settle()
+        #expect(fixture.engine.requests.map(\.text) == ["Good morning, my friend"])
+    }
+
+    @Test func serviceTextSupersedesAPendingRead() async {
+        await fixture.start()
+        fixture.focus("com.google.Chrome")
+        fixture.accessibility.selections = [nil, "Hello"]
+        fixture.pauses.holds = true
+        fixture.module.selectionShortcutPressed()
+        await eventually { fixture.pauses.isWaiting }
+        let read = fixture.module.selectionRead
+        #expect(fixture.harness.services.handle(name: "translate", text: "Xin chào, hôm nay trời đẹp quá"))
+        await read?.value
+        #expect(fixture.state.input == "Xin chào, hôm nay trời đẹp quá")
+        #expect(!fixture.state.isReadingSelection)
+    }
+
+    @Test func typingWhileTheSelectionIsReadWins() async {
+        await fixture.start()
+        fixture.focus("com.google.Chrome")
+        fixture.accessibility.selections = [nil, "Hello"]
+        fixture.pauses.holds = true
+        fixture.module.selectionShortcutPressed()
+        await eventually { fixture.pauses.isWaiting }
+        fixture.module.translator?.edit("Typed meanwhile")
+        fixture.pauses.release()
+        await fixture.module.selectionRead?.value
+        #expect(fixture.state.input == "Typed meanwhile")
+        #expect(!fixture.state.isReadingSelection)
+    }
+
     @Test func noSelectionOpensTheTabEmptyAndFocused() async {
         await fixture.start()
         fixture.module.translator?.edit("Câu cũ")
         let focusRequest = fixture.state.focusRequest
-        await fixture.module.translateSelection()
+        await fixture.pressShortcutAndRead()
         #expect(fixture.harness.presenter.openedTabs == ["translation"])
         #expect(fixture.state.input.isEmpty)
         #expect(fixture.state.output.isEmpty)
+        #expect(!fixture.state.isReadingSelection)
         #expect(fixture.state.focusRequest == focusRequest + 1)
         fixture.harness.scheduler.advance(by: .seconds(1))
+        #expect(fixture.module.translator?.translation == nil)
+        #expect(!fixture.state.isTranslating)
+        await settle()
         #expect(fixture.engine.requests.isEmpty)
     }
 
@@ -105,9 +192,11 @@ struct ModuleFixture {
         await fixture.start()
         fixture.accessibility.isTrusted = false
         fixture.accessibility.selections = ["Hello"]
-        await fixture.module.translateSelection()
+        await fixture.pressShortcutAndRead()
         #expect(fixture.harness.presenter.openedTabs == ["translation"])
         #expect(fixture.state.input.isEmpty)
+        #expect(fixture.module.translator?.translation == nil)
+        await settle()
         #expect(fixture.engine.requests.isEmpty)
     }
 
@@ -126,6 +215,8 @@ struct ModuleFixture {
         #expect(fixture.harness.services.handle(name: "translate", text: " \n"))
         #expect(fixture.harness.presenter.openedTabs == ["translation"])
         #expect(fixture.state.input.isEmpty)
+        #expect(fixture.module.translator?.translation == nil)
+        await settle()
         #expect(fixture.engine.requests.isEmpty)
     }
 
@@ -135,6 +226,9 @@ struct ModuleFixture {
         #expect(fixture.harness.services.handle(name: "translate", text: "Hello"))
         #expect(fixture.state.input == "Hello")
         fixture.harness.scheduler.advance(by: .seconds(1))
+        #expect(fixture.module.translator?.translation == nil)
+        #expect(!fixture.state.isTranslating)
+        await settle()
         #expect(fixture.engine.requests.isEmpty)
         #expect(fixture.state.output.isEmpty)
     }
@@ -142,9 +236,9 @@ struct ModuleFixture {
     @Test func chromiumAccessibilitySettingReachesTheSelectionReader() async {
         fixture.set(false, for: \.useChromiumAccessibility)
         await fixture.start()
-        fixture.accessibility.application = FocusedApplication(processID: 42, bundleID: "com.google.Chrome")
+        fixture.focus("com.google.Chrome")
         fixture.accessibility.selections = [nil, "Hello"]
-        await fixture.module.translateSelection()
+        await fixture.pressShortcutAndRead()
         #expect(fixture.accessibility.enabled.isEmpty)
         #expect(fixture.state.input.isEmpty)
     }
@@ -185,26 +279,45 @@ struct ModuleFixture {
         #expect(fixture.state.target.minimalIdentifier == "ja")
     }
 
+    @Test func theTabsOwnTargetChoiceTranslatesOnce() async throws {
+        await fixture.start()
+        let translator = try #require(fixture.module.translator)
+        translator.edit("Hello, how are you today?")
+        translator.setTarget(.ja)
+        let chosen = translator.translation
+        await fixture.translated()
+        await settle()   // the setting's observation has seen "ja" by now
+        #expect(translator.translation == chosen)
+        #expect(fixture.engine.requests.map(\.pair) == [LanguagePair(source: .en, target: .ja)])
+    }
+
     @Test func languagesAreLoadedForTheMenus() async {
         await fixture.start()
         await eventually { !fixture.state.languages.isEmpty }
         #expect(fixture.state.languages.map(\.minimalIdentifier) == ["en", "ja", "vi"])
     }
 
-    @Test func stoppingUnregistersAndCancelsPendingWork() async {
+    @Test func stoppingUnregistersAndCancelsPendingWork() async throws {
         await fixture.start()
         fixture.engine.holds = true
         #expect(fixture.harness.services.handle(name: "translate", text: "Good morning"))
         await eventually { fixture.engine.waiting }
-        fixture.module.translator?.edit("Hello")   // its translation is still waiting for the typing delay
+        let translator = try #require(fixture.module.translator)
+        translator.edit("Hello")   // its translation is still waiting for the typing delay
+        let inFlight = translator.translation
         await fixture.harness.registry.setEnabled(false, for: "translation")
-        #expect(!fixture.harness.services.handle(name: "translate", text: "Hello"))
+        _ = fixture.harness.services.handle(name: "translate", text: "Hello")   // queued (newer core) or refused (older); either way the stopped module must not see it
+        #expect(fixture.harness.presenter.openedTabs == ["translation"])
         #expect(fixture.harness.hotkeys.registrations.isEmpty)
         #expect(fixture.engine.invalidations == 1)
         #expect(fixture.module.translator == nil)
         #expect(fixture.state.input.isEmpty)
         #expect(!fixture.state.isTranslating)
         fixture.harness.scheduler.advance(by: .seconds(1))
+        #expect(translator.translation == inFlight)
+        #expect(!fixture.state.isTranslating)
+        await settle()
+        // Neither the typing delay nor the Services request reached the engine.
         #expect(fixture.engine.requests.map(\.text) == ["Good morning"])
     }
 
@@ -219,5 +332,11 @@ struct ModuleFixture {
         #expect(inPair == [LanguagePair(source: .vi, target: .en), LanguagePair(source: .en, target: .vi)])
         let outside = TranslationSettingsView.statusPairs(preferred: PreferredPair(first: "vi", second: "en"), target: "ja")
         #expect(outside.map { "\($0.source.minimalIdentifier)→\($0.target.minimalIdentifier)" } == ["vi→en", "en→vi", "vi→ja", "en→ja"])
+    }
+
+    @Test func preferredPairPickersNeverOfferTheOtherLanguage() {
+        #expect(TranslationSettingsView.options(available: [.vi, .en, .ja], including: "en", excluding: "vi") == ["en", "ja"])
+        // A saved value stays listed while the languages load, or if Translation dropped it.
+        #expect(TranslationSettingsView.options(available: [.vi, .en], including: "de", excluding: "vi") == ["de", "en"])
     }
 }

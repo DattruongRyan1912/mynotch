@@ -9,6 +9,11 @@ struct TranslationTabView: View {
 
     @Environment(\.notch) private var notch
     @State private var copied = false
+    /// After a language pick the notch stays pinned until the pointer is back in it or `menuHold` passes, so the
+    /// new translation can be seen even with the pointer left where the menu was.
+    @State private var holdsOpen = false
+    @State private var holdRequest = 0
+    private static let menuHold = Duration.seconds(1.5)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -22,12 +27,26 @@ struct TranslationTabView: View {
         .foregroundStyle(NotchTokens.primaryText)
         // The notch is always black, whatever the system appearance.
         .environment(\.colorScheme, .dark)
+        .onHover { inside in
+            if inside { releaseHold() }
+        }
+        .task(id: holdRequest) {
+            guard holdsOpen else { return }
+            do {
+                try await Task.sleep(for: Self.menuHold)
+            } catch {
+                return
+            }
+            releaseHold()
+        }
+        // Switching tabs must not leave the notch pinned.
+        .onDisappear(perform: releaseHold)
     }
 
     private var languageBar: some View {
         HStack(spacing: 6) {
             menuButton(sourceTitle, help: "Ngôn ngữ nguồn") {
-                LanguageMenu.show(sourceEntries, notch: notch)
+                showMenu(sourceEntries)
             }
             Button(action: translator.swap) {
                 Image(systemName: "arrow.left.arrow.right")
@@ -39,7 +58,7 @@ struct TranslationTabView: View {
             .disabled(!state.canSwap)
             .help("Đảo chiều dịch")
             menuButton(SupportedLanguages.name(of: state.target), help: "Ngôn ngữ đích") {
-                LanguageMenu.show(targetEntries, notch: notch)
+                showMenu(targetEntries)
             }
             Spacer()
             if state.isTranslating {
@@ -78,10 +97,10 @@ struct TranslationTabView: View {
                 text: state.input,
                 focusRequest: state.focusRequest,
                 onEdit: translator.edit,
-                onSubmit: translator.translate
+                onSubmit: translator.submit
             )
             if state.input.isEmpty {
-                Text("Nhập văn bản, Return để dịch")
+                Text(state.isReadingSelection ? "Đang đọc đoạn chữ…" : "Nhập văn bản, Return để dịch")
                     .foregroundStyle(NotchTokens.secondaryText)
                     .allowsHitTesting(false)
             }
@@ -174,6 +193,23 @@ struct TranslationTabView: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        // With keyboard navigation on, Space already presses a focused button; Return opens the menu too.
+        .onKeyPress(.return) {
+            action()
+            return .handled
+        }
+    }
+
+    private func showMenu(_ entries: [LanguageMenu.Entry]) {
+        guard LanguageMenu.show(entries, notch: notch) else { return }
+        holdsOpen = true
+        holdRequest += 1
+    }
+
+    private func releaseHold() {
+        guard holdsOpen else { return }
+        holdsOpen = false
+        notch.setPinned(false)
     }
 
     /// Menu items come from Translation's list ("vi" there is Vietnamese in Vietnam), the setting is plain "vi".
