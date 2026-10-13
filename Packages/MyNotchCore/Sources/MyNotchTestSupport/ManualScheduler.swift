@@ -18,12 +18,14 @@ public final class ManualScheduler: Scheduler {
     @discardableResult
     public func schedule(after delay: Duration, _ action: @escaping @MainActor () -> Void) -> ScheduledAction {
         let handle = ScheduledAction()
-        entries.append(Entry(id: nextID, fireAt: now + delay, action: action, handle: handle))
+        entries.append(Entry(id: nextID, fireAt: now + max(delay, .zero), action: action, handle: handle))
         nextID += 1
         return handle
     }
 
     /// Moves time forward, running due actions in time order (ties in scheduling order).
+    /// Actions may schedule or cancel other actions while it runs; an action that keeps
+    /// rescheduling itself with a zero delay never lets `advance` return.
     public func advance(by duration: Duration) {
         let target = now + duration
         while let next = entries

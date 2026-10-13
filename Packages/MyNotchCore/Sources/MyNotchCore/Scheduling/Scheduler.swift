@@ -1,5 +1,6 @@
 /// Handle to a scheduled action; cancelling prevents it from running.
 public final class ScheduledAction {
+    /// Whether `cancel()` has been called; it does not report whether the action already ran.
     public private(set) var isCancelled = false
     private let onCancel: () -> Void
 
@@ -24,13 +25,11 @@ public final class TaskScheduler: Scheduler {
 
     @discardableResult
     public func schedule(after delay: Duration, _ action: @escaping @MainActor () -> Void) -> ScheduledAction {
-        var task: Task<Void, Never>?
-        let handle = ScheduledAction { task?.cancel() }
-        task = Task {
+        let task = Task {
             try? await Task.sleep(for: delay)
-            guard !Task.isCancelled, !handle.isCancelled else { return }
+            guard !Task.isCancelled else { return }
             action()
         }
-        return handle
+        return ScheduledAction { task.cancel() }
     }
 }
