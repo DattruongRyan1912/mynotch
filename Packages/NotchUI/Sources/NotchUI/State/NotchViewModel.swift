@@ -124,6 +124,8 @@ public final class NotchViewModel {
         close()
     }
 
+    /// Closes the notch and ends pin and drag mode with it: a closed notch (hidden, toggled shut) must not stay stuck
+    /// in drag mode, which would ignore outside clicks and keep a later toast open.
     public func close() {
         pendingOpen?.cancel()
         pendingOpen = nil
@@ -134,6 +136,7 @@ public final class NotchViewModel {
         toastContent = nil
         state = .closed
         isOpenedOnPurpose = false
+        isDragging = false
         isPinned = false
     }
 

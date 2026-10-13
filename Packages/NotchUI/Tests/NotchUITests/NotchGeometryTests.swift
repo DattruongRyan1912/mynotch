@@ -65,6 +65,15 @@ import Testing
         #expect(!rect.contains(CGPoint(x: 754.5, y: 983)))
     }
 
+    @Test func dragHitRectFollowsTheOpenAndCompactShapes() {
+        let geometry = NotchGeometry(screen: Self.macBook14, config: NotchLayoutConfig())
+        let frame = Self.macBook14.frame
+        #expect(geometry.dragHitRect(for: .open(nil), contentHeight: 190, in: frame)
+            == CGRect(x: 754.5 - 300 - 40, y: 982 - 222 - 40, width: 600 + 80, height: 222 + 40 + 1))
+        #expect(geometry.dragHitRect(for: .compact, in: frame)
+            == CGRect(x: 754.5 - 162.5 - 40, y: 982 - 32 - 40, width: 325 + 80, height: 32 + 40 + 1))
+    }
+
     @Test func secondaryScreenWithOffsetOriginUsesItsOwnTopCentre() {
         let geometry = NotchGeometry(screen: Self.externalAboveLeft, config: NotchLayoutConfig())
         #expect(geometry.panelFrame(in: Self.externalAboveLeft.frame) == CGRect(x: -400, y: 2062 - 325, width: 720, height: 325))

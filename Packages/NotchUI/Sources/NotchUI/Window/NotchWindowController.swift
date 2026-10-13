@@ -67,7 +67,9 @@ final class NotchWindowController {
             refreshHitTesting()
         } else {
             if model.isPointerInside { model.pointerExited() }
+            // Closing also ends drag mode on the model; the drag's own types must not outlive the hide either.
             model.close()
+            dragTypes = []
             panel.allowsKeyStatus = false
             lastFocus = false
             panel.ignoresMouseEvents = true
@@ -102,9 +104,11 @@ final class NotchWindowController {
     }
 
     /// Called for every mouse-button press, inside this app or not; a press outside the notch closes it. A new press
-    /// also ends any earlier drag, so its pasteboard types cannot linger.
+    /// also ends any earlier drag, so its pasteboard types cannot linger. Hidden controllers still forget the previous
+    /// press, so a stale "started inside" cannot suppress opening on a later drag.
     func mouseDown(at point: CGPoint) {
         dragTypes = []
+        dragStartedInside = false
         guard isVisible else { return }
         let inside = currentHitRect().contains(point)
         dragStartedInside = inside

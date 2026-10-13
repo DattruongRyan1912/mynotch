@@ -70,6 +70,24 @@ import Testing
         #expect(model.state.isExpanded)
     }
 
+    @Test func dragEnterSwitchesAnOpenNotchOrAToastToTheDropTab() {
+        let model = makeModel()
+        model.open(tab: "battery")
+        model.dragEntered(tab: "clipboard")
+        #expect(model.state == .open("clipboard"))
+        #expect(model.isDragging)
+
+        let toasted = makeModel()
+        toasted.open(tab: "battery")
+        toasted.showToast(AnyView(EmptyView()), duration: .seconds(5))
+        toasted.dragEntered(tab: "clipboard")
+        #expect(toasted.state == .open("clipboard"))
+        #expect(toasted.tabUnderToast == nil)
+        #expect(toasted.toastContent == nil)
+        scheduler.advance(by: .seconds(10))
+        #expect(toasted.state == .open("clipboard"))
+    }
+
     @Test func dragExitClearsDraggingAndClosesAfterDelay() {
         let model = makeModel()
         model.dragEntered(tab: "clipboard")
@@ -348,6 +366,29 @@ import Testing
         scheduler.advance(by: .seconds(5))
         #expect(model.state == .closed)
 
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        scheduler.advance(by: .seconds(2))
+        #expect(model.state == .closed)
+    }
+
+    @Test func closeEndsDragMode() {
+        let model = makeModel()
+        model.dragEntered(tab: "clipboard")
+        model.pointerExited()
+        model.close()
+        #expect(!model.isDragging)
+        #expect(model.state == .closed)
+
+        model.click()
+        model.clickedOutside()
+        #expect(model.state == .closed)
+    }
+
+    @Test func aToastStillClosesAfterTheNotchWasClosedMidDrag() {
+        let model = makeModel()
+        model.dragEntered(tab: "clipboard")
+        model.pointerExited()
+        model.close()
         model.showToast(AnyView(EmptyView()), duration: .seconds(2))
         scheduler.advance(by: .seconds(2))
         #expect(model.state == .closed)
