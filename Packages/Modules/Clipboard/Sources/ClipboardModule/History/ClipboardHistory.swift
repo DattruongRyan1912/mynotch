@@ -129,6 +129,12 @@ nonisolated struct ClipboardHistory: Codable, Equatable, Sendable {
         boards.filter { $0.itemIDs.contains(itemID) }
     }
 
+    /// Drops board entries whose item is gone, e.g. after items failed to load; boards themselves stay.
+    mutating func removeDanglingPins() {
+        let ids = Set(items.map(\.id))
+        for index in boards.indices { boards[index].itemIDs.removeAll { !ids.contains($0) } }
+    }
+
     private var pinnedIDs: Set<UUID> {
         Set(boards.flatMap(\.itemIDs))
     }
@@ -142,6 +148,16 @@ nonisolated struct ClipboardHistory: Codable, Equatable, Sendable {
         let removed = items.filter(matches)
         items.removeAll(where: matches)
         return removed
+    }
+}
+
+/// In an extension so the memberwise initializer stays available.
+nonisolated extension ClipboardHistory {
+    /// A missing array means empty, so history saved without boards (or the reverse) still loads.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        items = try container.decodeIfPresent([ClipboardItem].self, forKey: .items) ?? []
+        boards = try container.decodeIfPresent([ClipboardBoard].self, forKey: .boards) ?? []
     }
 }
 

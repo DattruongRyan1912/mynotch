@@ -3,13 +3,17 @@ import Testing
 @testable import ClipboardModule
 
 @Suite struct ClipboardSearchTests {
+    static let start = Date(timeIntervalSinceReferenceDate: 800_000_000)
+
     /// Fixture history, newest first: rich text, color, files, link, image, text.
     let history: ClipboardHistory
     let text: UUID, image: UUID, link: UUID, files: UUID, color: UUID, richText: UUID
+    /// Held across queries like the tab does, so every test also checks it agrees with a fresh search.
+    let index = ClipboardSearchIndex()
 
     init() {
         var history = ClipboardHistory()
-        var date = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        var date = Self.start
         func add(_ content: ClipboardContent, from app: String?) -> UUID {
             date += 1
             return history.add(content, hash: ClipboardContent.hash(of: content), source: (bundleID: nil, name: app), at: date).id
@@ -23,8 +27,11 @@ import Testing
         self.history = history
     }
 
-    func ids(_ query: ClipboardQuery) -> [UUID] {
-        ClipboardSearch.filter(history, query).map(\.id)
+    func ids(_ query: ClipboardQuery, in history: ClipboardHistory? = nil) -> [UUID] {
+        let history = history ?? self.history
+        let found = ClipboardSearch.filter(history, query)
+        #expect(index.filter(history, query) == found)
+        return found.map(\.id)
     }
 
     @Test func emptyQueryReturnsEveryItemNewestFirst() {
@@ -62,9 +69,14 @@ import Testing
         #expect(ids(ClipboardQuery(text: "ref=ad")) == [link])
     }
 
-    @Test func matchesFileNamesAndColorHex() {
+    @Test func matchesFileNamesButNotTheirFolders() {
         #expect(ids(ClipboardQuery(text: "bao cao quy")) == [files])
         #expect(ids(ClipboardQuery(text: "notes.txt")) == [files])
+        #expect(ids(ClipboardQuery(text: "users")) == [])
+        #expect(ids(ClipboardQuery(text: "tmp")) == [])
+    }
+
+    @Test func matchesColorHex() {
         #expect(ids(ClipboardQuery(text: "ff8800")) == [color])
         #expect(ids(ClipboardQuery(text: "#ff88")) == [color])
     }
@@ -87,9 +99,44 @@ import Testing
         history.pin(itemID: text, to: board)
         history.pin(itemID: link, to: board)
         history.pin(itemID: files, to: other)
-        #expect(ClipboardSearch.filter(history, ClipboardQuery(boardID: board)).map(\.id) == [link, text, color])
-        #expect(ClipboardSearch.filter(history, ClipboardQuery(text: "o", boardID: board)).map(\.id) == [link, text])
-        #expect(ClipboardSearch.filter(history, ClipboardQuery(kind: .color, boardID: board)).map(\.id) == [color])
-        #expect(ClipboardSearch.filter(history, ClipboardQuery(boardID: UUID())).isEmpty)
+        #expect(ids(ClipboardQuery(boardID: board), in: history) == [link, text, color])
+        #expect(ids(ClipboardQuery(text: "o", boardID: board), in: history) == [link, text])
+        #expect(ids(ClipboardQuery(kind: .color, boardID: board), in: history) == [color])
+        #expect(ids(ClipboardQuery(boardID: UUID()), in: history) == [])
+    }
+
+    @Test func onlyTheFirst20000CharactersAreSearched() {
+        var history = ClipboardHistory()
+        let long = String(repeating: "x ", count: 9_997) + "early " + String(repeating: "y", count: 100) + " late"
+        let id = history.add(.text(long), hash: "long", source: (bundleID: nil, name: "Ghi chú"), at: Self.start).id
+        #expect(ids(ClipboardQuery(text: "early"), in: history) == [id])
+        #expect(ids(ClipboardQuery(text: "late"), in: history) == [])
+        // The app name is always searchable, however long the content.
+        #expect(ids(ClipboardQuery(text: "ghi chu"), in: history) == [id])
+    }
+
+    @Test func indexOnlyFoldsNewOrChangedItems() {
+        var history = history
+        index.update(history)
+        #expect(index.foldCount == 6)
+        _ = index.filter(history, ClipboardQuery(text: "dong"))
+        _ = index.filter(history, ClipboardQuery(text: "dong ho"))
+        #expect(index.foldCount == 6)
+
+        history.add(.text("mới"), hash: "new", source: (bundleID: nil, name: nil), at: Self.start + 10)
+        #expect(index.filter(history, ClipboardQuery(text: "moi")).count == 1)
+        #expect(index.foldCount == 7)
+
+        // Re-copying from the same app keeps the folded text; another app changes what is searchable.
+        history.add(.text("Hello World"), hash: ClipboardContent.hash(of: .text("Hello World")), source: (bundleID: nil, name: "Pages"), at: Self.start + 11)
+        index.update(history)
+        #expect(index.foldCount == 7)
+        history.add(.text("Hello World"), hash: ClipboardContent.hash(of: .text("Hello World")), source: (bundleID: nil, name: "TextEdit"), at: Self.start + 12)
+        #expect(index.filter(history, ClipboardQuery(text: "textedit")).map(\.id) == [richText])
+        #expect(index.foldCount == 8)
+
+        _ = history.remove(ids: [text])
+        #expect(index.filter(history, ClipboardQuery(text: "dong")) == [])
+        #expect(index.foldCount == 8)
     }
 }

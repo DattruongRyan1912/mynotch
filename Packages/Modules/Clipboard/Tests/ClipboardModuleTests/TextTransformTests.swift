@@ -13,12 +13,23 @@ import Testing
         #expect(TextTransform.uppercase.apply("Xin chào thế giới") == "XIN CHÀO THẾ GIỚI")
         #expect(TextTransform.lowercase.apply("ĐỒNG Hồ iPhone") == "đồng hồ iphone")
         #expect(TextTransform.capitalizeWords.apply("đồng hồ THÔNG minh\nhello-world") == "Đồng Hồ Thông Minh\nHello-World")
+        // Like macOS's own Capitalize: the rest of each word is lowercased, acronyms and brand casing included.
+        #expect(TextTransform.capitalizeWords.apply("iPhone HTTP") == "Iphone Http")
     }
 
-    @Test func trimWhitespaceTrimsTheEndsAndCollapsesSpacesAndTabsInsideLines() {
-        #expect(TextTransform.trimWhitespace.apply("\n  a   b \t c  \n\n\t d\t\te \n ") == "a b c\n\nd e")
-        #expect(TextTransform.trimWhitespace.apply("one\r\n  two") == "one\ntwo")
+    @Test func trimWhitespaceTrimsTheEndsAndCollapsesRunsAfterTheIndentation() {
+        #expect(TextTransform.trimWhitespace.apply("\n  a   b \t c  \n\n\t d\t\te \n ") == "a b c\n\n\t d e")
+        #expect(TextTransform.trimWhitespace.apply("one\r\n  two  ") == "one\n  two")
         #expect(TextTransform.trimWhitespace.apply("   ") == "")
+    }
+
+    @Test func trimWhitespaceKeepsCodeIndentation() {
+        let code = "func f() {\n    let x  =  1   \n  \n    if x  > 0 {\n\t\treturn  x\t\n    }\n}\n"
+        #expect(TextTransform.trimWhitespace.apply(code) == "func f() {\n    let x = 1\n\n    if x > 0 {\n\t\treturn x\n    }\n}")
+    }
+
+    @Test func trimWhitespaceTreatsNonBreakingSpacesAsSpaces() {
+        #expect(TextTransform.trimWhitespace.apply("a\u{00A0}\u{00A0}b\u{00A0}\n\u{00A0}c") == "a b\n\u{00A0}c")
     }
 
     @Test func removeEmptyLinesKeepsOtherLinesVerbatim() {
@@ -27,9 +38,11 @@ import Testing
 
     @Test func sortLinesUsesLocalizedStandardOrder() {
         #expect(TextTransform.sortLines.apply("item10\nitem2\nBánh\nan") == "an\nBánh\nitem2\nitem10")
-        // A trailing line break stays at the end instead of sorting to the top as an empty line.
+        // Trailing empty lines stay at the end instead of sorting to the top.
         #expect(TextTransform.sortLines.apply("b\na\n") == "a\nb\n")
+        #expect(TextTransform.sortLines.apply("b\na\n\n \n") == "a\nb\n\n \n")
         #expect(TextTransform.sortLines.apply("b\n\na") == "\na\nb")
+        #expect(TextTransform.sortLines.apply("\n\n") == "\n\n")
     }
 
     @Test func jsonPrettyPrintsWithSortedKeysAndUnescapedSlashes() {
@@ -78,7 +91,26 @@ import Testing
         #expect(TextTransform.jsonMinify.apply("[ ]") == "[]")
     }
 
-    @Test(arguments: [TextTransform.jsonPretty, .jsonMinify], ["", "hello", "{\"a\": }", "{'a': 1}", "[1, 2", "123", "\"text\""])
+    @Test func jsonTransformsKeepNumbersExactly() {
+        let json = #"{"id": 12345678901234567890, "price": 19.99, "ratio": 0.1, "list": [0.1, -2.5, 0]}"#
+        #expect(TextTransform.jsonMinify.apply(json) == #"{"id":12345678901234567890,"list":[0.1,-2.5,0],"price":19.99,"ratio":0.1}"#)
+        #expect(TextTransform.jsonPretty.apply(json) == """
+        {
+          "id" : 12345678901234567890,
+          "list" : [
+            0.1,
+            -2.5,
+            0
+          ],
+          "price" : 19.99,
+          "ratio" : 0.1
+        }
+        """)
+    }
+
+    @Test(arguments: [TextTransform.jsonPretty, .jsonMinify], [
+        "", "hello", "{\"a\": }", "{'a': 1}", "[1, 2", "123", "\"text\"", "true", "null", "[1e400]",
+    ])
     func invalidJSONIsNotApplicable(transform: TextTransform, input: String) {
         #expect(transform.apply(input) == nil)
     }
@@ -91,7 +123,14 @@ import Testing
         #expect(TextTransform.base64Decode.apply(" xJDhu5NuZyBo4buTIC8g\nMTAwJQ== \n") == "Đồng hồ / 100%")
     }
 
-    @Test(arguments: ["WGluIGNow6B", "WGluIGNow6Bv!", "hello world", "dGVz dA=", "/w==", "gA=="])
+    @Test func base64DecodeAcceptsBase64URLWithoutPadding() {
+        // JWT segments use "-" and "_" and drop the "=" padding.
+        #expect(TextTransform.base64Decode.apply("eyJuYW1lIjoixJDhu5NuZyBo4buTIiwicSI6ImE_Yj5jIn0") == #"{"name":"Đồng hồ","q":"a?b>c"}"#)
+        #expect(TextTransform.base64Decode.apply("eyJxIjoiPz8-fiJ9") == #"{"q":"??>~"}"#)
+        #expect(TextTransform.base64Decode.apply("eyJzdWIiOiIxMjM0IiwibXNnIjoib2s_Pz4ifQ") == #"{"sub":"1234","msg":"ok??>"}"#)
+    }
+
+    @Test(arguments: ["WGluIGNow6Bv!", "hello world", "abcde", "a", "%%%%", "/w==", "gA=="])
     func invalidBase64OrNonUTF8IsNotApplicable(input: String) {
         #expect(TextTransform.base64Decode.apply(input) == nil)
     }

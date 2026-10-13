@@ -156,6 +156,13 @@ import Testing
         #expect(history.items.map(\.id) == [ids[4], ids[3], ids[2]])
     }
 
+    @Test func imageBytesExactlyAtTheLimitAreKept() {
+        var (history, ids) = Self.history([Self.image("a", bytes: 100), Self.image("b", bytes: 150)])
+        var atLimit = history
+        #expect(atLimit.prune(limit: 100, retention: .forever, imageByteLimit: 250, now: Self.start + 10) == [])
+        #expect(history.prune(limit: 100, retention: .forever, imageByteLimit: 249, now: Self.start + 10).map(\.id) == [ids[0]])
+    }
+
     @Test func pinnedImagesDoNotCountTowardTheByteLimit() {
         var (history, ids) = Self.history([Self.image("pinned", bytes: 300), Self.image("b", bytes: 100), .text("text")])
         let board = history.createBoard(name: "Ghim")
@@ -240,5 +247,87 @@ import Testing
         history.pin(itemID: ids[1], to: board)
         let decoded = try JSONDecoder().decode(ClipboardHistory.self, from: JSONEncoder().encode(history))
         #expect(decoded == history)
+    }
+
+    /// Pins the stored shape: renaming a property must not silently orphan saved history.
+    static let goldenJSON = """
+    {
+      "boards" : [
+        {
+          "id" : "00000000-0000-0000-0000-0000000000B1",
+          "itemIDs" : [
+            "00000000-0000-0000-0000-000000000002"
+          ],
+          "name" : "Công việc",
+          "systemImage" : "tray.full"
+        }
+      ],
+      "items" : [
+        {
+          "content" : {
+            "link" : {
+              "_0" : "https://example.com/a"
+            }
+          },
+          "contentHash" : "hash-link",
+          "copiedAt" : 800000060,
+          "id" : "00000000-0000-0000-0000-000000000002"
+        },
+        {
+          "content" : {
+            "text" : {
+              "_0" : "Xin chào"
+            }
+          },
+          "contentHash" : "hash-text",
+          "copiedAt" : 800000000,
+          "id" : "00000000-0000-0000-0000-000000000001",
+          "sourceAppName" : "Safari",
+          "sourceBundleID" : "com.apple.Safari"
+        }
+      ]
+    }
+    """
+
+    @Test func historyMatchesTheGoldenJSON() throws {
+        let textID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
+        let linkID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000002"))
+        let boardID = try #require(UUID(uuidString: "00000000-0000-0000-0000-0000000000B1"))
+        let history = ClipboardHistory(
+            items: [
+                ClipboardItem(
+                    id: linkID, content: .link(URL(string: "https://example.com/a")!), contentHash: "hash-link",
+                    copiedAt: Self.start + 60, sourceBundleID: nil, sourceAppName: nil
+                ),
+                ClipboardItem(
+                    id: textID, content: .text("Xin chào"), contentHash: "hash-text",
+                    copiedAt: Self.start, sourceBundleID: "com.apple.Safari", sourceAppName: "Safari"
+                ),
+            ],
+            boards: [ClipboardBoard(id: boardID, name: "Công việc", systemImage: "tray.full", itemIDs: [linkID])]
+        )
+        #expect(try JSONDecoder().decode(ClipboardHistory.self, from: Data(Self.goldenJSON.utf8)) == history)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        #expect(String(decoding: try encoder.encode(history), as: UTF8.self) == Self.goldenJSON)
+    }
+
+    @Test func missingArraysDecodeAsEmpty() throws {
+        #expect(try JSONDecoder().decode(ClipboardHistory.self, from: Data("{}".utf8)) == ClipboardHistory())
+        let boardOnly = #"{"boards": [{"id": "00000000-0000-0000-0000-0000000000B1", "name": "A", "systemImage": "tray.full", "itemIDs": []}]}"#
+        let decoded = try JSONDecoder().decode(ClipboardHistory.self, from: Data(boardOnly.utf8))
+        #expect(decoded.items.isEmpty && decoded.boards.map(\.name) == ["A"])
+    }
+
+    @Test func removeDanglingPinsDropsIDsMissingFromItems() {
+        var (history, ids) = Self.history([.text("a"), .text("b")])
+        let missing = UUID()
+        history.boards = [
+            ClipboardBoard(id: UUID(), name: "A", systemImage: "tray.full", itemIDs: [missing, ids[1], ids[0]]),
+            ClipboardBoard(id: UUID(), name: "B", systemImage: "tray.full", itemIDs: [missing]),
+        ]
+        history.removeDanglingPins()
+        #expect(history.boards.map(\.itemIDs) == [[ids[1], ids[0]], []])
+        #expect(history.boards.map(\.name) == ["A", "B"])
     }
 }

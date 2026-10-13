@@ -33,31 +33,38 @@ nonisolated enum TextTransform: String, CaseIterable {
         case .capitalizeWords:
             return text.capitalized
         case .trimWhitespace:
-            let lines = Self.lines(of: text).map { $0.split(whereSeparator: { $0 == " " || $0 == "\t" }).joined(separator: " ") }
-            return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            return Self.lines(of: text).map(Self.tidy).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         case .removeEmptyLines:
-            return Self.lines(of: text).filter { !$0.allSatisfy(\.isWhitespace) }.joined(separator: "\n")
+            return Self.lines(of: text).filter { !Self.isBlank($0) }.joined(separator: "\n")
         case .sortLines:
-            var lines = Self.lines(of: text)
-            // A final line break is kept at the end rather than sorted to the top as an empty line.
-            let endsWithLineBreak = lines.count > 1 && lines.last?.isEmpty == true
-            if endsWithLineBreak { lines.removeLast() }
-            lines.sort { $0.localizedStandardCompare($1) == .orderedAscending }
-            return lines.joined(separator: "\n") + (endsWithLineBreak ? "\n" : "")
+            // Trailing empty lines stay at the end rather than sorting to the top.
+            let lines = Self.lines(of: text)
+            let contentEnd = (lines.lastIndex { !Self.isBlank($0) } ?? -1) + 1
+            let sorted = lines[..<contentEnd].sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            return (sorted + lines[contentEnd...]).joined(separator: "\n")
         case .jsonPretty:
-            // JSONSerialization prints empty containers as "{\n\n}". Strings never hold a raw line break
+            // JSONEncoder prints empty containers as "{\n\n}". Strings never hold a raw line break
             // (it is escaped), so joining these cannot change a value.
-            return Self.reserializeJSON(text, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])?
+            return Self.reencodeJSON(text, formatting: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])?
                 .replacing(/\{\n\n *\}/, with: "{}")
                 .replacing(/\[\n\n *\]/, with: "[]")
         case .jsonMinify:
-            // Sorted keys too: JSONSerialization does not keep the original key order, so this keeps output stable.
-            return Self.reserializeJSON(text, options: [.sortedKeys, .withoutEscapingSlashes])
+            // Sorted keys too: decoding does not keep the original key order, so this keeps output stable.
+            return Self.reencodeJSON(text, formatting: [.sortedKeys, .withoutEscapingSlashes])
         case .base64Encode:
             return Data(text.utf8).base64EncodedString()
         case .base64Decode:
-            // Copied Base64 is often wrapped over several lines.
-            guard let data = Data(base64Encoded: String(text.filter { !$0.isWhitespace })) else { return nil }
+            // Copied Base64 is often wrapped over several lines; JWTs and URLs use base64url without padding.
+            var base64 = String(text.compactMap { character -> Character? in
+                switch character {
+                case "-": "+"
+                case "_": "/"
+                case _ where character.isWhitespace: nil
+                default: character
+                }
+            })
+            base64 += String(repeating: "=", count: (4 - base64.count % 4) % 4)
+            guard let data = Data(base64Encoded: base64) else { return nil }
             return String(data: data, encoding: .utf8)
         case .urlEncode:
             return text.addingPercentEncoding(withAllowedCharacters: Self.urlUnreserved)
@@ -74,10 +81,28 @@ nonisolated enum TextTransform: String, CaseIterable {
         text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
     }
 
+    /// Lines hold no line breaks, so any whitespace left (spaces, tabs, no-break spaces) is horizontal.
+    private static func isBlank(_ line: Substring) -> Bool {
+        line.allSatisfy(\.isWhitespace)
+    }
+
+    /// Keeps the leading indentation (code stays readable), collapses later runs of whitespace to one space
+    /// and drops trailing whitespace.
+    private static func tidy(_ line: Substring) -> String {
+        guard let contentStart = line.firstIndex(where: { !$0.isWhitespace }) else { return "" }
+        return String(line[..<contentStart]) + line[contentStart...].split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
     /// Only objects and arrays count as JSON, so plain words and numbers do not offer the JSON transforms.
-    private static func reserializeJSON(_ text: String, options: JSONSerialization.WritingOptions) -> String? {
-        guard let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)),
-              let data = try? JSONSerialization.data(withJSONObject: object, options: options) else { return nil }
-        return String(data: data, encoding: .utf8)
+    private static func reencodeJSON(_ text: String, formatting: JSONEncoder.OutputFormatting) -> String? {
+        guard let value = try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)) else { return nil }
+        switch value {
+        case .object, .array:
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = formatting
+            return (try? encoder.encode(value)).flatMap { String(data: $0, encoding: .utf8) }
+        case .string, .number, .bool, .null:
+            return nil
+        }
     }
 }
