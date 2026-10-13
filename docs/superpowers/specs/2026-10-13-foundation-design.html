@@ -1,0 +1,384 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MyNotch — Thiết kế Nền tảng (dự án con 0)</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-bối-cảnh-và-mục-tiêu">1. Bối cảnh và mục tiêu</a><a class="h2" href="#2-phạm-vi">2. Phạm vi</a><a class="h2" href="#3-ràng-buộc-kỹ-thuật">3. Ràng buộc kỹ thuật</a><a class="h2" href="#4-kiến-trúc">4. Kiến trúc</a><a class="h3" href="#4-1-cấu-trúc-thư-mục">4.1 Cấu trúc thư mục</a><a class="h3" href="#4-2-quy-tắc-phụ-thuộc">4.2 Quy tắc phụ thuộc</a><a class="h3" href="#4-3-api-module-mynotchcore">4.3 API module (<code>MyNotchCore</code>)</a><a class="h3" href="#4-4-moduleregistry">4.4 <code>ModuleRegistry</code></a><a class="h2" href="#5-notchui">5. NotchUI</a><a class="h3" href="#5-1-cửa-sổ">5.1 Cửa sổ</a><a class="h3" href="#5-2-hình-học-notchgeometry">5.2 Hình học (<code>NotchGeometry</code>)</a><a class="h3" href="#5-3-đa-màn-hình-screenmanager">5.3 Đa màn hình (<code>ScreenManager</code>)</a><a class="h3" href="#5-4-state-machine-notchviewmodel">5.4 State machine (<code>NotchViewModel</code>)</a><a class="h3" href="#5-5-ẩn-khi-fullscreen-fullscreendetector">5.5 Ẩn khi fullscreen (<code>FullscreenDetector</code>)</a><a class="h3" href="#5-6-giao-diện-và-animation">5.6 Giao diện và animation</a><a class="h2" href="#6-khung-ứng-dụng">6. Khung ứng dụng</a><a class="h3" href="#6-1-menu-bar">6.1 Menu bar</a><a class="h3" href="#6-2-settings">6.2 Settings</a><a class="h3" href="#6-3-lưu-cài-đặt">6.3 Lưu cài đặt</a><a class="h3" href="#6-4-phím-tắt">6.4 Phím tắt</a><a class="h3" href="#6-5-quyền-permissioncenter">6.5 Quyền (<code>PermissionCenter</code>)</a><a class="h3" href="#6-6-log">6.6 Log</a><a class="h2" href="#7-module-mẫu-battery">7. Module mẫu: Battery</a><a class="h2" href="#8-xử-lý-lỗi">8. Xử lý lỗi</a><a class="h2" href="#9-kiểm-thử-và-kiểm-chứng">9. Kiểm thử và kiểm chứng</a><a class="h2" href="#10-tiêu-chí-hoàn-thành">10. Tiêu chí hoàn thành</a><a class="h2" href="#11-lộ-trình-các-dự-án-con">11. Lộ trình các dự án con</a><a class="h2" href="#12-rủi-ro-và-điểm-cần-kiểm-chứng">12. Rủi ro và điểm cần kiểm chứng</a></nav><main><h1 id="mynotch-thiết-kế-nền-tảng-dự-án-con-0">MyNotch — Thiết kế Nền tảng (dự án con 0)</h1>
+<ul>
+<li><strong>Ngày:</strong> 2026-10-13</li>
+<li><strong>Trạng thái:</strong> Đã duyệt thiết kế, chờ review spec</li>
+<li><strong>Phạm vi:</strong> dự án con 0 trong lộ trình MyNotch: khung ứng dụng, cửa sổ notch, hệ thống module và module mẫu Battery</li>
+</ul>
+<h2 id="1-bối-cảnh-và-mục-tiêu">1. Bối cảnh và mục tiêu</h2>
+<p>MyNotch là ứng dụng notch cho macOS, viết mới từ đầu, dùng cá nhân và dễ tùy biến. Tính năng tham chiếu là OneNotch: media, clipboard, chụp màn hình/OCR, dịch, trạng thái AI agent, live activities, lịch.</p>
+<p>Kết quả điều tra OneNotch 2.0.5 (build 67) bằng REA:</p>
+<ul>
+<li>OneNotch kế thừa từ <strong>boring.notch</strong> (GPL-3.0). Bằng chứng: 36 tên type trùng hệt, 6 type đổi tên từ <code>Boring*</code> sang <code>OneNotch*</code>, <code>boring.m4a</code> và <code>mediaremote-adapter.pl</code> giống nhau từng byte, cùng protocol XPC helper.</li>
+<li>Các phần OneNotch bổ sung riêng (clipboard, screenshot, translation, AI…) là mã độc quyền và có license trả phí.</li>
+</ul>
+<p><strong>Mục tiêu của dự án con 0:</strong></p>
+<ul>
+<li>Dựng nền tảng để mỗi tính năng sau này là một module độc lập, bật/tắt được và thêm/sửa được mà không đụng tới module khác.</li>
+<li>Kiểm chứng toàn bộ vòng đời module bằng một module thật nhưng nhỏ: Battery.</li>
+</ul>
+<h2 id="2-phạm-vi">2. Phạm vi</h2>
+<p><strong>Trong phạm vi:</strong></p>
+<ul>
+<li>Project XcodeGen, target app và các Swift package <code>MyNotchCore</code>, <code>NotchUI</code>, <code>BatteryModule</code>.</li>
+<li>Cửa sổ notch trên mọi màn hình: notch thật hoặc notch ảo. Có ba trạng thái <code>closed</code>, <code>compact</code>, <code>open</code>. Mở/đóng bằng rê chuột, click và phím tắt.</li>
+<li>Hệ thống module: <code>FeatureModule</code>, <code>ModuleContext</code>, <code>ModuleRegistry</code>, cơ chế phát live activity, tab, toast.</li>
+<li>Settings window (General, Interface, Modules, About), lưu cài đặt, phím tắt, trung tâm quyền, menu bar, khởi động cùng máy, log.</li>
+<li>Module Battery.</li>
+<li>Unit test, <code>scripts/verify.sh</code> và checklist kiểm thử tay.</li>
+</ul>
+<p><strong>Ngoài phạm vi</strong> (thuộc các dự án con sau, hoặc không làm):</p>
+<ul>
+<li>Clipboard, Media, Screenshot/OCR, Translation, AI agent, Calendar, các live activity khác, Shelf, Lock screen. Mỗi mục có spec riêng.</li>
+<li>Đồng bộ iCloud: CloudKit cần tài khoản Apple Developer trả phí.</li>
+<li>License, telemetry, Sentry, Sparkle auto-update.</li>
+<li>Sao chép mã từ binary OneNotch. Mọi tính năng phải viết theo kiểu clean-room, chỉ dùng API công khai của Apple và thư viện mã nguồn mở.</li>
+</ul>
+<h2 id="3-ràng-buộc-kỹ-thuật">3. Ràng buộc kỹ thuật</h2>
+<table><thead><tr><th>Mục</th><th>Giá trị</th></tr></thead><tbody>
+<tr><td>macOS tối thiểu</td><td>26.0 (deployment target <code>26.0</code>)</td></tr>
+<tr><td>Công cụ</td><td>Xcode 26.6 (17F113), Swift 6.3, Swift 6 language mode, strict concurrency <code>complete</code></td></tr>
+<tr><td>Sinh project</td><td>XcodeGen (<code>project.yml</code>); không commit <code>MyNotch.xcodeproj</code></td></tr>
+<tr><td>Bundle ID / tên</td><td><code>io.lucasvu.mynotch</code> / <code>MyNotch</code></td></tr>
+<tr><td>Ký</td><td>Apple Development (Apple ID miễn phí), <code>DEVELOPMENT_TEAM</code> đặt trong <code>project.yml</code></td></tr>
+<tr><td>Sandbox</td><td>Tắt; Hardened Runtime bật</td></tr>
+<tr><td>Dock</td><td>Ẩn (<code>LSUIElement = YES</code>); chỉ có icon menu bar</td></tr>
+<tr><td>Mạng / telemetry</td><td>Không gửi dữ liệu ra ngoài</td></tr>
+<tr><td>License mã của MyNotch</td><td>Dùng cá nhân. Đoạn nào lấy từ boring.notch phải giữ header GPL-3.0 và ghi nguồn</td></tr>
+</tbody></table>
+<p><strong>Thư viện bên thứ ba</strong> (ghim version chính xác lúc triển khai, ghi vào <code>Package.resolved</code>, liệt kê ở trang About):</p>
+<table><thead><tr><th>Thư viện</th><th>Dùng cho</th><th>License</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/sindresorhus/Defaults">Defaults</a></td><td>Lưu cài đặt có kiểu</td><td>MIT</td></tr>
+<tr><td><a href="https://github.com/sindresorhus/KeyboardShortcuts">KeyboardShortcuts</a></td><td>Phím tắt toàn cục, giao diện ghi phím</td><td>MIT</td></tr>
+<tr><td><a href="https://github.com/yonaskolb/XcodeGen">XcodeGen</a></td><td>Sinh <code>.xcodeproj</code> (công cụ dev, không nhúng vào app)</td><td>MIT</td></tr>
+</tbody></table>
+<h2 id="4-kiến-trúc">4. Kiến trúc</h2>
+<h3 id="4-1-cấu-trúc-thư-mục">4.1 Cấu trúc thư mục</h3>
+<pre><code>MyNotch/
+├── project.yml
+├── App/
+│   ├── MyNotchApp.swift          # @main, NSApplicationDelegateAdaptor
+│   ├── AppDelegate.swift         # composition root: tạo registry, ScreenManager, menu bar
+│   ├── ModuleList.swift          # danh sách module, nơi DUY NHẤT ghép module
+│   ├── Settings/                 # SettingsWindowController + các trang General/Interface/Modules/About
+│   ├── Info.plist
+│   └── MyNotch.entitlements
+├── Packages/
+│   ├── MyNotchCore/              # không phụ thuộc AppKit UI ngoài kiểu cơ bản
+│   ├── NotchUI/                  # phụ thuộc MyNotchCore
+│   └── Modules/
+│       └── Battery/              # package BatteryModule, phụ thuộc MyNotchCore + NotchUI
+├── scripts/
+│   ├── verify.sh
+│   └── md2html.py                # chuyển spec Markdown sang HTML để đọc
+└── docs/
+    ├── superpowers/specs/
+    └── manual-test-checklist.md</code></pre>
+<h3 id="4-2-quy-tắc-phụ-thuộc">4.2 Quy tắc phụ thuộc</h3>
+<ul>
+<li><code>MyNotchCore</code> không phụ thuộc package nội bộ nào.</li>
+<li><code>NotchUI</code> chỉ phụ thuộc <code>MyNotchCore</code>.</li>
+<li>Mỗi module chỉ phụ thuộc <code>MyNotchCore</code> và <code>NotchUI</code>. <strong>Không module nào import module khác.</strong></li>
+<li>Chỉ <code>App/</code> import các module. Thêm một module mới = thêm một package + một dòng trong <code>ModuleList.swift</code> + khai báo package trong <code>project.yml</code>.</li>
+</ul>
+<h3 id="4-3-api-module-mynotchcore">4.3 API module (<code>MyNotchCore</code>)</h3>
+<pre><code class="language-swift">public struct ModuleID: Hashable, Sendable, RawRepresentable { public let rawValue: String }
+
+public struct ModuleDescriptor: Sendable {
+    public let id: ModuleID              // ổn định, chữ thường, ví dụ &quot;battery&quot;
+    public let displayName: String
+    public let systemImage: String       // SF Symbol
+    public let defaultEnabled: Bool
+    public let permissions: [Permission] // quyền bắt buộc để start()
+    public let order: Int                // thứ tự tab và thứ tự trong Settings
+}
+
+@MainActor public protocol FeatureModule: AnyObject {
+    var descriptor: ModuleDescriptor { get }
+    func start(_ context: ModuleContext) async throws(ModuleError)
+    func stop() async
+    func makeTab() -&gt; NotchTab?          // nil nếu module không có tab
+    func makeSettingsView() -&gt; AnyView?  // nil nếu module không có cài đặt riêng
+}
+
+@MainActor public final class ModuleContext {
+    public let settings: ModuleSettings        // chỉ đọc/ghi key &quot;module.&lt;id&gt;.*&quot;
+    public let activities: ActivityPublisher   // set/clear live activity của module
+    public let presenter: NotchPresenter       // mở tab, toast, đóng notch
+    public let hotkeys: HotkeyRegistry         // đăng ký KeyboardShortcuts.Name + handler
+    public let permissions: PermissionCenter   // kiểm tra/xin quyền
+    public let logger: Logger                  // os.Logger, category = module id
+}</code></pre>
+<p><strong>Thay đổi so với bản phác ở bước brainstorm:</strong> live activity không còn là thuộc tính <code>activity</code> trên protocol. Module chủ động phát activity qua <code>context.activities.set(_:)</code> và gỡ bằng <code>clear()</code>. Như vậy registry không phải theo dõi thuộc tính của từng module, và mọi activity của module đó tự động bị gỡ khi module stop.</p>
+<pre><code class="language-swift">public struct LiveActivity: Identifiable {
+    public let id: String                  // duy nhất trong phạm vi module
+    public let priority: ActivityPriority  // .low &lt; .normal &lt; .high &lt; .critical
+    public let leading: AnyView            // ô bên trái notch ở trạng thái compact
+    public let trailing: AnyView           // ô bên phải notch
+    public let expiresAfter: Duration?     // tự gỡ sau khoảng thời gian, nil = giữ đến khi clear
+}
+
+public struct NotchTab: Identifiable {
+    public let id: ModuleID
+    public let title: String
+    public let systemImage: String
+    public let preferredHeight: CGFloat?   // bị giới hạn trong [120, 300] pt
+    public let content: AnyView
+}
+
+@MainActor public protocol NotchPresenter {
+    func open(tab: ModuleID)
+    func showToast(_ content: AnyView, duration: Duration)
+    func close()
+}
+
+public enum ModuleError: Error, Sendable {
+    case needsPermission(Permission)
+    case unavailable(reason: String)
+    case failed(reason: String)
+}</code></pre>
+<h3 id="4-4-moduleregistry">4.4 <code>ModuleRegistry</code></h3>
+<p><code>ModuleRegistry</code> là <code>@MainActor @Observable</code>. Nó giữ danh sách module và trạng thái của từng module:</p>
+<pre><code>disabled → starting → running
+                    ↘ needsPermission(Permission) | unavailable(reason) | failed(reason)
+running  → stopping → disabled</code></pre>
+<ul>
+<li>Lúc app khởi động, registry đọc <code>module.&lt;id&gt;.enabled</code>; nếu chưa có giá trị thì dùng <code>descriptor.defaultEnabled</code>.</li>
+<li><strong>Bật module:</strong></li>
+</ul>
+<ol>
+<li>Kiểm tra các quyền trong <code>descriptor.permissions</code>. Thiếu quyền nào thì chuyển sang <code>needsPermission</code>, không gọi <code>start</code>.</li>
+<li>Gọi <code>start(context)</code> trong một <code>Task</code> riêng. Thành công thì chuyển sang <code>running</code>. <code>start</code> ném <code>ModuleError</code> thì chuyển sang trạng thái lỗi tương ứng.</li>
+</ol>
+<ul>
+<li><strong>Tắt module:</strong></li>
+</ul>
+<ol>
+<li>Gọi <code>stop()</code>, đợi tối đa 2 giây.</li>
+<li>Hủy task của module.</li>
+<li><code>ActivityPublisher</code> gỡ mọi activity của module.</li>
+<li>Gỡ tab của module, gỡ các phím tắt module đã đăng ký.</li>
+</ol>
+<ul>
+<li><strong>Thử lại:</strong> nút Retry trong Settings sẽ tắt rồi bật lại module.</li>
+<li>Lỗi của một module không ảnh hưởng tới các module khác. Registry không bao giờ để lỗi lan lên crash cả app.</li>
+</ul>
+<h2 id="5-notchui">5. NotchUI</h2>
+<h3 id="5-1-cửa-sổ">5.1 Cửa sổ</h3>
+<ul>
+<li>Mỗi màn hình có một <code>NotchPanel: NSPanel</code>. Cấu hình:</li>
+<li><code>styleMask: [.borderless, .nonactivatingPanel]</code></li>
+<li><code>isOpaque = false</code>, <code>backgroundColor = .clear</code>, <code>hasShadow = false</code></li>
+<li><code>level = .mainMenu + 3</code> (nằm trên menu bar)</li>
+<li><code>collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]</code></li>
+<li><code>canBecomeKey = false</code>, trừ khi tab đang mở cần nhận bàn phím (ví dụ ô tìm kiếm). Khi đó tab tự yêu cầu.</li>
+<li>Kích thước panel cố định bằng <strong>kích thước mở tối đa</strong> (rộng 720pt × cao <code>notchHeight + 300</code>pt), neo ở giữa cạnh trên <code>screen.frame</code>. Panel không đổi frame khi animate; chỉ nội dung SwiftUI bên trong thay đổi.</li>
+<li><strong>Click xuyên qua:</strong></li>
+<li>Panel mặc định <code>ignoresMouseEvents = true</code>.</li>
+<li><code>NotchHoverTracker</code> dùng <code>NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged])</code> cùng local monitor tương ứng để biết con trỏ có nằm trong vùng hình notch hiện tại hay không.</li>
+<li>Vùng này là <code>hitRect</code>: bằng hình notch hiện tại nới ra 8pt mỗi bên. Khi con trỏ vào <code>hitRect</code> thì đặt <code>ignoresMouseEvents = false</code>; khi ra thì đặt lại <code>true</code>.</li>
+<li>Monitor chuột (không phải phím) không cần quyền Accessibility.</li>
+</ul>
+<h3 id="5-2-hình-học-notchgeometry">5.2 Hình học (<code>NotchGeometry</code>)</h3>
+<p>Đầu vào là <code>ScreenDescriptor</code>, một struct lấy từ <code>NSScreen</code> để test được: <code>frame</code>, <code>safeAreaTop</code>, <code>auxiliaryTopLeftWidth?</code>, <code>auxiliaryTopRightWidth?</code>, <code>menuBarHeight</code>.</p>
+<ul>
+<li><strong>Notch thật</strong> (có <code>safeAreaTop &gt; 0</code> và có cả hai vùng auxiliary):</li>
+<li><code>width = frame.width - leftAux - rightAux</code></li>
+<li><code>height = safeAreaTop</code></li>
+<li><strong>Notch ảo:</strong></li>
+<li><code>width = settings.virtualNotchWidth</code> (mặc định 185, cho phép 120–300)</li>
+<li><code>height = settings.virtualNotchHeight</code> (mặc định <code>menuBarHeight</code>, cho phép 24–40)</li>
+<li><strong>Kích thước theo trạng thái:</strong></li>
+<li><code>closed</code> = kích thước notch</li>
+<li><code>compact</code> = notch + 2 × <code>compactSideWidth</code> (mặc định 64pt mỗi bên)</li>
+<li><code>open</code> = rộng 600pt (cho phép 480–720), cao <code>notchHeight + clamp(tab.preferredHeight ?? 190, 120, 300)</code></li>
+<li>Bán kính góc: <code>closed</code> và <code>compact</code> có góc dưới 10pt; <code>open</code> có góc dưới 24pt và góc trên 8pt (bo vào cạnh menu bar).</li>
+</ul>
+<h3 id="5-3-đa-màn-hình-screenmanager">5.3 Đa màn hình (<code>ScreenManager</code>)</h3>
+<ul>
+<li>Định danh màn hình bằng <code>CGDisplayCreateUUIDFromDisplayID</code> lấy từ <code>NSScreenNumber</code>.</li>
+<li>Lắng nghe <code>NSApplication.didChangeScreenParametersNotification</code> và <code>NSWorkspace.didWakeNotification</code>. Khi có sự kiện thì đối chiếu tập UUID hiện tại: tạo panel cho màn mới, hủy panel của màn đã rút, cập nhật frame cho màn còn lại.</li>
+<li>Chế độ hiển thị (<code>interface.displayMode</code>):</li>
+<li><code>all</code> (mặc định): mỗi màn một notch.</li>
+<li><code>main</code>: chỉ màn chính.</li>
+<li><code>cursor</code>: chỉ màn đang có con trỏ. Kiểm tra lại mỗi khi con trỏ đổi màn.</li>
+<li>Mỗi panel có một <code>NotchViewModel</code> riêng. Trạng thái <code>open</code> của màn này không ảnh hưởng màn khác.</li>
+</ul>
+<h3 id="5-4-state-machine-notchviewmodel">5.4 State machine (<code>NotchViewModel</code>)</h3>
+<p><code>NotchViewModel</code> là <code>@MainActor @Observable</code>, gồm:</p>
+<ul>
+<li><code>state: closed | compact | open(tabID)</code></li>
+<li><code>isPinned</code></li>
+<li><code>isDragging</code>, dành cho các module có kéo-thả sau này</li>
+</ul>
+<p>Hai thông số thời gian, lấy từ cài đặt:</p>
+<ul>
+<li><code>openDelay</code> = 150ms (cho phép 0–1000)</li>
+<li><code>closeDelay</code> = 300ms (cho phép 0–1000)</li>
+</ul>
+<p>Đồng hồ được inject dạng <code>any Clock&lt;Duration&gt;</code> để test được.</p>
+<table><thead><tr><th>Từ</th><th>Sự kiện</th><th>Đến</th></tr></thead><tbody>
+<tr><td><code>closed</code>/<code>compact</code></td><td>con trỏ ở trong notch liên tục ≥ <code>openDelay</code></td><td><code>open(lastTab ?? firstTab)</code></td></tr>
+<tr><td><code>closed</code>/<code>compact</code></td><td>click vào notch</td><td><code>open(lastTab ?? firstTab)</code></td></tr>
+<tr><td>bất kỳ</td><td>phím tắt "Toggle notch"</td><td><code>open</code> nếu đang đóng, ngược lại đóng. Áp dụng cho màn đang có con trỏ</td></tr>
+<tr><td><code>open</code></td><td>con trỏ rời <code>hitRect</code> liên tục ≥ <code>closeDelay</code>, và không ghim, không kéo</td><td>đóng</td></tr>
+<tr><td><code>open</code></td><td><code>presenter.close()</code></td><td>đóng</td></tr>
+<tr><td>bất kỳ</td><td><code>presenter.open(tab:)</code></td><td><code>open(tab)</code></td></tr>
+<tr><td><code>closed</code></td><td>xuất hiện activity</td><td><code>compact</code></td></tr>
+<tr><td><code>compact</code></td><td>hết activity</td><td><code>closed</code></td></tr>
+</tbody></table>
+<p>"Đóng" nghĩa là về <code>compact</code> nếu đang có activity, ngược lại về <code>closed</code>.</p>
+<p><strong>Ưu tiên activity:</strong></p>
+<ul>
+<li><code>compact</code> hiển thị activity có <code>priority</code> cao nhất. Nếu bằng nhau thì activity được <code>set</code> gần nhất thắng.</li>
+<li>Các activity còn lại nằm trong hàng đợi.</li>
+<li>Activity có <code>expiresAfter</code> tự gỡ khi hết hạn.</li>
+</ul>
+<p><strong>Toast:</strong> <code>showToast</code> hiển thị nội dung ở trạng thái <code>open</code> không có thanh tab, trong <code>duration</code>. Hết thời gian thì đóng, trừ khi con trỏ đang ở trong notch.</p>
+<h3 id="5-5-ẩn-khi-fullscreen-fullscreendetector">5.5 Ẩn khi fullscreen (<code>FullscreenDetector</code>)</h3>
+<ul>
+<li>Cài đặt <code>interface.hideInFullscreen</code>, mặc định <code>true</code>.</li>
+<li>Các sự kiện kích hoạt kiểm tra lại: <code>NSWorkspace.activeSpaceDidChangeNotification</code>, <code>didActivateApplicationNotification</code>, và một lần kiểm tra lại 500ms sau mỗi sự kiện, vì animation chuyển Space chưa xong ngay.</li>
+<li>Quy tắc nhận diện: lấy <code>CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)</code>. Nếu có cửa sổ thuộc PID của app phía trước, nằm ở layer 0, và có <code>kCGWindowBounds</code> phủ kín bounds của màn đó (sai số 1pt), thì màn đó đang fullscreen. Khi đó panel của màn ấy chuyển <code>alphaValue = 0</code> và <code>ignoresMouseEvents = true</code>.</li>
+<li>Không cần quyền Screen Recording, vì chỉ đọc bounds, không đọc tên cửa sổ.</li>
+<li><strong>Rủi ro cần kiểm chứng:</strong> video fullscreen trong Safari, Keynote khi trình chiếu, game. Ghi kết quả vào checklist kiểm thử tay.</li>
+</ul>
+<h3 id="5-6-giao-diện-và-animation">5.6 Giao diện và animation</h3>
+<ul>
+<li><code>NotchShape</code> là <code>Shape</code> có <code>animatableData</code> gồm bán kính góc trên/dưới, chiều rộng và chiều cao.</li>
+<li>Chuyển trạng thái dùng <code>.spring(response: 0.38, dampingFraction: 0.8)</code>. Nội dung tab hiện ra (<code>opacity</code> + <code>scale 0.96 → 1</code>) sau khi khung notch mở xong khoảng 80ms.</li>
+<li>Nền notch màu đen tuyền để liền với notch phần cứng. Màu nhấn và kiểu chữ lấy từ design tokens của <code>NotchUI</code>.</li>
+<li>Thanh tab chỉ hiện khi có từ 2 tab trở lên, nằm trên cùng của vùng mở rộng.</li>
+</ul>
+<h2 id="6-khung-ứng-dụng">6. Khung ứng dụng</h2>
+<h3 id="6-1-menu-bar">6.1 Menu bar</h3>
+<p><code>NSStatusItem</code> dùng SF Symbol <code>rectangle.topthird.inset.filled</code>. Menu gồm:</p>
+<ul>
+<li>Open Settings… (⌘,)</li>
+<li>Show/Hide Notch</li>
+<li>Pause All Modules (tắt toàn bộ module tạm thời, không đổi cài đặt enabled)</li>
+<li>Quit MyNotch (⌘Q)</li>
+</ul>
+<h3 id="6-2-settings">6.2 Settings</h3>
+<p>Dùng <code>SettingsWindowController</code> (NSWindow) bọc SwiftUI <code>NavigationSplitView</code>.</p>
+<table><thead><tr><th>Trang</th><th>Nội dung</th></tr></thead><tbody>
+<tr><td>General</td><td>Khởi động cùng máy (<code>SMAppService.mainApp</code>), hiện icon menu bar, phím tắt "Toggle notch" (mặc định ⌃⌥N)</td></tr>
+<tr><td>Interface</td><td><code>displayMode</code>, kích thước notch ảo, <code>openDelay</code>, <code>closeDelay</code>, <code>hideInFullscreen</code>, độ rộng khi mở</td></tr>
+<tr><td>Modules</td><td>Danh sách module theo <code>order</code>: công tắc bật/tắt, trạng thái từ registry, các quyền còn thiếu kèm nút "Cấp quyền", nút Retry khi lỗi, và trang <code>makeSettingsView()</code> của module</td></tr>
+<tr><td>About</td><td>Phiên bản, bundle ID, danh sách thư viện bên thứ ba và license</td></tr>
+</tbody></table>
+<p>Settings mở từ mục "Open Settings…" trong menu bar. Vì app không có Dock icon và notch không nhận focus, phím ⌘, chỉ có tác dụng khi chính cửa sổ Settings đang được chọn.</p>
+<h3 id="6-3-lưu-cài-đặt">6.3 Lưu cài đặt</h3>
+<ul>
+<li>Dùng <code>Defaults</code> trên <code>UserDefaults.standard</code>. Key toàn cục có tiền tố <code>app.</code> hoặc <code>interface.</code>.</li>
+<li><code>ModuleSettings</code> bọc key với tiền tố <code>module.&lt;id&gt;.</code>. Module không tạo được key nằm ngoài namespace của nó.</li>
+</ul>
+<h3 id="6-4-phím-tắt">6.4 Phím tắt</h3>
+<ul>
+<li><code>HotkeyRegistry</code> bọc <code>KeyboardShortcuts</code>. Module đăng ký <code>(name, defaultShortcut?, handler)</code>. Registry tự gỡ handler khi module stop.</li>
+<li>Settings hiển thị <code>KeyboardShortcuts.Recorder</code> cho mọi phím tắt đã đăng ký, và cảnh báo khi hai tên trùng tổ hợp phím.</li>
+</ul>
+<h3 id="6-5-quyền-permissioncenter">6.5 Quyền (<code>PermissionCenter</code>)</h3>
+<table><thead><tr><th><code>Permission</code></th><th>Kiểm tra</th><th>Mở System Settings</th></tr></thead><tbody>
+<tr><td><code>.accessibility</code></td><td><code>AXIsProcessTrusted()</code></td><td><code>x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility</code></td></tr>
+<tr><td><code>.screenRecording</code></td><td><code>CGPreflightScreenCaptureAccess()</code></td><td><code>…?Privacy_ScreenCapture</code></td></tr>
+<tr><td><code>.calendars</code></td><td><code>EKEventStore.authorizationStatus(for: .event)</code></td><td><code>…?Privacy_Calendars</code></td></tr>
+<tr><td><code>.reminders</code></td><td><code>EKEventStore.authorizationStatus(for: .reminder)</code></td><td><code>…?Privacy_Reminders</code></td></tr>
+<tr><td><code>.bluetooth</code></td><td><code>CBManager.authorization</code></td><td><code>…?Privacy_Bluetooth</code></td></tr>
+<tr><td><code>.automation(bundleID)</code></td><td><code>AEDeterminePermissionToAutomateTarget</code> (không hỏi)</td><td><code>…?Privacy_Automation</code></td></tr>
+<tr><td><code>.microphone</code></td><td><code>AVCaptureDevice.authorizationStatus(for: .audio)</code></td><td><code>…?Privacy_Microphone</code></td></tr>
+</tbody></table>
+<ul>
+<li><code>PermissionCenter</code> kiểm tra lại trạng thái khi app được kích hoạt lại (<code>didBecomeActive</code>) và khi mở Settings. Module đang ở <code>needsPermission</code> sẽ tự thử start lại khi quyền vừa được cấp.</li>
+<li>Nền tảng chỉ cài đặt các quyền thật sự cần cho nền tảng và Battery (hiện là không có quyền nào). Các case còn lại được khai báo và kiểm tra trước, để các module sau dùng. <strong>Usage description trong Info.plist của từng quyền được thêm ở dự án con cần quyền đó.</strong></li>
+</ul>
+<h3 id="6-6-log">6.6 Log</h3>
+<ul>
+<li>Dùng <code>Logger(subsystem: &quot;io.lucasvu.mynotch&quot;, category: &lt;module id | &quot;app&quot; | &quot;notch&quot;&gt;)</code>.</li>
+<li>Chỉ log trạng thái và lỗi, không log nội dung người dùng như clipboard hay văn bản.</li>
+</ul>
+<h2 id="7-module-mẫu-battery">7. Module mẫu: Battery</h2>
+<ul>
+<li><code>descriptor</code>: id <code>battery</code>, tên "Battery", icon <code>battery.100percent.bolt</code>, <code>defaultEnabled = true</code>, không cần quyền nào, <code>order = 900</code>.</li>
+<li><strong>Nguồn dữ liệu:</strong></li>
+<li>Đăng ký <code>IOPSNotificationCreateRunLoopSource</code> để nhận thông báo khi trạng thái nguồn điện đổi.</li>
+<li>Đọc <code>IOPSCopyPowerSourcesInfo</code> → <code>IOPSCopyPowerSourcesList</code> → <code>IOPSGetPowerSourceDescription</code>, lấy các key <code>kIOPSCurrentCapacityKey</code>, <code>kIOPSMaxCapacityKey</code>, <code>kIOPSIsChargingKey</code>, <code>kIOPSPowerSourceStateKey</code>, <code>kIOPSTimeToEmptyKey</code>, <code>kIOPSTimeToFullChargeKey</code>.</li>
+<li>Logic đọc nằm sau protocol <code>PowerSourceReading</code> để test được bằng bản giả.</li>
+<li>Máy không có pin (Mac desktop) thì <code>start</code> ném <code>.unavailable(reason: &quot;Máy không có pin&quot;)</code>.</li>
+<li><strong>Live activity:</strong></li>
+<li>Khi chuyển từ pin sang sạc: phát activity <code>charging</code> (<code>priority .normal</code>, <code>expiresAfter 4s</code>). Bên trái là icon tia sét, bên phải là phần trăm pin.</li>
+<li>Khi pin ≤ <code>module.battery.lowThreshold</code> (mặc định 20%) và không sạc: phát activity <code>low</code> (<code>priority .high</code>), giữ đến khi cắm sạc hoặc pin vượt ngưỡng + 5%.</li>
+<li><strong>Tab:</strong> phần trăm, trạng thái sạc/xả, thời gian còn lại, nguồn điện (adapter/pin).</li>
+<li><strong>Settings:</strong> ngưỡng pin yếu (5–50%), bật/tắt thông báo khi cắm sạc.</li>
+</ul>
+<h2 id="8-xử-lý-lỗi">8. Xử lý lỗi</h2>
+<ul>
+<li>Mọi đường lỗi của module đều trả <code>ModuleError</code>, không <code>fatalError</code>, không force-unwrap kết quả API hệ thống.</li>
+<li>Lỗi lúc tạo panel cho một màn hình chỉ được ghi log, rồi bỏ qua màn đó; các màn khác vẫn chạy.</li>
+<li>Giá trị cài đặt ngoài khoảng cho phép bị kẹp (clamp) về biên khi đọc, không làm app crash.</li>
+<li>Không gửi lỗi ra ngoài. Dùng <code>os.Logger</code> và crash report của macOS.</li>
+</ul>
+<h2 id="9-kiểm-thử-và-kiểm-chứng">9. Kiểm thử và kiểm chứng</h2>
+<p><strong>Unit test</strong> (Swift Testing, <code>swift test</code> trong từng package):</p>
+<table><thead><tr><th>Package</th><th>Nội dung kiểm thử</th></tr></thead><tbody>
+<tr><td>MyNotchCore</td><td>Vòng đời registry (bật, tắt, lỗi <code>start</code>, thiếu quyền, Retry); lỗi của một module không ảnh hưởng module khác; namespace <code>ModuleSettings</code>; <code>ActivityPublisher</code> gỡ hết activity khi module stop; hàng đợi ưu tiên và hết hạn activity</td></tr>
+<tr><td>NotchUI</td><td><code>NotchGeometry</code> cho các màn: MacBook 14"/16" có notch, màn ngoài 1920×1080 và 5K không notch, cài đặt notch ảo ngoài biên; bảng chuyển trạng thái <code>NotchViewModel</code> với đồng hồ giả (open/close delay, ghim, kéo, toast); quy tắc nhận diện fullscreen từ danh sách cửa sổ giả</td></tr>
+<tr><td>BatteryModule</td><td>Tính phần trăm và trạng thái từ dictionary IOKit giả; phát/gỡ activity <code>charging</code> và <code>low</code> đúng ngưỡng; báo <code>.unavailable</code> khi không có pin</td></tr>
+</tbody></table>
+<p><strong><code>scripts/verify.sh</code>:</strong> chạy <code>xcodegen generate</code> → <code>swift test</code> cho từng package → <code>xcodebuild -scheme MyNotch -configuration Debug build</code>. Dừng ngay khi có bước lỗi.</p>
+<p><strong>Checklist kiểm thử tay</strong> (<code>docs/manual-test-checklist.md</code>): notch thật, notch ảo trên màn ngoài, ba chế độ hiển thị, rê chuột/click/phím tắt, menu bar không bị chặn click, video fullscreen trên Safari, Keynote khi trình chiếu, ngủ/đánh thức, rút/cắm màn hình, bật/tắt Battery trong Settings, khởi động cùng máy.</p>
+<h2 id="10-tiêu-chí-hoàn-thành">10. Tiêu chí hoàn thành</h2>
+<ol>
+<li><code>scripts/verify.sh</code> chạy hết các bước, không lỗi.</li>
+<li>App chạy không có icon Dock. Icon menu bar và menu hoạt động.</li>
+<li>Notch hiển thị đúng kích thước trên màn MacBook và màn ngoài; đổi được <code>displayMode</code>.</li>
+<li>Mở/đóng được bằng rê chuột, click và ⌃⌥N. Click vào menu bar và cửa sổ bên dưới vùng trong suốt vẫn hoạt động.</li>
+<li>Tự ẩn khi xem video fullscreen trên Safari, và hiện lại khi thoát fullscreen.</li>
+<li>Battery hiển thị tab. Cắm sạc thì hiện activity <code>charging</code>. Tắt Battery trong Settings thì tab và activity biến mất; bật lại thì xuất hiện lại.</li>
+<li>Bật "Khởi động cùng máy" thì app có trong Login Items và tự chạy sau khi đăng nhập lại.</li>
+<li>Checklist kiểm thử tay được điền kết quả: mục nào không kiểm được thì ghi rõ lý do.</li>
+</ol>
+<h2 id="11-lộ-trình-các-dự-án-con">11. Lộ trình các dự án con</h2>
+<table><thead><tr><th>#</th><th>Dự án con</th><th>Ghi chú</th></tr></thead><tbody>
+<tr><td>0</td><td>Nền tảng + Battery</td><td>Spec này</td></tr>
+<tr><td>1</td><td>Clipboard</td><td>Ưu tiên đầu tiên sau nền tảng</td></tr>
+<tr><td>2</td><td>Media</td><td>Now Playing qua <code>mediaremote-adapter</code> (BSD-3), điều khiển phát, ảnh bìa, lời bài hát, phổ âm</td></tr>
+<tr><td>3</td><td>Screenshot + OCR</td><td>Có thể tách 3a chụp vùng/cửa sổ + khay ảnh, 3b markup, 3c chụp cuộn + OCR (Vision, chạy trong XPC helper)</td></tr>
+<tr><td>4</td><td>Translation</td><td>Framework Translation, dịch đoạn chữ đang chọn qua Accessibility</td></tr>
+<tr><td>5</td><td>AI agent activity</td><td>Hook Claude Code/Codex, usage</td></tr>
+<tr><td>6</td><td>Calendar + Reminders</td><td>EventKit</td></tr>
+<tr><td>7</td><td>Live activities + HUD</td><td>Bluetooth, Focus, mạng, Caps Lock, download, HUD âm lượng/độ sáng</td></tr>
+<tr><td>8</td><td>Shelf, Shortcuts, Timer</td><td></td></tr>
+<tr><td>9</td><td>Lock screen</td><td>API riêng SkyLight; rủi ro cao, làm cuối</td></tr>
+</tbody></table>
+<h2 id="12-rủi-ro-và-điểm-cần-kiểm-chứng">12. Rủi ro và điểm cần kiểm chứng</h2>
+<table><thead><tr><th>Rủi ro</th><th>Cách xử lý</th></tr></thead><tbody>
+<tr><td>Nhận diện fullscreen sai với một số app</td><td>Có tùy chọn tắt <code>hideInFullscreen</code>; ghi các ca sai vào checklist để tinh chỉnh quy tắc</td></tr>
+<tr><td><code>level = .mainMenu + 3</code> che menu và popover của hệ thống</td><td>Kiểm thử tay. Nếu che thì chỉ nâng level khi notch <code>open</code></td></tr>
+<tr><td>Global mouse monitor tốn CPU khi rê chuột liên tục</td><td>Chỉ tính <code>hitRect</code> bằng phép so sánh hình chữ nhật. Kiểm tra CPU trong Activity Monitor khi rê chuột liên tục 30 giây</td></tr>
+<tr><td>Chứng chỉ Apple Development có thời hạn; hết hạn thì macOS không mở app</td><td>Build lại trong Xcode để ký bằng chứng chỉ mới. Ghi chú trong README</td></tr>
+<tr><td>Phím tắt mặc định ⌃⌥N trùng với app khác</td><td>Settings cảnh báo trùng; người dùng gán lại được</td></tr>
+</tbody></table></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>
