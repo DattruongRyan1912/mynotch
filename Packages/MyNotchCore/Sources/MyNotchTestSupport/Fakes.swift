@@ -25,6 +25,7 @@ public struct RegistryHarness {
     public let scheduler = ManualScheduler()
     public let permissions = FakePermissionCenter()
     public let presenter = FakePresenter()
+    public let hotkeys = HotkeyRegistry()
     public let activities: ActivityCenter
     public let registry: ModuleRegistry
 
@@ -32,7 +33,7 @@ public struct RegistryHarness {
         activities = ActivityCenter(scheduler: scheduler)
         registry = ModuleRegistry(
             modules: modules, settings: settings, activities: activities,
-            permissions: permissions, hotkeys: HotkeyRegistry(), presenter: presenter
+            permissions: permissions, hotkeys: hotkeys, presenter: presenter
         )
     }
 }
