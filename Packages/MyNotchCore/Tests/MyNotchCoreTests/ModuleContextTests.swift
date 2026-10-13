@@ -22,7 +22,9 @@ private final class StubPermissions: PermissionCenter {
             activities: ActivityPublisher(center: activities, module: "m"),
             presenter: StubPresenter(),
             hotkeys: ModuleHotkeys(registry: HotkeyRegistry(), module: "m"),
-            permissions: StubPermissions()
+            permissions: StubPermissions(),
+            storage: ModuleStorage(directory: URL(filePath: "/support/m/"), cachesDirectory: URL(filePath: "/caches/m/")),
+            scheduler: ManualScheduler()
         )
     }
 

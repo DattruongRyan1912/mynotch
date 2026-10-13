@@ -8,6 +8,9 @@ public final class ModuleContext {
     public let presenter: any NotchPresenter
     public let hotkeys: ModuleHotkeys
     public let permissions: any PermissionCenter
+    public let storage: ModuleStorage
+    /// Shared with the app; actions are not cancelled when the module stops, so cancel their handles in `stop()`.
+    public let scheduler: any Scheduler
     public let logger: Logger
 
     private var tasks: [Int: Task<Void, Never>] = [:]
@@ -20,7 +23,9 @@ public final class ModuleContext {
         activities: ActivityPublisher,
         presenter: any NotchPresenter,
         hotkeys: ModuleHotkeys,
-        permissions: any PermissionCenter
+        permissions: any PermissionCenter,
+        storage: ModuleStorage,
+        scheduler: any Scheduler
     ) {
         self.id = id
         self.settings = settings
@@ -28,6 +33,8 @@ public final class ModuleContext {
         self.presenter = presenter
         self.hotkeys = hotkeys
         self.permissions = permissions
+        self.storage = storage
+        self.scheduler = scheduler
         self.logger = Log.logger(category: id.rawValue)
     }
 

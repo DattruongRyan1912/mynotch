@@ -14,6 +14,8 @@ public final class ModuleRegistry {
     @ObservationIgnored private let permissions: any PermissionCenter
     @ObservationIgnored private let hotkeys: HotkeyRegistry
     @ObservationIgnored private let presenter: any NotchPresenter
+    @ObservationIgnored private let scheduler: any Scheduler
+    @ObservationIgnored private let storageRoot: StorageRoot
     @ObservationIgnored private var contexts: [ModuleID: ModuleContext] = [:]
     @ObservationIgnored private var tabCache: [ModuleID: NotchTab] = [:]
     /// Last queued lifecycle change per module; the next one waits for it, so start and stop never overlap.
@@ -25,7 +27,9 @@ public final class ModuleRegistry {
         activities: ActivityCenter,
         permissions: any PermissionCenter,
         hotkeys: HotkeyRegistry,
-        presenter: any NotchPresenter
+        presenter: any NotchPresenter,
+        scheduler: any Scheduler,
+        storageRoot: StorageRoot
     ) {
         let sorted = modules.sorted { $0.descriptor.order < $1.descriptor.order }
         precondition(Set(sorted.map(\.descriptor.id)).count == sorted.count, "Duplicate ModuleID")
@@ -35,6 +39,8 @@ public final class ModuleRegistry {
         self.permissions = permissions
         self.hotkeys = hotkeys
         self.presenter = presenter
+        self.scheduler = scheduler
+        self.storageRoot = storageRoot
         for module in sorted { states[module.descriptor.id] = .disabled }
     }
 
@@ -139,7 +145,9 @@ public final class ModuleRegistry {
             activities: ActivityPublisher(center: activities, module: id),
             presenter: presenter,
             hotkeys: ModuleHotkeys(registry: hotkeys, module: id),
-            permissions: permissions
+            permissions: permissions,
+            storage: storageRoot.storage(for: id),
+            scheduler: scheduler
         )
         contexts[id] = context
         do {

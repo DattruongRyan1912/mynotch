@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import MyNotchCore
 import MyNotchTestSupport
@@ -83,6 +84,23 @@ import MyNotchTestSupport
         await harness.registry.retry("m")
         #expect(harness.registry.state(of: "m") == .running)
         #expect(module.stopCount == 0)
+    }
+
+    @Test func contextCarriesTheModuleStorageAndScheduler() async throws {
+        let module = FakeModule("m")
+        let harness = Harness([module])
+        await harness.registry.bootstrap()
+        let context = try #require(module.context)
+        let expected = harness.storageRoot.storage(for: "m")
+        #expect(context.storage.directory == expected.directory)
+        #expect(context.storage.cachesDirectory == expected.cachesDirectory)
+        #expect(!FileManager.default.fileExists(atPath: expected.directory.path(percentEncoded: false)))
+
+        var fired = false
+        context.scheduler.schedule(after: .seconds(1)) { fired = true }
+        #expect(!fired)
+        harness.scheduler.advance(by: .seconds(1))
+        #expect(fired)
     }
 
     @Test func tabsFollowDescriptorOrder() async {

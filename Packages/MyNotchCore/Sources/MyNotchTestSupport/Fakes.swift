@@ -1,3 +1,4 @@
+import Foundation
 import MyNotchCore
 import SwiftUI
 
@@ -26,6 +27,12 @@ public struct RegistryHarness {
     public let permissions = FakePermissionCenter()
     public let presenter = FakePresenter()
     public let hotkeys = HotkeyRegistry()
+    /// Unique per harness under the temporary directory; nothing exists on disk until a module calls `ensureDirectories()`.
+    public let storageRoot: StorageRoot = {
+        let base = FileManager.default.temporaryDirectory
+            .appending(path: "MyNotchTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        return StorageRoot(applicationSupport: base.appending(path: "ApplicationSupport"), caches: base.appending(path: "Caches"))
+    }()
     public let activities: ActivityCenter
     public let registry: ModuleRegistry
 
@@ -33,7 +40,8 @@ public struct RegistryHarness {
         activities = ActivityCenter(scheduler: scheduler)
         registry = ModuleRegistry(
             modules: modules, settings: settings, activities: activities,
-            permissions: permissions, hotkeys: hotkeys, presenter: presenter
+            permissions: permissions, hotkeys: hotkeys, presenter: presenter,
+            scheduler: scheduler, storageRoot: storageRoot
         )
     }
 }

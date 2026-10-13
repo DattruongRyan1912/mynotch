@@ -13,7 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var activities = ActivityCenter(scheduler: scheduler)
     private lazy var registry = ModuleRegistry(
         modules: ModuleList.make(), settings: settings, activities: activities,
-        permissions: permissions, hotkeys: hotkeys, presenter: coordinator
+        permissions: permissions, hotkeys: hotkeys, presenter: coordinator,
+        scheduler: scheduler, storageRoot: .standard(bundleID: Bundle.main.bundleIdentifier ?? "io.lucasvu.mynotch")
     )
     private lazy var screens = ScreenManager(registry: registry, activities: activities, settings: settings, scheduler: scheduler)
     private lazy var settingsWindow = SettingsWindowController(
