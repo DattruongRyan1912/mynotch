@@ -65,11 +65,12 @@ final class Sandbox {
     }
 }
 
-private func iso(_ date: Date = Date()) -> String {
+func iso(_ date: Date = Date()) -> String {
     date.formatted(Date.ISO8601FormatStyle())
 }
 
-private enum Line {
+/// Hand-written transcript lines for the tests that need files; no real conversation text.
+enum Line {
     static func prompt(_ id: String, branch: String = "main") -> String {
         #"{"type":"user","isSidechain":false,"sessionId":"\#(id)","cwd":"/Users/example/Projects/demo","gitBranch":"\#(branch)","message":{"role":"user","content":"placeholder prompt"},"timestamp":"\#(iso())"}"# + "\n"
     }
@@ -407,7 +408,8 @@ private enum Line {
         let watcher = startWatcher()
         await watcher.rescan()
         watcher.stop()
-        #expect(!fileSystem.isWatching)
+        // The watch is cancelled on the watcher's own queue, so `stop` does not wait for it.
+        #expect(await waitUntil { !fileSystem.isWatching })
         try sandbox.append(Line.finish(session), to: sandbox.transcript(session))
         fileSystem.fire()
         try await Task.sleep(for: .milliseconds(300))

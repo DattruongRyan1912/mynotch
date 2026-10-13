@@ -11,7 +11,7 @@ nonisolated final class FakeAgentFileSystem: AgentFileSystem, @unchecked Sendabl
 
     private let lock = NSLock()
     private var alivePIDs: Set<pid_t> = []
-    private var handlers: [UUID: @Sendable () -> Void] = [:]
+    private var handlers: [UUID: @Sendable ([String]) -> Void] = [:]
     private var roots: [URL] = []
 
     var watchedRoots: [URL] { lock.withLock { roots } }
@@ -21,13 +21,14 @@ nonisolated final class FakeAgentFileSystem: AgentFileSystem, @unchecked Sendabl
         lock.withLock { alivePIDs = Set(pids) }
     }
 
-    /// Reports a change, as a file system event would.
-    func fire() {
+    /// Reports a change, as a file system event would: with the paths that changed, or with none when the
+    /// system would not say which.
+    func fire(_ paths: String...) {
         let current = lock.withLock { Array(handlers.values) }
-        current.forEach { $0() }
+        current.forEach { $0(paths) }
     }
 
-    func watch(_ roots: [URL], onChange: @escaping @Sendable () -> Void) -> any AgentWatchHandle {
+    func watch(_ roots: [URL], onChange: @escaping @Sendable ([String]) -> Void) -> any AgentWatchHandle {
         let id = UUID()
         lock.withLock {
             self.roots = roots

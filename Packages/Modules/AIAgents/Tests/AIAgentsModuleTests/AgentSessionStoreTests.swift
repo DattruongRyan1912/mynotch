@@ -397,6 +397,121 @@ import Testing
         #expect(store.todayUsage[.claude]?.tokens.output == 10)
     }
 
+    @Test func todayUsageCanBeReadAsOfAnotherTime() {
+        clock.now = utc("2026-10-14T16:50:00Z")
+        store.apply(event(.usageUpdated, usage: claudeUsage("late", output: 100)))
+        #expect(store.todayUsage(at: clock.now)[.claude]?.tokens.output == 100)
+        #expect(store.todayUsage(at: clock.now + 15 * 60).isEmpty)
+    }
+
+    // MARK: Usage when a session leaves and its transcript is read again
+
+    @Test func usageIsNotCountedAgainWhenASessionEndsAndItsTranscriptIsReadAgain() {
+        store.apply(event(.turnStarted, usage: claudeUsage("m1", output: 10)))
+        store.apply(event(.sessionEnded))
+        store.apply(event(.turnStarted, usage: claudeUsage("m1", output: 10)))
+        #expect(store.todayUsage[.claude]?.tokens.output == 10)
+        // The session itself starts again from what was read.
+        #expect(session()?.usage.output == 10)
+    }
+
+    @Test func usageIsNotCountedAgainWhenTheRegistryDropsASessionAndLaterListsItAgain() {
+        store.apply(event(.turnStarted, usage: claudeUsage("m1", output: 10)))
+        store.updateRegistry([registryEntry()])
+        store.updateRegistry([])
+        #expect(session() == nil)
+        store.apply(event(.turnStarted, usage: claudeUsage("m1", output: 10)))
+        store.apply(event(.usageUpdated, usage: claudeUsage("m2", output: 5)))
+        #expect(store.todayUsage[.claude]?.tokens.output == 15)
+    }
+
+    @Test func usageIsNotCountedAgainWhenASessionWasDroppedForInactivity() {
+        store.apply(event(.turnStarted, usage: claudeUsage("m1", output: 10)))
+        elapse(2 * 3600 + 10, step: 10)
+        #expect(session() == nil)
+        store.apply(event(.turnStarted, usage: claudeUsage("m1", output: 10)))
+        #expect(store.todayUsage[.claude]?.tokens.output == 10)
+    }
+
+    @Test func aCodexSessionThatLeavesKeepsItsRunningTotalForTheDay() {
+        func total(_ input: Int, fromStart: Bool = false) -> AgentUsage {
+            AgentUsage(input: input, model: "gpt-5-codex", isCumulative: true, startsFromZero: fromStart)
+        }
+        store.apply(event(.usageUpdated, .codex, usage: total(1_000, fromStart: true)))
+        store.apply(event(.sessionEnded, .codex))
+        // The rollout is small, so it is read from its first line again.
+        store.apply(event(.usageUpdated, .codex, usage: total(1_000, fromStart: true)))
+        #expect(store.todayUsage[.codex]?.tokens.input == 1_000)
+        store.apply(event(.usageUpdated, .codex, usage: total(1_400)))
+        #expect(store.todayUsage[.codex]?.tokens.input == 1_400)
+    }
+
+    @Test func theFirstCodexTotalAfterTheSessionWasDroppedCountsWhatItAdds() {
+        func total(_ input: Int, fromStart: Bool = false) -> AgentUsage {
+            AgentUsage(input: input, model: "gpt-5-codex", isCumulative: true, startsFromZero: fromStart)
+        }
+        store.apply(event(.usageUpdated, .codex, usage: total(1_000, fromStart: true)))
+        elapse(2 * 3600 + 10, step: 10)
+        #expect(session("s1", .codex) == nil)
+        // A long rollout is joined at its tail: its first total is only a starting point for a session never seen before.
+        store.apply(event(.usageUpdated, .codex, usage: total(1_700)))
+        #expect(store.todayUsage[.codex]?.tokens.input == 1_700)
+    }
+
+    @Test func aCodexRunningTotalSeenBeforeMidnightIsTheBaselineForWhatFollowsIt() {
+        func total(_ input: Int, fromStart: Bool = false) -> AgentUsage {
+            AgentUsage(input: input, model: "gpt-5-codex", isCumulative: true, startsFromZero: fromStart)
+        }
+        clock.now = utc("2026-10-14T16:50:00Z")
+        store.apply(event(.usageUpdated, .codex, usage: total(1_000, fromStart: true)))
+        store.apply(event(.sessionEnded, .codex))
+        clock.advance(by: 20 * 60)
+        store.apply(event(.usageUpdated, .codex, usage: total(1_300)))
+        #expect(store.todayUsage[.codex]?.tokens.input == 300)
+    }
+
+    // MARK: Usage without a timestamp
+
+    /// A record that has no timestamp: Claude's `cost-state` may not carry one.
+    func untimed(_ usage: AgentUsage? = nil, costUSD: Double? = nil, id: String = "s1") -> AgentEvent {
+        AgentEvent(source: .claude, sessionID: id, timestamp: nil, kind: .usageUpdated, usage: usage, costUSD: costUSD)
+    }
+
+    @Test func aCostStateWithoutATimestampDoesNotBringASessionBack() {
+        store.apply(untimed(costUSD: 3))
+        #expect(session() == nil)
+        store.apply(untimed(claudeUsage("m1", output: 5)))
+        #expect(session() == nil)
+        #expect(store.sessions.isEmpty)
+        // Its tokens still belong to today.
+        #expect(store.todayUsage[.claude]?.tokens.output == 5)
+    }
+
+    @Test func aCostStateWithoutATimestampDoesNotKeepASilentSessionAlive() {
+        store.apply(event(.turnStarted))
+        store.updateRegistry([registryEntry(status: .idle)])
+        elapse(60)
+        store.apply(untimed(costUSD: 2))
+        #expect(session()?.lastEventAt == clock.now - 60)
+        elapse(30)
+        #expect(state() == .idle)
+    }
+
+    @Test func aCostStateWithoutATimestampStillRecordsTheCostOfALiveSession() {
+        store.apply(event(.turnStarted))
+        store.apply(untimed(costUSD: 2))
+        store.apply(untimed(claudeUsage("m1", output: 7)))
+        #expect(session()?.costUSD ?? 0 > 2)
+        #expect(session()?.usage.output == 7)
+        #expect(state() == .working(tool: nil, summary: nil))
+    }
+
+    @Test func aTimedCostStateStillCountsAsActivity() {
+        store.apply(event(.turnStarted, age: 30))
+        store.apply(event(.usageUpdated, costUSD: 1, age: 5))
+        #expect(session()?.lastEventAt == clock.now - 5)
+    }
+
     @Test func todayIsObservable() {
         let changed = Flag()
         withObservationTracking {
@@ -531,6 +646,15 @@ import Testing
         store.removeSessions(of: .claude)
         #expect(session("a") == nil)
         #expect(session("b", .codex) != nil)
+    }
+
+    @Test func disablingASourceKeepsTodaysUsageSoTurningItOnAgainDoesNotCountItTwice() {
+        store.apply(event(.usageUpdated, .claude, id: "a", usage: claudeUsage("m1", output: 40)))
+        store.removeSessions(of: .claude)
+        #expect(store.todayUsage[.claude]?.tokens.output == 40)
+        // Turned on again, the transcript's tail is read again.
+        store.apply(event(.usageUpdated, .claude, id: "a", usage: claudeUsage("m1", output: 40)))
+        #expect(store.todayUsage[.claude]?.tokens.output == 40)
     }
 
     @Test func theTimerStopsWhenNoSessionsAreLeft() {

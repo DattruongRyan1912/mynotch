@@ -2,13 +2,6 @@ import Foundation
 
 /// What one session has used, counted the way each agent reports it, and what it cost.
 nonisolated struct SessionUsage: Equatable, Sendable {
-    /// What a usage record added once repeats and running totals are accounted for.
-    nonisolated struct Counted: Equatable, Sendable {
-        var model: String
-        /// What this record adds to the day's usage, which can be less than it adds to the session.
-        let forToday: UsageTotals
-    }
-
     private nonisolated struct ReportedCost: Equatable, Sendable {
         var usd: Double
         /// The estimate when the agent reported, so only usage after it is estimated on top.
@@ -30,29 +23,23 @@ nonisolated struct SessionUsage: Equatable, Sendable {
     var rememberedMessageCount: Int { messages.count }
 
     /// Claude repeats a message's usage on each of its records and Codex reports running totals, so what a
-    /// record adds is its difference from what was counted before.
-    mutating func record(_ usage: AgentUsage) -> Counted {
+    /// record adds is its difference from what was counted before. The day's usage is counted apart, by `DayUsageLedger`.
+    mutating func record(_ usage: AgentUsage) {
         let totals = UsageTotals(usage)
         let added: UsageTotals
-        let forToday: UsageTotals
         if usage.isCumulative {
             let previous = runningTotal
             runningTotal = totals
             // Fewer tokens than before means the agent counts from zero again.
             added = previous.map { totals.isAtLeast($0) ? totals - $0 : totals } ?? totals
-            // A first total that may include earlier work must not be counted as today's.
-            forToday = previous == nil && !usage.startsFromZero ? UsageTotals() : added
         } else if let id = usage.messageID {
             if messages[id] == nil { remember(id) }
             added = totals - (messages.updateValue(totals, forKey: id) ?? UsageTotals())
-            forToday = added
         } else {
             added = totals
-            forToday = added
         }
         total += added
         byModel[usage.model ?? "", default: UsageTotals()] += added
-        return Counted(model: usage.model ?? "", forToday: forToday)
     }
 
     mutating func recordReportedCost(_ usd: Double) {

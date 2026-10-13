@@ -1,8 +1,15 @@
 import Foundation
 
+/// What the watcher needs from a tailer; a test can wrap the real one to count reads.
+nonisolated protocol LineTailing: AnyObject, Sendable {
+    var offset: UInt64 { get }
+    var hasMoreToRead: Bool { get }
+    func readNewLines(maxBytes: Int) throws -> [String]
+}
+
 /// Reads the lines appended to a JSONL file since the previous read, so a transcript that grows while an agent
 /// works is parsed once. Not bound to the main actor: the watcher reads from a background queue.
-nonisolated final class JSONLTailer: @unchecked Sendable {
+nonisolated final class JSONLTailer: LineTailing, @unchecked Sendable {
     private struct FileIdentity: Equatable {
         var device: dev_t
         var inode: ino_t

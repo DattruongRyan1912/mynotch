@@ -46,7 +46,11 @@ final class AgentSessionStore {
     /// Per agent, from events since local midnight. Only what MyNotch has read counts: a transcript found at
     /// launch is read from its last 64 KB, so right after a restart the figures start low.
     var todayUsage: [AgentSource: AgentDayUsage] {
-        dayUsage.usage(now: clock(), calendar: calendar)
+        todayUsage(at: clock())
+    }
+
+    func todayUsage(at now: Date) -> [AgentSource: AgentDayUsage] {
+        dayUsage.usage(now: now, calendar: calendar)
     }
 
     func apply(_ event: AgentEvent) {
@@ -111,18 +115,34 @@ final class AgentSessionStore {
             return
         }
         let at = min(event.timestamp ?? now, now)
+        // A usage record without a timestamp (a `cost-state` may have none) says nothing about when the agent was
+        // last active: it must not revive a session that went quiet, nor bring back one that was dropped. Its
+        // tokens still count for today.
+        let isUntimed = event.kind == .usageUpdated && event.timestamp == nil
+        if isUntimed, sessions[key] == nil {
+            if let usage = event.usage { countToday(usage, of: event, at: at, now: now) }
+            return
+        }
         let previous = sessions[key]?.state
         var session = sessions[key] ?? AgentSession(key: key, lastEventAt: at)
-        session.lastEventAt = max(session.lastEventAt, at)
-        updateState(of: &session, from: previous, for: event.kind, at: at, now: now)
+        if !isUntimed {
+            session.lastEventAt = max(session.lastEventAt, at)
+            updateState(of: &session, from: previous, for: event.kind, at: at, now: now)
+        }
         if let usage = event.usage {
-            let counted = session.ledger.record(usage)
-            dayUsage.add(counted.forToday, model: counted.model, source: event.source, at: at, now: now, calendar: calendar)
+            session.ledger.record(usage)
+            countToday(usage, of: event, at: at, now: now)
         }
         if let costUSD = event.costUSD { session.ledger.recordReportedCost(costUSD) }
         if let rateLimits = event.rateLimits { session.rateLimits = rateLimits }
         sessions[key] = session
-        updateFinishTimer(for: key, from: previous, to: session.state, remaining: TimeInterval(finishedSeconds) - now.timeIntervalSince(at))
+        if !isUntimed {
+            updateFinishTimer(for: key, from: previous, to: session.state, remaining: TimeInterval(finishedSeconds) - now.timeIntervalSince(at))
+        }
+    }
+
+    private func countToday(_ usage: AgentUsage, of event: AgentEvent, at: Date, now: Date) {
+        dayUsage.record(usage, source: event.source, sessionID: event.sessionID, at: at, now: now, calendar: calendar)
     }
 
     private func updateState(of session: inout AgentSession, from previous: AgentState?, for kind: AgentEvent.Kind, at: Date, now: Date) {
