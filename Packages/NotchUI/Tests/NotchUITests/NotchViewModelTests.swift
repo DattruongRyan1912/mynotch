@@ -105,4 +105,67 @@ import Testing
         scheduler.advance(by: .milliseconds(300))
         #expect(model.state == .closed)
     }
+
+    @Test func clickingAToastOpensTheTabs() {
+        let model = makeModel()
+        model.showToast(AnyView(EmptyView()), duration: .seconds(5))
+        model.click()
+        #expect(model.state == .open("battery"))
+    }
+
+    @Test func passingOverAToastDoesNotCutItShort() {
+        let model = makeModel()
+        model.showToast(AnyView(EmptyView()), duration: .seconds(5))
+        model.pointerEntered()
+        model.pointerExited()
+        scheduler.advance(by: .seconds(1))
+        #expect(model.state == .toast)
+        scheduler.advance(by: .seconds(4))
+        #expect(model.state == .closed)
+    }
+
+    @Test func toastSurvivesPendingHoverOpenAndStaysWhileInsideOrPinned() {
+        let model = makeModel()
+        model.pointerEntered()
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        scheduler.advance(by: .seconds(3))
+        #expect(model.state == .toast)
+
+        let pinned = makeModel()
+        pinned.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        pinned.isPinned = true
+        scheduler.advance(by: .seconds(3))
+        #expect(pinned.state == .toast)
+    }
+
+    @Test func repeatedPinAndDragSettersHaveNoSideEffects() {
+        let model = makeModel()
+        model.toggle()
+        model.setDragging(false)
+        model.isPinned = false
+        scheduler.advance(by: .seconds(1))
+        #expect(model.state.isExpanded)
+    }
+
+    @Test func tabResolutionPrefersRequestedThenLastThenFirst() {
+        var tabs: [ModuleID] = ["battery", "clipboard"]
+        let model = NotchViewModel(scheduler: scheduler, availableTabs: { tabs }, delays: { (.milliseconds(150), .milliseconds(300)) })
+        model.open(tab: "clipboard")
+        model.open(tab: "missing")
+        #expect(model.state == .open("clipboard"))
+        tabs = []
+        model.open(tab: nil)
+        #expect(model.state == .open(nil))
+    }
+
+    @Test func closeClearsPinAndToggleClosesAToast() {
+        let model = makeModel()
+        model.click()
+        model.isPinned = true
+        model.close()
+        #expect(!model.isPinned)
+        model.showToast(AnyView(EmptyView()), duration: .seconds(5))
+        model.toggle()
+        #expect(model.state == .closed)
+    }
 }

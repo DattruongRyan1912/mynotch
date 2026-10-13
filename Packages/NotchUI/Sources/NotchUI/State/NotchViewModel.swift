@@ -11,8 +11,12 @@ public final class NotchViewModel {
     public private(set) var isPointerInside = false
     /// Set by the owner when the activity center has something to show.
     public var hasActivity = false
+    /// Keeps the notch open until unpinned or explicitly closed.
     public var isPinned = false {
-        didSet { isPinned ? pendingClose?.cancel() : scheduleCloseIfPointerOutside() }
+        didSet {
+            guard isPinned != oldValue else { return }
+            isPinned ? pendingClose?.cancel() : scheduleCloseIfPointerOutside()
+        }
     }
     public private(set) var isDragging = false
 
@@ -26,6 +30,9 @@ public final class NotchViewModel {
     @ObservationIgnored private let delays: () -> (open: Duration, close: Duration)
     @ObservationIgnored private var pendingOpen: ScheduledAction?
     @ObservationIgnored private var pendingClose: ScheduledAction?
+    @ObservationIgnored private var toastTimer: ScheduledAction?
+    /// A toast is shown for at least its duration; only after that may a pointer exit close it.
+    @ObservationIgnored private var toastExpired = true
 
     public init(
         scheduler: any Scheduler,
@@ -54,8 +61,10 @@ public final class NotchViewModel {
         scheduleCloseIfPointerOutside()
     }
 
+    /// Opens the tabs from the closed, compact or toast state.
     public func click() {
-        if !state.isExpanded { open(tab: nil) }
+        if case .open = state { return }
+        open(tab: nil)
     }
 
     public func toggle() {
@@ -67,6 +76,8 @@ public final class NotchViewModel {
         pendingOpen?.cancel()
         pendingOpen = nil
         pendingClose?.cancel()
+        toastTimer?.cancel()
+        toastExpired = true
         let tabs = availableTabs()
         let resolved = [tab, lastTab].compactMap { $0 }.first(where: tabs.contains) ?? tabs.first
         lastTab = resolved ?? lastTab
@@ -75,11 +86,17 @@ public final class NotchViewModel {
     }
 
     public func showToast(_ content: AnyView, duration: Duration) {
+        pendingOpen?.cancel()
+        pendingOpen = nil
         pendingClose?.cancel()
+        toastTimer?.cancel()
         toastContent = content
+        toastExpired = false
         state = .toast
-        pendingClose = scheduler.schedule(after: duration) { [weak self] in
-            guard let self, !self.isPointerInside, !self.isPinned else { return }
+        toastTimer = scheduler.schedule(after: duration) { [weak self] in
+            guard let self else { return }
+            self.toastExpired = true
+            guard !self.isPointerInside, !self.isPinned else { return }
             self.close()
         }
     }
@@ -88,17 +105,21 @@ public final class NotchViewModel {
         pendingOpen?.cancel()
         pendingOpen = nil
         pendingClose?.cancel()
+        toastTimer?.cancel()
+        toastExpired = true
         toastContent = nil
         state = .closed
+        isPinned = false
     }
 
     public func setDragging(_ dragging: Bool) {
+        guard dragging != isDragging else { return }
         isDragging = dragging
         dragging ? pendingClose?.cancel() : scheduleCloseIfPointerOutside()
     }
 
     private func scheduleCloseIfPointerOutside() {
-        guard state.isExpanded, !isPointerInside, !isPinned, !isDragging else { return }
+        guard state.isExpanded, !isPointerInside, !isPinned, !isDragging, state != .toast || toastExpired else { return }
         pendingClose?.cancel()
         pendingClose = scheduler.schedule(after: delays().close) { [weak self] in
             self?.close()
