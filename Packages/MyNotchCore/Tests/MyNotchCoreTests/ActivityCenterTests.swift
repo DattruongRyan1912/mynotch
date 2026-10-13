@@ -1,6 +1,17 @@
+import Observation
 import Testing
 @testable import MyNotchCore
 import MyNotchTestSupport
+
+/// Ignores cancellation, standing in for a timer that fires even though a later `set` rescheduled it.
+final class UncancellableScheduler: Scheduler {
+    let base = ManualScheduler()
+
+    func schedule(after delay: Duration, _ action: @escaping @MainActor () -> Void) -> ScheduledAction {
+        base.schedule(after: delay, action)
+        return ScheduledAction()
+    }
+}
 
 @Suite struct ActivityCenterTests {
     @Test func highestPriorityWinsThenMostRecent() {
@@ -36,6 +47,88 @@ import MyNotchTestSupport
         #expect(center.current == nil)
     }
 
+    @Test func updatingWithoutExpiryStopsExpiring() {
+        let scheduler = ManualScheduler()
+        let center = ActivityCenter(scheduler: scheduler)
+        center.set(activity("x", expiresAfter: .seconds(4)), from: "m")
+        center.set(activity("x"), from: "m")
+        scheduler.advance(by: .seconds(60))
+        #expect(center.current?.id == "m/x")
+        #expect(scheduler.pendingCount == 0)
+    }
+
+    @Test func staleExpiryDoesNotRemoveAnUpdatedActivity() {
+        let scheduler = UncancellableScheduler()
+        let center = ActivityCenter(scheduler: scheduler)
+        center.set(activity("x", expiresAfter: .seconds(4)), from: "m")
+        scheduler.base.advance(by: .seconds(3))
+        center.set(activity("x", expiresAfter: .seconds(4)), from: "m")
+        scheduler.base.advance(by: .seconds(1))
+        #expect(center.current?.id == "m/x")
+        scheduler.base.advance(by: .seconds(3))
+        #expect(center.current == nil)
+    }
+
+    @Test func updatingKeepsPositionAmongSamePriority() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        center.set(activity("a"), from: "m")
+        center.set(activity("b"), from: "m")
+        center.set(activity("a"), from: "m")
+        #expect(center.current?.id == "m/b")
+        center.set(activity("b"), from: "m")
+        center.set(activity("a"), from: "m")
+        #expect(center.current?.id == "m/b")
+        #expect(center.entries.map(\.id) == ["m/a", "m/b"])
+    }
+
+    @Test func updatingTheCurrentActivityNotifiesButKeepsItsPosition() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        center.set(activity("a"), from: "m")
+        center.set(activity("b"), from: "m")
+        nonisolated(unsafe) var changes = 0
+        withObservationTracking { _ = center.current } onChange: { changes += 1 }
+        center.set(activity("b"), from: "m")
+        #expect(changes == 1)
+        #expect(center.current?.id == "m/b")
+        #expect(center.entries.map(\.id) == ["m/a", "m/b"])
+    }
+
+    @Test func priorityStillDominatesUpdates() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        center.set(activity("a"), from: "m")
+        center.set(activity("b"), from: "m")
+        center.set(activity("a", .high), from: "m")
+        #expect(center.current?.id == "m/a")
+        center.set(activity("a"), from: "m")
+        #expect(center.current?.id == "m/b")
+    }
+
+    @Test func raiseWinsTiesAtItsPriority() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        center.set(activity("a"), from: "m")
+        center.set(activity("b"), from: "m")
+        center.raise(id: "a", from: "m")
+        #expect(center.current?.id == "m/a")
+        center.raise(id: "missing", from: "m")
+        center.raise(id: "b", from: "other")
+        #expect(center.current?.id == "m/a")
+        #expect(center.entries.map(\.id) == ["m/a", "m/b"])
+        center.set(activity("c", .high), from: "m")
+        center.raise(id: "b", from: "m")
+        #expect(center.current?.id == "m/c")
+    }
+
+    @Test func clearingANonCurrentEntryDoesNotNotify() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        center.set(activity("a"), from: "m")
+        center.set(activity("b", .high), from: "m")
+        nonisolated(unsafe) var changes = 0
+        withObservationTracking { _ = center.current } onChange: { changes += 1 }
+        center.clear(id: "a", from: "m")
+        #expect(changes == 0)
+        #expect(center.current?.id == "m/b")
+    }
+
     @Test func clearAllRemovesOnlyThatModule() {
         let scheduler = ManualScheduler()
         let center = ActivityCenter(scheduler: scheduler)
@@ -66,5 +159,19 @@ import MyNotchTestSupport
         #expect(center.current == nil)
         publisher.set(activity("late"))
         #expect(center.current == nil)
+    }
+
+    @Test func publisherRaiseIsInertAfterInvalidate() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        let publisher = ActivityPublisher(center: center, module: "m")
+        publisher.set(activity("a"))
+        publisher.set(activity("b"))
+        publisher.raise(id: "a")
+        #expect(center.current?.id == "m/a")
+        publisher.invalidate()
+        center.set(activity("a"), from: "m")
+        center.set(activity("b"), from: "m")
+        publisher.raise(id: "a")
+        #expect(center.current?.id == "m/b")
     }
 }
