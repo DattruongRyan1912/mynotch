@@ -24,6 +24,9 @@ public final class NotchViewModel {
     /// The open tab a toast covers; the toast returns to it instead of closing the notch, and the view keeps
     /// it alive underneath so its state (search text, focus, scroll position) survives the toast.
     public private(set) var tabUnderToast: ModuleID?
+    /// True when a click, the shortcut, the tab bar or a module opened the notch rather than hovering. Only then
+    /// does a keyboard tab take the keyboard by itself.
+    public private(set) var isOpenedOnPurpose = false
 
     /// What the view should render: `closed` becomes `compact` while an activity is live.
     public var displayState: NotchState {
@@ -55,7 +58,7 @@ public final class NotchViewModel {
         guard !state.isExpanded, pendingOpen == nil else { return }
         pendingOpen = scheduler.schedule(after: delays().open) { [weak self] in
             self?.pendingOpen = nil
-            self?.open(tab: nil)
+            self?.show(tab: nil, onPurpose: false)
         }
     }
 
@@ -76,8 +79,12 @@ public final class NotchViewModel {
         state.isExpanded ? close() : open(tab: nil)
     }
 
-    /// Opens `tab`, or the last used tab, or the first available one.
+    /// Opens `tab`, or the last used tab, or the first available one, as an on-purpose open.
     public func open(tab: ModuleID?) {
+        show(tab: tab, onPurpose: true)
+    }
+
+    private func show(tab: ModuleID?, onPurpose: Bool) {
         pendingOpen?.cancel()
         pendingOpen = nil
         pendingClose?.cancel()
@@ -88,6 +95,7 @@ public final class NotchViewModel {
         let resolved = [tab, lastTab].compactMap { $0 }.first(where: tabs.contains) ?? tabs.first
         lastTab = resolved ?? lastTab
         toastContent = nil
+        isOpenedOnPurpose = onPurpose
         state = .open(resolved)
     }
 
@@ -125,6 +133,7 @@ public final class NotchViewModel {
         tabUnderToast = nil
         toastContent = nil
         state = .closed
+        isOpenedOnPurpose = false
         isPinned = false
     }
 
@@ -138,7 +147,7 @@ public final class NotchViewModel {
         toastExpired = true
         if let covered = tabUnderToast {
             // Resolved like any open, so a tab whose module stopped meanwhile falls back to another one.
-            open(tab: covered)
+            show(tab: covered, onPurpose: isOpenedOnPurpose)
             scheduleCloseIfPointerOutside()
         } else if !isPointerInside, !isPinned, !isDragging {
             close()

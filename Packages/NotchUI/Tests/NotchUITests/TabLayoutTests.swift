@@ -23,9 +23,16 @@ private final class TabModule: FeatureModule {
     @Test func contentHeightFollowsTheOpenTab() async {
         let harness = RegistryHarness([TabModule("tall", height: 280)])
         await harness.registry.bootstrap()
-        #expect(harness.registry.contentHeight(for: .open("tall")) == 280)
-        #expect(harness.registry.contentHeight(for: .open("missing")) == NotchTab.defaultHeight)
-        #expect(harness.registry.contentHeight(for: .closed) == NotchTab.defaultHeight)
+        #expect(harness.registry.contentHeight(for: .open("tall"), tabUnderToast: nil) == 280)
+        #expect(harness.registry.contentHeight(for: .open("missing"), tabUnderToast: nil) == NotchTab.defaultHeight)
+        #expect(harness.registry.contentHeight(for: .closed, tabUnderToast: nil) == NotchTab.defaultHeight)
+    }
+
+    @Test func aToastKeepsTheHeightOfTheTabItCovers() async {
+        let harness = RegistryHarness([TabModule("tall", height: 280)])
+        await harness.registry.bootstrap()
+        #expect(harness.registry.contentHeight(for: .toast, tabUnderToast: "tall") == 280)
+        #expect(harness.registry.contentHeight(for: .toast, tabUnderToast: nil) == NotchTab.defaultHeight)
     }
 
     @Test func shapeStaysInsideItsRectForShortRects() {

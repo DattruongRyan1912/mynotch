@@ -14,6 +14,8 @@ final class NotchWindowController {
     private let registry: ModuleRegistry
     private let activities: ActivityCenter
     private var observation: Task<Void, Never>?
+    /// Last keyboard focus decision; the panel makes itself key only when it turns true.
+    private var lastFocus = false
 
     init(
         displayID: CGDirectDisplayID,
@@ -63,6 +65,7 @@ final class NotchWindowController {
             if model.isPointerInside { model.pointerExited() }
             model.close()
             panel.allowsKeyStatus = false
+            lastFocus = false
             panel.ignoresMouseEvents = true
             panel.orderOut(nil)
         }
@@ -101,45 +104,54 @@ final class NotchWindowController {
 
     private func currentHitRect() -> CGRect {
         let state = model.displayState
-        return geometry.hitRect(for: state, contentHeight: registry.contentHeight(for: state), in: screenFrame)
+        let contentHeight = registry.contentHeight(for: state, tabUnderToast: model.tabUnderToast)
+        return geometry.hitRect(for: state, contentHeight: contentHeight, in: screenFrame)
     }
 
-    /// Gives the panel the keyboard while an open tab accepts it, and hands it back to the app in front otherwise.
-    /// The panel is non-activating, so MyNotch never becomes the active app.
-    private func setTakesKeyboard(_ takesKeyboard: Bool) {
-        guard takesKeyboard != panel.allowsKeyStatus else { return }
-        panel.allowsKeyStatus = takesKeyboard
-        if takesKeyboard {
-            // An ordered-out panel must not take the keyboard where nobody can see it.
-            if isVisible { panel.makeKey() }
-        } else if isVisible, panel.isKeyWindow {
-            // Ordering out returns key status to the app in front; ordering back in leaves it there.
-            panel.orderOut(nil)
-            panel.orderFrontRegardless()
+    /// The panel may become key while the shown tab accepts the keyboard, and hands the keyboard back to the app in
+    /// front otherwise; it is non-activating, so MyNotch never becomes the active app. It makes itself key only when
+    /// focus starts being wanted, never on later updates, so a pinned notch does not grab the keyboard back after
+    /// the user clicked another app.
+    private func updateKeyboard(wants: Bool, focuses: Bool) {
+        if wants != panel.allowsKeyStatus {
+            panel.allowsKeyStatus = wants
+            if !wants, isVisible, panel.isKeyWindow {
+                // Ordering out returns key status to the app in front; ordering back in leaves it there.
+                panel.orderOut(nil)
+                panel.orderFrontRegardless()
+            }
         }
+        // An ordered-out panel must not take the keyboard where nobody can see it.
+        if focuses, !lastFocus, isVisible { panel.makeKey() }
+        lastFocus = focuses
     }
 
-    /// The user moved the keyboard elsewhere (another app or another MyNotch window), so the notch closes unless
-    /// pinned. Resigning because the keyboard is no longer wanted (tab switch, toast, close) changes nothing.
+    /// The user moved the keyboard elsewhere (another app or another MyNotch window): treated like a click outside,
+    /// so pinned and dragging notches stay open. Resigning because the keyboard is no longer wanted changes nothing.
     private func panelDidResignKey() {
-        guard panel.allowsKeyStatus, model.state.isExpanded, !model.isPinned else { return }
-        model.close()
+        guard panel.allowsKeyStatus else { return }
+        model.clickedOutside()
     }
 
     private func observe() {
         observation = Task { [weak self, activities, registry, model] in
-            for await (hasActivity, _, _, wantsKeyboard) in Observations({
-                (
+            for await (hasActivity, _, _, wantsKeyboard, focusesKeyboard) in Observations({
+                let state = model.displayState
+                let covered = model.tabUnderToast
+                return (
                     activities.current != nil,
-                    model.displayState,
-                    registry.contentHeight(for: model.displayState),
-                    NotchKeyboardPolicy.wantsKeyboard(state: model.displayState, tabs: registry.tabs)
+                    state,
+                    registry.contentHeight(for: state, tabUnderToast: covered),
+                    NotchKeyboardPolicy.wantsKeyboard(state: state, tabUnderToast: covered, tabs: registry.tabs),
+                    NotchKeyboardPolicy.focusesKeyboard(
+                        state: state, tabUnderToast: covered, tabs: registry.tabs, onPurpose: model.isOpenedOnPurpose
+                    )
                 )
             }) {
                 guard let self else { return }
                 self.model.hasActivity = hasActivity
                 self.refreshHitTesting()
-                self.setTakesKeyboard(wantsKeyboard)
+                self.updateKeyboard(wants: wantsKeyboard, focuses: focusesKeyboard)
             }
         }
     }

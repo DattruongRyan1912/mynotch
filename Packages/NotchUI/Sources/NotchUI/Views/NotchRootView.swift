@@ -12,16 +12,11 @@ struct NotchRootView: View {
 
     /// The open tab, or the tab a toast covers.
     private var shownTab: NotchTab? {
-        let id: ModuleID? = switch state {
-        case .open(let id): id
-        case .toast: model.tabUnderToast
-        case .closed, .compact: nil
-        }
-        guard let id else { return nil }
+        guard let id = state.shownTab(tabUnderToast: model.tabUnderToast) else { return nil }
         return registry.tabs.first { $0.id == id }
     }
 
-    private var contentHeight: CGFloat { registry.contentHeight(for: state) }
+    private var contentHeight: CGFloat { registry.contentHeight(for: state, tabUnderToast: model.tabUnderToast) }
 
     private var isOpen: Bool {
         if case .open = state { true } else { false }
@@ -87,7 +82,11 @@ struct NotchRootView: View {
                     .padding(.bottom, 6)
             }
             if let shownTab {
-                shownTab.content.frame(maxWidth: .infinity, maxHeight: .infinity).id(shownTab.id)
+                shownTab.content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Esc while the tab has focus; the panel's cancelOperation covers the rest.
+                    .onExitCommand { model.close() }
+                    .id(shownTab.id)
             } else {
                 Text("Chưa có module nào đang chạy")
                     .foregroundStyle(NotchTokens.secondaryText)

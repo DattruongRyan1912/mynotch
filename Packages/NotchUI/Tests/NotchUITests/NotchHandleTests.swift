@@ -30,6 +30,13 @@ import Testing
         handle.close()
     }
 
+    @Test func handlesAreEqualWhenTheyControlTheSameNotch() {
+        let model = makeModel()
+        #expect(NotchHandle(model: model) == NotchHandle(model: model))
+        #expect(NotchHandle(model: model) != NotchHandle(model: makeModel()))
+        #expect(NotchHandle() == EnvironmentValues().notch)
+    }
+
     @Test func handleDoesNotKeepItsNotchAlive() {
         var handle = NotchHandle()
         weak var released: NotchViewModel?

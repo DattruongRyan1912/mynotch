@@ -282,6 +282,42 @@ import Testing
         #expect(model.tabUnderToast == nil)
     }
 
+    @Test func hoverOpensWithoutPurposeAndExplicitOpensSetIt() {
+        let model = makeModel()
+        model.pointerEntered()
+        scheduler.advance(by: .milliseconds(150))
+        #expect(model.state == .open("battery"))
+        #expect(!model.isOpenedOnPurpose)
+        model.open(tab: "clipboard")
+        #expect(model.isOpenedOnPurpose)
+        model.close()
+        #expect(!model.isOpenedOnPurpose)
+
+        model.click()
+        #expect(model.isOpenedOnPurpose)
+        model.toggle()
+        #expect(!model.isOpenedOnPurpose)
+        model.toggle()
+        #expect(model.isOpenedOnPurpose)
+    }
+
+    @Test func toastExpiryKeepsHowTheCoveredTabWasOpened() {
+        let model = makeModel()
+        model.open(tab: "clipboard")
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        scheduler.advance(by: .seconds(2))
+        #expect(model.state == .open("clipboard"))
+        #expect(model.isOpenedOnPurpose)
+
+        let hovered = makeModel()
+        hovered.pointerEntered()
+        scheduler.advance(by: .milliseconds(150))
+        hovered.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        scheduler.advance(by: .seconds(2))
+        #expect(hovered.state == .open("battery"))
+        #expect(!hovered.isOpenedOnPurpose)
+    }
+
     @Test func closingDuringAToastOverATabForgetsTheTab() {
         let model = makeModel()
         model.open(tab: "clipboard")
