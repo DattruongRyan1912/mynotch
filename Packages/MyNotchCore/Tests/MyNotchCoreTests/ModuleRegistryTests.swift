@@ -73,4 +73,26 @@ import MyNotchTestSupport
         await harness.registry.resumeAll()
         #expect(harness.registry.state(of: "m") == .running)
     }
+
+    @Test func retryOfFailedModuleDoesNotCallStop() async {
+        let module = FakeModule("m")
+        module.startError = .failed(reason: "boom")
+        let harness = Harness([module])
+        await harness.registry.bootstrap()
+        module.startError = nil
+        await harness.registry.retry("m")
+        #expect(harness.registry.state(of: "m") == .running)
+        #expect(module.stopCount == 0)
+    }
+
+    @Test func tabsFollowDescriptorOrder() async {
+        let late = FakeModule("late", order: 2)
+        let early = FakeModule("early", order: 1)
+        let harness = Harness([late, early])
+        await harness.registry.bootstrap()
+        #expect(harness.registry.tabs.map(\.id) == ["early", "late"])
+        await harness.registry.setEnabled(false, for: "early")
+        await harness.registry.setEnabled(true, for: "early")
+        #expect(harness.registry.tabs.map(\.id) == ["early", "late"])
+    }
 }
