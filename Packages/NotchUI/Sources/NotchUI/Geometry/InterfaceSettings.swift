@@ -1,0 +1,45 @@
+import CoreGraphics
+import MyNotchCore
+
+nonisolated public enum DisplayMode: String, Codable, Sendable, CaseIterable {
+    case all, main, cursor
+}
+
+/// Global interface settings (`interface.*`).
+public enum InterfaceSettings {
+    public static let displayMode = SettingKey("interface.displayMode", default: DisplayMode.all)
+    public static let virtualNotchWidth = SettingKey("interface.virtualNotchWidth", default: 185.0, clampedTo: 120...300)
+    /// 0 means "same as the menu bar".
+    public static let virtualNotchHeight = SettingKey("interface.virtualNotchHeight", default: 0.0, clampedTo: 0...40)
+    public static let openWidth = SettingKey("interface.openWidth", default: 600.0, clampedTo: 480...720)
+    public static let openDelayMs = SettingKey("interface.openDelayMs", default: 150, clampedTo: 0...1000)
+    public static let closeDelayMs = SettingKey("interface.closeDelayMs", default: 300, clampedTo: 0...1000)
+    public static let hideInFullscreen = SettingKey("interface.hideInFullscreen", default: true)
+}
+
+/// Geometry inputs read from settings.
+nonisolated public struct NotchLayoutConfig: Equatable, Sendable {
+    public var virtualNotchWidth: CGFloat = 185
+    /// nil = menu bar height.
+    public var virtualNotchHeight: CGFloat?
+    public var compactSideWidth: CGFloat = 64
+    public var openWidth: CGFloat = 600
+
+    public init(virtualNotchWidth: CGFloat = 185, virtualNotchHeight: CGFloat? = nil, compactSideWidth: CGFloat = 64, openWidth: CGFloat = 600) {
+        self.virtualNotchWidth = virtualNotchWidth
+        self.virtualNotchHeight = virtualNotchHeight
+        self.compactSideWidth = compactSideWidth
+        self.openWidth = openWidth
+    }
+}
+
+extension NotchLayoutConfig {
+    public init(settings: SettingsStore) {
+        let height = settings.value(InterfaceSettings.virtualNotchHeight)
+        self.init(
+            virtualNotchWidth: settings.value(InterfaceSettings.virtualNotchWidth),
+            virtualNotchHeight: height == 0 ? nil : max(height, 24),
+            openWidth: settings.value(InterfaceSettings.openWidth)
+        )
+    }
+}
