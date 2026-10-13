@@ -14,7 +14,7 @@ final class CaptureStore {
 
     /// Newest first. Read from disk on first use, so changes never overwrite an index that was not loaded;
     /// only `load()` deletes unlisted PNGs, so a capture being written is never mistaken for one.
-    private(set) lazy var records: [CaptureRecord] = readIndex() ?? []
+    private(set) lazy var records: [CaptureRecord] = readIndex() ?? rebuildIndex()
 
     private let capturesDirectory: URL
     private let thumbnailsDirectory: URL
@@ -28,11 +28,11 @@ final class CaptureStore {
     }
 
     /// Re-reads the index, skipping malformed records and records whose PNG is gone, and deletes top-level PNGs
-    /// it does not list. An unreadable index is set aside and nothing is deleted, since it lists no capture.
+    /// it does not list. An unreadable index is set aside and rebuilt from the PNGs, and nothing is deleted.
     @discardableResult
     func load() -> [CaptureRecord] {
         guard let listedRecords = readIndex() else {
-            records = []
+            records = rebuildIndex()
             return records
         }
         records = listedRecords
@@ -183,6 +183,34 @@ final class CaptureStore {
         } catch let moveError {
             logger.error("Unreadable capture index (\(error, privacy: .public)) could not be moved: \(moveError, privacy: .public)")
         }
+    }
+
+    /// Recovers the captures from the top-level `<uuid>.png` files that are readable images, and saves them as
+    /// the new index. Dates come from the files, so they are approximate.
+    private func rebuildIndex() -> [CaptureRecord] {
+        let keys: Set<URLResourceKey> = [.creationDateKey, .contentModificationDateKey]
+        let files = (try? FileManager.default.contentsOfDirectory(at: capturesDirectory, includingPropertiesForKeys: Array(keys))) ?? []
+        let records = files.compactMap { file -> CaptureRecord? in
+            guard file.pathExtension == "png",
+                  let id = UUID(uuidString: file.deletingPathExtension().lastPathComponent),
+                  let source = CGImageSourceCreateWithURL(file as CFURL, nil),
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let width = properties[kCGImagePropertyPixelWidth] as? Int,
+                  let height = properties[kCGImagePropertyPixelHeight] as? Int else { return nil }
+            let dates = try? file.resourceValues(forKeys: keys)
+            return CaptureRecord(
+                id: id, fileName: file.lastPathComponent,
+                createdAt: dates?.creationDate ?? dates?.contentModificationDate ?? .now,
+                pixelWidth: width, pixelHeight: height,
+                hasMarkup: FileManager.default.fileExists(atPath: originalURL(for: id).path(percentEncoded: false))
+            )
+        }.sorted { $0.createdAt > $1.createdAt }
+        do {
+            try save(records)
+        } catch {
+            logger.error("Could not save the rebuilt capture index: \(error, privacy: .public)")
+        }
+        return records
     }
 
     private func save(_ records: [CaptureRecord]) throws {

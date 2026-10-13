@@ -149,15 +149,42 @@ import Testing
 
         for contents in ["{ not json", "{\"records\": []}"] {
             try writeIndex(contents)
-            #expect(makeStore().load().isEmpty)
+            #expect(makeStore().load().map(\.id) == [record.id])
         }
 
         let files = fileNames(in: capturesDirectory)
         let setAside = files.filter { $0.wholeMatch(of: corruptName) != nil }
         #expect(setAside.count == 2)
-        #expect(files.subtracting(setAside) == [record.fileName])
+        #expect(files.subtracting(setAside) == ["captures.json", record.fileName])
         let contents = try setAside.map { try String(contentsOf: capturesDirectory.appending(path: $0), encoding: .utf8) }
         #expect(Set(contents) == ["{ not json", "{\"records\": []}"])
+    }
+
+    @Test func unreadableIndexIsRebuiltFromTheCaptureFiles() throws {
+        let store = makeStore()
+        let older = try store.add(Self.image(width: 40, height: 30), keepCount: 30)
+        let newer = try store.add(Self.image(width: 20, height: 50), keepCount: 30)
+        try writeMarkupFiles(for: older.id, in: store)
+        let now = Date.now
+        for (record, age) in [(older, 120.0), (newer, 60.0)] {
+            let path = capturesDirectory.appending(path: record.fileName).path(percentEncoded: false)
+            try FileManager.default.setAttributes([.creationDate: now.addingTimeInterval(-age)], ofItemAtPath: path)
+        }
+        let unreadable = "\(UUID().uuidString).png"
+        try Data("not an image".utf8).write(to: capturesDirectory.appending(path: unreadable))
+        try Self.pngData(Self.image(width: 10, height: 10)).write(to: capturesDirectory.appending(path: "Screenshot.png"))
+        try writeIndex("{ not json")
+
+        let rebuilt = makeStore().load()
+
+        #expect(rebuilt.map(\.id) == [newer.id, older.id])
+        #expect(rebuilt.map(\.fileName) == [newer.fileName, older.fileName])
+        #expect(rebuilt.map { [$0.pixelWidth, $0.pixelHeight] } == [[20, 50], [40, 30]])
+        #expect(rebuilt.map(\.hasMarkup) == [false, true])
+        #expect(abs(try #require(rebuilt.last).createdAt.timeIntervalSince(now.addingTimeInterval(-120))) < 1)
+        let index = try JSONDecoder().decode([CaptureRecord].self, from: Data(contentsOf: capturesDirectory.appending(path: "captures.json")))
+        #expect(index == rebuilt)
+        #expect(makeStore().load() == rebuilt)
     }
 
     @Test func markupFilesLiveInSubfoldersOfCaptures() throws {
