@@ -284,7 +284,9 @@ public final class MediaModule: FeatureModule {
                 guard let self, lyricsEpoch == epoch else { return }
                 fetchLyrics(for: track, mayRetry: false)
             }
-        case .plain, .instrumental, .notFound:
+        case .plain:
+            store.showUnsyncedLyrics()
+        case .instrumental, .notFound:
             break
         }
     }

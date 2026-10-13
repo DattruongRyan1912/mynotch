@@ -4,14 +4,27 @@ import Foundation
 /// asked for once. Holds results only, never the track's name. Entries are a few KB, so reads and writes stay
 /// on the caller's actor.
 nonisolated struct LyricsCache: Sendable {
+    /// "Not found" is asked again after this long: lrclib gains lyrics over time.
+    static let notFoundLifetime: TimeInterval = 7 * 24 * 60 * 60
+
     let directory: URL
 
-    /// nil when the track is not cached, or the file cannot be read as a result (the next fetch replaces it).
+    /// nil when the track is not cached, or the file cannot be read as a result (the next fetch replaces it), or
+    /// the entry is a `.notFound` older than a week (judged by the file's modification date).
     func load(_ track: TrackKey) -> LyricsResult? {
-        guard let data = try? Data(contentsOf: url(for: track)),
+        let url = url(for: track)
+        guard let data = try? Data(contentsOf: url),
               let result = try? JSONDecoder().decode(LyricsResult.self, from: data) else { return nil }
-        if case .unavailable = result { return nil }
-        return result
+        switch result {
+        case .unavailable:
+            return nil
+        case .notFound:
+            let stored = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            guard let stored, Date().timeIntervalSince(stored) < Self.notFoundLifetime else { return nil }
+            return result
+        default:
+            return result
+        }
     }
 
     /// Keeps found and not-found answers. `.unavailable` is trouble of the moment, not an answer. Best effort:

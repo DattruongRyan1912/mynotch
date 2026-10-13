@@ -38,6 +38,19 @@ enum LrclibReplies {
         return HTTPReply(status: 200, body: try! JSONSerialization.data(withJSONObject: object))
     }
 
+    /// One `/api/search` entry; `synced`/`plain` nil are JSON nulls like lrclib's.
+    static func entry(duration: Double, synced: String? = lrc, plain: String? = "First\nSecond") -> [String: Any] {
+        [
+            "id": 1, "trackName": "Song", "artistName": "Artist", "albumName": "Album", "duration": duration,
+            "instrumental": false, "plainLyrics": plain ?? NSNull(), "syncedLyrics": synced ?? NSNull(),
+        ]
+    }
+
+    /// An `/api/search` answer: a JSON array of entries.
+    static func results(_ entries: [[String: Any]]) -> HTTPReply {
+        HTTPReply(status: 200, body: try! JSONSerialization.data(withJSONObject: entries))
+    }
+
     static let instrumental = found(synced: nil, plain: nil, instrumental: true)
 
     static let notFound = HTTPReply(

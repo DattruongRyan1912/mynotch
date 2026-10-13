@@ -1,7 +1,8 @@
 import NotchUI
 import SwiftUI
 
-/// The line being sung, under the progress bar. Nothing at all while the track has no synced lyrics.
+/// The line being sung, under the progress bar. One dimmed note when lrclib has the words but no timing, and
+/// nothing at all while the track has no lyrics.
 /// Once it has, the row keeps its height between lines, so the player does not jump at each pause in the song.
 struct CurrentLyricView: View {
     static let height: CGFloat = 14
@@ -22,6 +23,12 @@ struct CurrentLyricView: View {
                     .contentTransition(.opacity)
                     .animation(.easeOut(duration: 0.2), value: text)
             }
+        } else if store.lyricsAreUnsynced {
+            Text("Chỉ có lời không đồng bộ")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(NotchTokens.secondaryText.opacity(0.7))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height, alignment: .leading)
         }
     }
 }

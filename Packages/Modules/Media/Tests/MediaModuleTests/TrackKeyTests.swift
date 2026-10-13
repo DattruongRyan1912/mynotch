@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 @testable import MediaModule
@@ -76,5 +77,61 @@ import Testing
         let one = try #require(key(artist: "ab", title: "c"))
         let other = try #require(key(artist: "a", title: "bc"))
         #expect(one.cacheKey != other.cacheKey)
+    }
+}
+
+@Suite struct TrackKeyLookupTests {
+    func state(bundle: String? = "com.google.Chrome", parent: String? = nil, title: String, artist: String, album: String? = nil) -> NowPlayingState {
+        NowPlayingState(
+            bundleIdentifier: bundle, parentApplicationBundleIdentifier: parent, title: title, artist: artist, album: album,
+            durationSeconds: 200
+        )
+    }
+
+    @Test(arguments: [
+        "com.google.Chrome", "com.apple.Safari", "company.thebrowser.Browser", "com.microsoft.edgemac",
+        "org.mozilla.firefox", "com.brave.Browser", "com.operasoftware.Opera", "com.vivaldi.Vivaldi",
+        "com.google.Chrome.helper",
+    ])
+    func browsersGetTheirTitlesCleaned(bundle: String) throws {
+        let key = try #require(TrackKey(state(bundle: bundle, title: "Song (Official Video)", artist: "ArtistVEVO", album: "Album")))
+        #expect(key.lookupArtist == "Artist")
+        #expect(key.lookupTitle == "Song")
+    }
+
+    @Test func aHelperProcessCountsThroughItsParent() throws {
+        let key = try #require(TrackKey(state(bundle: "com.example.helper", parent: "org.mozilla.firefox", title: "Song (Lyrics)", artist: "Chan")))
+        #expect(key.lookupTitle == "Song")
+    }
+
+    @Test func anAlbumlessDashedTitleIsCleanedWhateverThePlayer() throws {
+        let key = try #require(TrackKey(state(bundle: "com.example.Player", title: "Queen - Radio Ga Ga (Official Video)", artist: "Channel")))
+        #expect(key.lookupArtist == "Queen")
+        #expect(key.lookupTitle == "Radio Ga Ga")
+    }
+
+    @Test func otherPlayersWithAnAlbumAreLookedUpAsReported() throws {
+        let key = try #require(TrackKey(state(bundle: "com.spotify.client", title: "Song - Remastered (Live)", artist: "Artist", album: "Album")))
+        #expect(key.lookupArtist == "Artist")
+        #expect(key.lookupTitle == "Song - Remastered (Live)")
+    }
+
+    @Test func theKeyKeepsTheOriginalFields() throws {
+        let key = try #require(TrackKey(state(title: "Queen - Radio Ga Ga (Official Video)", artist: "QueenVEVO")))
+        #expect(key.artist == "QueenVEVO")
+        #expect(key.title == "Queen - Radio Ga Ga (Official Video)")
+    }
+
+    @Test func theCacheKeyIsVersioned() throws {
+        let key = try #require(TrackKey(artist: "Artist", title: "Song", album: "Album", duration: 200))
+        let unversioned = ["Artist", "Song", "Album", "200"].joined(separator: "\u{1F}")
+        let withVersion = [unversioned, "v2"].joined(separator: "\u{1F}")
+        #expect(key.cacheKey == hash(withVersion))
+        // Entries written before the version existed are never found again.
+        #expect(key.cacheKey != hash(unversioned))
+    }
+
+    func hash(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }

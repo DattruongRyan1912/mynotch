@@ -165,22 +165,41 @@ import Testing
         #expect(store.syncedLyrics == nil)
     }
 
-    @Test func nothingIsShownForPlainInstrumentalMissingOrUnavailable() async {
+    @Test func nothingIsShownForInstrumentalMissingOrUnavailable() async {
         enableLyrics()
         await harness.registry.bootstrap()
-        let answers = [
-            LrclibReplies.found(synced: nil, plain: "La la"), LrclibReplies.instrumental, LrclibReplies.notFound,
-            HTTPReply(status: 500),
-        ]
-        for (index, answer) in answers.enumerated() {
+        // A missing track is asked four times, each after the spacing; the others once.
+        let answers = [(LrclibReplies.instrumental, 1), (LrclibReplies.notFound, 4), (HTTPReply(status: 500), 1)]
+        var asked = 0
+        for (index, (answer, requests)) in answers.enumerated() {
             client.reply(answer)
             playTrack("Track \(index)")
-            await settle { client.requests.count == index + 1 }
-            #expect(client.requests.count == index + 1)
-            harness.scheduler.advance(by: .milliseconds(300))
-            await settle { false }
+            for _ in 0...requests {
+                await settle { false }
+                harness.scheduler.advance(by: .milliseconds(300))
+            }
+            asked += requests
+            #expect(client.requests.count == asked)
             #expect(store.syncedLyrics == nil)
+            #expect(!store.lyricsAreUnsynced)
         }
+    }
+
+    @Test func plainLyricsOnlyMarkTheTrackAsUnsynced() async {
+        enableLyrics()
+        await harness.registry.bootstrap()
+        client.reply(LrclibReplies.found(synced: nil, plain: "La la"))
+        playTrack("Plain")
+        await settle { store.lyricsAreUnsynced }
+        #expect(store.lyricsAreUnsynced)
+        #expect(store.syncedLyrics == nil)
+
+        // The next track starts clean.
+        client.reply(LrclibReplies.instrumental)
+        harness.scheduler.advance(by: .milliseconds(300))
+        playTrack("Other")
+        await settle { !store.lyricsAreUnsynced }
+        #expect(!store.lyricsAreUnsynced)
     }
 
     @Test func aTrackChangeWhileFetchingNeverShowsTheOldAnswer() async {
@@ -370,6 +389,18 @@ import Testing
         let store = NowPlayingStore(lookUpApp: { _ in nil })
         store.showLyrics(lines)
         #expect(store.lyric(at: Date()) == nil)
+    }
+
+    @Test func unsyncedLyricsAreFlaggedUntilTheyAreReplaced() {
+        let store = NowPlayingStore(lookUpApp: { _ in nil })
+        store.showUnsyncedLyrics()
+        #expect(store.lyricsAreUnsynced)
+        #expect(store.syncedLyrics == nil)
+        store.showLyrics(lines)
+        #expect(!store.lyricsAreUnsynced)
+        store.showUnsyncedLyrics()
+        store.reset()
+        #expect(!store.lyricsAreUnsynced)
     }
 
     @Test func resetForgetsTheLyrics() {

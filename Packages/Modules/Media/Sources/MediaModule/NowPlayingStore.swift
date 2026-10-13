@@ -28,6 +28,8 @@ final class NowPlayingStore {
 
     /// Synced lyrics of the current track; nil while there are none (lyrics off, still fetching, no entry, unsynced).
     private(set) var syncedLyrics: [LyricLine]?
+    /// lrclib has the words of the current track but no timing: the lyric row says so instead of following along.
+    private(set) var lyricsAreUnsynced = false
 
     @ObservationIgnored private var reducer = NowPlayingReducer()
     @ObservationIgnored private let lookUpApp: @MainActor (String) -> PlayerApp?
@@ -80,6 +82,12 @@ final class NowPlayingStore {
     /// Assigns only a real change, so the lyric row is redrawn only for new lyrics.
     func showLyrics(_ lines: [LyricLine]?) {
         if lines != syncedLyrics { syncedLyrics = lines }
+        if lyricsAreUnsynced { lyricsAreUnsynced = false }
+    }
+
+    func showUnsyncedLyrics() {
+        showLyrics(nil)
+        lyricsAreUnsynced = true
     }
 
     /// The lyric line being sung at `date`, by the playback clock; nil before the first line or without lyrics.

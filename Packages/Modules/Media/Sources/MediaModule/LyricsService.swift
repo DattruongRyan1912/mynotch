@@ -4,10 +4,13 @@ import MyNotchCore
 /// Looks lyrics up on lrclib.net. Opt-in: a request sends the track's name, artist, album and length off the Mac.
 ///
 /// One request at a time, each at least `minimumSpacing` after the previous answer, and none while lrclib has
-/// asked for quiet. Answers, including "not found", are cached on disk, so a track is asked for once.
+/// asked for quiet. Answers are cached on disk, so a track is asked for once; "not found" is asked again after a week.
 final class LyricsService {
     static let minimumSpacing: Duration = .milliseconds(300)
     static let endpoint = URL(string: "https://lrclib.net/api/get")!
+    static let searchEndpoint = URL(string: "https://lrclib.net/api/search")!
+    /// How far a search result's length may be from the track's and still count as the same recording.
+    static let durationTolerance = 3.0
     static let requestTimeout: TimeInterval = 10
     /// How long to stay quiet after a 429 or 503 without a usable `Retry-After`.
     static let defaultCooldownSeconds = 60
@@ -23,6 +26,8 @@ final class LyricsService {
     private var waiters: [(id: Int, continuation: CheckedContinuation<Bool, Never>)] = []
     private var nextWaiterID = 0
     private var spacingTimer: ScheduledAction?
+    /// A chain waiting out the spacing between two of its requests.
+    private var stepContinuation: CheckedContinuation<Void, Never>?
     /// Set while lrclib's `Retry-After` runs.
     private var cooldownTimer: ScheduledAction?
     private var cooldownWaiters: [@MainActor () -> Void] = []
@@ -52,10 +57,18 @@ final class LyricsService {
         userAgent = "MyNotch/\(appVersion ?? "dev") (personal)"
     }
 
-    /// Never throws and never makes a request for a cached track. A rate-limited request is not retried: the
-    /// answer is `.unavailable` and the next uncached track waits out the cooldown, which is the retry.
-    /// Cancelling the caller cancels the request in flight; a cancelled call still waiting its turn sends nothing.
+    /// Never throws. Something that is no song (a mix, a playlist, an hour-long video) answers `.notFound` at once,
+    /// uncached and without a request; neither does a cached track make one.
+    ///
+    /// A lookup is a chain of requests, each after the spacing: the exact match with the album, the exact match
+    /// without it (an album spelled differently from lrclib's breaks the first), a search by name and artist, a
+    /// free-text search. The first step with lyrics ends it, and so does a rate limit or any other failure.
+    ///
+    /// A rate-limited request is not retried: the answer is `.unavailable` and the next uncached track waits out
+    /// the cooldown, which is the retry. Cancelling the caller cancels the request in flight; a cancelled call
+    /// still waiting its turn, or its next step, sends nothing.
     func lyrics(for track: TrackKey) async -> LyricsResult {
+        if track.isLongOrMix { return .notFound }
         if let cached = cache.load(track) { return cached }
         guard await takeTurn() else {
             return .unavailable(Task.isCancelled ? "Lookup cancelled" : "Lyrics service stopped")
@@ -68,7 +81,7 @@ final class LyricsService {
             passTurn()
             return .unavailable("Waiting out a rate limit")
         }
-        let result = await request(track)
+        let result = await lookUp(track)
         // The gap counts from the answer, however long the request took.
         spacingTimer = scheduler.schedule(after: Self.minimumSpacing) { [weak self] in self?.passTurn() }
         cache.store(result, for: track)
@@ -83,6 +96,7 @@ final class LyricsService {
         cooldownTimer?.cancel()
         cooldownTimer = nil
         cooldownWaiters = []
+        endStepWait()
         isBusy = false
         let waiting = waiters
         waiters = []
@@ -91,35 +105,99 @@ final class LyricsService {
 
     // MARK: request
 
-    private func request(_ track: TrackKey) async -> LyricsResult {
+    private struct Step {
+        var endpoint: URL
+        var items: [(String, String)]
+        var isSearch: Bool { endpoint == LyricsService.searchEndpoint }
+    }
+
+    private enum Outcome {
+        case body(Data)
+        case notFound
+        case failed(LyricsResult)
+    }
+
+    private func lookUp(_ track: TrackKey) async -> LyricsResult {
+        let artist = track.lookupArtist
+        let title = track.lookupTitle
+        let named = [("track_name", title), ("artist_name", artist)]
+        var steps: [Step] = []
+        // An empty album would be matched literally.
+        if !track.album.isEmpty {
+            steps.append(Step(endpoint: Self.endpoint, items: named + [("album_name", track.album), ("duration", String(track.durationSeconds))]))
+        }
+        steps.append(Step(endpoint: Self.endpoint, items: named + [("duration", String(track.durationSeconds))]))
+        steps.append(Step(endpoint: Self.searchEndpoint, items: named))
+        steps.append(Step(endpoint: Self.searchEndpoint, items: [("q", "\(artist) \(title)")]))
+
+        for (index, step) in steps.enumerated() {
+            if index > 0 {
+                if let reason = reasonToStop { return reason }
+                await waitOutSpacing()
+                if let reason = reasonToStop { return reason }
+            }
+            switch await send(step) {
+            case .failed(let result):
+                return result
+            case .notFound:
+                continue
+            case .body(let body) where step.isSearch:
+                guard let entries = try? JSONDecoder().decode([Entry].self, from: body) else { return .unavailable("Unreadable answer") }
+                if let match = Self.bestMatch(in: entries, duration: Double(track.durationSeconds)) { return match }
+            case .body(let body):
+                return Self.result(from: body) ?? .unavailable("Unreadable answer")
+            }
+        }
+        return .notFound
+    }
+
+    /// Why the chain sends nothing more, nil to go on.
+    private var reasonToStop: LyricsResult? {
+        if isShutDown { return .unavailable("Lyrics service stopped") }
+        if Task.isCancelled { return .unavailable("Lookup cancelled") }
+        return nil
+    }
+
+    private func send(_ step: Step) async -> Outcome {
         let reply: HTTPReply
         do {
-            reply = try await client.send(makeRequest(for: track))
+            reply = try await client.send(makeRequest(for: step))
         } catch {
             // The domain and code only: an error's text can carry the URL, and with it the track.
             let nsError = error as NSError
-            return .unavailable("Request failed (\(nsError.domain) \(nsError.code))")
+            return .failed(.unavailable("Request failed (\(nsError.domain) \(nsError.code))"))
         }
         switch reply.status {
         case 200:
-            return Self.result(from: reply.body) ?? .unavailable("Unreadable answer")
+            return .body(reply.body)
         case 404:
             return .notFound
         case 429, 503:
             startCooldown(seconds: Self.cooldownSeconds(retryAfter: reply.retryAfter))
-            return .unavailable("Rate limited (HTTP \(reply.status))")
+            return .failed(.unavailable("Rate limited (HTTP \(reply.status))"))
         default:
-            return .unavailable("HTTP \(reply.status)")
+            return .failed(.unavailable("HTTP \(reply.status)"))
         }
     }
 
-    private func makeRequest(for track: TrackKey) -> URLRequest {
-        var items = [("track_name", track.title), ("artist_name", track.artist)]
-        // An empty album would be matched literally.
-        if !track.album.isEmpty { items.append(("album_name", track.album)) }
-        items.append(("duration", String(track.durationSeconds)))
-        var components = URLComponents(url: Self.endpoint, resolvingAgainstBaseURL: false)!
-        components.percentEncodedQuery = items.map { "\($0)=\(Self.escape($1))" }.joined(separator: "&")
+    /// The gap between two requests of one chain, counted from the answer like the gap between lookups.
+    private func waitOutSpacing() async {
+        await withCheckedContinuation { continuation in
+            stepContinuation = continuation
+            spacingTimer = scheduler.schedule(after: Self.minimumSpacing) { [weak self] in self?.endStepWait() }
+        }
+    }
+
+    private func endStepWait() {
+        spacingTimer?.cancel()
+        spacingTimer = nil
+        stepContinuation?.resume()
+        stepContinuation = nil
+    }
+
+    private func makeRequest(for step: Step) -> URLRequest {
+        var components = URLComponents(url: step.endpoint, resolvingAgainstBaseURL: false)!
+        components.percentEncodedQuery = step.items.map { "\($0)=\(Self.escape($1))" }.joined(separator: "&")
         var request = URLRequest(url: components.url!, timeoutInterval: Self.requestTimeout)
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         return request
@@ -142,7 +220,27 @@ final class LyricsService {
         return plain.isEmpty ? .notFound : .plain(plain)
     }
 
+    /// The search result closest in length (within `durationTolerance`) with synced lyrics, else the closest with
+    /// plain ones; nil when no result fits.
+    private static func bestMatch(in entries: [Entry], duration: Double) -> LyricsResult? {
+        let close = entries
+            .filter { $0.instrumental != true }
+            .compactMap { entry in entry.duration.map { (entry, abs($0 - duration)) } }
+            .filter { $0.1 <= durationTolerance }
+            .sorted { $0.1 < $1.1 }
+        for (entry, _) in close {
+            let synced = LRCParser.parse(entry.syncedLyrics ?? "")
+            if !synced.isEmpty { return .synced(synced) }
+        }
+        for (entry, _) in close {
+            let plain = (entry.plainLyrics ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !plain.isEmpty { return .plain(plain) }
+        }
+        return nil
+    }
+
     private nonisolated struct Entry: Decodable {
+        var duration: Double?
         var instrumental: Bool?
         var plainLyrics: String?
         var syncedLyrics: String?

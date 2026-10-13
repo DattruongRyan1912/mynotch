@@ -58,4 +58,30 @@ import Testing
         let text = try String(contentsOf: cache.directory.appending(path: "\(track.cacheKey).json"), encoding: .utf8)
         #expect(!text.contains("Artist") && !text.contains("Song") && !text.contains("Album"))
     }
+
+    func age(_ track: TrackKey, days: Double) throws {
+        let file = cache.directory.appending(path: "\(track.cacheKey).json")
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-days * 86_400)], ofItemAtPath: file.path())
+    }
+
+    @Test func aNotFoundEntryExpiresAfterSevenDays() throws {
+        cache.store(.notFound, for: track)
+        try age(track, days: 6.9)
+        #expect(cache.load(track) == .notFound)
+        try age(track, days: 7.1)
+        #expect(cache.load(track) == nil)
+    }
+
+    @Test func foundEntriesNeverExpire() throws {
+        cache.store(.plain("La"), for: track)
+        try age(track, days: 400)
+        #expect(cache.load(track) == .plain("La"))
+    }
+
+    @Test func anExpiredNotFoundIsReplacedByTheNextStore() throws {
+        cache.store(.notFound, for: track)
+        try age(track, days: 8)
+        cache.store(.notFound, for: track)
+        #expect(cache.load(track) == .notFound)
+    }
 }
