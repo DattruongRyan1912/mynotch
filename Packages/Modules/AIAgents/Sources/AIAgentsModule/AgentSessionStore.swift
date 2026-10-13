@@ -1,0 +1,232 @@
+import Foundation
+import MyNotchCore
+import Observation
+
+/// Every Claude Code and Codex session MyNotch knows of, the state each is in and the day's usage. Fed with
+/// events from the watcher; time only matters through the injected clock and scheduler, so tests can drive it.
+@Observable
+final class AgentSessionStore {
+    /// A working session silent for this long, whose registry says idle, was probably interrupted: Claude Code
+    /// writes no record when the user presses Esc.
+    static let interruptSeconds: TimeInterval = 90
+    /// A session silent for this long is dropped; it comes back with its next event.
+    static let inactivitySeconds: TimeInterval = 2 * 3600
+    private static let tickInterval: Duration = .seconds(10)
+
+    private(set) var sessions: [AgentSessionKey: AgentSession] = [:]
+    private var dayUsage = DayUsageLedger()
+
+    /// How long a finished turn shows before the session is idle; a setting, so views need not follow it.
+    @ObservationIgnored var finishedSeconds: Int
+    @ObservationIgnored private let scheduler: any Scheduler
+    @ObservationIgnored private let clock: () -> Date
+    @ObservationIgnored private let calendar: Calendar
+    @ObservationIgnored private var finishTimers: [AgentSessionKey: ScheduledAction] = [:]
+    @ObservationIgnored private var tickTimer: ScheduledAction?
+    /// The live Claude processes the registry listed last, by session id.
+    @ObservationIgnored private var registry: [String: ClaudeSessionInfo] = [:]
+
+    init(
+        scheduler: any Scheduler,
+        finishedSeconds: Int = 5,
+        now: @escaping () -> Date = { Date() },
+        calendar: Calendar = .autoupdatingCurrent
+    ) {
+        self.scheduler = scheduler
+        self.finishedSeconds = finishedSeconds
+        clock = now
+        self.calendar = calendar
+    }
+
+    /// Newest activity first.
+    var orderedSessions: [AgentSession] {
+        sessions.values.sorted { ($0.lastEventAt, $1.key.sessionID) > ($1.lastEventAt, $0.key.sessionID) }
+    }
+
+    /// Per agent, from events since local midnight. Only what MyNotch has read counts: a transcript found at
+    /// launch is read from its last 64 KB, so right after a restart the figures start low.
+    var todayUsage: [AgentSource: AgentDayUsage] {
+        dayUsage.usage(now: clock(), calendar: calendar)
+    }
+
+    func apply(_ event: AgentEvent) {
+        apply([event])
+    }
+
+    /// Applies events in order and publishes once, so a burst of lines costs views a single update. Old events
+    /// replayed from the end of a transcript can leave a turn that ended long ago looking busy; that is settled
+    /// before views see it, like any silent session.
+    func apply(_ events: [AgentEvent]) {
+        let now = clock()
+        for event in events { apply(event, now: now) }
+        tick(now: now)
+    }
+
+    /// Takes the registry of live Claude processes. It never creates a session, since a session shows only
+    /// when it does something; sessions it listed before and no longer lists have ended.
+    func updateRegistry(_ live: [ClaudeSessionInfo]) {
+        let previous = registry
+        registry = Dictionary(live.map { ($0.sessionID, $0) }, uniquingKeysWith: { _, latest in latest })
+        for id in previous.keys where registry[id] == nil {
+            remove(AgentSessionKey(source: .claude, sessionID: id))
+        }
+        for info in registry.values {
+            let key = AgentSessionKey(source: .claude, sessionID: info.sessionID)
+            guard let original = sessions[key] else { continue }
+            var session = original
+            if session.cwd == nil { session.cwd = info.cwd }
+            // Busy since after the last event: a turn the transcript has not shown yet. A busy entry from before
+            // it is stale, and would undo a finish whose registry write is still to come.
+            if info.status == .busy, let busySince = info.statusUpdatedAt, busySince > session.lastEventAt, !session.state.isInTurn {
+                session.state = .working(tool: nil, summary: nil)
+                session.turnStartedAt = busySince
+                cancelFinishTimer(for: key)
+            }
+            if session != original { sessions[key] = session }
+        }
+        tick(now: clock())
+    }
+
+    /// Ends the interrupted turns and drops the sessions that went quiet. Called by a timer while sessions exist.
+    func tick(now: Date) {
+        for (key, session) in sessions where isInterrupted(session, now: now) {
+            sessions[key]?.state = .idle
+        }
+        prune(now: now)
+    }
+
+    /// Forgets the sessions of one agent, for when the user turns it off.
+    func removeSessions(of source: AgentSource) {
+        for key in sessions.keys where key.source == source { remove(key) }
+        if source == .claude { registry = [:] }
+        syncTick()
+    }
+
+    // MARK: Events
+
+    private func apply(_ event: AgentEvent, now: Date) {
+        let key = AgentSessionKey(source: event.source, sessionID: event.sessionID)
+        if event.kind == .sessionEnded {
+            remove(key)
+            return
+        }
+        let at = min(event.timestamp ?? now, now)
+        let previous = sessions[key]?.state
+        var session = sessions[key] ?? AgentSession(key: key, lastEventAt: at)
+        session.lastEventAt = max(session.lastEventAt, at)
+        updateState(of: &session, from: previous, for: event.kind, at: at, now: now)
+        if let usage = event.usage {
+            let counted = session.ledger.record(usage)
+            dayUsage.add(counted.forToday, model: counted.model, source: event.source, at: at, now: now, calendar: calendar)
+        }
+        if let costUSD = event.costUSD { session.ledger.recordReportedCost(costUSD) }
+        if let rateLimits = event.rateLimits { session.rateLimits = rateLimits }
+        sessions[key] = session
+        updateFinishTimer(for: key, from: previous, to: session.state, remaining: TimeInterval(finishedSeconds) - now.timeIntervalSince(at))
+    }
+
+    private func updateState(of session: inout AgentSession, from previous: AgentState?, for kind: AgentEvent.Kind, at: Date, now: Date) {
+        switch kind {
+        case .turnStarted:
+            session.state = .working(tool: nil, summary: nil)
+            session.turnStartedAt = at
+        case let .toolStarted(name, summary):
+            beginTurnIfNeeded(&session, from: previous, at: at)
+            session.state = .working(tool: name, summary: summary)
+        case .toolFinished:
+            beginTurnIfNeeded(&session, from: previous, at: at)
+            session.state = .working(tool: nil, summary: nil)
+        case .waitingForInput:
+            session.state = .waitingForInput
+        case .turnFinished:
+            // Claude writes several records that finish one turn, the first before the answer text.
+            // Repeats must not show the finish again or push the idle time back.
+            guard previous != .finished, previous != .idle else { return }
+            session.state = now.timeIntervalSince(at) >= TimeInterval(finishedSeconds) ? .idle : .finished
+        case .turnAborted:
+            session.state = .idle
+        case .turnFailed:
+            session.state = .error
+        case let .sessionStarted(cwd, branch):
+            if let cwd {
+                session.cwd = cwd
+                session.branch = branch
+            } else if branch != nil {
+                session.branch = branch
+            }
+        case .usageUpdated, .sessionEnded:
+            break
+        }
+    }
+
+    /// Work seen without the prompt that began it (the transcript was joined mid-turn) starts the turn here.
+    private func beginTurnIfNeeded(_ session: inout AgentSession, from previous: AgentState?, at: Date) {
+        if previous?.isInTurn != true { session.turnStartedAt = at }
+    }
+
+    // MARK: Timers
+
+    private func updateFinishTimer(for key: AgentSessionKey, from previous: AgentState?, to state: AgentState, remaining: TimeInterval) {
+        switch (previous, state) {
+        case (.finished?, .finished):
+            break
+        case (_, .finished):
+            let delay = Duration.seconds(max(remaining, 0))
+            finishTimers[key] = scheduler.schedule(after: delay) { [weak self] in
+                self?.finishTimers[key] = nil
+                if self?.sessions[key]?.state == .finished { self?.sessions[key]?.state = .idle }
+            }
+        default:
+            cancelFinishTimer(for: key)
+        }
+    }
+
+    private func cancelFinishTimer(for key: AgentSessionKey) {
+        finishTimers.removeValue(forKey: key)?.cancel()
+    }
+
+    /// Runs while any session exists; with none there is nothing to time out.
+    private func syncTick() {
+        if sessions.isEmpty {
+            tickTimer?.cancel()
+            tickTimer = nil
+        } else if tickTimer == nil {
+            tickTimer = scheduler.schedule(after: Self.tickInterval) { [weak self] in
+                guard let self else { return }
+                tickTimer = nil
+                tick(now: clock())
+                syncTick()
+            }
+        }
+    }
+
+    // MARK: Removal
+
+    private func isInterrupted(_ session: AgentSession, now: Date) -> Bool {
+        guard case .working = session.state, now.timeIntervalSince(session.lastEventAt) >= Self.interruptSeconds else { return false }
+        // Codex has no registry to confirm the turn is over, so silence alone decides.
+        return session.key.source == .codex || registry[session.key.sessionID]?.status == .idle
+    }
+
+    private func prune(now: Date) {
+        for (key, session) in sessions where now.timeIntervalSince(session.lastEventAt) >= Self.inactivitySeconds {
+            remove(key)
+        }
+        syncTick()
+    }
+
+    private func remove(_ key: AgentSessionKey) {
+        sessions[key] = nil
+        cancelFinishTimer(for: key)
+    }
+}
+
+private extension AgentState {
+    /// A turn is under way: the agent is working or has stopped to ask.
+    var isInTurn: Bool {
+        switch self {
+        case .working, .waitingForInput: true
+        case .finished, .idle, .error: false
+        }
+    }
+}

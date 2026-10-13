@@ -14,6 +14,8 @@ nonisolated struct AgentEvent: Equatable, Sendable {
         case toolFinished
         case turnFinished
         case turnAborted
+        /// The turn ended in an error. Transcripts do not record this; only the hooks of the precise mode do.
+        case turnFailed
         case waitingForInput
         /// Claude has no session-start record, so each prompt reports its cwd and branch again; both can change between turns.
         case sessionStarted(cwd: String?, branch: String?)

@@ -20,6 +20,8 @@ nonisolated final class JSONLTailer: @unchecked Sendable {
     private var pending = Data()
     /// The file read last time; nil until the first read, so a start offset is trusted for the file found then.
     private var identity: FileIdentity?
+    /// Whether the last read stopped at `maxBytes` before the end of the file.
+    private var hasMore = false
 
     init(url: URL, startOffset: UInt64 = 0) {
         self.url = url
@@ -32,10 +34,17 @@ nonisolated final class JSONLTailer: @unchecked Sendable {
         queue.sync { readPosition - UInt64(pending.count) }
     }
 
+    /// True after a `readNewLines(maxBytes:)` that left part of the file unread: call again to continue.
+    var hasMoreToRead: Bool {
+        queue.sync { hasMore }
+    }
+
     /// Complete, non-empty lines added since the last call. Starts over from the beginning when the file is now
     /// shorter than what was read (truncated) or is a different file at the same path (replaced).
     /// Throws when the file cannot be opened or read, for example while it does not exist.
-    func readNewLines() throws -> [String] {
+    /// - Parameter maxBytes: reads at most this much of the file, so a transcript of tens of megabytes is
+    ///   processed in bounded pieces; `hasMoreToRead` says whether to call again.
+    func readNewLines(maxBytes: Int = .max) throws -> [String] {
         try queue.sync {
             let handle = try FileHandle(forReadingFrom: url)
             defer { try? handle.close() }
@@ -50,8 +59,10 @@ nonisolated final class JSONLTailer: @unchecked Sendable {
             }
             identity = current
             try handle.seek(toOffset: readPosition)
-            let chunk = try handle.readToEnd() ?? Data()
+            let chunk = try handle.read(upToCount: maxBytes) ?? Data()
             readPosition += UInt64(chunk.count)
+            // An empty read means the file shrank since `fstat`; the next call starts over as for any truncation.
+            hasMore = !chunk.isEmpty && readPosition < UInt64(info.st_size)
             return lines(completedBy: chunk)
         }
     }

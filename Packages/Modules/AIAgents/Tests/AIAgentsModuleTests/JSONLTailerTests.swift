@@ -96,6 +96,40 @@ import Testing
         #expect(try second.readNewLines() == ["partial", "three"])
     }
 
+    @Test func readsAtMostMaxBytesPerCallAndSaysWhetherMoreRemains() throws {
+        try write("one\ntwo\nthree\nfour\n")
+        let tailer = JSONLTailer(url: file, startOffset: 0)
+        #expect(!tailer.hasMoreToRead)
+        #expect(try tailer.readNewLines(maxBytes: 8) == ["one", "two"])
+        #expect(tailer.hasMoreToRead)
+        #expect(try tailer.readNewLines(maxBytes: 8) == ["three"])
+        #expect(tailer.hasMoreToRead)
+        #expect(try tailer.readNewLines(maxBytes: 8) == ["four"])
+        #expect(!tailer.hasMoreToRead)
+        #expect(tailer.offset == 19)
+    }
+
+    @Test func aLineLongerThanMaxBytesIsAssembledAcrossCalls() throws {
+        let long = String(repeating: "x", count: 50)
+        try write(long + "\nshort\n")
+        let tailer = JSONLTailer(url: file, startOffset: 0)
+        var lines: [String] = []
+        var reads = 0
+        repeat {
+            lines += try tailer.readNewLines(maxBytes: 16)
+            reads += 1
+        } while tailer.hasMoreToRead
+        #expect(lines == [long, "short"])
+        #expect(reads > 1)
+    }
+
+    @Test func readingWithoutALimitStillReadsEverything() throws {
+        try write("a\nb\n")
+        let tailer = JSONLTailer(url: file, startOffset: 0)
+        #expect(try tailer.readNewLines() == ["a", "b"])
+        #expect(!tailer.hasMoreToRead)
+    }
+
     @Test func missingFileThrows() {
         let tailer = JSONLTailer(url: directory.appending(path: "missing.jsonl"), startOffset: 0)
         #expect(throws: (any Error).self) { try tailer.readNewLines() }

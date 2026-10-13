@@ -43,4 +43,34 @@ import Testing
         #expect(!ClaudeSessionRegistry.isAlive(pid: 0))
         #expect(!ClaudeSessionRegistry.isAlive(pid: -1))
     }
+
+    @Test func readsTheProcessStartWhenPresent() {
+        let data = Data(#"{"pid":7,"sessionId":"s","procStart":1791878399500}"#.utf8)
+        #expect(ClaudeSessionRegistry.parse(data: data)?.procStart == Date(timeIntervalSince1970: 1_791_878_399.5))
+        #expect(ClaudeSessionRegistry.parse(data: Data(#"{"pid":7,"sessionId":"s"}"#.utf8))?.procStart == nil)
+    }
+
+    @Test func aProcessStartedWhenTheEntryRecordsIsTheSameSession() throws {
+        let start = try #require(ClaudeSessionRegistry.processStartTime(pid: getpid()))
+        #expect(start < Date() + 1 && start > Date() - 86_400)
+        func info(procStart: Date?, pid: pid_t = getpid()) -> ClaudeSessionInfo {
+            ClaudeSessionInfo(pid: pid, sessionID: "s", procStart: procStart)
+        }
+        #expect(ClaudeSessionRegistry.isAlive(info(procStart: start)))
+        #expect(ClaudeSessionRegistry.isAlive(info(procStart: start + 5)))
+    }
+
+    @Test func aRecycledPidIsNotTheRecordedSession() throws {
+        let start = try #require(ClaudeSessionRegistry.processStartTime(pid: getpid()))
+        // Same pid, but the entry was written by a process that started a day earlier.
+        #expect(!ClaudeSessionRegistry.isAlive(ClaudeSessionInfo(pid: getpid(), sessionID: "s", procStart: start - 86_400)))
+    }
+
+    @Test func aProcessStartThatCannotBeComparedIsIgnored() {
+        // Missing, or not a plausible Unix time (e.g. clock ticks), so only the pid decides.
+        for procStart in [nil, Date(timeIntervalSince1970: 12_345), Date(timeIntervalSince1970: 0)] {
+            #expect(ClaudeSessionRegistry.isAlive(ClaudeSessionInfo(pid: getpid(), sessionID: "s", procStart: procStart)))
+        }
+        #expect(!ClaudeSessionRegistry.isAlive(ClaudeSessionInfo(pid: 999_999, sessionID: "s")))
+    }
 }

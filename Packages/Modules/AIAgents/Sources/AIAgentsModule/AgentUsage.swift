@@ -17,6 +17,10 @@ nonisolated struct AgentUsage: Equatable, Sendable {
     var messageID: String?
     /// Codex reports running totals for the whole session: they replace, rather than add to, earlier usage.
     var isCumulative = false
+    /// For a running total: it is the first of its session and that session was read from its first line, so
+    /// the total is all of the session's usage and counts in full for the day it was reported. Without it, the
+    /// first total seen is only a starting point: it may include work from before anything was watched.
+    var startsFromZero = false
 }
 
 /// Codex plan limits: how much of each rolling window is used and when it resets.
