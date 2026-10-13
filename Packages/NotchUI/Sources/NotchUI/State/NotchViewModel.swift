@@ -96,7 +96,7 @@ public final class NotchViewModel {
         toastTimer = scheduler.schedule(after: duration) { [weak self] in
             guard let self else { return }
             self.toastExpired = true
-            guard !self.isPointerInside, !self.isPinned else { return }
+            guard !self.isPointerInside, !self.isPinned, !self.isDragging else { return }
             self.close()
         }
     }

@@ -138,6 +138,17 @@ import Testing
         #expect(pinned.state == .toast)
     }
 
+    @Test func toastStaysWhileDraggingPastItsDuration() {
+        let model = makeModel()
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        model.setDragging(true)
+        scheduler.advance(by: .seconds(3))
+        #expect(model.state == .toast)
+        model.setDragging(false)
+        scheduler.advance(by: .milliseconds(300))
+        #expect(model.state == .closed)
+    }
+
     @Test func repeatedPinAndDragSettersHaveNoSideEffects() {
         let model = makeModel()
         model.toggle()
