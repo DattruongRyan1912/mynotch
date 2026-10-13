@@ -38,6 +38,14 @@ nonisolated final class StubURLProtocol: URLProtocol {
         }
     }
 
+    @Test func theDefaultSessionKeepsNoCacheAndNoCookies() {
+        // Request URLs hold the track's name; nothing of them may stay on disk.
+        let configuration = URLSessionHTTPClient().session.configuration
+        #expect(configuration.urlCache == nil)
+        #expect(configuration.httpCookieStorage == nil)
+        #expect(configuration.requestCachePolicy == .reloadIgnoringLocalAndRemoteCacheData)
+    }
+
     @Test func repliesWithStatusAndBody() async throws {
         answer(status: 200, body: #"{"id":1}"#)
         let reply = try await makeClient().send(request)

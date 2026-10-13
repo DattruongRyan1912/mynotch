@@ -21,15 +21,16 @@ nonisolated struct TrackKey: Hashable, Sendable {
         "org.mozilla.firefox", "com.brave.Browser", "com.operasoftware.Opera", "com.vivaldi.Vivaldi",
     ]
 
-    /// What lrclib is asked: the artist and song cleaned from the video title when the source is a browser, or has
-    /// no album and a title shaped "Artist - Song"; the fields as reported otherwise.
+    /// What lrclib is asked: the artist and song cleaned from the video title when the source is a browser (split on
+    /// the dash only without an album), or has no album and a title shaped "Artist - Song"; as reported otherwise.
     var lookupArtist: String { lookup.artist }
     var lookupTitle: String { lookup.title }
 
     private var lookup: (artist: String, title: String) {
         let dashed = VideoTitleParser.separators.contains { title.contains($0) }
         guard isFromBrowser || (album.isEmpty && dashed) else { return (artist, title) }
-        return VideoTitleParser.parse(title: title, channel: artist)
+        // With an album the player has tagged the track itself, so a dash belongs to the title.
+        return VideoTitleParser.parse(title: title, channel: artist, splitsOnDash: album.isEmpty)
     }
 
     /// True for what is no song: a mix, a playlist or something longer than 15 minutes. Never looked up.
@@ -58,7 +59,7 @@ nonisolated struct TrackKey: Hashable, Sendable {
     }
 
     /// Bumped when the lookup changes, so answers of an older lookup (all "not found" for videos) are asked again.
-    static let cacheVersion = "v2"
+    static let cacheVersion = "v3"
 
     /// SHA-256 of the fields as hex, a file name that is safe whatever the track is called.
     var cacheKey: String {
@@ -68,6 +69,7 @@ nonisolated struct TrackKey: Hashable, Sendable {
     }
 
     private static func normalised(_ text: String?) -> String {
-        (text ?? "").split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        // Composed, as lrclib stores Vietnamese: a player may report the decomposed form.
+        (text ?? "").split(whereSeparator: \.isWhitespace).joined(separator: " ").precomposedStringWithCanonicalMapping
     }
 }

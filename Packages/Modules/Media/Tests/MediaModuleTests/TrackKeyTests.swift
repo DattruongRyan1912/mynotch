@@ -94,7 +94,7 @@ import Testing
         "com.google.Chrome.helper",
     ])
     func browsersGetTheirTitlesCleaned(bundle: String) throws {
-        let key = try #require(TrackKey(state(bundle: bundle, title: "Song (Official Video)", artist: "ArtistVEVO", album: "Album")))
+        let key = try #require(TrackKey(state(bundle: bundle, title: "Song (Official Video)", artist: "ArtistVEVO")))
         #expect(key.lookupArtist == "Artist")
         #expect(key.lookupTitle == "Song")
     }
@@ -116,6 +116,15 @@ import Testing
         #expect(key.lookupTitle == "Song - Remastered (Live)")
     }
 
+    @Test func aBrowserTrackWithAnAlbumKeepsItsMetadataAndOnlyLosesTheNoise() throws {
+        let tagged = try #require(TrackKey(state(title: "Bohemian Rhapsody - Remastered 2011", artist: "Queen", album: "A Night at the Opera")))
+        #expect(tagged.lookupArtist == "Queen")
+        #expect(tagged.lookupTitle == "Bohemian Rhapsody - Remastered 2011")
+        let noisy = try #require(TrackKey(state(title: "Hello - Radio Edit (Official Video)", artist: "AdeleVEVO", album: "25")))
+        #expect(noisy.lookupArtist == "AdeleVEVO")
+        #expect(noisy.lookupTitle == "Hello - Radio Edit")
+    }
+
     @Test func theKeyKeepsTheOriginalFields() throws {
         let key = try #require(TrackKey(state(title: "Queen - Radio Ga Ga (Official Video)", artist: "QueenVEVO")))
         #expect(key.artist == "QueenVEVO")
@@ -125,10 +134,23 @@ import Testing
     @Test func theCacheKeyIsVersioned() throws {
         let key = try #require(TrackKey(artist: "Artist", title: "Song", album: "Album", duration: 200))
         let unversioned = ["Artist", "Song", "Album", "200"].joined(separator: "\u{1F}")
-        let withVersion = [unversioned, "v2"].joined(separator: "\u{1F}")
+        let withVersion = [unversioned, "v3"].joined(separator: "\u{1F}")
         #expect(key.cacheKey == hash(withVersion))
         // Entries written before the version existed are never found again.
         #expect(key.cacheKey != hash(unversioned))
+    }
+
+    @Test func namesAreNormalisedToTheComposedForm() throws {
+        let composed = "Nhạc Việt – Đừng Hỏi Em".precomposedStringWithCanonicalMapping
+        let decomposed = composed.decomposedStringWithCanonicalMapping
+        #expect(decomposed.unicodeScalars.count > composed.unicodeScalars.count)
+        let nfc = try #require(TrackKey(artist: composed, title: composed, album: composed, duration: 200))
+        let nfd = try #require(TrackKey(artist: decomposed, title: decomposed, album: decomposed, duration: 200))
+        // Swift compares the two as equal anyway; what lrclib is sent, and the cache file name, must be the same too.
+        #expect(nfd.title.unicodeScalars.count == composed.unicodeScalars.count)
+        #expect(nfd.artist.unicodeScalars.count == composed.unicodeScalars.count)
+        #expect(nfd.album.unicodeScalars.count == composed.unicodeScalars.count)
+        #expect(nfd.cacheKey == nfc.cacheKey)
     }
 
     func hash(_ text: String) -> String {

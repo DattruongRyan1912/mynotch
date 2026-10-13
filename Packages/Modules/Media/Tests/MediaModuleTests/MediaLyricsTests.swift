@@ -350,7 +350,7 @@ import Testing
     // MARK: settings
 
     @Test func theSettingExplainsWhatIsSent() {
-        #expect(MediaSettingsView.lyricsExplanation == "Khi bật, tên bài, nghệ sĩ, album và thời lượng của mỗi bài mới được gửi tới lrclib.net để lấy lời.")
+        #expect(MediaSettingsView.lyricsExplanation == "Khi bật, tên bài, nghệ sĩ, album và thời lượng của mỗi bài mới (kể cả video phát trong trình duyệt) được gửi tới lrclib.net để lấy lời.")
     }
 }
 

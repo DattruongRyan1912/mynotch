@@ -7,7 +7,7 @@ struct MediaSettingsView: View {
     /// System Settings › Privacy & Security › Screen & System Audio Recording, where "System Audio Recording Only" is.
     static let audioCaptureSettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")!
     /// Says what leaves the Mac, because lyrics are the one feature here that talks to a server.
-    static let lyricsExplanation = "Khi bật, tên bài, nghệ sĩ, album và thời lượng của mỗi bài mới được gửi tới lrclib.net để lấy lời."
+    static let lyricsExplanation = "Khi bật, tên bài, nghệ sĩ, album và thời lượng của mỗi bài mới (kể cả video phát trong trình duyệt) được gửi tới lrclib.net để lấy lời."
 
     @Binding var showActivity: Bool
     @Binding var pauseGraceSeconds: Int

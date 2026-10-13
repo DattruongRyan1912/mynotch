@@ -59,8 +59,8 @@ final class LyricsService {
         userAgent = "MyNotch/\(appVersion ?? "dev") (personal)"
     }
 
-    /// Never throws. Something that is no song (a mix, a playlist, an hour-long video) answers `.notFound` at once,
-    /// uncached and without a request; neither does a cached track make one.
+    /// Never throws. Something that is no song (a mix, a playlist, an hour-long video), or a title with nothing left
+    /// after cleaning, answers `.notFound` at once, uncached and without a request; neither does a cached track make one.
     ///
     /// A lookup is a chain of requests, each after the spacing: the exact match with the album, the exact match
     /// without it (an album spelled differently from lrclib's breaks the first), a search by name and artist, a
@@ -72,7 +72,7 @@ final class LyricsService {
     /// the cooldown, which is the retry. Cancelling the caller cancels the request in flight; a cancelled call
     /// still waiting its turn, or its next step, sends nothing.
     func lyrics(for track: TrackKey) async -> LyricsResult {
-        if track.isLongOrMix { return .notFound }
+        if track.isLongOrMix || track.lookupTitle.isEmpty { return .notFound }
         if let cached = cache.load(track) { return cached }
         guard await takeTurn() else {
             return .unavailable(Task.isCancelled ? "Lookup cancelled" : "Lyrics service stopped")
@@ -194,9 +194,14 @@ final class LyricsService {
 
     /// The gap between two requests of one chain, counted from the answer like the gap between lookups.
     private func waitOutSpacing() async {
-        await withCheckedContinuation { continuation in
-            stepContinuation = continuation
-            spacingTimer = scheduler.schedule(after: Self.minimumSpacing) { [weak self] in self?.endStepWait() }
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                stepContinuation = continuation
+                spacingTimer = scheduler.schedule(after: Self.minimumSpacing) { [weak self] in self?.endStepWait() }
+            }
+        } onCancel: {
+            // Back on the main actor, after the continuation is stored even when the task was cancelled already.
+            Task { @MainActor [weak self] in self?.endStepWait() }
         }
     }
 

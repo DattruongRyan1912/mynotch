@@ -14,9 +14,19 @@ protocol HTTPClient {
     func send(_ request: URLRequest) async throws -> HTTPReply
 }
 
-/// The real thing: a URLSession (the shared one unless a test hands in its own).
+/// The real thing: a URLSession (a private one unless a test hands in its own).
 struct URLSessionHTTPClient: HTTPClient {
-    var session: URLSession = .shared
+    /// In memory only, with no cache and no cookies: request URLs hold the track's name, and none of it may stay
+    /// on disk or come back with a later request.
+    private static let privateSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.httpCookieStorage = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        return URLSession(configuration: configuration)
+    }()
+
+    var session: URLSession = URLSessionHTTPClient.privateSession
 
     func send(_ request: URLRequest) async throws -> HTTPReply {
         let (data, response) = try await session.data(for: request)

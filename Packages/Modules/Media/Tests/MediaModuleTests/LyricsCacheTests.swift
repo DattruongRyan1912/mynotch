@@ -78,6 +78,13 @@ import Testing
         #expect(cache.load(track) == .plain("La"))
     }
 
+    @Test func aNotFoundFromTheFutureIsExpired() throws {
+        cache.store(.notFound, for: track)
+        // The clock was wrong when it was written: waiting for the clock to catch up would keep it for ever.
+        try age(track, days: -1)
+        #expect(cache.load(track) == nil)
+    }
+
     @Test func anExpiredNotFoundIsReplacedByTheNextStore() throws {
         cache.store(.notFound, for: track)
         try age(track, days: 8)

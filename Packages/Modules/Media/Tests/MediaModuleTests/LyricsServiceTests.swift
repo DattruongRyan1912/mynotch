@@ -495,16 +495,46 @@ import Testing
         #expect(client.requests.count == 1)
     }
 
-    @Test func cancellingBetweenTwoStepsSendsNothingMore() async {
+    @Test func cancellingBetweenTwoStepsEndsTheWaitAtOnceAndSendsNothingMore() async {
         route()
         let service = makeService()
-        let task = Task { await service.lyrics(for: key()) }
+        var result: LyricsResult?
+        let task = Task { result = await service.lyrics(for: key()) }
         await settle { scheduler.pendingCount == 1 }
         task.cancel()
+        // No time passes: the wait for the spacing does not keep a cancelled call.
+        await settle { result != nil }
+        #expect(result?.reason == "Lookup cancelled")
+        // Only so that a regression ends in a failed expectation rather than a call that waits for ever.
         scheduler.advance(by: LyricsService.minimumSpacing)
-        #expect(await task.value.reason == "Lookup cancelled")
+        await task.value
         #expect(client.requests.count == 1)
         #expect(!FileManager.default.fileExists(atPath: cacheDirectory.path()))
+    }
+
+    @Test func afterACancelledWaitTheNextCallWaitsOneSpacingNotTwo() async {
+        route()
+        let service = makeService()
+        var first: LyricsResult?
+        let cancelled = Task { first = await service.lyrics(for: key("A")) }
+        await settle { scheduler.pendingCount == 1 }
+        let next = Task { await service.lyrics(for: key("B")) }
+        await settle { service.queuedCount == 1 }
+        cancelled.cancel()
+        await settle { first != nil }
+        #expect(first != nil)
+
+        scheduler.advance(by: .milliseconds(299))
+        await settle { client.requests.count == 2 }
+        #expect(client.requests.count == 1)
+        scheduler.advance(by: .milliseconds(1))
+        await settle { client.requests.count == 2 }
+        #expect(client.requests.count == 2)
+        // Only so that a regression ends in a failed expectation rather than calls that wait for ever.
+        next.cancel()
+        scheduler.advance(by: .seconds(1))
+        await cancelled.value
+        _ = await next.value
     }
 
     @Test func aLookupCancelledWhileARequestIsOutDoesNotWaitForTheNextStep() async {
@@ -561,7 +591,7 @@ import Testing
 
     // MARK: long tracks
 
-    @Test(arguments: [("Song", 901.0), ("Best Mix 2024", 200), ("Lofi 1 hour", 200), ("Nhạc 1 giờ", 200), ("Nonstop Remix", 200), ("Tuyển tập nhạc", 200), ("Playlist", 200)])
+    @Test(arguments: [("Song", 901.0), ("Best Mix 2024", 420), ("Mix It Up", 901), ("Lofi 1 hour", 200), ("Nhạc 1 giờ", 200), ("Nonstop Remix", 200), ("Tuyển tập nhạc", 200), ("Playlist", 200)])
     func longTracksAndMixesNeverReachLrclib(title: String, duration: Double) async {
         client.reply(LrclibReplies.found())
         let service = makeService()
@@ -571,6 +601,28 @@ import Testing
         // Not cached, and it did not take the turn: the next track goes out at once.
         #expect(!FileManager.default.fileExists(atPath: cacheDirectory.path()))
         #expect(await service.lyrics(for: key()) == .synced(LrclibReplies.syncedLines))
+    }
+
+    @Test(arguments: [("Little Mix - Black Magic (Official Video)", 210.0), ("Avicii - Levels (Original Mix)", 180), ("Mix It Up", 200)])
+    func songsWithMixInTheirNameAreLookedUp(title: String, duration: Double) async throws {
+        route(get: LrclibReplies.found())
+        let track = try #require(TrackKey(artist: "Channel", title: title, album: nil, duration: duration, isFromBrowser: true))
+        #expect(await lookup(makeService(), track) == .synced(LrclibReplies.syncedLines))
+        #expect(client.requests.count == 1)
+    }
+
+    @Test(arguments: ["-", "|", "—", "- | -"])
+    func aTitleWithNothingLeftIsNotLookedUp(title: String) async throws {
+        client.reply(LrclibReplies.found())
+        let service = makeService()
+        let track = try #require(TrackKey(artist: "Channel", title: title, album: nil, duration: 200, isFromBrowser: true))
+        #expect(track.lookupTitle.isEmpty)
+        #expect(await service.lyrics(for: track) == .notFound)
+        #expect(client.requests.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: cacheDirectory.path()))
+        // It did not take the turn, so the next track's only request is its own.
+        #expect(await lookup(service, key()) == .synced(LrclibReplies.syncedLines))
+        #expect(client.requests.count == 1)
     }
 
     // MARK: rate limits

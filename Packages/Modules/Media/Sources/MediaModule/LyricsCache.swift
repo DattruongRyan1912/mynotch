@@ -10,7 +10,7 @@ nonisolated struct LyricsCache: Sendable {
     let directory: URL
 
     /// nil when the track is not cached, or the file cannot be read as a result (the next fetch replaces it), or
-    /// the entry is a `.notFound` older than a week (judged by the file's modification date).
+    /// the entry is a `.notFound` older than a week or dated in the future (judged by the file's modification date).
     func load(_ track: TrackKey) -> LyricsResult? {
         let url = url(for: track)
         guard let data = try? Data(contentsOf: url),
@@ -20,7 +20,8 @@ nonisolated struct LyricsCache: Sendable {
             return nil
         case .notFound:
             let stored = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-            guard let stored, Date().timeIntervalSince(stored) < Self.notFoundLifetime else { return nil }
+            // A date in the future means the clock was wrong when it was written: expired, not fresh for longer.
+            guard let stored, (0..<Self.notFoundLifetime).contains(Date().timeIntervalSince(stored)) else { return nil }
             return result
         default:
             return result

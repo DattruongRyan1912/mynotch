@@ -59,12 +59,18 @@ import Testing
         "(Official Video)", "(Official Music Video)", "(Official MV)", "[MV]", "(M/V)", "(Lyrics)", "(Lyric Video)",
         "| Lyrics", "(Audio)", "(Official Audio)", "(Visualizer)", "(Live)", "4K", "HD", "MV", "(Prod. by Someone)",
         "(official video)", "[OFFICIAL MV]", "OFFICIAL MV", "| Lyrics Video", "(Lyrics + Vietsub)", "(Official Video) [4K] | Lyrics",
-        "(Official 4K Remaster)", "| Official Video Remastered",
+        "(Official 4K Remaster)", "| Official Video Remastered", "[4K Upgrade]", "(1080p HD)", "(Official Video",
     ])
     func everyKindOfNoiseIsStripped(noise: String) {
         let parsed = VideoTitleParser.parse(title: "Artist - Song \(noise)", channel: "X")
         #expect(parsed.artist == "Artist", "artist with \(noise)")
         #expect(parsed.title == "Song", "song with \(noise)")
+    }
+
+    @Test func aTitleWithAnAlbumBehindItIsNotSplitOnItsDash() {
+        let parsed = VideoTitleParser.parse(title: "Bohemian Rhapsody - Remastered 2011 (Official Video)", channel: "Queen", splitsOnDash: false)
+        #expect(parsed.artist == "Queen")
+        #expect(parsed.title == "Bohemian Rhapsody - Remastered 2011")
     }
 
     @Test func aBracketWithRealWordsInItStays() {
@@ -86,7 +92,7 @@ import Testing
     }
 
     @Test(arguments: [
-        ("Best Songs Mix 2024", 200, true),
+        ("Best Songs Mix 2024", 420, true),
         ("Chill Playlist", 200, true),
         ("Lofi 1 hour", 200, true),
         ("Nhạc 1 giờ", 200, true),
@@ -96,8 +102,16 @@ import Testing
         ("Normal Song", 900, false),
         ("Radio Remix", 200, false),
         ("Mixtape Song", 200, false),
-        ("Summer Megamix 2024", 200, true),
-        ("Top Mixes", 200, true),
+        ("Summer Megamix 2024", 420, true),
+        ("Top Mixes", 420, true),
+        // A mix is a long track: below six minutes "mix" is part of a song's name, above the cap everything goes.
+        ("Little Mix - Black Magic (Official Video)", 210, false),
+        ("Avicii - Levels (Original Mix)", 180, false),
+        ("Mix It Up", 200, false),
+        ("Deep House Mix", 360, false),
+        ("Deep House Mix", 361, true),
+        ("Mix It Up", 901, true),
+        ("Playlist", 200, true),
         ("Non Stop Vinahey", 200, true),
         ("Non-stop Party", 200, true),
         ("Tuyển Tập Nhạc".decomposedStringWithCanonicalMapping, 200, true),
