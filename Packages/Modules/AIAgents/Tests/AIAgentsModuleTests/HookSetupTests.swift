@@ -82,12 +82,15 @@ final class FakeHookInstaller: HookInstalling {
         #expect(copies.texts == ["claude plugin marketplace add x\nclaude plugin install y"])
     }
 
-    @Test func onlyCodexIsToldToTrustTheNewHooks() {
+    /// The Settings rows show it once, under the Codex buttons; the message of an action must not repeat it.
+    @Test func theTrustNoteIsNotRepeatedInTheMessageOfAnAction() {
         let model = model()
         model.merge(.claude)
-        #expect(!model.message.contains(HookInstaller.codexTrustNote))
         model.merge(.codex)
-        #expect(model.message.contains(HookInstaller.codexTrustNote))
+        #expect(!model.message.contains(HookInstaller.codexTrustNote))
+        installer.result = []
+        model.merge(.codex)
+        #expect(!model.message.contains(HookInstaller.codexTrustNote))
     }
 
     @Test func nothingToDoAndFailuresAreReported() {

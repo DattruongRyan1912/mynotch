@@ -106,8 +106,7 @@ final class HookSetupModel {
             didInstall()
             return lines
         } done: { lines in
-            let summary = lines.isEmpty ? "Đã cài từ trước, không có gì thay đổi." : "Đã thêm \(lines.count) hook vào \(target.fileName)."
-            return target == .codex ? summary + " " + HookInstaller.codexTrustNote : summary
+            lines.isEmpty ? "Đã cài từ trước, không có gì thay đổi." : "Đã thêm \(lines.count) hook vào \(target.fileName)."
         }
     }
 

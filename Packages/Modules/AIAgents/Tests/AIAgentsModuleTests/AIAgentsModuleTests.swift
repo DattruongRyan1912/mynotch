@@ -605,6 +605,30 @@ final class FakeOpener {
         #expect(await waitUntil { FileManager.default.fileExists(atPath: socketPath) })
     }
 
+    @Test func aSocketThatCannotBeOpenedIsToldInTheSettingsUntilItWorks() async throws {
+        try Data().write(to: socketDirectory)
+        harness.settings.set(true, for: keys.preciseStatus)
+        await start()
+        let message = try #require(module.hookListenStatus.failure)
+        #expect(message.contains("socket"))
+        try FileManager.default.removeItem(at: socketDirectory)
+        harness.settings.set(false, for: keys.preciseStatus)
+        await settle { module.hookListenStatus.failure == nil }
+        #expect(module.hookListenStatus.failure == nil)
+        harness.settings.set(true, for: keys.preciseStatus)
+        #expect(await waitUntil { FileManager.default.fileExists(atPath: socketPath) })
+        #expect(module.hookListenStatus.failure == nil)
+    }
+
+    @Test func theFailureIsForgottenWhenTheModuleStops() async throws {
+        try Data().write(to: socketDirectory)
+        harness.settings.set(true, for: keys.preciseStatus)
+        await start()
+        #expect(module.hookListenStatus.failure != nil)
+        await harness.registry.setEnabled(false, for: "aiagents")
+        #expect(module.hookListenStatus.failure == nil)
+    }
+
     @Test func disablingTheModuleStopsListening() async {
         harness.settings.set(true, for: keys.preciseStatus)
         await start()

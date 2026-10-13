@@ -760,6 +760,32 @@ import Testing
         #expect(state() == .idle)
     }
 
+    @Test func aBusyRegistryEntryDoesNotOverrideWhatTheHooksJustSaid() {
+        store.apply([event(.turnStarted)], fromHooks: true)
+        store.apply([event(.turnFinished)], fromHooks: true)
+        #expect(state() == .finished)
+        elapse(2)
+        store.updateRegistry([registryEntry(status: .busy, statusUpdatedAt: clock.now - 1)])
+        #expect(state() == .finished)
+        // Once the hooks have been quiet for a while, the registry is the better source again.
+        elapse(Int(AgentSessionStore.hookPrecedenceSeconds))
+        #expect(state() == .idle)
+        store.updateRegistry([registryEntry(status: .busy, statusUpdatedAt: clock.now - 1)])
+        #expect(state() == .working(tool: nil, summary: nil))
+    }
+
+    @Test func theHooksOfOneSessionDoNotHoldBackTheRegistryForAnother() {
+        store.apply([event(.turnFinished, id: "hooked")], fromHooks: true)
+        store.apply(event(.turnFinished, id: "plain", age: 60))
+        elapse(2)
+        store.updateRegistry([
+            registryEntry("hooked", pid: 1, statusUpdatedAt: clock.now - 1),
+            registryEntry("plain", pid: 2, statusUpdatedAt: clock.now - 1),
+        ])
+        #expect(state("hooked") == .finished)
+        #expect(state("plain") == .working(tool: nil, summary: nil))
+    }
+
     @Test func theRegistryDoesNotInterruptAWorkingOrWaitingSession() {
         store.apply(event(.toolStarted(name: "Bash", summary: "ls"), age: 30))
         store.updateRegistry([registryEntry(status: .busy, statusUpdatedAt: clock.now)])

@@ -13,9 +13,17 @@ import Testing
         #expect(AgentSocket.path(inStorageDirectory: storage, uid: 501) == "/tmp/mynotch-501/agent.sock")
     }
 
-    @Test func theHelperAndTheAppAgreeOnTheDefaultPath() {
+    /// The literal layout of the app's storage; that the app really uses it is checked in `AgentSocketSyncTests` of the module's tests.
+    @Test func theDefaultPathIsTheAppsStandardStorageFolderOfTheModule() {
         let support = URL(filePath: "/Users/example/Library/Application Support", directoryHint: .isDirectory)
-        let storage = support.appending(components: "io.lucasvu.mynotch", "Modules", "aiagents", directoryHint: .isDirectory)
-        #expect(AgentSocket.defaultPath(applicationSupport: support, uid: 501) == AgentSocket.path(inStorageDirectory: storage, uid: 501))
+        #expect(
+            AgentSocket.defaultPath(applicationSupport: support, uid: 501)
+                == "/Users/example/Library/Application Support/io.lucasvu.mynotch/Modules/aiagents/agent.sock"
+        )
+    }
+
+    @Test func aSupportFolderThatDoesNotFitFallsBackToTheTemporaryFolderOfTheUser() {
+        let support = URL(filePath: "/Users/" + String(repeating: "x", count: 90) + "/Library/Application Support", directoryHint: .isDirectory)
+        #expect(AgentSocket.defaultPath(applicationSupport: support, uid: 501) == "/tmp/mynotch-501/agent.sock")
     }
 }

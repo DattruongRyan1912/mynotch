@@ -72,6 +72,33 @@ import Testing
         #expect(try FileManager.default.attributesOfItem(atPath: directory.path)[.posixPermissions] as? Int == 0o700)
     }
 
+    @Test func theReceiveBufferIsLargeEnoughForABurstOfHelpers() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let server = AgentEventServer(directory: directory) { _ in }
+        #expect(server.receiveBufferSize == nil)
+        try server.start()
+        // The default of a few KB holds only a handful of datagrams.
+        #expect((server.receiveBufferSize ?? 0) >= 256 * 1024)
+        server.stop()
+        #expect(server.receiveBufferSize == nil)
+    }
+
+    /// A folder of another user, as when someone made `/tmp/mynotch-<uid>` before the app did. `/Library` is the
+    /// system's; the check comes before anything is changed or created there.
+    @Test(.enabled(if: geteuid() != 0)) func aDirectoryOfAnotherUserIsRefused() {
+        let foreign = URL(filePath: "/Library", directoryHint: .isDirectory)
+        let server = AgentEventServer(directory: foreign) { _ in }
+        #expect(throws: AgentEventServer.StartError.directoryNotOwned) { try server.start() }
+        #expect(server.receiveBufferSize == nil)
+    }
+
+    @Test(.enabled(if: geteuid() != 0)) func aLinkToADirectoryOfAnotherUserIsRefusedToo() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createSymbolicLink(at: directory, withDestinationURL: URL(filePath: "/Library", directoryHint: .isDirectory))
+        let server = AgentEventServer(directory: directory) { _ in }
+        #expect(throws: AgentEventServer.StartError.directoryNotOwned) { try server.start() }
+    }
+
     @Test func callbacksQueuedBeforeStopAreDropped() async throws {
         defer { try? FileManager.default.removeItem(at: directory) }
         var received: [HookPayload] = []

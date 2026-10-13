@@ -8,6 +8,7 @@ struct AIAgentsSettingsView: View {
     @Binding var finishedSeconds: Int
     @Binding var preciseStatus: Bool
     let hooks: HookSetupModel
+    let listenStatus: HookListenStatus
     /// The file a pending "install" waits for the user to confirm.
     @State private var confirming: HookSetupModel.Target?
 
@@ -25,6 +26,11 @@ struct AIAgentsSettingsView: View {
             Toggle(isOn: $preciseStatus) {
                 Text("Trạng thái chính xác")
                 Text("Biết lúc agent chờ duyệt quyền. Cần cài hook cho Claude Code và Codex.")
+            }
+            if let failure = listenStatus.failure {
+                Text(failure)
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
             LabeledContent("Claude Code") {
                 HStack {

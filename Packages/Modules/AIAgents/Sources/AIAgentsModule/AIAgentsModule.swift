@@ -69,6 +69,8 @@ public final class AIAgentsModule: FeatureModule {
     private var eventServer: AgentEventServer?
     /// The socket could not be opened; it is tried again only after the setting was switched off and on.
     private var listenFailed = false
+    /// What the Settings rows say about that.
+    let hookListenStatus = HookListenStatus()
     /// Kept here because the Settings rows are built again whenever the page refreshes, which would reset its message.
     private var hookModel: HookSetupModel?
 
@@ -123,6 +125,7 @@ public final class AIAgentsModule: FeatureModule {
         eventServer?.stop()
         eventServer = nil
         listenFailed = false
+        hookListenStatus.failure = nil
     }
 
     public func makeTab() -> NotchTab? {
@@ -141,7 +144,8 @@ public final class AIAgentsModule: FeatureModule {
             showWorkingActivity: environment.settings.binding(keys.showWorkingActivity),
             finishedSeconds: environment.settings.binding(keys.finishedSeconds),
             preciseStatus: environment.settings.binding(keys.preciseStatus),
-            hooks: hookSetupModel(for: environment)
+            hooks: hookSetupModel(for: environment),
+            listenStatus: hookListenStatus
         ))
     }
 
@@ -241,6 +245,7 @@ public final class AIAgentsModule: FeatureModule {
             eventServer?.stop()
             eventServer = nil
             listenFailed = false
+            hookListenStatus.failure = nil
             return
         }
         guard eventServer == nil, !listenFailed else { return }
@@ -255,8 +260,10 @@ public final class AIAgentsModule: FeatureModule {
         do {
             try server.start()
             eventServer = server
+            hookListenStatus.failure = nil
         } catch {
             listenFailed = true
+            hookListenStatus.failure = HookListenStatus.failureMessage
             context.logger.error("Cannot listen for agent hooks: \(String(describing: error), privacy: .public)")
         }
     }

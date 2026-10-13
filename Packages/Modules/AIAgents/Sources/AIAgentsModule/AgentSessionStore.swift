@@ -11,8 +11,8 @@ final class AgentSessionStore {
     static let interruptSeconds: TimeInterval = 90
     /// A session silent for this long is dropped; it comes back with its next event.
     static let inactivitySeconds: TimeInterval = 2 * 3600
-    /// After a hook event the transcript no longer decides that session's state for this long. The hooks know
-    /// what the transcript can only guess, such as a tool that waits for permission instead of running.
+    /// After a hook event neither the transcript nor the registry decides that session's state for this long. The
+    /// hooks know what they can only guess, such as a tool that waits for permission instead of running.
     static let hookPrecedenceSeconds: TimeInterval = 60
     private static let tickInterval: Duration = .seconds(10)
 
@@ -75,7 +75,7 @@ final class AgentSessionStore {
             if fromHooks {
                 lastHookEvent[key] = now
                 apply(event, now: now)
-            } else if let hooked = lastHookEvent[key], now.timeIntervalSince(hooked) < Self.hookPrecedenceSeconds {
+            } else if hooksDecideState(of: key, now: now) {
                 apply(event.keepingStateAsIs, now: now)
             } else {
                 apply(event, now: now)
@@ -98,8 +98,10 @@ final class AgentSessionStore {
             var session = original
             if session.cwd == nil { session.cwd = info.cwd }
             // Busy since after the last event: a turn the transcript has not shown yet. A busy entry from before
-            // it is stale, and would undo a finish whose registry write is still to come.
-            if info.status == .busy, let busySince = info.statusUpdatedAt, busySince > session.lastEventAt, !session.state.isInTurn {
+            // it is stale, and would undo a finish whose registry write is still to come. While hooks arrive, they
+            // know better than the registry: the next prompt or tool comes as a hook too.
+            if info.status == .busy, let busySince = info.statusUpdatedAt, busySince > session.lastEventAt, !session.state.isInTurn,
+               !hooksDecideState(of: key, now: clock()) {
                 session.state = .working(tool: nil, summary: nil)
                 session.turnStartedAt = busySince
                 cancelFinishTimer(for: key)
@@ -157,6 +159,12 @@ final class AgentSessionStore {
         if !isUntimed {
             updateFinishTimer(for: key, from: previous, to: session.state, remaining: TimeInterval(finishedSeconds) - now.timeIntervalSince(at))
         }
+    }
+
+    /// A hook event came for this session recently enough that the transcript and the registry do not decide its state.
+    private func hooksDecideState(of key: AgentSessionKey, now: Date) -> Bool {
+        guard let hooked = lastHookEvent[key] else { return false }
+        return now.timeIntervalSince(hooked) < Self.hookPrecedenceSeconds
     }
 
     private func countToday(_ usage: AgentUsage, of event: AgentEvent, at: Date, now: Date) {
