@@ -16,10 +16,18 @@ trap cleanup_test_files EXIT
 echo "==> xcodegen generate"
 xcodegen generate --quiet
 
+# SwiftPM keeps a stale file list for local path dependencies, so a file added to or removed from
+# MyNotchCore/NotchUI breaks the dependents' incremental builds. Drop their .build when that list changes.
+shared_sources=$(find Packages/MyNotchCore/Sources Packages/NotchUI/Sources -name '*.swift' | sort | shasum | cut -d' ' -f1)
+
 for manifest in Packages/MyNotchCore/Package.swift Packages/NotchUI/Package.swift Packages/Modules/*/Package.swift; do
     package=$(dirname "$manifest")
+    if [ "$package" != Packages/MyNotchCore ] && [ "$(cat "$package/.build/mynotch-shared-sources" 2>/dev/null)" != "$shared_sources" ]; then
+        rm -rf "$package/.build"
+    fi
     echo "==> swift test ($package)"
     (cd "$package" && swift test --quiet)
+    [ "$package" = Packages/MyNotchCore ] || echo "$shared_sources" > "$package/.build/mynotch-shared-sources"
 done
 
 echo "==> xcodebuild build"
