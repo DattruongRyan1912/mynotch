@@ -1,19 +1,21 @@
 import AppKit
 
-/// Reports pointer movement and mouse-button presses anywhere on screen. Mouse monitors need no Accessibility permission.
+/// Reports pointer movement and mouse-button presses anywhere on screen, and the pasteboard types of a drag that carries data. Mouse monitors need no Accessibility permission.
 final class NotchHoverTracker {
     private var monitors: [Any] = []
-    private let onMove: (CGPoint) -> Void
+    private let onMove: (CGPoint, [String]) -> Void
     private let onMouseDown: (CGPoint) -> Void
+    /// Drag pasteboard change count at the last mouse-down; a drag that changed it carries data.
+    private var dragChangeCount = NSPasteboard(name: .drag).changeCount
 
-    init(onMove: @escaping (CGPoint) -> Void, onMouseDown: @escaping (CGPoint) -> Void) {
+    init(onMove: @escaping (CGPoint, [String]) -> Void, onMouseDown: @escaping (CGPoint) -> Void) {
         self.onMove = onMove
         self.onMouseDown = onMouseDown
     }
 
     func start() {
         guard monitors.isEmpty else { return }
-        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .leftMouseDown, .rightMouseDown]
+        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .leftMouseUp, .leftMouseDown, .rightMouseDown]
         if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] event in
             let type = event.type
             MainActor.assumeIsolated { self?.report(type) }
@@ -37,8 +39,14 @@ final class NotchHoverTracker {
     private func report(_ type: NSEvent.EventType) {
         let point = NSEvent.mouseLocation
         switch type {
-        case .leftMouseDown, .rightMouseDown: onMouseDown(point)
-        default: onMove(point)
+        case .leftMouseDown:
+            dragChangeCount = NSPasteboard(name: .drag).changeCount
+            onMouseDown(point)
+        case .rightMouseDown: onMouseDown(point)
+        case .leftMouseDragged:
+            let pasteboard = NSPasteboard(name: .drag)
+            onMove(point, pasteboard.changeCount == dragChangeCount ? [] : pasteboard.types?.map(\.rawValue) ?? [])
+        default: onMove(point, [])
         }
     }
 }

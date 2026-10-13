@@ -14,7 +14,7 @@ public final class ScreenManager {
     private var screenFrames: [(displayID: CGDirectDisplayID, frame: CGRect)] = []
     private var observers: [NSObjectProtocol] = []
     private lazy var hoverTracker = NotchHoverTracker(
-        onMove: { [weak self] point in self?.pointerMoved(to: point) },
+        onMove: { [weak self] point, dragTypes in self?.pointerMoved(to: point, dragTypes: dragTypes) },
         onMouseDown: { [weak self] point in self?.mouseDown(at: point) }
     )
     private lazy var fullscreenDetector = FullscreenDetector { [weak self] displays in
@@ -106,13 +106,13 @@ public final class ScreenManager {
         }
     }
 
-    private func pointerMoved(to point: CGPoint) {
+    private func pointerMoved(to point: CGPoint, dragTypes: [String]) {
         let display = screenFrames.first { $0.frame.containsMouseLocation(point) }?.displayID
         if display != cursorDisplay {
             cursorDisplay = display
             if settings.value(InterfaceSettings.displayMode) == .cursor { applyVisibility() }
         }
-        controllers.values.forEach { $0.pointerMoved(to: point) }
+        controllers.values.forEach { $0.pointerMoved(to: point, dragTypes: dragTypes) }
     }
 
     private func mouseDown(at point: CGPoint) {

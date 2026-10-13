@@ -1,5 +1,6 @@
 import MyNotchCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Root SwiftUI view hosted in each notch panel.
 struct NotchRootView: View {
@@ -22,6 +23,17 @@ struct NotchRootView: View {
         if case .open = state { true } else { false }
     }
 
+    private var allDropTypes: [UTType] {
+        registry.tabs.reduce(into: []) { types, tab in types += tab.dropTypes.filter { !types.contains($0) } }
+    }
+
+    /// Hands the items to the shown tab when it accepts them, else to the first tab that does.
+    private func drop(_ providers: [NSItemProvider]) -> Bool {
+        let types = providers.flatMap(\.registeredTypeIdentifiers)
+        let target = shownTab.flatMap { DropRouting.tab(for: types, tabs: [$0]) } ?? DropRouting.tab(for: types, tabs: registry.tabs)
+        return registry.tabs.first { $0.id == target }?.onDrop?(providers) ?? false
+    }
+
     var body: some View {
         let size = geometry.shapeSize(for: state, contentHeight: contentHeight)
         let radii = geometry.cornerRadii(for: state)
@@ -39,6 +51,9 @@ struct NotchRootView: View {
             // Once open, taps belong to the tab content; the root tap only opens the notch.
             .gesture(TapGesture().onEnded { model.click() }, including: isOpen ? .subviews : .all)
             .animation(NotchTokens.spring, value: state)
+            .onDrop(of: allDropTypes, isTargeted: Binding(get: { model.isDragging }, set: { if !$0 { model.setDragging(false) } })) { providers in
+                drop(providers)
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 

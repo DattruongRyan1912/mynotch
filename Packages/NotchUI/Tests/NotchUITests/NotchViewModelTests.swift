@@ -58,6 +58,28 @@ import Testing
         #expect(model.state == .closed)
     }
 
+    @Test func dragEnterOpensTheTabOnPurposeAndSetsDragging() {
+        let model = makeModel()
+        model.dragEntered(tab: "clipboard")
+        #expect(model.state == .open("clipboard"))
+        #expect(model.isOpenedOnPurpose)
+        #expect(model.isDragging)
+        #expect(model.isPointerInside)
+        model.pointerExited()
+        scheduler.advance(by: .seconds(1))
+        #expect(model.state.isExpanded)
+    }
+
+    @Test func dragExitClearsDraggingAndClosesAfterDelay() {
+        let model = makeModel()
+        model.dragEntered(tab: "clipboard")
+        model.pointerExited()
+        model.dragExited()
+        #expect(!model.isDragging)
+        scheduler.advance(by: .milliseconds(300))
+        #expect(model.state == .closed)
+    }
+
     @Test func remembersLastTab() {
         let model = makeModel()
         model.open(tab: "clipboard")

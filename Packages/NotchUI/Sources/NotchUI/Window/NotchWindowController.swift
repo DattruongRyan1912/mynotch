@@ -16,6 +16,8 @@ final class NotchWindowController {
     private var observation: Task<Void, Never>?
     /// Last keyboard focus decision; the panel makes itself key only when it turns true.
     private var lastFocus = false
+    /// Pasteboard types of the drag in progress, empty when nothing is being dragged.
+    private var dragTypes: [String] = []
 
     init(
         displayID: CGDirectDisplayID,
@@ -71,16 +73,26 @@ final class NotchWindowController {
         }
     }
 
-    /// Called for every pointer move; flips click-through and drives hover state.
-    func pointerMoved(to point: CGPoint) {
+    /// Called for every pointer move; flips click-through and drives hover and drag state. `dragTypes` are the
+    /// pasteboard types of a drag in progress; one that a tab accepts enlarges the hit area and opens that tab.
+    func pointerMoved(to point: CGPoint, dragTypes: [String]) {
+        self.dragTypes = dragTypes
+        updatePointer(point)
+    }
+
+    private func updatePointer(_ point: CGPoint) {
         guard isVisible else { return }
-        let inside = currentHitRect().contains(point)
+        let dropTab = dragTypes.isEmpty ? nil : DropRouting.tab(for: dragTypes, tabs: registry.tabs)
+        let inside = currentHitRect(dragging: dropTab != nil).contains(point)
         if panel.ignoresMouseEvents == inside { panel.ignoresMouseEvents = !inside }
-        if inside, !model.isPointerInside {
+        if inside, let dropTab, !model.isDragging {
+            model.dragEntered(tab: dropTab)
+        } else if inside, !model.isPointerInside {
             model.pointerEntered()
         } else if !inside, model.isPointerInside {
             model.pointerExited()
         }
+        if !inside || dropTab == nil { model.dragExited() }
     }
 
     /// Called for every mouse-button press, inside this app or not; a press outside the notch closes it.
@@ -99,13 +111,15 @@ final class NotchWindowController {
 
     /// The shape can change while the mouse is still (hotkey, toast, activity), so re-check the pointer.
     private func refreshHitTesting() {
-        pointerMoved(to: NSEvent.mouseLocation)
+        updatePointer(NSEvent.mouseLocation)
     }
 
-    private func currentHitRect() -> CGRect {
+    private func currentHitRect(dragging: Bool = false) -> CGRect {
         let state = model.displayState
         let contentHeight = registry.contentHeight(for: state, tabUnderToast: model.tabUnderToast)
-        return geometry.hitRect(for: state, contentHeight: contentHeight, in: screenFrame)
+        return dragging
+            ? geometry.dragHitRect(for: state, contentHeight: contentHeight, in: screenFrame)
+            : geometry.hitRect(for: state, contentHeight: contentHeight, in: screenFrame)
     }
 
     /// The panel may become key while the shown tab accepts the keyboard, and hands the keyboard back to the app in

@@ -7,6 +7,8 @@ nonisolated public enum NotchKind: Equatable, Sendable { case hardware, virtual 
 nonisolated public struct NotchGeometry: Equatable, Sendable {
     public static let maxOpenWidth: CGFloat = 720
     public static let hitPadding: CGFloat = 8
+    /// Padding of the hit area while a drag with data is in progress, so the panel accepts the drop.
+    public static let dragHitPadding: CGFloat = 40
 
     public let kind: NotchKind
     /// Size of the physical (or virtual) notch body.
@@ -68,13 +70,22 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
 
     /// Area (screen coordinates) where the pointer counts as "inside" the notch.
     public func hitRect(for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, in screenFrame: CGRect) -> CGRect {
+        paddedRect(for: state, contentHeight: contentHeight, padding: Self.hitPadding, in: screenFrame)
+    }
+
+    /// The enlarged hit area used while something is being dragged.
+    public func dragHitRect(for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, in screenFrame: CGRect) -> CGRect {
+        paddedRect(for: state, contentHeight: contentHeight, padding: Self.dragHitPadding, in: screenFrame)
+    }
+
+    private func paddedRect(for state: NotchState, contentHeight: CGFloat, padding: CGFloat, in screenFrame: CGRect) -> CGRect {
         let size = shapeSize(for: state, contentHeight: contentHeight)
         let padded = CGRect(
             x: screenFrame.midX + centerOffset - size.width / 2,
             y: screenFrame.maxY - size.height,
             width: size.width,
             height: size.height
-        ).insetBy(dx: -Self.hitPadding, dy: -Self.hitPadding)
+        ).insetBy(dx: -padding, dy: -padding)
         // AppKit reports the pointer at y == maxY on a screen's top row; y == maxY + 1 already belongs
         // to a display arranged above, so the rect stops there (CGRect.contains excludes its top edge).
         return CGRect(x: padded.minX, y: padded.minY, width: padded.width, height: screenFrame.maxY + 1 - padded.minY)

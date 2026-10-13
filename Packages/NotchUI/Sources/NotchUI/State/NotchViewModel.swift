@@ -143,6 +143,17 @@ public final class NotchViewModel {
         dragging ? pendingClose?.cancel() : scheduleCloseIfPointerOutside()
     }
 
+    /// A drag carrying data entered the notch: opens `tab` on purpose and keeps the notch open until the drag ends.
+    public func dragEntered(tab: ModuleID?) {
+        isPointerInside = true
+        open(tab: tab)
+        setDragging(true)
+    }
+
+    public func dragExited() {
+        setDragging(false)
+    }
+
     private func toastDidExpire() {
         toastExpired = true
         if let covered = tabUnderToast {

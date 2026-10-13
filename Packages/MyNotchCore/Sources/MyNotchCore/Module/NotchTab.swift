@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Content a running module shows when the notch is open.
 public struct NotchTab: Identifiable {
@@ -13,6 +14,11 @@ public struct NotchTab: Identifiable {
     /// Set by tabs with text fields or keyboard navigation. The notch panel then takes keyboard focus
     /// while the tab is shown, without activating MyNotch, so the app in front stays active.
     public let acceptsKeyboard: Bool
+    /// Types the tab accepts when something is dropped on the notch, even while it is closed. The notch opens
+    /// the first tab whose types match what is being dragged.
+    public let dropTypes: [UTType]
+    /// Receives the dropped items; returns whether they were accepted.
+    public let onDrop: (([NSItemProvider]) -> Bool)?
     public let content: AnyView
 
     public init(
@@ -21,6 +27,8 @@ public struct NotchTab: Identifiable {
         systemImage: String,
         preferredHeight: CGFloat? = nil,
         acceptsKeyboard: Bool = false,
+        dropTypes: [UTType] = [],
+        onDrop: (([NSItemProvider]) -> Bool)? = nil,
         content: AnyView
     ) {
         self.id = id
@@ -28,6 +36,8 @@ public struct NotchTab: Identifiable {
         self.systemImage = systemImage
         self.preferredHeight = preferredHeight
         self.acceptsKeyboard = acceptsKeyboard
+        self.dropTypes = dropTypes
+        self.onDrop = onDrop
         self.content = content
     }
 
