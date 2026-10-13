@@ -1,3 +1,4 @@
+import AgentHookKit
 import Foundation
 import MyNotchCore
 import MyNotchTestSupport
@@ -28,18 +29,25 @@ final class FakeOpener {
     let opener = FakeOpener()
     let module: AIAgentsModule
     let harness: RegistryHarness
+    /// Unix socket paths are short, so this is outside the sandboxed temporary directory.
+    let socketDirectory = URL(filePath: "/tmp/mn-\(UUID().uuidString.prefix(8))", directoryHint: .isDirectory)
+    var socketPath: String { socketDirectory.appending(path: "agent.sock").path }
     let session = "11111111-2222-4333-8444-555555555555"
     let codexID = "0199aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee"
 
     init() throws {
         sandbox = try Sandbox()
         fileSystem.setAlive(4242)
-        module = AIAgentsModule(fileSystem: fileSystem, claudeRoot: sandbox.claude, codexRoot: sandbox.codex, opener: opener.opener)
+        module = AIAgentsModule(
+            fileSystem: fileSystem, claudeRoot: sandbox.claude, codexRoot: sandbox.codex, opener: opener.opener,
+            hookSetup: FakeHookInstaller().setup(in: sandbox.directory), socketPath: socketDirectory.appending(path: "agent.sock").path
+        )
         harness = RegistryHarness([module])
     }
 
     isolated deinit {
         module.stopWatching()
+        try? FileManager.default.removeItem(at: socketDirectory)
     }
 
     var keys: AIAgentsSettingsKeys { AIAgentsSettingsKeys(harness.settingsEnvironment(for: "aiagents")!.settings) }
@@ -451,6 +459,55 @@ final class FakeOpener {
         #expect(current != nil)
     }
 
+    // MARK: Precise status
+
+    func sendHook(_ event: String, id: String = "s1") throws {
+        let payload = HookPayload(source: "claude", event: event, sessionID: id, tool: event == "PreToolUse" ? "Bash" : nil, timestamp: Date())
+        HookDatagramSender.send(try #require(payload.encodedDatagram()), to: socketPath)
+    }
+
+    @Test func preciseStatusIsOffByDefaultAndListensToNothing() async {
+        #expect(!harness.settingsEnvironment(for: "aiagents")!.settings.value(keys.preciseStatus))
+        await start()
+        #expect(!FileManager.default.fileExists(atPath: socketPath))
+    }
+
+    @Test func turningPreciseStatusOnListensAndHookEventsReachTheStore() async throws {
+        await start()
+        harness.settings.set(true, for: keys.preciseStatus)
+        #expect(await waitUntil { FileManager.default.fileExists(atPath: socketPath) })
+        try sendHook("PermissionRequest")
+        #expect(await waitUntil { store.sessions[key()]?.state == .waitingForInput })
+        // The transcript only sees a tool that was asked for; the hook knows it waits.
+        send(.toolStarted(name: "Bash", summary: nil))
+        #expect(store.sessions[key()]?.state == .waitingForInput)
+    }
+
+    @Test func aSettingThatIsAlreadyOnListensFromTheStart() async throws {
+        harness.settings.set(true, for: keys.preciseStatus)
+        await start()
+        #expect(FileManager.default.fileExists(atPath: socketPath))
+        try sendHook("UserPromptSubmit")
+        #expect(await waitUntil { store.sessions[key()] != nil })
+    }
+
+    @Test func turningPreciseStatusOffStopsListening() async throws {
+        harness.settings.set(true, for: keys.preciseStatus)
+        await start()
+        harness.settings.set(false, for: keys.preciseStatus)
+        #expect(await waitUntil { !FileManager.default.fileExists(atPath: socketPath) })
+        try sendHook("UserPromptSubmit")
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(store.sessions.isEmpty)
+    }
+
+    @Test func disablingTheModuleStopsListening() async {
+        harness.settings.set(true, for: keys.preciseStatus)
+        await start()
+        await harness.registry.setEnabled(false, for: "aiagents")
+        #expect(!FileManager.default.fileExists(atPath: socketPath))
+    }
+
     // MARK: Settings
 
     @Test func settingsRowsExistWhetherOrNotTheModuleRuns() async {
@@ -469,5 +526,6 @@ final class FakeOpener {
         #expect(keys.codexEnabled.name == "module.aiagents.codexEnabled")
         #expect(keys.showWorkingActivity.name == "module.aiagents.showWorkingActivity")
         #expect(keys.finishedSeconds.name == "module.aiagents.finishedSeconds")
+        #expect(keys.preciseStatus.name == "module.aiagents.preciseStatus")
     }
 }

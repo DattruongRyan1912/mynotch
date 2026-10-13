@@ -63,6 +63,40 @@ import Testing
         #expect(received.count == 1)
     }
 
+    @Test func anExistingDirectoryIsMadePrivateToo() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        let server = AgentEventServer(directory: directory) { _ in }
+        try server.start()
+        defer { server.stop() }
+        #expect(try FileManager.default.attributesOfItem(atPath: directory.path)[.posixPermissions] as? Int == 0o700)
+    }
+
+    @Test func callbacksQueuedBeforeStopAreDropped() async throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var received: [HookPayload] = []
+        let server = AgentEventServer(directory: directory) { received.append($0) }
+        try server.start()
+        HookDatagramSender.send(try #require(payload().encodedDatagram()), to: server.socketPath)
+        // Blocks the main thread, so the datagram is read and handed to the main queue but not yet delivered.
+        usleep(300_000)
+        server.stop()
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(received.isEmpty)
+    }
+
+    @Test func aServerThatIsDroppedWithoutStopRemovesItsSocket() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var path = ""
+        do {
+            let server = AgentEventServer(directory: directory) { _ in }
+            try server.start()
+            path = server.socketPath
+            #expect(FileManager.default.fileExists(atPath: path))
+        }
+        #expect(!FileManager.default.fileExists(atPath: path))
+    }
+
     @Test func aPathThatDoesNotFitIsATypedError() {
         let long = URL(filePath: "/tmp/" + String(repeating: "d", count: 120), directoryHint: .isDirectory)
         let server = AgentEventServer(directory: long) { _ in }

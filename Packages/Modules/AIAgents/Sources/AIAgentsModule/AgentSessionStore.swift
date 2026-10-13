@@ -11,6 +11,9 @@ final class AgentSessionStore {
     static let interruptSeconds: TimeInterval = 90
     /// A session silent for this long is dropped; it comes back with its next event.
     static let inactivitySeconds: TimeInterval = 2 * 3600
+    /// After a hook event the transcript no longer decides that session's state for this long. The hooks know
+    /// what the transcript can only guess, such as a tool that waits for permission instead of running.
+    static let hookPrecedenceSeconds: TimeInterval = 60
     private static let tickInterval: Duration = .seconds(10)
 
     private(set) var sessions: [AgentSessionKey: AgentSession] = [:]
@@ -25,6 +28,8 @@ final class AgentSessionStore {
     @ObservationIgnored private var tickTimer: ScheduledAction?
     /// The live Claude processes the registry listed last, by session id.
     @ObservationIgnored private var registry: [String: ClaudeSessionInfo] = [:]
+    /// When each session last got a hook event.
+    @ObservationIgnored private var lastHookEvent: [AgentSessionKey: Date] = [:]
 
     init(
         scheduler: any Scheduler,
@@ -60,9 +65,22 @@ final class AgentSessionStore {
     /// Applies events in order and publishes once, so a burst of lines costs views a single update. Old events
     /// replayed from the end of a transcript can leave a turn that ended long ago looking busy; that is settled
     /// before views see it, like any silent session.
-    func apply(_ events: [AgentEvent]) {
+    ///
+    /// `fromHooks` marks events of the precise-status hooks. While those keep arriving for a session, the same
+    /// session's transcript events only give usage and folder, not state.
+    func apply(_ events: [AgentEvent], fromHooks: Bool = false) {
         let now = clock()
-        for event in events { apply(event, now: now) }
+        for event in events {
+            let key = AgentSessionKey(source: event.source, sessionID: event.sessionID)
+            if fromHooks {
+                lastHookEvent[key] = now
+                apply(event, now: now)
+            } else if let hooked = lastHookEvent[key], now.timeIntervalSince(hooked) < Self.hookPrecedenceSeconds {
+                apply(event.keepingStateAsIs, now: now)
+            } else {
+                apply(event, now: now)
+            }
+        }
         tick(now: now)
     }
 
@@ -237,6 +255,7 @@ final class AgentSessionStore {
 
     private func remove(_ key: AgentSessionKey) {
         sessions[key] = nil
+        lastHookEvent[key] = nil
         cancelFinishTimer(for: key)
     }
 }
@@ -247,6 +266,20 @@ private extension AgentState {
         switch self {
         case .working, .waitingForInput: true
         case .finished, .idle, .error: false
+        }
+    }
+}
+
+private extension AgentEvent {
+    /// The same event without its effect on the state: what is left is its usage, cost and limits, or the
+    /// folder it names. An event with none of those becomes a usage update with nothing in it, which only
+    /// notes that the session was active.
+    var keepingStateAsIs: AgentEvent {
+        switch kind {
+        case .sessionStarted, .usageUpdated:
+            self
+        default:
+            AgentEvent(source: source, sessionID: sessionID, timestamp: timestamp, kind: .usageUpdated, usage: usage, costUSD: costUSD, rateLimits: rateLimits)
         }
     }
 }

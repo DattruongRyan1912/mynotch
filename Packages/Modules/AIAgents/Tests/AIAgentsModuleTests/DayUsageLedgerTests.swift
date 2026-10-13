@@ -86,6 +86,19 @@ import Testing
         #expect(ledger.usage(now: thisMorning, calendar: calendar)[.claude]?.tokens.output == 20)
     }
 
+    @Test func aFullBaselineMemoryStillUpdatesAMessageItHolds() {
+        var ledger = DayUsageLedger()
+        let lastNight = utc("2026-10-14T16:50:00Z")
+        let thisMorning = utc("2026-10-14T17:10:00Z")
+        record(&ledger, message("m", output: 30), at: lastNight, now: thisMorning)
+        for number in 1..<DayUsageLedger.messageMemory {
+            record(&ledger, message("filler_\(number)"), at: lastNight, now: thisMorning)
+        }
+        record(&ledger, message("m", output: 40), at: lastNight, now: thisMorning)
+        record(&ledger, message("m", output: 50), at: thisMorning, now: thisMorning)
+        #expect(ledger.usage(now: thisMorning, calendar: calendar)[.claude]?.tokens.output == 10)
+    }
+
     @Test func aMessageUnknownBeforeMidnightCountsInFull() {
         var ledger = DayUsageLedger()
         let lastNight = utc("2026-10-14T16:50:00Z")

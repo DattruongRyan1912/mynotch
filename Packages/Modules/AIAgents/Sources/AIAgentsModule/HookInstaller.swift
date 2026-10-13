@@ -1,17 +1,21 @@
 import Foundation
 
 /// Registers the `mynotch-hook` helper with Claude Code and Codex. It works on the file URLs it is given and
-/// only ever adds or removes groups whose command contains the helper's path, so other tools' hooks, and every
+/// only ever adds or removes groups whose command runs the helper, so other tools' hooks, and every
 /// other key of the file, stay as they are. Every change to an existing file is preceded by a backup.
 struct HookInstaller {
     enum InstallError: Error, Equatable {
         case notAJSONObject
+        /// An event's hooks are not a list, so adding to them would replace what the user wrote.
+        case hooksNotAnArray(event: String)
     }
 
     /// The Claude Code events whose hooks tell MyNotch what a session is doing.
     static let claudeEvents = ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Notification", "Stop", "StopFailure", "SessionEnd"]
-    /// Codex has no notification, failure or session-end hooks.
-    static let codexEvents = ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop"]
+    /// Codex has no notification or failure hooks.
+    static let codexEvents = ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd"]
+    /// Shown after installing for Codex: it does not run a hook it has not been told to trust.
+    static let codexTrustNote = "Codex sẽ hỏi bạn tin cậy hook mới (xem lại trong Codex) trước khi chạy chúng."
     static let pluginName = "mynotch"
     static let marketplaceName = "mynotch-local"
 
@@ -70,8 +74,9 @@ struct HookInstaller {
         var hooks = root["hooks"] as? [String: Any] ?? [:]
         var added: [String] = []
         for event in events {
+            if let existing = hooks[event], !(existing is [Any]) { throw InstallError.hooksNotAnArray(event: event) }
             var groups = hooks[event] as? [Any] ?? []
-            guard !groups.contains(where: { Self.commands(in: $0).contains { $0.contains(helperPath) } }) else { continue }
+            guard !groups.contains(where: { Self.commands(in: $0).contains { Self.runsHelper($0, helperPath: helperPath) } }) else { continue }
             groups.append(Self.group(helperPath: helperPath, source: source))
             hooks[event] = groups
             added.append("\(event): + \(Self.command(helperPath: helperPath, source: source))")
@@ -94,7 +99,10 @@ struct HookInstaller {
                     kept.append(group)
                     continue
                 }
-                let others = entries.filter { !((($0 as? [String: Any])?["command"] as? String)?.contains(helperPath) ?? false) }
+                let others = entries.filter { entry in
+                    let command = (entry as? [String: Any])?["command"] as? String ?? ""
+                    return !Self.runsHelper(command, helperPath: helperPath)
+                }
                 count += entries.count - others.count
                 // A group left with nothing in it would be a dangling matcher.
                 if others.count == entries.count {
@@ -123,15 +131,26 @@ struct HookInstaller {
         return object
     }
 
+    /// A backup is never overwritten: a second change within the same second gets the next free `-1`, `-2`, …
     private func save(_ object: [String: Any], to url: URL, backingUp: Bool) throws {
         let fileManager = FileManager.default
+        // Dotfiles are often links into a repository: the content is replaced, the link stays.
+        let target = url.resolvingSymlinksInPath()
         if backingUp {
-            let backup = url.deletingLastPathComponent().appending(path: "\(url.lastPathComponent).mynotch-\(backupStamp()).bak")
-            try? fileManager.removeItem(at: backup)
-            try fileManager.copyItem(at: url, to: backup)
+            let folder = url.deletingLastPathComponent()
+            let base = "\(url.lastPathComponent).mynotch-\(backupStamp())"
+            var backup = folder.appending(path: base + ".bak")
+            var number = 0
+            while fileManager.fileExists(atPath: backup.path) {
+                number += 1
+                backup = folder.appending(path: "\(base)-\(number).bak")
+            }
+            try fileManager.copyItem(at: target, to: backup)
         }
-        try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Self.write(object, to: url)
+        try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let permissions = (try? fileManager.attributesOfItem(atPath: target.path))?[.posixPermissions]
+        try Self.write(object, to: target)
+        if let permissions { try? fileManager.setAttributes([.posixPermissions: permissions], ofItemAtPath: target.path) }
     }
 
     private func backupStamp() -> String {
@@ -157,6 +176,12 @@ struct HookInstaller {
 
     private static func command(helperPath: String, source: String) -> String {
         "\(shellQuoted(helperPath)) --source \(source)"
+    }
+
+    /// The command is the quoted helper path followed by its arguments, so a longer path that starts the same is not ours.
+    private static func runsHelper(_ command: String, helperPath: String) -> Bool {
+        let quoted = shellQuoted(helperPath)
+        return command == quoted || command.hasPrefix(quoted + " ")
     }
 
     private static func commands(in group: Any) -> [String] {

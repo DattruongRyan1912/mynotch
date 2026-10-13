@@ -129,6 +129,62 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 
+    @Test func aSecondChangeInTheSameSecondKeepsTheOriginalBackup() throws {
+        defer { cleanUp() }
+        let url = try write(claudeSettings, to: "settings.json")
+        let original = try object(at: url)
+        _ = try installer.mergeClaudeSettings(settingsURL: url, helperPath: helper)
+        _ = try installer.removeClaude(settingsURL: url, helperPath: helper)
+        _ = try installer.mergeClaudeSettings(settingsURL: url, helperPath: helper)
+        let backups = try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasSuffix(".bak") }.sorted()
+        #expect(backups == [
+            "settings.json.mynotch-20261014-120709-1.bak",
+            "settings.json.mynotch-20261014-120709-2.bak",
+            "settings.json.mynotch-20261014-120709.bak",
+        ])
+        #expect(try object(at: directory.appending(path: "settings.json.mynotch-20261014-120709.bak")) == original)
+    }
+
+    @Test func eventsThatAreNotAnArrayAreNotReplaced() throws {
+        defer { cleanUp() }
+        let text = #"{"hooks": {"Stop": {"oops": true}}}"#
+        let url = try write(text, to: "settings.json")
+        #expect(throws: HookInstaller.InstallError.hooksNotAnArray(event: "Stop")) {
+            try installer.mergeClaudeSettings(settingsURL: url, helperPath: helper)
+        }
+        #expect(try String(contentsOf: url, encoding: .utf8) == text)
+    }
+
+    @Test func onlyTheExactQuotedHelperIsOurs() throws {
+        defer { cleanUp() }
+        let sibling = "'\(helper)-beta' --source claude"
+        let url = try write(#"{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "\#(sibling)"}]}]}}"#, to: "settings.json")
+        _ = try installer.mergeClaudeSettings(settingsURL: url, helperPath: helper)
+        #expect(groups(try object(at: url), "Stop").count == 2)
+        _ = try installer.removeClaude(settingsURL: url, helperPath: helper)
+        #expect(groups(try object(at: url), "Stop").map(commands) == [[sibling]])
+    }
+
+    @Test func aWriteKeepsThePermissionsOfTheFile() throws {
+        defer { cleanUp() }
+        let url = try write(claudeSettings, to: "settings.json")
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        _ = try installer.mergeClaudeSettings(settingsURL: url, helperPath: helper)
+        #expect(try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int == 0o600)
+    }
+
+    @Test func aSymlinkedFileIsWrittenThroughAndStaysALink() throws {
+        defer { cleanUp() }
+        let real = try write(claudeSettings, to: "real.json")
+        let link = directory.appending(path: "settings.json")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        _ = try installer.mergeClaudeSettings(settingsURL: link, helperPath: helper)
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: link.path)) == real.path)
+        #expect(ours(try object(at: real), "Stop").count == 1)
+        let backup = directory.appending(path: "settings.json.mynotch-20261014-120709.bak")
+        #expect(ours(try object(at: backup), "Stop").isEmpty)
+    }
+
     // MARK: Codex
 
     let codexHooks = """
@@ -145,7 +201,7 @@ import Testing
         let added = try installer.mergeCodexHooks(hooksURL: url, helperPath: helper)
         #expect(!added.isEmpty)
         let merged = try object(at: url)
-        for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop"] {
+        for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd"] {
             #expect(ours(merged, event).count == 1, "\(event)")
             #expect(commands(ours(merged, event)[0]).first?.hasSuffix("--source codex") == true)
         }
@@ -155,6 +211,10 @@ import Testing
 
         #expect(try installer.removeCodex(hooksURL: url, helperPath: helper).count == added.count)
         #expect(try object(at: url) == original)
+    }
+
+    @Test func codexAsksToTrustNewHooks() {
+        #expect(HookInstaller.codexTrustNote.contains("Codex"))
     }
 
     @Test func codexConfigTomlIsNotTouched() throws {

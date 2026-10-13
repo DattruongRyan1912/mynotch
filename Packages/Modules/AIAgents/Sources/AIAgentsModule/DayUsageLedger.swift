@@ -73,7 +73,8 @@ nonisolated struct DayUsageLedger: Equatable, Sendable {
             }
             let key = MessageKey(source: source, messageID: id)
             guard date >= dayStart else {
-                if earlier.count < Self.messageMemory { earlier[key] = totals }
+                // A full memory takes no new message, but a message it already holds keeps its latest baseline.
+                if earlier[key] != nil || earlier.count < Self.messageMemory { earlier[key] = totals }
                 return
             }
             if messages[key] == nil { remember(key) }

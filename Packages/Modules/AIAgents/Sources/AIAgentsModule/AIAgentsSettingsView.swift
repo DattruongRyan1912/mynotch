@@ -6,6 +6,10 @@ struct AIAgentsSettingsView: View {
     @Binding var codexEnabled: Bool
     @Binding var showWorkingActivity: Bool
     @Binding var finishedSeconds: Int
+    @Binding var preciseStatus: Bool
+    let hooks: HookSetupModel
+    /// The file a pending "install" waits for the user to confirm.
+    @State private var confirming: HookSetupModel.Target?
 
     var body: some View {
         Group {
@@ -18,15 +22,48 @@ struct AIAgentsSettingsView: View {
             Stepper(value: $finishedSeconds, in: AIAgentsSettingsKeys.finishedSecondsRange) {
                 Text("Hiện dấu ✓ khi xong trong \(finishedSeconds) giây")
             }
-            // Placeholder: the hooks that tell when an agent waits for a permission come with a later version.
-            LabeledContent {
-                Toggle("Trạng thái chính xác (sắp có)", isOn: .constant(false))
-                    .labelsHidden()
-                    .disabled(true)
-            } label: {
-                Text("Trạng thái chính xác (sắp có)")
+            Toggle(isOn: $preciseStatus) {
+                Text("Trạng thái chính xác")
                 Text("Biết lúc agent chờ duyệt quyền. Cần cài hook cho Claude Code và Codex.")
             }
+            LabeledContent("Claude Code") {
+                HStack {
+                    Button("Cài cho Claude Code") { hooks.installClaudePlugin() }
+                    Button("Cài vào settings.json") { confirming = .claude }
+                    Button("Gỡ") { hooks.remove(.claude) }
+                }
+            }
+            if !hooks.pluginCommands.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(hooks.pluginCommands.joined(separator: "\n"))
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                    Button("Sao chép lệnh") { hooks.copyPluginCommands() }
+                }
+            }
+            LabeledContent("Codex") {
+                HStack {
+                    Button("Cài vào hooks.json") { confirming = .codex }
+                    Button("Gỡ") { hooks.remove(.codex) }
+                }
+            }
+            Text(HookInstaller.codexTrustNote)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if !hooks.message.isEmpty {
+                Text(hooks.message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .alert(
+            "Thêm hook vào \(confirming.map { hooks.url(of: $0).lastPathComponent } ?? "")?",
+            isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }), presenting: confirming
+        ) { target in
+            Button("Thêm") { hooks.merge(target) }
+            Button("Huỷ", role: .cancel) {}
+        } message: { target in
+            Text("Một bản sao lưu \(hooks.url(of: target).lastPathComponent).mynotch-<thời gian>.bak được tạo cạnh file trước khi sửa. Hook của công cụ khác và mọi khoá khác được giữ nguyên.")
         }
     }
 }

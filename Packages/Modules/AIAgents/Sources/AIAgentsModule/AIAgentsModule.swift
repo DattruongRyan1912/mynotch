@@ -1,3 +1,4 @@
+import AgentHookKit
 import Foundation
 import MyNotchCore
 import NotchUI
@@ -14,12 +15,15 @@ struct AIAgentsSettingsKeys {
     let showWorkingActivity: SettingKey<Bool>
     /// How long the check mark of a finished turn stays.
     let finishedSeconds: SettingKey<Int>
+    /// Listens for the hook helper, which tells exactly when an agent waits for you.
+    let preciseStatus: SettingKey<Bool>
 
     init(_ settings: ModuleSettings) {
         claudeEnabled = settings.key("claudeEnabled", default: true)
         codexEnabled = settings.key("codexEnabled", default: true)
         showWorkingActivity = settings.key("showWorkingActivity", default: true)
         finishedSeconds = settings.key("finishedSeconds", default: 5, clampedTo: Self.finishedSecondsRange)
+        preciseStatus = settings.key("preciseStatus", default: false)
     }
 }
 
@@ -54,9 +58,14 @@ public final class AIAgentsModule: FeatureModule {
     private let claudeRoot: URL
     private let codexRoot: URL
     private let opener: AgentOpener
+    private let hookSetup: HookSetup
+    /// Where the hook socket is; nil is the standard place in the module's storage.
+    private let socketPath: String?
     private var context: ModuleContext?
     /// One per agent that is turned on, so turning one off or on leaves the other alone.
     private var watchers: [AgentSource: AgentWatcher] = [:]
+    /// Set while the setting `preciseStatus` is on and the socket could be opened.
+    private var eventServer: AgentEventServer?
 
     /// Reads the real `~/.claude` and `~/.codex`.
     public convenience init() {
@@ -64,12 +73,18 @@ public final class AIAgentsModule: FeatureModule {
         self.init(fileSystem: LocalAgentFileSystem(), claudeRoot: roots.claude, codexRoot: roots.codex, opener: .system)
     }
 
-    /// For tests: a fake file system, temporary roots and an opener that opens nothing.
-    init(fileSystem: any AgentFileSystem, claudeRoot: URL, codexRoot: URL, opener: AgentOpener) {
+    /// For tests: a fake file system, temporary roots, an opener that opens nothing, and the socket and installer
+    /// they use instead of the real ones.
+    init(
+        fileSystem: any AgentFileSystem, claudeRoot: URL, codexRoot: URL, opener: AgentOpener,
+        hookSetup: HookSetup = .system, socketPath: String? = nil
+    ) {
         self.fileSystem = fileSystem
         self.claudeRoot = claudeRoot
         self.codexRoot = codexRoot
         self.opener = opener
+        self.hookSetup = hookSetup
+        self.socketPath = socketPath
     }
 
     static func defaultRoots(home: URL) -> (claude: URL, codex: URL) {
@@ -96,9 +111,12 @@ public final class AIAgentsModule: FeatureModule {
         publishedActivity = nil
     }
 
+    /// Stops reading the agents' files and listening for the hooks.
     func stopWatching() {
         for watcher in watchers.values { watcher.stop() }
         watchers = [:]
+        eventServer?.stop()
+        eventServer = nil
     }
 
     public func makeTab() -> NotchTab? {
@@ -115,7 +133,11 @@ public final class AIAgentsModule: FeatureModule {
             claudeEnabled: environment.settings.binding(keys.claudeEnabled),
             codexEnabled: environment.settings.binding(keys.codexEnabled),
             showWorkingActivity: environment.settings.binding(keys.showWorkingActivity),
-            finishedSeconds: environment.settings.binding(keys.finishedSeconds)
+            finishedSeconds: environment.settings.binding(keys.finishedSeconds),
+            preciseStatus: environment.settings.binding(keys.preciseStatus),
+            hooks: HookSetupModel(
+                setup: hookSetup, pluginDirectory: environment.storage.directory.appending(path: "claude-plugin", directoryHint: .isDirectory)
+            )
         ))
     }
 
@@ -153,6 +175,7 @@ public final class AIAgentsModule: FeatureModule {
         var claudeEnabled: Bool
         var codexEnabled: Bool
         var finishedSeconds: Int
+        var preciseStatus: Bool
     }
 
     private static func inputs(store: AgentSessionStore, settings: ModuleSettings, keys: AIAgentsSettingsKeys) -> Inputs {
@@ -160,7 +183,8 @@ public final class AIAgentsModule: FeatureModule {
             activity: AgentActivityContent(sessions: store.sessions.values, showWorking: settings.value(keys.showWorkingActivity)),
             claudeEnabled: settings.value(keys.claudeEnabled),
             codexEnabled: settings.value(keys.codexEnabled),
-            finishedSeconds: settings.value(keys.finishedSeconds)
+            finishedSeconds: settings.value(keys.finishedSeconds),
+            preciseStatus: settings.value(keys.preciseStatus)
         )
     }
 
@@ -172,6 +196,7 @@ public final class AIAgentsModule: FeatureModule {
         store.finishedSeconds = settings.value(keys.finishedSeconds)
         follow(.claude, settings.value(keys.claudeEnabled), store: store)
         follow(.codex, settings.value(keys.codexEnabled), store: store)
+        listen(settings.value(keys.preciseStatus), store: store, context: context)
         publish(AgentActivityContent(sessions: store.sessions.values, showWorking: settings.value(keys.showWorkingActivity)))
     }
 
@@ -188,6 +213,26 @@ public final class AIAgentsModule: FeatureModule {
         } else if !enabled, let watcher = watchers.removeValue(forKey: source) {
             watcher.stop()
             store.removeSessions(of: source)
+        }
+    }
+
+    /// Starts or stops the socket the hook helper sends to. Its events win over what the transcripts suggest.
+    private func listen(_ enabled: Bool, store: AgentSessionStore, context: ModuleContext) {
+        guard enabled else {
+            eventServer?.stop()
+            eventServer = nil
+            return
+        }
+        guard eventServer == nil else { return }
+        let path = socketPath ?? AgentSocket.path(inStorageDirectory: context.storage.directory)
+        let server = AgentEventServer(directory: URL(filePath: path).deletingLastPathComponent()) { [weak store] payload in
+            store?.apply(payload.agentEvents, fromHooks: true)
+        }
+        do {
+            try server.start()
+            eventServer = server
+        } catch {
+            context.logger.error("Cannot listen for agent hooks: \(String(describing: error), privacy: .public)")
         }
     }
 

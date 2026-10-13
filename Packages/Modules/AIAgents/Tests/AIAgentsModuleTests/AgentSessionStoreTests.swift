@@ -51,6 +51,49 @@ import Testing
         ClaudeSessionInfo(pid: pid, sessionID: id, cwd: cwd, status: status, statusUpdatedAt: statusUpdatedAt)
     }
 
+    // MARK: Hooks
+
+    @Test func whileHooksArriveTheTranscriptDoesNotChangeTheState() {
+        store.apply([event(.waitingForInput)], fromHooks: true)
+        // The transcript only knows a tool was requested, not that it waits for permission.
+        store.apply(event(.toolStarted(name: "Bash", summary: "ls")))
+        #expect(state() == .waitingForInput)
+        store.apply(event(.turnFinished))
+        #expect(state() == .waitingForInput)
+        store.apply([event(.toolFinished)], fromHooks: true)
+        #expect(state() == .working(tool: nil, summary: nil))
+    }
+
+    @Test func theTranscriptStillBringsUsageAndTheFolderWhileHooksArrive() {
+        store.apply([event(.turnStarted)], fromHooks: true)
+        store.apply(event(.sessionStarted(cwd: demoPath, branch: "main")))
+        store.apply(event(.usageUpdated, usage: claudeUsage("m1", output: 7)))
+        store.apply(event(.turnFinished, usage: claudeUsage("m2", output: 3)))
+        #expect(state() == .working(tool: nil, summary: nil))
+        #expect(session()?.cwd == demoPath)
+        #expect(store.todayUsage[.claude]?.tokens.output == 10)
+    }
+
+    @Test func theTranscriptTakesOverAgainWhenHooksGoQuiet() {
+        store.apply([event(.waitingForInput)], fromHooks: true)
+        elapse(Int(AgentSessionStore.hookPrecedenceSeconds) + 1)
+        store.apply(event(.toolStarted(name: "Bash", summary: nil)))
+        #expect(state() == .working(tool: "Bash", summary: nil))
+    }
+
+    @Test func hooksOfOneSessionDoNotSilenceTheTranscriptOfAnother() {
+        store.apply([event(.waitingForInput, id: "a")], fromHooks: true)
+        store.apply(event(.turnStarted, id: "b"))
+        #expect(state("b") == .working(tool: nil, summary: nil))
+    }
+
+    @Test func aRepeatedHookEventChangesNothing() {
+        store.apply([event(.waitingForInput)], fromHooks: true)
+        let once = session()
+        store.apply([event(.waitingForInput)], fromHooks: true)
+        #expect(session() == once)
+    }
+
     // MARK: State table
 
     @Test func aPromptStartsAWorkingTurnInTheProject() {
