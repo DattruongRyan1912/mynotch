@@ -39,7 +39,8 @@ public final class SystemPermissionCenter: PermissionCenter {
     public func request(_ permission: Permission) async -> PermissionStatus {
         switch permission {
         case .accessibility:
-            // The user enables it in System Settings, so the prompt never changes the status right away.
+            // `kAXTrustedCheckOptionPrompt` is a mutable C global that Swift 6 rejects as not concurrency-safe;
+            // the literal is its value. The user enables it in System Settings, so the status doesn't change right away.
             _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
         case .screenRecording:
             _ = CGRequestScreenCaptureAccess()

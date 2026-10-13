@@ -51,7 +51,8 @@ targets:
       path: App/MyNotch.entitlements
       properties:
         com.apple.security.app-sandbox: false
-        # Hardened Runtime blocks these resources unless the matching entitlement is present.
+        # Hardened Runtime blocks calendars, Apple Events and audio input without these entitlements.
+        # The Bluetooth one is an App Sandbox entitlement: harmless without the sandbox, ready if it is enabled.
         com.apple.security.personal-information.calendars: true
         com.apple.security.automation.apple-events: true
         com.apple.security.device.audio-input: true

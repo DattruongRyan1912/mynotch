@@ -20,6 +20,15 @@ nonisolated public enum Permission: Hashable, Sendable {
         }
     }
 
+    /// The status can't tell "never asked" from "denied", and only `request` lists the app in System Settings,
+    /// so granting always requests first and then opens System Settings if that was not enough.
+    public var isSettingsOnly: Bool {
+        switch self {
+        case .accessibility, .screenRecording: true
+        default: false
+        }
+    }
+
     /// Deep link into the matching System Settings privacy pane.
     public var settingsURL: String {
         let base = "x-apple.systempreferences:com.apple.preference.security?"

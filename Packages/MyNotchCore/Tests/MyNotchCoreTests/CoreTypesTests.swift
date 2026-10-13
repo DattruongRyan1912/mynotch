@@ -35,6 +35,13 @@ import Testing
         #expect(permission.settingsURL == "x-apple.systempreferences:com.apple.preference.security?" + anchor)
     }
 
+    @Test func onlyAccessibilityAndScreenRecordingAreSettingsOnly() {
+        let settingsOnly: [Permission] = [.accessibility, .screenRecording]
+        let promptable: [Permission] = [.calendars, .reminders, .bluetooth, .automation(bundleID: "com.spotify.client"), .microphone]
+        #expect(settingsOnly.allSatisfy { $0.isSettingsOnly })
+        #expect(!promptable.contains { $0.isSettingsOnly })
+    }
+
     @Test func moduleIDValidatesRuntimeValuesAndCodesAsPlainString() throws {
         #expect(ModuleID(rawValue: "battery2")?.rawValue == "battery2")
         for invalid in ["", "Battery", "a.b", "a_b", "café", "app"] {

@@ -59,6 +59,8 @@ private struct PermissionRow: View {
     let permission: Permission
     let registry: ModuleRegistry
     let permissions: any PermissionCenter
+    /// Repeated taps while a prompt is pending would otherwise start parallel requests.
+    @State private var isGranting = false
 
     var body: some View {
         LabeledContent(permission.displayName) {
@@ -71,7 +73,14 @@ private struct PermissionRow: View {
                     case .notDetermined: Text("Chưa xin").foregroundStyle(.secondary)
                     }
                     if status != .granted {
-                        Button("Cấp quyền") { Task { await registry.grant(permission) } }
+                        Button("Cấp quyền") {
+                            isGranting = true
+                            Task {
+                                await registry.grant(permission)
+                                isGranting = false
+                            }
+                        }
+                        .disabled(isGranting)
                     }
                 }
             }

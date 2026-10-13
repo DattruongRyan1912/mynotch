@@ -90,9 +90,14 @@ public final class ModuleRegistry {
     public var needsPermissionPolling: Bool { modules.contains(where: waitsForPermission) }
 
     /// Prompts while the system still can; after an answer only System Settings can change it.
+    /// Settings-only permissions always request first, which also lists the app in System Settings.
     public func grant(_ permission: Permission) async {
-        if permissions.status(of: permission) == .notDetermined {
-            _ = await permissions.request(permission)
+        let before = permissions.status(of: permission)
+        if before == .notDetermined || permission.isSettingsOnly {
+            let after = await permissions.request(permission)
+            if before != .notDetermined && after != .granted {
+                permissions.openSystemSettings(for: permission)
+            }
         } else {
             permissions.openSystemSettings(for: permission)
         }

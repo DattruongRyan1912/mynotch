@@ -58,7 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func observePermissionPolling() {
         Task { [weak self, registry] in
             for await needed in Observations({ registry.needsPermissionPolling }) {
-                self?.setPermissionPolling(needed)
+                guard let self else { return }
+                setPermissionPolling(needed)
             }
         }
     }

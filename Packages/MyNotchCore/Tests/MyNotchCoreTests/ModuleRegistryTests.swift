@@ -53,14 +53,37 @@ import MyNotchTestSupport
     }
 
     @Test func grantOpensSystemSettingsForADeniedPermission() async {
-        let module = FakeModule("needy", permissions: [.accessibility])
+        let module = FakeModule("needy", permissions: [.calendars])
         let harness = Harness([module])
         await harness.registry.bootstrap()
-        await harness.registry.grant(.accessibility)
-        #expect(harness.permissions.openedSettings == [.accessibility])
+        await harness.registry.grant(.calendars)
+        #expect(harness.permissions.openedSettings == [.calendars])
         #expect(harness.permissions.requested.isEmpty)
+        #expect(harness.registry.state(of: "needy") == .needsPermission(.calendars))
+        #expect(module.startCount == 0)
+    }
+
+    @Test func grantRequestsThenOpensSettingsForASettingsOnlyPermission() async {
+        let module = FakeModule("needy", permissions: [.accessibility])
+        let harness = Harness([module])
+        harness.permissions.requestResult = .denied
+        await harness.registry.bootstrap()
+        await harness.registry.grant(.accessibility)
+        #expect(harness.permissions.requested == [.accessibility])
+        #expect(harness.permissions.openedSettings == [.accessibility])
         #expect(harness.registry.state(of: "needy") == .needsPermission(.accessibility))
         #expect(module.startCount == 0)
+    }
+
+    @Test func grantSkipsSettingsWhenASettingsOnlyRequestSucceeds() async {
+        let module = FakeModule("needy", permissions: [.screenRecording])
+        let harness = Harness([module])
+        await harness.registry.bootstrap()
+        await harness.registry.grant(.screenRecording)
+        #expect(harness.permissions.requested == [.screenRecording])
+        #expect(harness.permissions.openedSettings.isEmpty)
+        #expect(harness.registry.state(of: "needy") == .running)
+        #expect(module.startCount == 1)
     }
 
     @Test func deniedOptionalPermissionsDoNotBlockStart() async {
