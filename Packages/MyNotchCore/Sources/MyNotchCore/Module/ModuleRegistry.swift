@@ -11,6 +11,7 @@ public final class ModuleRegistry {
 
     @ObservationIgnored private let settings: SettingsStore
     @ObservationIgnored private let activities: ActivityCenter
+    @ObservationIgnored private let lockScreen: LockScreenContentCenter
     @ObservationIgnored private let permissions: any PermissionCenter
     @ObservationIgnored private let hotkeys: HotkeyRegistry
     @ObservationIgnored private let presenter: any NotchPresenter
@@ -30,6 +31,7 @@ public final class ModuleRegistry {
         modules: [any FeatureModule],
         settings: SettingsStore,
         activities: ActivityCenter,
+        lockScreen: LockScreenContentCenter,
         permissions: any PermissionCenter,
         hotkeys: HotkeyRegistry,
         presenter: any NotchPresenter,
@@ -42,6 +44,7 @@ public final class ModuleRegistry {
         self.modules = sorted
         self.settings = settings
         self.activities = activities
+        self.lockScreen = lockScreen
         self.permissions = permissions
         self.hotkeys = hotkeys
         self.presenter = presenter
@@ -193,6 +196,7 @@ public final class ModuleRegistry {
             id: id,
             settings: moduleSettings[id]!,
             activities: ActivityPublisher(center: activities, module: id),
+            lockScreen: LockScreenPublisher(center: lockScreen, module: id),
             presenter: presenter,
             hotkeys: ModuleHotkeys(registry: hotkeys, module: id),
             services: ModuleServices(registry: services, module: id),

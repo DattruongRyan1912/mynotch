@@ -2,6 +2,7 @@ import AIAgentsModule
 import BatteryModule
 import CalendarModule
 import ClipboardModule
+import LockScreenModule
 import MediaModule
 import MyNotchCore
 import ScreenshotModule
@@ -26,6 +27,7 @@ enum ModuleList {
             TimerModule(),
             ShelfModule(),
             SystemActivitiesModule(),
+            LockScreenModule(),
         ]
     }
 }

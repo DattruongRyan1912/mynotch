@@ -92,6 +92,7 @@ public struct RegistryHarness {
         return StorageRoot(applicationSupport: base.appending(path: "ApplicationSupport"), caches: base.appending(path: "Caches"))
     }()
     public let activities: ActivityCenter
+    public let lockScreen = LockScreenContentCenter()
     public let registry: ModuleRegistry
 
     public init(_ modules: [any FeatureModule]) {
@@ -99,7 +100,7 @@ public struct RegistryHarness {
         services = ServiceRegistry(scheduler: scheduler)
         activities = ActivityCenter(scheduler: scheduler)
         registry = ModuleRegistry(
-            modules: modules, settings: settings, activities: activities,
+            modules: modules, settings: settings, activities: activities, lockScreen: lockScreen,
             permissions: permissions, hotkeys: hotkeys, presenter: presenter,
             scheduler: scheduler, storageRoot: storageRoot, services: services
         )

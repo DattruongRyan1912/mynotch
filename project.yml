@@ -30,6 +30,8 @@ packages:
     path: Packages/Modules/Calendar
   ClipboardModule:
     path: Packages/Modules/Clipboard
+  LockScreenModule:
+    path: Packages/Modules/LockScreen
   MediaModule:
     path: Packages/Modules/Media
   ScreenshotModule:
@@ -63,6 +65,7 @@ targets:
       - package: BatteryModule
       - package: CalendarModule
       - package: ClipboardModule
+      - package: LockScreenModule
       - package: MediaModule
       - package: ScreenshotModule
       - package: ShelfModule

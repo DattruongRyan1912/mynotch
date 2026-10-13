@@ -33,6 +33,23 @@ final class FakePowerSource: PowerSourceReading {
         #expect(harness.registry.state(of: "battery") == .unavailable(reason: "Máy không có pin"))
     }
 
+    @Test func offersThePercentToTheLockScreenWhileRunning() async {
+        let source = FakePowerSource(PowerSourceSnapshot(percent: 60, isCharging: false, isOnAC: false))
+        let harness = RegistryHarness([BatteryModule(reader: source)])
+        await harness.registry.bootstrap()
+        #expect(harness.lockScreen.current?.module == "battery")
+        #expect(harness.lockScreen.current?.priority == .low)
+
+        await harness.registry.setEnabled(false, for: "battery")
+        #expect(harness.lockScreen.current == nil)
+    }
+
+    @Test func aMacWithoutABatteryOffersNothingToTheLockScreen() async {
+        let harness = RegistryHarness([BatteryModule(reader: FakePowerSource(nil))])
+        await harness.registry.bootstrap()
+        #expect(harness.lockScreen.current == nil)
+    }
+
     @Test func pluggingInPublishesChargingActivityThatExpires() async {
         let source = FakePowerSource(PowerSourceSnapshot(percent: 60, isCharging: false, isOnAC: false))
         let harness = RegistryHarness([BatteryModule(reader: source)])

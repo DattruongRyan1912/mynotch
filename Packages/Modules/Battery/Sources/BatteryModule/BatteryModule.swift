@@ -49,6 +49,8 @@ public final class BatteryModule: FeatureModule {
         publishedLowPercent = nil
         lastThreshold = nil
         apply(snapshot, previous: nil)
+        // The view reads `state`, so it is offered once and follows the percent by itself.
+        context.lockScreen.set(AnyView(BatteryLockScreenView(state: state)), priority: .low)
         if !reader.startObserving({ [weak self] in self?.refresh() }) {
             context.logger.error("Power source notifications unavailable; battery data will not update")
         }

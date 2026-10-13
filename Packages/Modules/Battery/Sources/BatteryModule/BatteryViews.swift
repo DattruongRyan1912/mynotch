@@ -52,6 +52,24 @@ struct BatteryTabView: View {
     }
 }
 
+/// Lock screen widget: the percent and nothing else.
+struct BatteryLockScreenView: View {
+    let state: BatteryState
+
+    var body: some View {
+        if let snapshot = state.snapshot {
+            HStack(spacing: 10) {
+                Image(systemName: BatteryTabView.symbol(for: snapshot))
+                    .font(.system(size: 22))
+                Text("\(snapshot.percent)%")
+                    .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(NotchTokens.primaryText)
+        }
+    }
+}
+
 struct BatteryActivityIcon: View {
     let systemImage: String
     let tint: Color

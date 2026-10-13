@@ -66,6 +66,8 @@ public final class MediaModule: FeatureModule {
     /// Track the published activity belongs to; nil while none is published. Compared so the activity is
     /// set once per track: everything that changes while a track plays is read by its views from `store`.
     private var publishedTrack: TrackIdentity?
+    /// Whether the lock screen view is on offer; its view reads `store`, so it is set once and cleared once.
+    private var lockScreenOffered = false
     private var deadlineTimer: ScheduledAction?
     private var scheduledDeadline: Date?
 
@@ -115,6 +117,7 @@ public final class MediaModule: FeatureModule {
         store.reset()
         policy = ActivityPolicy()
         publishedTrack = nil
+        lockScreenOffered = false
         spectrumFeed = SpectrumFeed(source: spectrum, store: store, scheduler: context.scheduler, logger: context.logger)
         lyricsTrack = nil
         lyricsService = LyricsService(
@@ -161,6 +164,7 @@ public final class MediaModule: FeatureModule {
         cancelDeadline()
         policy = ActivityPolicy()
         publishedTrack = nil
+        lockScreenOffered = false
         store.reset()
     }
 
@@ -323,10 +327,23 @@ public final class MediaModule: FeatureModule {
         scheduledDeadline = nil
     }
 
+    /// On offer while the policy shows playback, whatever the live activity setting says: the lock screen module
+    /// has its own switch for Media.
+    private func refreshLockScreen(_ context: ModuleContext) {
+        guard policy.visible != lockScreenOffered else { return }
+        lockScreenOffered = policy.visible
+        if lockScreenOffered {
+            context.lockScreen.set(AnyView(NowPlayingLockScreenView(store: store)), priority: .normal)
+        } else {
+            context.lockScreen.clear()
+        }
+    }
+
     /// Sets the activity when it becomes visible or another track starts, clears it when it hides; nothing else,
     /// so frequent position updates neither redraw nor reorder it.
     private func refreshActivity() {
         guard let context else { return }
+        refreshLockScreen(context)
         guard showActivity, policy.visible else {
             if publishedTrack != nil {
                 context.activities.clear(id: Self.activityID)

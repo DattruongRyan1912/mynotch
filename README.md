@@ -42,7 +42,8 @@ Kiểm tra toàn bộ (test mọi package rồi build app):
 5. `xcodegen generate`. `scripts/verify.sh` tự chạy test của mọi package trong `Packages/Modules/`.
 
 Module dùng được: `context.storage` (thư mục dữ liệu riêng), `context.scheduler` (việc đã hẹn tự huỷ khi module dừng), `NotchTab(acceptsKeyboard:)` (tab nhận bàn phím),
-`@Environment(\.notch)` (ghim/đóng notch từ view) và `optionalPermissions` trong `ModuleDescriptor` (quyền không bắt buộc).
+`@Environment(\.notch)` (ghim/đóng notch từ view), `optionalPermissions` trong `ModuleDescriptor` (quyền không bắt buộc)
+và `context.lockScreen` (view nhỏ, không nhạy cảm, hiện trên màn hình khoá khi module Màn hình khoá được bật).
 
 ## Bản Release
 

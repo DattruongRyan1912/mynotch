@@ -7,6 +7,7 @@ final class FakeModule: FeatureModule {
     let descriptor: ModuleDescriptor
     var startError: ModuleError?
     var activityOnStart: LiveActivity?
+    var lockScreenOnStart: AnyView?
     /// Scheduled one second after `start` through the context's scheduler.
     var actionOnStart: (@MainActor () -> Void)?
     /// Service name registered on `start`; texts it receives go to `serviceTexts`.
@@ -32,6 +33,7 @@ final class FakeModule: FeatureModule {
         startCount += 1
         self.context = context
         if let activityOnStart { context.activities.set(activityOnStart) }
+        if let lockScreenOnStart { context.lockScreen.set(lockScreenOnStart) }
         if let actionOnStart { context.scheduler.schedule(after: .seconds(1), actionOnStart) }
         if let serviceOnStart { context.services.register(serviceOnStart) { [weak self] in self?.serviceTexts.append($0) } }
         if let startError { throw startError }

@@ -27,9 +27,30 @@ enum TimerActivity {
     }
 }
 
+/// Lock screen widget: the running time and nothing else.
+struct TimerLockScreenView: View {
+    let systemImage: String
+    let range: ClosedRange<Date>
+    let countsDown: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 20, weight: .semibold))
+            Text(timerInterval: range, pauseTime: nil, countsDown: countsDown)
+                .font(.system(size: 26, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+        }
+        .foregroundStyle(.orange)
+    }
+}
+
 /// The "Hẹn giờ" tab: presets while idle, otherwise the big time and its controls.
 struct TimerTabView: View {
     static let presets = [1, 5, 10, 25]
+
+    /// Counts down to `endDate` from a lower bound that never moves, so rebuilding the view cannot restart the text.
+    static func countdownRange(to endDate: Date) -> ClosedRange<Date> { .distantPast...endDate }
 
     let state: TimerState
     let module: TimerModule
@@ -110,7 +131,7 @@ struct TimerTabView: View {
     @ViewBuilder private var bigTime: some View {
         switch state.model {
         case .countdown(let endDate):
-            Text(timerInterval: Date.now...max(endDate, .now), pauseTime: nil, countsDown: true)
+            Text(timerInterval: Self.countdownRange(to: endDate), pauseTime: nil, countsDown: true)
         case .stopwatch(let accumulated, let startedAt):
             Text(timerInterval: startedAt.addingTimeInterval(-accumulated)...Date.distantFuture, pauseTime: nil, countsDown: false)
         case .countdownPaused(let remaining):

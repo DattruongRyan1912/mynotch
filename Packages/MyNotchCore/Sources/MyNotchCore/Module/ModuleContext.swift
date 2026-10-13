@@ -5,6 +5,7 @@ public final class ModuleContext {
     public let id: ModuleID
     public let settings: ModuleSettings
     public let activities: ActivityPublisher
+    public let lockScreen: LockScreenPublisher
     public let presenter: any NotchPresenter
     public let hotkeys: ModuleHotkeys
     public let services: ModuleServices
@@ -23,6 +24,7 @@ public final class ModuleContext {
         id: ModuleID,
         settings: ModuleSettings,
         activities: ActivityPublisher,
+        lockScreen: LockScreenPublisher,
         presenter: any NotchPresenter,
         hotkeys: ModuleHotkeys,
         services: ModuleServices,
@@ -33,6 +35,7 @@ public final class ModuleContext {
         self.id = id
         self.settings = settings
         self.activities = activities
+        self.lockScreen = lockScreen
         self.presenter = presenter
         self.hotkeys = hotkeys
         self.services = services
@@ -63,6 +66,7 @@ public final class ModuleContext {
         tasks.removeAll()
         moduleScheduler.invalidate()
         activities.invalidate()
+        lockScreen.invalidate()
         hotkeys.invalidate()
         services.invalidate()
     }

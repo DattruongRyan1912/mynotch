@@ -21,6 +21,7 @@ private final class StubPermissions: PermissionCenter {
             id: "m",
             settings: ModuleSettings(store: SettingsStore(defaults: makeIsolatedDefaults()), module: "m"),
             activities: ActivityPublisher(center: activities, module: "m"),
+            lockScreen: LockScreenPublisher(center: LockScreenContentCenter(), module: "m"),
             presenter: StubPresenter(),
             hotkeys: ModuleHotkeys(registry: HotkeyRegistry(backend: FakeHotkeyBackend()), module: "m"),
             services: ModuleServices(registry: ServiceRegistry(scheduler: scheduler), module: "m"),

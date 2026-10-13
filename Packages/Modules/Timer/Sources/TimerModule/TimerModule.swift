@@ -38,7 +38,10 @@ public final class TimerModule: FeatureModule {
             throw .failed(reason: "Không tạo được thư mục lưu hẹn giờ")
         }
         let url = context.storage.directory.appending(path: "timer.json")
-        let stored = (try? JSONDecoder().decode(TimerModel.self, from: Data(contentsOf: url))) ?? .idle
+        let (stored, loadError) = Self.load(from: url)
+        if let loadError {
+            context.logger.error("Could not read timer.json, starting idle: \(loadError.localizedDescription)")
+        }
         var model = stored
         _ = model.refresh(now: now())   // finished while the app was closed: shown, but not announced with a sound
         self.context = context
@@ -46,6 +49,17 @@ public final class TimerModule: FeatureModule {
         state.model = model
         // One that was already finished at the last quit stays in the tab but is not raised again on every launch.
         commit(announcesFinish: stored != .finished)
+    }
+
+    /// A missing file is a first run: idle, no error. Any other failure is returned with the idle state, to be logged.
+    static func load(from url: URL) -> (model: TimerModel, error: (any Error)?) {
+        do {
+            return (try JSONDecoder().decode(TimerModel.self, from: Data(contentsOf: url)), nil)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return (.idle, nil)
+        } catch {
+            return (.idle, error)
+        }
     }
 
     public func stop() async {
@@ -70,9 +84,12 @@ public final class TimerModule: FeatureModule {
     /// Also dismisses a finished timer.
     func cancel() { mutate { model, _ in model.cancel() } }
 
+    /// A countdown that is already due finishes first, so pausing it (or any other change) cannot freeze it at zero.
     private func mutate(_ change: (inout TimerModel, Date) -> Void) {
         guard context != nil else { return }
-        change(&state.model, now())
+        let now = now()
+        if state.model.refresh(now: now) { sound.play(named: Self.finishedSound) }
+        change(&state.model, now)
         commit()
     }
 
@@ -80,7 +97,7 @@ public final class TimerModule: FeatureModule {
     private func commit(announcesFinish: Bool = true) {
         guard let context else { return }
         save(logger: context.logger)
-        if announcesFinish || state.model != .finished { publish(to: context.activities) }
+        if announcesFinish || state.model != .finished { publish(in: context) }
         scheduleFinish(on: context.scheduler)
     }
 
@@ -93,20 +110,28 @@ public final class TimerModule: FeatureModule {
         }
     }
 
-    private func publish(to activities: ActivityPublisher) {
+    /// The lock screen shows only a running time; finished, paused and idle timers leave it.
+    private func publish(in context: ModuleContext) {
         let now = now()
         switch state.model {
         case .countdown(let endDate):
-            activities.set(TimerActivity.running(
-                systemImage: "hourglass", range: now...max(endDate, now), countsDown: true))
+            publishRunning(systemImage: "hourglass", range: now...max(endDate, now), countsDown: true, in: context)
         case .stopwatch(let accumulated, let startedAt):
-            activities.set(TimerActivity.running(
-                systemImage: "stopwatch", range: startedAt.addingTimeInterval(-accumulated)...Date.distantFuture, countsDown: false))
+            publishRunning(
+                systemImage: "stopwatch", range: startedAt.addingTimeInterval(-accumulated)...Date.distantFuture, countsDown: false, in: context)
         case .finished:
-            activities.set(TimerActivity.finished(expiresAfter: Self.finishedLifetime))
+            context.activities.set(TimerActivity.finished(expiresAfter: Self.finishedLifetime))
+            context.lockScreen.clear()
         case .idle, .countdownPaused, .stopwatchPaused:
-            activities.clear(id: Self.activityID)
+            context.activities.clear(id: Self.activityID)
+            context.lockScreen.clear()
         }
+    }
+
+    private func publishRunning(systemImage: String, range: ClosedRange<Date>, countsDown: Bool, in context: ModuleContext) {
+        context.activities.set(TimerActivity.running(systemImage: systemImage, range: range, countsDown: countsDown))
+        context.lockScreen.set(
+            AnyView(TimerLockScreenView(systemImage: systemImage, range: range, countsDown: countsDown)), priority: .high)
     }
 
     private func scheduleFinish(on scheduler: any Scheduler) {

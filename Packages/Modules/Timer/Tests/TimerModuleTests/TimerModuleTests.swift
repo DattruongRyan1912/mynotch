@@ -242,6 +242,107 @@ struct TimerFixture {
         #expect(fixture.sound.played == ["Glass"])
     }
 
+    // MARK: Lock screen
+
+    @Test func aRunningTimerOffersItsTimeToTheLockScreen() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        #expect(fixture.harness.lockScreen.current == nil)
+        fixture.module.startCountdown(minutes: 5)
+        #expect(fixture.harness.lockScreen.current?.module == "timer")
+        #expect(fixture.harness.lockScreen.current?.priority == .high)
+
+        fixture.module.cancel()
+        fixture.module.startStopwatch()
+        #expect(fixture.harness.lockScreen.current?.module == "timer")
+    }
+
+    @Test func pausingFinishingAndCancellingTakeTheTimeOffTheLockScreen() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.startCountdown(minutes: 1)
+        fixture.module.pause()
+        #expect(fixture.harness.lockScreen.current == nil)
+        fixture.module.resume()
+        #expect(fixture.harness.lockScreen.current != nil)
+        fixture.advance(60)
+        #expect(fixture.module.state.model == .finished)
+        #expect(fixture.harness.lockScreen.current == nil)
+        fixture.module.addMinute()
+        #expect(fixture.harness.lockScreen.current != nil)
+        fixture.module.cancel()
+        #expect(fixture.harness.lockScreen.current == nil)
+    }
+
+    @Test func aRestoredRunningCountdownIsOnTheLockScreen() async throws {
+        let fixture = TimerFixture()
+        try fixture.seedFile(.countdown(endDate: fixture.clock.date.addingTimeInterval(400)))
+        await fixture.start()
+        #expect(fixture.harness.lockScreen.current?.module == "timer")
+    }
+
+    @Test func disablingRemovesTheTimeFromTheLockScreen() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.startCountdown(minutes: 1)
+        await fixture.harness.registry.setEnabled(false, for: "timer")
+        #expect(fixture.harness.lockScreen.current == nil)
+    }
+
+    // MARK: Review follow-ups
+
+    @Test func pausingACountdownThatIsDueFinishesItInsteadOfPausingAtZero() async throws {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.startCountdown(minutes: 1)
+        // The wall clock passed the end (e.g. after sleep) but the finish timer has not run yet.
+        fixture.clock.advance(61)
+        fixture.module.pause()
+        #expect(fixture.module.state.model == .finished)
+        #expect(fixture.sound.played == ["Glass"])
+        #expect(fixture.harness.activities.current?.activity.priority == .high)
+        #expect(try fixture.savedModel() == .finished)
+
+        // The finish timer that was already armed must not announce it a second time.
+        fixture.harness.scheduler.advance(by: .seconds(120))
+        #expect(fixture.sound.played == ["Glass"])
+    }
+
+    @Test func aChangeToACountdownThatIsStillRunningIsAppliedAsBefore() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.startCountdown(minutes: 1)
+        fixture.advance(30)
+        fixture.module.pause()
+        #expect(fixture.module.state.model == .countdownPaused(remaining: 30))
+        #expect(fixture.sound.played.isEmpty)
+    }
+
+    @Test func aMissingFileIsAFirstRunAndACorruptOneIsReported() throws {
+        let fixture = TimerFixture()
+        let missing = TimerModule.load(from: fixture.fileURL)
+        #expect(missing.model == .idle)
+        #expect(missing.error == nil)
+
+        try FileManager.default.createDirectory(at: fixture.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("nope".utf8).write(to: fixture.fileURL)
+        let corrupt = TimerModule.load(from: fixture.fileURL)
+        #expect(corrupt.model == .idle)
+        #expect(corrupt.error != nil)
+
+        try fixture.seedFile(.countdownPaused(remaining: 12))
+        let valid = TimerModule.load(from: fixture.fileURL)
+        #expect(valid.model == .countdownPaused(remaining: 12))
+        #expect(valid.error == nil)
+    }
+
+    @Test func theCountdownTextCountsDownFromAFixedLowerBound() {
+        let end = Date(timeIntervalSinceReferenceDate: 5_000)
+        #expect(TimerTabView.countdownRange(to: end) == TimerTabView.countdownRange(to: end))
+        #expect(TimerTabView.countdownRange(to: end).upperBound == end)
+        #expect(TimerTabView.countdownRange(to: end).lowerBound < end.addingTimeInterval(-86_400 * 365))
+    }
+
     @Test func disablingStopsTheTimerAndRemovesTheActivity() async {
         let fixture = TimerFixture()
         await fixture.start()
