@@ -28,6 +28,11 @@ public final class ClipboardModule: FeatureModule {
     private var keys: ClipboardSettingKeys?
     private var monitor: ClipboardMonitor?
     private var paster: ClipboardPaster?
+    /// Closed on stop, so a ⌘V still waiting for the paste delay is never sent into whatever app is in front by then.
+    private var keystrokeGate: KeystrokeGate?
+    /// The last flush or file edit. Starts, flushes and edits wait for it, so two of them never touch the files at once.
+    /// Not private so tests can queue work they control.
+    var diskWork: Task<Void, Never>?
 
     public convenience init() {
         self.init(
@@ -61,6 +66,7 @@ public final class ClipboardModule: FeatureModule {
     }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
+        await finishDiskWork()
         do {
             try context.storage.ensureDirectories()
         } catch {
@@ -74,6 +80,8 @@ public final class ClipboardModule: FeatureModule {
 
         let loaded = store.load()
         var history = loaded
+        // Images are deleted before the save that drops their items, so a crash in between leaves items without images.
+        _ = history.remove(ids: Set(loaded.items.filter { !hasImageFile($0, in: store) }.map(\.id)))
         history.removeDanglingPins()
         let removed = prune(&history)
         state.history = history
@@ -81,7 +89,9 @@ public final class ClipboardModule: FeatureModule {
         if history != loaded { store.scheduleSave(history) }
         refreshPasteboardAccess()
 
-        paster = ClipboardPaster(pasteboard: pasteboard, keystrokes: keystrokes, scheduler: context.scheduler, isTrusted: isTrusted)
+        let keystrokeGate = KeystrokeGate(keystrokes)
+        self.keystrokeGate = keystrokeGate
+        paster = ClipboardPaster(pasteboard: pasteboard, keystrokes: keystrokeGate, scheduler: context.scheduler, isTrusted: isTrusted)
         let settings = context.settings
         let monitor = ClipboardMonitor(
             pasteboard: pasteboard, scheduler: context.scheduler, frontmostApp: frontmostApp,
@@ -112,6 +122,8 @@ public final class ClipboardModule: FeatureModule {
 
     /// Writes any unsaved change before returning, so quitting right after a copy keeps it.
     public func stop() async {
+        keystrokeGate?.isOpen = false
+        keystrokeGate = nil
         monitor?.stop()
         monitor = nil
         paster = nil
@@ -119,7 +131,13 @@ public final class ClipboardModule: FeatureModule {
         keys = nil
         let store = store
         self.store = nil
-        await store?.flush()
+        let previous = diskWork
+        let flush = Task {
+            await previous?.value
+            await store?.flush()
+        }
+        diskWork = flush
+        await flush.value
         state.reset()
     }
 
@@ -131,13 +149,12 @@ public final class ClipboardModule: FeatureModule {
     }
 
     public func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? {
-        refreshPasteboardAccess()
         let directory = environment.storage.directory
         return AnyView(ClipboardSettingsView(
             settings: environment.settings,
             keys: ClipboardSettingKeys(environment.settings),
             usage: environment.isRunning ? .live(state) : .disk(directory),
-            clear: { [weak self] range in await self?.clearHistory(range, directory: directory) },
+            clear: { [weak self] range in await self?.clearHistory(range, directory: directory).value },
             pasteboardAccessBehavior: pasteboardAccessBehavior
         ))
     }
@@ -196,20 +213,27 @@ public final class ClipboardModule: FeatureModule {
         update { $0.clear(newerThan: range.cutoff(from: now())) }
     }
 
-    /// From Settings, which also works while the module is stopped: then the files are edited directly.
-    func clearHistory(_ range: ClipboardClearRange, directory: URL) async {
+    /// From Settings, which also works while the module is stopped: then the files are edited directly, after the
+    /// flush or edit before it and before the next start reads them. Await the returned task for completion.
+    @discardableResult
+    func clearHistory(_ range: ClipboardClearRange, directory: URL) -> Task<Void, Never> {
         if store != nil {
             clearHistory(range)
-            return
+            return Task {}
         }
-        // A module that never ran has nothing to clear, and Settings must not create its folder.
-        guard FileManager.default.fileExists(atPath: directory.path(percentEncoded: false)) else { return }
-        let store = ClipboardStore(directory: directory, scheduler: TaskScheduler(), logger: Log.logger(category: descriptor.id.rawValue), now: now)
-        var history = store.load()
-        history.removeDanglingPins()
-        store.deleteImages(for: history.clear(newerThan: range.cutoff(from: now())))
-        store.scheduleSave(history)
-        await store.flush()
+        let previous = diskWork
+        let work = Task { [weak self] in
+            await previous?.value
+            guard let self else { return }
+            // A start that got in first owns the files now.
+            if self.store != nil {
+                self.clearHistory(range)
+            } else {
+                await self.clearFiles(range, directory: directory)
+            }
+        }
+        diskWork = work
+        return work
     }
 
     /// nil for an empty name or while stopped.
@@ -311,6 +335,7 @@ public final class ClipboardModule: FeatureModule {
 
     /// Puts the item on the pasteboard and moves it to the top. A paste always closes the notch, at once, so keyboard
     /// focus is back in the previous app before ⌘V is sent; a copy closes it when "close after action" is on.
+    /// A failed write changes nothing and keeps the notch open.
     private func put(_ item: ClipboardItem, paste: Bool, plainTextOnly: Bool = false) {
         guard let context, let keys, let paster else { return }
         let outcome = paster.perform(item, imageURL: imageURL(of: item), paste: paste, plainTextOnly: plainTextOnly)
@@ -318,14 +343,22 @@ public final class ClipboardModule: FeatureModule {
         switch outcome {
         case .pasted:
             context.presenter.close()
+        case .copiedNeedsPermission:
+            // Closed like a paste: the user pastes into the previous app, and activities show only beside the closed notch.
+            context.presenter.close()
+            context.activities.set(LiveActivity(
+                id: "pasteHint", expiresAfter: .seconds(3),
+                leading: AnyView(ClipboardActivityIcon(systemImage: "doc.on.clipboard.fill")),
+                trailing: AnyView(ClipboardPasteKeyHint())
+            ))
         case .copied:
             if closeAfterAction { context.presenter.close() }
-        case .copiedNeedsPermission:
-            showHint("Nhấn ⌘V để dán", id: "pasteHint")
-            if closeAfterAction { context.presenter.close() }
         case .failed:
-            // The notch stays open so the user sees the item was not copied.
-            showHint("Không chép được mục này", id: "copyFailed")
+            // The notch stays open, where only a toast is visible.
+            context.presenter.showToast(
+                AnyView(ClipboardToast(text: "Không chép được mục này", systemImage: "exclamationmark.triangle.fill")),
+                duration: .seconds(2)
+            )
             return
         }
         update { history in
@@ -339,12 +372,33 @@ public final class ClipboardModule: FeatureModule {
         return store?.imageURL(fileName: image.fileName)
     }
 
-    private func showHint(_ text: String, id: String) {
-        context?.activities.set(LiveActivity(
-            id: id, expiresAfter: .seconds(3),
-            leading: AnyView(ClipboardActivityIcon(systemImage: "doc.on.clipboard.fill")),
-            trailing: AnyView(ClipboardActivityText(text: text))
-        ))
+    private func hasImageFile(_ item: ClipboardItem, in store: ClipboardStore) -> Bool {
+        guard case .image(let image) = item.content else { return true }
+        guard let url = store.imageURL(fileName: image.fileName) else { return false }
+        return FileManager.default.fileExists(atPath: url.path(percentEncoded: false))
+    }
+
+    /// Waits for the queued disk work, including work queued while waiting.
+    private func finishDiskWork() async {
+        while let work = diskWork {
+            await work.value
+            if diskWork == work { diskWork = nil }
+        }
+    }
+
+    /// Clears a stopped module's files. Images are deleted only once the history that no longer lists them is
+    /// written, so a failed write loses nothing.
+    private func clearFiles(_ range: ClipboardClearRange, directory: URL) async {
+        // A module that never ran has nothing to clear, and Settings must not create its folder.
+        guard FileManager.default.fileExists(atPath: directory.path(percentEncoded: false)) else { return }
+        let store = ClipboardStore(directory: directory, scheduler: TaskScheduler(), logger: Log.logger(category: descriptor.id.rawValue), now: now)
+        var history = store.load()
+        history.removeDanglingPins()
+        let removed = history.clear(newerThan: range.cutoff(from: now()))
+        guard !removed.isEmpty else { return }
+        store.scheduleSave(history)
+        await store.flush()
+        if store.writeCount > 0 { store.deleteImages(for: removed) }
     }
 
     /// Applies a change, enforces the limits, deletes the images of removed items and schedules a save.
@@ -369,5 +423,19 @@ public final class ClipboardModule: FeatureModule {
             imageByteLimit: settings.value(keys.imageStorageLimitMB) * ClipboardStorageUsage.bytesPerMB,
             now: now()
         )
+    }
+}
+
+/// Passes ⌘V on until closed; the paster keeps its sender, so this is how a stop drops a paste still waiting.
+private final class KeystrokeGate: KeystrokeSending {
+    var isOpen = true
+    private let sender: any KeystrokeSending
+
+    init(_ sender: any KeystrokeSending) {
+        self.sender = sender
+    }
+
+    func sendPaste() {
+        if isOpen { sender.sendPaste() }
     }
 }

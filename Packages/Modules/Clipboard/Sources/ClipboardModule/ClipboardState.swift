@@ -4,7 +4,7 @@ import Observation
 /// What the tab shows. The module owns `history`; the tab sets `query` and `selectedID`.
 @Observable
 final class ClipboardState {
-    /// Changed only by the module; every change refreshes the search index and `visibleItems`.
+    /// Changed only by the module; every change refreshes `visibleItems`.
     var history = ClipboardHistory() {
         didSet { historyChanged() }
     }
@@ -16,21 +16,21 @@ final class ClipboardState {
     var pasteboardDenied = false
     /// Items matching `query`: newest first, or in pin order when a board is selected.
     private(set) var visibleItems: [ClipboardItem] = []
-    /// Kept across changes so typing and new copies fold only the items that are new or changed.
+    /// Kept across changes so typing and new copies fold only the items that are new or changed. Filtering with
+    /// search text folds what is missing, so nothing is folded until the user searches.
     @ObservationIgnored private(set) var searchIndex = ClipboardSearchIndex()
 
     /// Back to the state of a module that never started.
     func reset() {
         searchIndex = ClipboardSearchIndex()
-        query = ClipboardQuery()
         history = ClipboardHistory()
+        query = ClipboardQuery()
         selectedID = nil
         pasteboardDenied = false
     }
 
     /// Drops a board filter or selection whose board or item is gone.
     private func historyChanged() {
-        searchIndex.update(history)
         if let boardID = query.boardID, !history.boards.contains(where: { $0.id == boardID }) {
             query.boardID = nil
         } else {

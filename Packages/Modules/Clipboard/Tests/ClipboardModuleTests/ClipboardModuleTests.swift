@@ -215,7 +215,7 @@ final class FakeSystem {
         #expect(items.map(\.content) == [.text("Xin chào")])
     }
 
-    @Test func raisingALimitInSettingsPrunesAtOnce() async throws {
+    @Test func shorteningTheRetentionInSettingsPrunesAtOnce() async throws {
         let (settings, keys) = try settings()
         await start()
         copy("Xin chào")
@@ -231,9 +231,10 @@ final class FakeSystem {
         await start()
         copy("Xin chào")
         copy("Tạm biệt")
-        #expect(state.searchIndex.foldCount == 2)
+        #expect(state.searchIndex.foldCount == 0)
 
         state.query.text = "chao"
+        #expect(state.searchIndex.foldCount == 2)
         #expect(state.visibleItems.map(\.content) == [.text("Xin chào")])
         state.query.text = "CHÀO"
         #expect(state.visibleItems.count == 1)
@@ -264,9 +265,10 @@ final class FakeSystem {
         #expect(keystrokes.pasteCount == 1)
     }
 
-    @Test func activateWithPasteWithoutAccessibilityOnlyCopiesAndShowsTheHint() async throws {
+    @Test func activateWithPasteWithoutAccessibilityOnlyCopiesClosesAndShowsTheHint() async throws {
         let (settings, keys) = try settings()
         settings.set(.paste, for: keys.clickAction)
+        settings.set(false, for: keys.closeAfterAction)
         system.trusted = false
         await start()
         copy("Xin chào")
@@ -277,6 +279,7 @@ final class FakeSystem {
 
         #expect(pasteboard.writes.count == 1)
         #expect(keystrokes.pasteCount == 0)
+        #expect(harness.presenter.closeCount == 1)
         #expect(harness.activities.current?.id == "clipboard/pasteHint")
     }
 
@@ -342,14 +345,20 @@ final class FakeSystem {
         let root = harness.storageRoot.applicationSupport.deletingLastPathComponent()
         defer { try? FileManager.default.removeItem(at: root) }
         let missing = Self.item(Self.image("gone"), copiedAt: system.now.addingTimeInterval(-60))
-        await persist(ClipboardHistory(items: [missing]), in: harness.storageRoot.storage(for: "clipboard").directory)
+        let directory = harness.storageRoot.storage(for: "clipboard").directory
+        let file = directory.appending(components: "images", Self.image("gone").imageFileName)
+        await persist(ClipboardHistory(items: [missing]), in: directory)
+        try Data([1, 2, 3, 4]).write(to: file)
         await harness.registry.bootstrap()
+        // Gone while running, e.g. deleted in Finder.
+        try FileManager.default.removeItem(at: file)
 
         module.activate(missing)
         harness.scheduler.advance(by: .seconds(1))
 
         #expect(harness.presenter.closeCount == 0)
-        #expect(harness.activities.current?.id == "clipboard/copyFailed")
+        #expect(harness.presenter.toastCount == 1)
+        #expect(harness.activities.current == nil)
         #expect(module.state.history.items == [missing])
         #expect(keystrokes.pasteCount == 0)
     }
@@ -424,10 +433,10 @@ final class FakeSystem {
         system.now += 2 * 60 * 60
         copy("just now")
 
-        await module.clearHistory(.lastHour, directory: directory)
+        await module.clearHistory(.lastHour, directory: directory).value
         #expect(items.map(\.content) == [.text("an hour ago"), .text("pinned")])
 
-        await module.clearHistory(.all, directory: directory)
+        await module.clearHistory(.all, directory: directory).value
         #expect(items.map(\.id) == [pinned.id])
     }
 
@@ -439,15 +448,102 @@ final class FakeSystem {
         await persist(history)
         try Data([1, 2, 3, 4]).write(to: imageFile(Self.image("photo").imageFileName))
 
-        await module.clearHistory(.all, directory: directory)
+        await module.clearHistory(.all, directory: directory).value
 
+        // Checked before `load()`, which would delete the orphaned file itself.
+        #expect(!exists(imageFile(Self.image("photo").imageFileName)))
         #expect(harness.registry.state(of: "clipboard") == .disabled)
         #expect(makeStore().load().items == [pinned])
-        #expect(!exists(imageFile(Self.image("photo").imageFileName)))
+    }
+
+    @Test func aFailedWriteWhileStoppedKeepsTheImages() async throws {
+        let image = Self.item(Self.image("photo"), copiedAt: system.now)
+        await persist(ClipboardHistory(items: [image]))
+        try Data([1, 2, 3, 4]).write(to: imageFile(Self.image("photo").imageFileName))
+        let path = directory.path(percentEncoded: false)
+        // History files are replaced atomically, which needs a writable folder; `images/` itself stays writable.
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path) }
+
+        await module.clearHistory(.all, directory: directory).value
+
+        #expect(exists(imageFile(Self.image("photo").imageFileName)))
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+        #expect(makeStore().load().items == [image])
+    }
+
+    @Test func startWaitsForAClearQueuedWhileStopped() async {
+        await persist(ClipboardHistory(items: [Self.item(.text("Xin chào"), copiedAt: system.now)]))
+
+        let clearing = module.clearHistory(.all, directory: directory)
+        await start()
+        await clearing.value
+
+        #expect(items.isEmpty)
+        #expect(makeStore().load().items.isEmpty)
+    }
+
+    @Test func startWaitsForQueuedDiskWork() async {
+        let (release, finish) = AsyncStream<Void>.makeStream()
+        module.diskWork = Task { for await _ in release {} }
+
+        let starting = Task { await harness.registry.bootstrap() }
+        for _ in 0..<100 { await Task.yield() }
+        #expect(harness.registry.state(of: "clipboard") == .starting)
+        #expect(module.store == nil)
+
+        finish.finish()
+        await starting.value
+        #expect(harness.registry.state(of: "clipboard") == .running)
+    }
+
+    @Test func aClearDuringStopRunsAfterTheFinalFlush() async {
+        await start()
+        copy("Xin chào")
+
+        let stopping = Task { await harness.registry.setEnabled(false, for: "clipboard") }
+        for _ in 0..<1000 where module.store != nil { await Task.yield() }
+        #expect(module.store == nil)
+        let clearing = module.clearHistory(.all, directory: directory)
+        await stopping.value
+        await clearing.value
+
+        #expect(makeStore().load().items.isEmpty)
+    }
+
+    @Test func startDropsImageItemsWhoseFileIsGone() async throws {
+        let text = Self.item(.text("Xin chào"), copiedAt: system.now)
+        let kept = Self.item(Self.image("kept"), copiedAt: system.now)
+        let gone = Self.item(Self.image("gone"), copiedAt: system.now)
+        var history = ClipboardHistory(items: [gone, kept, text])
+        history.pin(itemID: gone.id, to: history.createBoard(name: "Board"))
+        await persist(history)
+        try Data([1, 2, 3, 4]).write(to: imageFile(Self.image("kept").imageFileName))
+
+        await start()
+
+        #expect(items == [kept, text])
+        #expect(state.history.boards.first?.itemIDs == [])
+        await harness.registry.setEnabled(false, for: "clipboard")
+        #expect(makeStore().load().items == [kept, text])
+    }
+
+    @Test func stopDropsAPasteStillWaitingForTheDelay() async throws {
+        let (settings, keys) = try settings()
+        settings.set(.paste, for: keys.clickAction)
+        await start()
+        copy("Xin chào")
+        module.activate(try #require(items.first))
+
+        // Called directly, so only the module (not the registry's cancelled scheduler) can stop the ⌘V.
+        await module.stop()
+        harness.scheduler.advance(by: .seconds(1))
+
+        #expect(keystrokes.pasteCount == 0)
     }
 
     @Test func clearingWhileStoppedCreatesNothingWhenThereIsNoHistory() async {
-        await module.clearHistory(.all, directory: directory)
+        await module.clearHistory(.all, directory: directory).value
         #expect(!exists(directory))
     }
 

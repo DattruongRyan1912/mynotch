@@ -12,15 +12,29 @@ struct ClipboardActivityIcon: View {
     }
 }
 
-/// Short text beside the closed notch, e.g. "Nhấn ⌘V để dán".
-struct ClipboardActivityText: View {
+/// "Press ⌘V" in the 64 pt beside the closed notch, after a paste that lacked the Accessibility permission.
+struct ClipboardPasteKeyHint: View {
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "keyboard")
+            Text("⌘V")
+        }
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundStyle(NotchTokens.primaryText)
+        .lineLimit(1)
+        .fixedSize()
+    }
+}
+
+/// A short message over the open tab; activities would stay hidden until the notch closes.
+struct ClipboardToast: View {
     let text: String
+    let systemImage: String
 
     var body: some View {
-        Text(text)
-            .font(.system(size: 12, weight: .semibold))
+        Label(text, systemImage: systemImage)
+            .font(.callout.weight(.semibold))
             .foregroundStyle(NotchTokens.primaryText)
-            .lineLimit(1)
     }
 }
 
