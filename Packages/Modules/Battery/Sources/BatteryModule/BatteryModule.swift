@@ -33,9 +33,11 @@ public final class BatteryModule: FeatureModule {
         self.reader = reader
     }
 
+    static let lowThresholdRange = 5...50
+
     /// Setting names and defaults in one place, shared by the running module and the Settings rows.
     static func keys(_ settings: ModuleSettings) -> (lowThreshold: SettingKey<Int>, notifyOnCharge: SettingKey<Bool>) {
-        (settings.key("lowThreshold", default: 20, clampedTo: 5...50), settings.key("notifyOnCharge", default: true))
+        (settings.key("lowThreshold", default: 20, clampedTo: lowThresholdRange), settings.key("notifyOnCharge", default: true))
     }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
@@ -76,6 +78,7 @@ public final class BatteryModule: FeatureModule {
         let keys = Self.keys(environment.settings)
         return AnyView(BatterySettingsView(
             lowThreshold: environment.settings.binding(keys.lowThreshold),
+            lowThresholdRange: Self.lowThresholdRange,
             notifyOnCharge: environment.settings.binding(keys.notifyOnCharge)
         ))
     }

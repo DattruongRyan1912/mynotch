@@ -20,11 +20,12 @@ final class ModuleScheduler: Scheduler {
         }
         nextID += 1
         let id = nextID
+        // Forgetting the entry when it fires bounds `pending` for self-rescheduling timers;
+        // forgetting it on cancel bounds it for cancel-and-reschedule (debounce).
         let inner = base.schedule(after: delay) { [weak self] in
             self?.pending[id] = nil
             action()
         }
-        // Removing the entry on cancel keeps repeating timers from growing `pending`.
         let handle = ScheduledAction { [weak self] in
             inner.cancel()
             self?.pending[id] = nil

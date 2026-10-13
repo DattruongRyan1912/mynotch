@@ -77,11 +77,12 @@ struct BatteryActivityPercent: View {
 /// Plain rows: the Settings page provides the Form and the section.
 struct BatterySettingsView: View {
     @Binding var lowThreshold: Int
+    let lowThresholdRange: ClosedRange<Int>
     @Binding var notifyOnCharge: Bool
 
     var body: some View {
         Group {
-            Stepper("Ngưỡng pin yếu: \(lowThreshold)%", value: $lowThreshold, in: 5...50, step: 5)
+            Stepper("Ngưỡng pin yếu: \(lowThreshold)%", value: $lowThreshold, in: lowThresholdRange, step: 5)
             Toggle("Thông báo khi cắm sạc", isOn: $notifyOnCharge)
         }
     }

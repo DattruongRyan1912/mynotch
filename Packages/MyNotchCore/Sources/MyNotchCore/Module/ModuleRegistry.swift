@@ -100,13 +100,19 @@ public final class ModuleRegistry {
 
     /// Built whether or not the module runs, so it can be configured while disabled.
     public func settingsView(for id: ModuleID) -> AnyView? {
-        guard let module = module(id), let settings = moduleSettings[id] else { return nil }
-        return module.makeSettingsView(ModuleSettingsEnvironment(
+        guard let module = module(id), let environment = settingsEnvironment(for: id) else { return nil }
+        return module.makeSettingsView(environment)
+    }
+
+    /// What `settingsView(for:)` passes to the module; `package` so test support can drive settings like the page does.
+    package func settingsEnvironment(for id: ModuleID) -> ModuleSettingsEnvironment? {
+        guard let settings = moduleSettings[id] else { return nil }
+        return ModuleSettingsEnvironment(
             settings: settings,
             storage: storageRoot.storage(for: id),
             permissions: permissions,
             isRunning: state(of: id) == .running
-        ))
+        )
     }
 
     private func module(_ id: ModuleID) -> (any FeatureModule)? {

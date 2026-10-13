@@ -70,6 +70,23 @@ private final class StubPermissions: PermissionCenter {
         #expect(scheduler.pendingCount == 0)
     }
 
+    @Test func selfReschedulingTimerKeepsOnePendingEntry() throws {
+        let base = ManualScheduler()
+        let context = makeContext(activities: ActivityCenter(scheduler: base), scheduler: base)
+        let scheduler = try #require(context.scheduler as? ModuleScheduler)
+        var ticks = 0
+        func tick() {
+            ticks += 1
+            context.scheduler.schedule(after: .seconds(1), tick)
+        }
+        context.scheduler.schedule(after: .seconds(1), tick)
+        for _ in 0..<50 {
+            base.advance(by: .seconds(1))
+            #expect(scheduler.pendingCount == 1)
+        }
+        #expect(ticks == 50)
+    }
+
     @Test func cancelAllCancelsPendingScheduledActions() throws {
         let base = ManualScheduler()
         let context = makeContext(activities: ActivityCenter(scheduler: base), scheduler: base)

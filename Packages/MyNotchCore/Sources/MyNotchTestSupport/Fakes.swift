@@ -45,3 +45,10 @@ public struct RegistryHarness {
         )
     }
 }
+
+extension RegistryHarness {
+    /// The environment the module's Settings rows get right now, so tests can change settings as the page would.
+    public func settingsEnvironment(for id: ModuleID) -> ModuleSettingsEnvironment? {
+        registry.settingsEnvironment(for: id)
+    }
+}

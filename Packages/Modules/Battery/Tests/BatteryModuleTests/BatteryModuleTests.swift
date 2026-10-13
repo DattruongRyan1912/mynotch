@@ -26,23 +26,6 @@ final class FakePowerSource: PowerSourceReading {
     }
 }
 
-/// Battery module that records the environment the registry passes to its Settings rows.
-final class SettingsEnvironmentRecorder: FeatureModule {
-    let base: BatteryModule
-    private(set) var environment: ModuleSettingsEnvironment?
-
-    init(_ base: BatteryModule) { self.base = base }
-
-    var descriptor: ModuleDescriptor { base.descriptor }
-    func start(_ context: ModuleContext) async throws(ModuleError) { try await base.start(context) }
-    func stop() async { await base.stop() }
-    func makeTab() -> NotchTab? { base.makeTab() }
-    func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? {
-        self.environment = environment
-        return base.makeSettingsView(environment)
-    }
-}
-
 @Suite struct BatteryModuleTests {
     @Test func desktopMacReportsUnavailable() async {
         let harness = RegistryHarness([BatteryModule(reader: FakePowerSource(nil))])
@@ -116,22 +99,31 @@ final class SettingsEnvironmentRecorder: FeatureModule {
         #expect(harness.activities.current == nil)
     }
 
-    @Test func settingsRowsExistBeforeTheModuleEverStarts() {
+    @Test func settingsRowsExistBeforeTheModuleEverStarts() throws {
         let source = FakePowerSource(PowerSourceSnapshot(percent: 60, isCharging: false, isOnAC: false))
         let harness = RegistryHarness([BatteryModule(reader: source)])
         #expect(harness.registry.state(of: "battery") == .disabled)
-        #expect(harness.registry.settingsView(for: "battery") != nil)
+        let view = try #require(harness.registry.settingsView(for: "battery"))
+        #expect(String(describing: view).hasPrefix("AnyView(BatterySettingsView("))
+    }
+
+    @Test func thresholdSetBeforeTheFirstStartAppliesWhenItStarts() async throws {
+        let source = FakePowerSource(PowerSourceSnapshot(percent: 25, isCharging: false, isOnAC: false))
+        let harness = RegistryHarness([BatteryModule(reader: source)])
+        let environment = try #require(harness.settingsEnvironment(for: "battery"))
+        #expect(!environment.isRunning)
+        environment.settings.binding(BatteryModule.keys(environment.settings).lowThreshold).wrappedValue = 30
+        await harness.registry.bootstrap()
+        #expect(harness.activities.current?.id == "battery/low")
     }
 
     @Test func raisingTheThresholdThroughTheSettingsRowsShowsLow() async throws {
         let source = FakePowerSource(PowerSourceSnapshot(percent: 25, isCharging: false, isOnAC: false))
-        let recorder = SettingsEnvironmentRecorder(BatteryModule(reader: source))
-        let harness = RegistryHarness([recorder])
+        let harness = RegistryHarness([BatteryModule(reader: source)])
         await harness.registry.bootstrap()
         #expect(harness.activities.current == nil)
 
-        _ = harness.registry.settingsView(for: "battery")
-        let environment = try #require(recorder.environment)
+        let environment = try #require(harness.settingsEnvironment(for: "battery"))
         #expect(environment.isRunning)
         environment.settings.binding(BatteryModule.keys(environment.settings).lowThreshold).wrappedValue = 30
         for _ in 0..<100 where harness.activities.current == nil { await Task.yield() }
