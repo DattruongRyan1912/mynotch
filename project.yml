@@ -70,6 +70,9 @@ targets:
         NSBluetoothAlwaysUsageDescription: "MyNotch hiển thị pin của thiết bị Bluetooth trong notch."
         NSAppleEventsUsageDescription: "MyNotch điều khiển ứng dụng khác, ví dụ trình phát nhạc, từ notch."
         NSMicrophoneUsageDescription: "MyNotch dùng micro cho các tính năng ghi âm trong notch."
+        NSAudioCaptureUsageDescription: "MyNotch hiển thị phổ âm thanh của nhạc đang phát."
+        NSDesktopFolderUsageDescription: "MyNotch lưu ảnh chụp màn hình vào Desktop khi bạn chọn."
+        NSDownloadsFolderUsageDescription: "MyNotch lưu ảnh chụp và theo dõi file tải xong trong Downloads khi bạn bật."
         # Each NSMessage is a method of App/ServicesProvider.swift.
         NSServices:
           - NSMenuItem:
