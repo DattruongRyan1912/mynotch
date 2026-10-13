@@ -9,6 +9,9 @@ final class FakeModule: FeatureModule {
     var activityOnStart: LiveActivity?
     /// Scheduled one second after `start` through the context's scheduler.
     var actionOnStart: (@MainActor () -> Void)?
+    /// Service name registered on `start`; texts it receives go to `serviceTexts`.
+    var serviceOnStart: String?
+    private(set) var serviceTexts: [String] = []
     private(set) var startCount = 0
     private(set) var stopCount = 0
     private(set) var context: ModuleContext?
@@ -30,6 +33,7 @@ final class FakeModule: FeatureModule {
         self.context = context
         if let activityOnStart { context.activities.set(activityOnStart) }
         if let actionOnStart { context.scheduler.schedule(after: .seconds(1), actionOnStart) }
+        if let serviceOnStart { context.services.register(serviceOnStart) { [weak self] in self?.serviceTexts.append($0) } }
         if let startError { throw startError }
     }
 

@@ -9,12 +9,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let scheduler = TaskScheduler()
     private let permissions = SystemPermissionCenter()
     private let hotkeys = HotkeyRegistry()
+    private let services = ServiceRegistry()
     private let coordinator = NotchCoordinator()
     private lazy var activities = ActivityCenter(scheduler: scheduler)
     private lazy var registry = ModuleRegistry(
         modules: ModuleList.make(), settings: settings, activities: activities,
         permissions: permissions, hotkeys: hotkeys, presenter: coordinator,
-        scheduler: scheduler, storageRoot: .standard(bundleID: Bundle.main.bundleIdentifier ?? "io.lucasvu.mynotch")
+        scheduler: scheduler, storageRoot: .standard(bundleID: Bundle.main.bundleIdentifier ?? "io.lucasvu.mynotch"),
+        services: services
     )
     private lazy var screens = ScreenManager(registry: registry, activities: activities, settings: settings, scheduler: scheduler)
     private lazy var settingsWindow = SettingsWindowController(
@@ -27,6 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = MainMenu.make(settingsTarget: self, settingsAction: #selector(showSettings))
         coordinator.screens = screens
+        NSApp.servicesProvider = ServicesProvider(registry: services)
+        // Picks up NSServices changes from a new build without logging out.
+        NSUpdateDynamicServices()
         hotkeys.register(
             "toggleNotch", title: "Mở/đóng notch", owner: nil,
             initial: KeyboardShortcuts.Shortcut(.n, modifiers: [.control, .option])

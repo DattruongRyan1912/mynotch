@@ -39,6 +39,7 @@ public struct RegistryHarness {
     public let permissions = FakePermissionCenter()
     public let presenter = FakePresenter()
     public let hotkeys = HotkeyRegistry()
+    public let services = ServiceRegistry()
     /// Unique per harness under the temporary directory; nothing exists on disk until a module calls `ensureDirectories()`.
     public let storageRoot: StorageRoot = {
         let base = FileManager.default.temporaryDirectory
@@ -53,7 +54,7 @@ public struct RegistryHarness {
         registry = ModuleRegistry(
             modules: modules, settings: settings, activities: activities,
             permissions: permissions, hotkeys: hotkeys, presenter: presenter,
-            scheduler: scheduler, storageRoot: storageRoot
+            scheduler: scheduler, storageRoot: storageRoot, services: services
         )
     }
 }

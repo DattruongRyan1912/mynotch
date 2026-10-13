@@ -16,6 +16,7 @@ public final class ModuleRegistry {
     @ObservationIgnored private let presenter: any NotchPresenter
     @ObservationIgnored private let scheduler: any Scheduler
     @ObservationIgnored private let storageRoot: StorageRoot
+    @ObservationIgnored private let services: ServiceRegistry
     /// One per module for the registry's lifetime, shared by its context and its Settings rows.
     @ObservationIgnored private let moduleSettings: [ModuleID: ModuleSettings]
     @ObservationIgnored private var contexts: [ModuleID: ModuleContext] = [:]
@@ -33,7 +34,8 @@ public final class ModuleRegistry {
         hotkeys: HotkeyRegistry,
         presenter: any NotchPresenter,
         scheduler: any Scheduler,
-        storageRoot: StorageRoot
+        storageRoot: StorageRoot,
+        services: ServiceRegistry
     ) {
         let sorted = modules.sorted { $0.descriptor.order < $1.descriptor.order }
         precondition(Set(sorted.map(\.descriptor.id)).count == sorted.count, "Duplicate ModuleID")
@@ -45,6 +47,7 @@ public final class ModuleRegistry {
         self.presenter = presenter
         self.scheduler = scheduler
         self.storageRoot = storageRoot
+        self.services = services
         moduleSettings = Dictionary(uniqueKeysWithValues: sorted.map {
             ($0.descriptor.id, ModuleSettings(store: settings, module: $0.descriptor.id))
         })
@@ -192,6 +195,7 @@ public final class ModuleRegistry {
             activities: ActivityPublisher(center: activities, module: id),
             presenter: presenter,
             hotkeys: ModuleHotkeys(registry: hotkeys, module: id),
+            services: ModuleServices(registry: services, module: id),
             permissions: permissions,
             storage: storageRoot.storage(for: id),
             scheduler: scheduler
@@ -229,6 +233,7 @@ public final class ModuleRegistry {
         contexts.removeValue(forKey: id)?.cancelAll()
         activities.clearAll(from: id)
         hotkeys.unregisterAll(owner: id)
+        services.unregisterAll(owner: id)
         tabCache[id] = nil
     }
 

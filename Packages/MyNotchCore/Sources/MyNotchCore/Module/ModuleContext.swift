@@ -7,6 +7,7 @@ public final class ModuleContext {
     public let activities: ActivityPublisher
     public let presenter: any NotchPresenter
     public let hotkeys: ModuleHotkeys
+    public let services: ModuleServices
     public let permissions: any PermissionCenter
     public let storage: ModuleStorage
     /// Delays for the module; actions still pending are cancelled when the module stops.
@@ -24,6 +25,7 @@ public final class ModuleContext {
         activities: ActivityPublisher,
         presenter: any NotchPresenter,
         hotkeys: ModuleHotkeys,
+        services: ModuleServices,
         permissions: any PermissionCenter,
         storage: ModuleStorage,
         scheduler: any Scheduler
@@ -33,6 +35,7 @@ public final class ModuleContext {
         self.activities = activities
         self.presenter = presenter
         self.hotkeys = hotkeys
+        self.services = services
         self.permissions = permissions
         self.storage = storage
         self.moduleScheduler = ModuleScheduler(base: scheduler)
@@ -61,5 +64,6 @@ public final class ModuleContext {
         moduleScheduler.invalidate()
         activities.invalidate()
         hotkeys.invalidate()
+        services.invalidate()
     }
 }
