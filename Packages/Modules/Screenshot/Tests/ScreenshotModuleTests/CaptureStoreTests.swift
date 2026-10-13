@@ -143,9 +143,71 @@ import Testing
         #expect(makeStore().load() == [record])
     }
 
-    @Test func unreadableIndexLoadsEmpty() throws {
-        try writeIndex("{ not json")
-        #expect(makeStore().load().isEmpty)
+    @Test func unreadableIndexIsSetAsideWithoutSweepingCaptures() throws {
+        let record = try makeStore().add(Self.image(width: 10, height: 10), keepCount: 30)
+        let corruptName = /captures\.corrupt-\d{8}-\d{6}(-\d+)?\.json/
+
+        for contents in ["{ not json", "{\"records\": []}"] {
+            try writeIndex(contents)
+            #expect(makeStore().load().isEmpty)
+        }
+
+        let files = fileNames(in: capturesDirectory)
+        let setAside = files.filter { $0.wholeMatch(of: corruptName) != nil }
+        #expect(setAside.count == 2)
+        #expect(files.subtracting(setAside) == [record.fileName])
+        let contents = try setAside.map { try String(contentsOf: capturesDirectory.appending(path: $0), encoding: .utf8) }
+        #expect(Set(contents) == ["{ not json", "{\"records\": []}"])
+    }
+
+    @Test func markupFilesLiveInSubfoldersOfCaptures() throws {
+        let id = UUID()
+        let store = makeStore()
+        #expect(store.originalURL(for: id) == capturesDirectory.appending(path: "originals/\(id.uuidString).png"))
+        #expect(store.markupURL(for: id) == capturesDirectory.appending(path: "markup/\(id.uuidString).json"))
+    }
+
+    /// Plants an original and an annotation sidecar for `id`, as the markup editor would.
+    func writeMarkupFiles(for id: UUID, in store: CaptureStore) throws {
+        for url in [store.originalURL(for: id), store.markupURL(for: id)] {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("markup".utf8).write(to: url)
+        }
+    }
+
+    @Test func deleteAndTrimRemoveOriginalsAndMarkup() throws {
+        let store = makeStore()
+        let oldest = try store.add(Self.image(width: 10, height: 10), keepCount: 30)
+        let deleted = try store.add(Self.image(width: 10, height: 10), keepCount: 30)
+        let kept = try store.add(Self.image(width: 10, height: 10), keepCount: 30)
+        for record in [oldest, deleted, kept] { try writeMarkupFiles(for: record.id, in: store) }
+
+        store.delete(id: deleted.id)
+        #expect(!exists(store.originalURL(for: deleted.id)))
+        #expect(!exists(store.markupURL(for: deleted.id)))
+
+        _ = try store.add(Self.image(width: 10, height: 10), keepCount: 2)
+        #expect(!exists(store.originalURL(for: oldest.id)))
+        #expect(!exists(store.markupURL(for: oldest.id)))
+
+        #expect(exists(store.originalURL(for: kept.id)))
+        #expect(exists(store.markupURL(for: kept.id)))
+    }
+
+    @Test func sweepLeavesOriginalsAndMarkupAlone() throws {
+        let store = makeStore()
+        let record = try store.add(Self.image(width: 10, height: 10), keepCount: 30)
+        let unlisted = UUID()
+        try writeMarkupFiles(for: record.id, in: store)
+        try writeMarkupFiles(for: unlisted, in: store)
+        try Data("not an image".utf8).write(to: capturesDirectory.appending(path: "orphan.png"))
+
+        #expect(makeStore().load() == [record])
+        #expect(!exists(capturesDirectory.appending(path: "orphan.png")))
+        for id in [record.id, unlisted] {
+            #expect(exists(store.originalURL(for: id)))
+            #expect(exists(store.markupURL(for: id)))
+        }
     }
 
     @Test func deleteRemovesTheRecordAndItsFiles() throws {
