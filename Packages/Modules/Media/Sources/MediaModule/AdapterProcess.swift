@@ -23,8 +23,9 @@ final class AdapterProcess: NowPlayingSource {
     let baseArguments: [String]
     private let scheduler: any Scheduler
     /// How long `stop()` lets the stream handle SIGTERM before killing it.
-    private let killDelay: TimeInterval
+    private let killDelay: Duration
     private let log: @MainActor (String) -> Void
+    private let environment: [String: String]
 
     private var onLine: (@MainActor (String) -> Void)?
     private var onFailure: (@MainActor (String) -> Void)?
@@ -36,6 +37,9 @@ final class AdapterProcess: NowPlayingSource {
     private var isStarting = false
     /// Startup window, uptime and restart timers; all cancelled on exit and stop.
     private var timers: [ScheduledAction] = []
+    /// Commands waiting for the running one, oldest first; at most one of them is a seek.
+    private var queuedCommands: [(arguments: [String], isSeek: Bool)] = []
+    private var isRunningCommand = false
 
     convenience init(
         perl: URL = URL(filePath: "/usr/bin/perl"),
@@ -52,7 +56,7 @@ final class AdapterProcess: NowPlayingSource {
         executable: URL,
         baseArguments: [String],
         scheduler: any Scheduler,
-        killDelay: TimeInterval = 1,
+        killDelay: Duration = .seconds(1),
         log: @escaping @MainActor (String) -> Void = AdapterProcess.defaultLog
     ) {
         self.executable = executable
@@ -60,6 +64,7 @@ final class AdapterProcess: NowPlayingSource {
         self.scheduler = scheduler
         self.killDelay = killDelay
         self.log = log
+        self.environment = Self.adapterEnvironment(from: ProcessInfo.processInfo.environment)
     }
 
     /// A dropped source must not leave perl running.
@@ -71,14 +76,23 @@ final class AdapterProcess: NowPlayingSource {
         logger.notice("\(message, privacy: .public)")
     }
 
+    /// Variables that load code into perl, or that the adapter reads as its own options and test hooks.
+    private nonisolated static let blockedVariables: Set<String> = ["PERL5OPT", "PERL5LIB", "PERLLIB", "PERL5DB", "ADAPTER_TEST_MODE"]
+
+    /// The app's environment minus anything that could change what perl or the adapter runs.
+    nonisolated static func adapterEnvironment(from environment: [String: String]) -> [String: String] {
+        environment.filter { key, _ in !blockedVariables.contains(key) && !key.hasPrefix("MEDIAREMOTEADAPTER_") }
+    }
+
     var streamArguments: [String] { baseArguments + ["stream", "--micros", "--debounce=100"] }
 
     func arguments(for command: MediaCommand) -> [String] { baseArguments + ["send", String(command.rawValue)] }
 
-    /// The adapter takes a non-negative whole number of microseconds; nil for a position that is not a number.
+    /// The adapter takes a non-negative whole number of microseconds; nil when the position has none
+    /// (not finite, or too far for `Int64`, where converting would trap).
     func seekArguments(toSeconds seconds: Double) -> [String]? {
-        guard seconds.isFinite else { return nil }
-        return baseArguments + ["seek", String(Int64((max(seconds, 0) * 1_000_000).rounded()))]
+        guard seconds.isFinite, let micros = Int64(exactly: (max(seconds, 0) * 1_000_000).rounded()) else { return nil }
+        return baseArguments + ["seek", String(micros)]
     }
 
     /// Whether a stream process is running (for tests).
@@ -101,13 +115,14 @@ final class AdapterProcess: NowPlayingSource {
         self.stream = nil
         stream.terminate()
         // `stream` exits on SIGTERM (README); kill it if it hangs, without blocking the main actor.
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + killDelay) {
+        Task.detached { [killDelay] in
+            try? await Task.sleep(for: killDelay)
             if stream.isRunning { kill(stream.processIdentifier, SIGKILL) }
         }
     }
 
     func send(_ command: MediaCommand) {
-        runOnce(arguments(for: command))
+        enqueue(arguments(for: command), isSeek: false)
     }
 
     func seek(toSeconds seconds: Double) {
@@ -115,7 +130,7 @@ final class AdapterProcess: NowPlayingSource {
             log("Ignored seek to \(seconds) seconds")
             return
         }
-        runOnce(arguments)
+        enqueue(arguments, isSeek: true)
     }
 
     private func launch() {
@@ -125,6 +140,7 @@ final class AdapterProcess: NowPlayingSource {
         let process = Process()
         process.executableURL = executable
         process.arguments = streamArguments
+        process.environment = environment
         let output = Pipe()
         let errors = Pipe()
         process.standardOutput = output
@@ -181,25 +197,46 @@ final class AdapterProcess: NowPlayingSource {
         timers = []
     }
 
-    /// Fire-and-forget command; the result only matters when it failed.
-    private func runOnce(_ arguments: [String]) {
+    /// Commands run one at a time so the player gets them in order. A new seek replaces a seek still waiting,
+    /// so dragging the progress bar keeps at most one seek waiting behind the running command.
+    private func enqueue(_ arguments: [String], isSeek: Bool) {
+        if isSeek { queuedCommands.removeAll { $0.isSeek } }
+        queuedCommands.append((arguments, isSeek))
+        runNextCommand()
+    }
+
+    private func runNextCommand() {
+        guard !isRunningCommand, !queuedCommands.isEmpty else { return }
+        isRunningCommand = true
+        runOnce(queuedCommands.removeFirst().arguments) { [weak self] in
+            self?.isRunningCommand = false
+            self?.runNextCommand()
+        }
+    }
+
+    /// Runs one command and calls `finished` when it is over; the result only matters when it failed.
+    private func runOnce(_ arguments: [String], finished: @escaping @MainActor () -> Void) {
         let command = arguments.dropFirst(baseArguments.count).joined(separator: " ")
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
+        process.environment = environment
         process.standardOutput = FileHandle.nullDevice
         let errors = Pipe()
         process.standardError = errors
         let log = log
         process.terminationHandler = { process in
             let (succeeded, reason) = Self.outcome(of: process)
-            guard !succeeded else { return }
-            DispatchQueue.main.async { log("The media adapter command `\(command)` failed (\(reason))") }
+            DispatchQueue.main.async {
+                if !succeeded { log("The media adapter command `\(command)` failed (\(reason))") }
+                finished()
+            }
         }
         do {
             try process.run()
         } catch {
             log("Could not run the media adapter command `\(command)`: \(error.localizedDescription)")
+            finished()
             return
         }
         Self.readLines(from: errors.fileHandleForReading) { lines in lines.forEach(log) }
