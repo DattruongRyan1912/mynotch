@@ -17,7 +17,8 @@ nonisolated struct ActivityPolicy: Equatable, Sendable {
     private nonisolated enum Phase: Equatable, Sendable {
         case hidden, playing
         case paused(until: Date)
-        case hiding(at: Date)
+        /// Waiting out a track change; `pausedUntil` keeps a running grace period if the track returns paused.
+        case hiding(at: Date, pausedUntil: Date?)
     }
 
     init(pauseGrace: TimeInterval = 5, hiddenBundleIDs: Set<String> = []) {
@@ -32,7 +33,7 @@ nonisolated struct ActivityPolicy: Equatable, Sendable {
         switch phase {
         case .hidden, .playing: nil
         case .paused(let until): until
-        case .hiding(let at): at
+        case .hiding(let at, _): at
         }
     }
 
@@ -42,15 +43,16 @@ nonisolated struct ActivityPolicy: Equatable, Sendable {
         } else if !state.isActive {
             switch phase {
             case .hidden, .hiding: break
-            case .playing: phase = .hiding(at: date + Self.hideDebounce)
-            case .paused(let until): phase = .hiding(at: min(until, date + Self.hideDebounce))
+            case .playing: phase = .hiding(at: date + Self.hideDebounce, pausedUntil: nil)
+            case .paused(let until): phase = .hiding(at: min(until, date + Self.hideDebounce), pausedUntil: until)
             }
         } else if state.isPlaying {
             phase = .playing
         } else {
             switch phase {
             case .hidden, .paused: break
-            case .playing, .hiding: phase = .paused(until: date + pauseGrace)
+            case .playing: phase = .paused(until: date + pauseGrace)
+            case .hiding(_, let pausedUntil): phase = .paused(until: pausedUntil ?? date + pauseGrace)
             }
         }
         tick(at: date)

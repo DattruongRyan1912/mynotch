@@ -14,9 +14,9 @@ import Testing
         #"{"type":"data","diff":\#(diff),"payload":\#(payload)}"#
     }
 
-    func applying(_ lines: String...) -> NowPlayingReducer {
+    func applying(_ lines: String..., at date: Date = NowPlayingReducerTests.anchorDate) -> NowPlayingReducer {
         var reducer = NowPlayingReducer()
-        for line in lines { #expect(reducer.apply(line: line) == .applied) }
+        for line in lines { #expect(reducer.apply(line: line, receivedAt: date) == .applied) }
         return reducer
     }
 
@@ -70,8 +70,8 @@ import Testing
     @Test func malformedLinesAreIgnored() {
         var reducer = applying(Self.fullLine)
         let before = reducer.state
-        for bad in ["", "not json", #"{"type":"data","diff":true"#, #"{"type":"data","diff":false,"payload":"oops"}"#, #"{"diff":false,"payload":{}}"#, "[1,2]"] {
-            #expect(reducer.apply(line: bad) == .ignored)
+        for bad in ["", "not json", #"{"type":"data","diff":true"#, #"{"type":"data","diff":false,"payload":"oops"}"#, #"{"diff":false,"payload":{}}"#, #"{"type":"data","diff":false}"#, "[1,2]"] {
+            #expect(reducer.apply(line: bad, receivedAt: Self.anchorDate) == .ignored)
         }
         #expect(reducer.state == before)
     }
@@ -79,7 +79,7 @@ import Testing
     @Test func nonDataLinesAreIgnored() {
         var reducer = applying(Self.fullLine)
         let before = reducer.state
-        #expect(reducer.apply(line: #"{"type":"error","diff":false,"payload":{}}"#) == .ignored)
+        #expect(reducer.apply(line: #"{"type":"error","diff":false,"payload":{}}"#, receivedAt: Self.anchorDate) == .ignored)
         #expect(reducer.state == before)
     }
 
@@ -87,18 +87,23 @@ import Testing
         var reducer = applying(Self.fullLine)
         #expect(reducer.state.artwork == ArtworkData(data: Data([1, 2, 3]), mimeType: "image/png", revision: 1))
 
-        reducer.apply(line: line(diff: true, #"{"artworkData":"AQID","elapsedTimeMicros":31000000}"#))
-        reducer.apply(line: Self.fullLine)
+        reducer.apply(line: line(diff: true, #"{"artworkData":"AQID","elapsedTimeMicros":31000000}"#), receivedAt: Self.anchorDate)
+        reducer.apply(line: Self.fullLine, receivedAt: Self.anchorDate)
         #expect(reducer.state.artwork?.revision == 1)
 
-        reducer.apply(line: line(diff: true, #"{"artworkData":"BAUG","artworkMimeType":"image/jpeg"}"#))
+        reducer.apply(line: line(diff: true, #"{"artworkData":"BAUG","artworkMimeType":"image/jpeg"}"#), receivedAt: Self.anchorDate)
         #expect(reducer.state.artwork == ArtworkData(data: Data([4, 5, 6]), mimeType: "image/jpeg", revision: 2))
 
-        reducer.apply(line: line(diff: true, #"{"artworkData":null}"#))
+        reducer.apply(line: line(diff: true, #"{"artworkData":null}"#), receivedAt: Self.anchorDate)
         #expect(reducer.state.artwork == nil)
 
-        reducer.apply(line: line(diff: true, #"{"artworkData":"AQID"}"#))
+        reducer.apply(line: line(diff: true, #"{"artworkData":"AQID"}"#), receivedAt: Self.anchorDate)
         #expect(reducer.state.artwork?.revision == 3)
+    }
+
+    @Test func mimeTypeOnlyDiffKeepsTheDecodedArtwork() {
+        let reducer = applying(Self.fullLine, line(diff: true, #"{"artworkMimeType":"image/jpeg"}"#))
+        #expect(reducer.state.artwork == ArtworkData(data: Data([1, 2, 3]), mimeType: "image/jpeg", revision: 1))
     }
 
     @Test func artworkSurvivesUpdatesWithoutItForTheSameTrack() {
@@ -126,10 +131,60 @@ import Testing
         #expect(reducer.state.elapsedAnchor?.rate == 0)
         #expect(!reducer.state.isPlaying)
 
-        reducer.apply(line: line(diff: true, #"{"playing":true,"playbackRate":2}"#))
+        reducer.apply(line: line(diff: true, #"{"playing":true,"playbackRate":2}"#), receivedAt: Self.anchorDate)
         #expect(reducer.state.elapsedAnchor?.rate == 2)
 
-        reducer.apply(line: line(diff: true, #"{"playbackRate":0}"#))
+        reducer.apply(line: line(diff: true, #"{"playbackRate":0}"#), receivedAt: Self.anchorDate)
         #expect(reducer.state.elapsedAnchor?.rate == 0)
+    }
+
+    @Test func pauseKeepsThePositionUntilThePlayerReportsOne() {
+        let start = line(diff: false, #"{"bundleIdentifier":"com.example.Player","title":"T","playing":true,"playbackRate":1,"durationMicros":300000000,"elapsedTimeMicros":0,"timestampEpochMicros":1760000000000000}"#)
+        var reducer = applying(start)
+        reducer.apply(line: line(diff: true, #"{"playing":false}"#), receivedAt: Self.anchorDate + 120)
+        #expect(PlaybackClock.position(reducer.state, at: Self.anchorDate + 130) == 120)
+
+        reducer.apply(line: line(diff: true, #"{"playing":true}"#), receivedAt: Self.anchorDate + 200)
+        #expect(PlaybackClock.position(reducer.state, at: Self.anchorDate + 200) == 120)
+        #expect(PlaybackClock.position(reducer.state, at: Self.anchorDate + 210) == 130)
+
+        reducer.apply(line: line(diff: true, #"{"elapsedTimeMicros":125000000,"timestampEpochMicros":1760000200000000}"#), receivedAt: Self.anchorDate + 201)
+        #expect(PlaybackClock.position(reducer.state, at: Self.anchorDate + 210) == 135)
+    }
+
+    @Test func rateChangeWithoutElapsedKeepsThePosition() {
+        let start = line(diff: false, #"{"bundleIdentifier":"com.example.Player","title":"T","playing":true,"playbackRate":1,"elapsedTimeMicros":0,"timestampEpochMicros":1760000000000000}"#)
+        var reducer = applying(start)
+        reducer.apply(line: line(diff: true, #"{"playbackRate":2}"#), receivedAt: Self.anchorDate + 10)
+        #expect(PlaybackClock.position(reducer.state, at: Self.anchorDate + 10) == 10)
+        #expect(PlaybackClock.position(reducer.state, at: Self.anchorDate + 15) == 20)
+    }
+
+    @Test func anchorNeedsBothElapsedAndTimestamp() {
+        let elapsedOnly = line(diff: false, #"{"bundleIdentifier":"com.example.Player","title":"T","playing":true,"elapsedTimeMicros":1000000}"#)
+        let timestampOnly = line(diff: false, #"{"bundleIdentifier":"com.example.Player","title":"T","playing":true,"timestampEpochMicros":1760000000000000}"#)
+        #expect(applying(elapsedOnly).state.elapsedAnchor == nil)
+        #expect(applying(timestampOnly).state.elapsedAnchor == nil)
+    }
+
+    @Test func integerIdentifiersStayExact() {
+        let signed = applying(line(diff: false, #"{"bundleIdentifier":"com.example.Player","title":"T","playing":true,"uniqueIdentifier":-5468329482734873982}"#))
+        #expect(signed.state.uniqueIdentifier == "-5468329482734873982")
+        let unsigned = applying(line(diff: false, #"{"bundleIdentifier":"com.example.Player","title":"T","playing":true,"uniqueIdentifier":18446744073709551615}"#))
+        #expect(unsigned.state.uniqueIdentifier == "18446744073709551615")
+    }
+
+    @Test func trackIdentityIncludesItemIdentifiers() {
+        let base = NowPlayingState(bundleIdentifier: "com.example.Player", title: "T", uniqueIdentifier: "1", contentItemIdentifier: "a")
+        var other = base
+        other.uniqueIdentifier = "2"
+        #expect(other.trackIdentity != base.trackIdentity)
+        other = base
+        other.contentItemIdentifier = "b"
+        #expect(other.trackIdentity != base.trackIdentity)
+        other = base
+        other.isPlaying = true
+        other.elapsedAnchor = PlaybackAnchor(elapsedSeconds: 3, timestamp: Self.anchorDate, rate: 1)
+        #expect(other.trackIdentity == base.trackIdentity)
     }
 }

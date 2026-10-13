@@ -17,28 +17,39 @@ nonisolated struct NowPlayingReducer: Sendable {
     private var artworkBase64: String?
     private var artworkRevision = 0
 
+    /// - Parameter receivedAt: when the line arrived. A pause, resume or rate change can arrive before
+    ///   the player's fresh elapsed time (~100 ms later, or never); until then the position is anchored here.
     @discardableResult
-    mutating func apply(line: String) -> Outcome {
+    mutating func apply(line: String, receivedAt: Date) -> Outcome {
         guard let message = try? JSONDecoder().decode(Message.self, from: Data(line.utf8)), message.type == "data" else {
             return .ignored
         }
-        let update = message.payload ?? [:]
+        let update = message.payload
+        let previousPayload = payload
+        let previousState = state
         if update.isEmpty {
             payload = [:]
         } else if message.diff == true {
             for (key, value) in update { payload[key] = value == .null ? nil : value }
         } else {
-            let previous = payload
             payload = update.filter { $0.value != .null }
-            // Players briefly unload artwork (e.g. while seeking); keep it while the track is the same.
-            if payload["artworkData"] == nil, Self.metadata(from: payload).trackIdentity == state.trackIdentity {
-                payload["artworkData"] = previous["artworkData"]
-                payload["artworkMimeType"] = payload["artworkMimeType"] ?? previous["artworkMimeType"]
-            }
         }
-        let previousArtwork = state.artwork
+        let sameTrack = Self.metadata(from: payload).trackIdentity == previousState.trackIdentity
+        // Players briefly unload artwork (e.g. while seeking); keep it while the track is the same.
+        if message.diff != true, sameTrack, payload["artworkData"] == nil {
+            payload["artworkData"] = previousPayload["artworkData"]
+            payload["artworkMimeType"] = payload["artworkMimeType"] ?? previousPayload["artworkMimeType"]
+        }
+        // Without this the old anchor would be re-read at the new rate: pausing snaps back, resuming jumps ahead.
+        let playbackChanged = (payload["playing"]?.bool ?? false) != previousState.isPlaying
+            || payload["playbackRate"]?.number != previousPayload["playbackRate"]?.number
+        let carriesTime = update["elapsedTimeMicros"] != nil || update["timestampEpochMicros"] != nil
+        if sameTrack, playbackChanged, !carriesTime, let position = PlaybackClock.position(previousState, at: receivedAt) {
+            payload["elapsedTimeMicros"] = .number(position * 1_000_000)
+            payload["timestampEpochMicros"] = .number(receivedAt.timeIntervalSince1970 * 1_000_000)
+        }
         state = Self.metadata(from: payload)
-        state.artwork = artwork(previous: previousArtwork)
+        state.artwork = artwork(previous: previousState.artwork)
         return .applied
     }
 
@@ -87,20 +98,35 @@ nonisolated struct NowPlayingReducer: Sendable {
     private nonisolated struct Message: Decodable {
         var type: String
         var diff: Bool?
-        var payload: [String: JSONValue]?
+        var payload: [String: JSONValue]
+
+        private nonisolated enum CodingKeys: String, CodingKey { case type, diff, payload }
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            type = try container.decode(String.self, forKey: .type)
+            diff = try container.decodeIfPresent(Bool.self, forKey: .diff)
+            // A missing payload is malformed; an explicit null, like {}, means nothing is playing.
+            payload = try container.decode([String: JSONValue]?.self, forKey: .payload) ?? [:]
+        }
     }
 }
 
 /// One payload value. Only scalars are read; arrays and objects are kept as `.other`.
 nonisolated enum JSONValue: Decodable, Equatable, Sendable {
-    case null, bool(Bool), number(Double), string(String), other
+    case null, bool(Bool), integer(Int64), unsignedInteger(UInt64), number(Double), string(String), other
 
+    /// Integers are tried before `Double` so 64-bit identifiers stay exact.
     init(from decoder: any Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() {
             self = .null
         } else if let value = try? container.decode(Bool.self) {
             self = .bool(value)
+        } else if let value = try? container.decode(Int64.self) {
+            self = .integer(value)
+        } else if let value = try? container.decode(UInt64.self) {
+            self = .unsignedInteger(value)
         } else if let value = try? container.decode(Double.self) {
             self = .number(value)
         } else if let value = try? container.decode(String.self) {
@@ -111,14 +137,24 @@ nonisolated enum JSONValue: Decodable, Equatable, Sendable {
     }
 
     var bool: Bool? { if case .bool(let value) = self { value } else { nil } }
-    var number: Double? { if case .number(let value) = self { value } else { nil } }
     var string: String? { if case .string(let value) = self { value } else { nil } }
 
-    /// MediaRemote reports `uniqueIdentifier` as a number for some players and a string for others.
+    var number: Double? {
+        switch self {
+        case .integer(let value): Double(value)
+        case .unsignedInteger(let value): Double(value)
+        case .number(let value): value
+        default: nil
+        }
+    }
+
+    /// MediaRemote reports `uniqueIdentifier` as a 64-bit number for some players and a string for others.
     var identifier: String? {
         switch self {
         case .string(let value): value
-        case .number(let value): Int64(exactly: value).map(String.init) ?? String(value)
+        case .integer(let value): String(value)
+        case .unsignedInteger(let value): String(value)
+        case .number(let value): String(value)
         default: nil
         }
     }

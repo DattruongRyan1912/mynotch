@@ -41,12 +41,53 @@ import Testing
         #expect(policy.visible)
     }
 
-    @Test func pausedTrackNeverShowsAndZeroGraceHidesAtOnce() {
-        var policy = ActivityPolicy(pauseGrace: 0)
+    @Test func pausedTrackNeverShows() {
+        var policy = ActivityPolicy()
         policy.update(track(playing: false), at: start)
         #expect(!policy.visible)
-        policy.update(track(), at: start + 1)
-        policy.update(track(playing: false), at: start + 2)
+        #expect(policy.nextDeadline == nil)
+    }
+
+    @Test func zeroGraceHidesAtOnce() {
+        var policy = ActivityPolicy(pauseGrace: 0)
+        policy.update(track(), at: start)
+        policy.update(track(playing: false), at: start + 1)
+        #expect(!policy.visible)
+    }
+
+    @Test func emptyNearTheEndOfGraceHidesAtTheGraceDeadline() {
+        var policy = ActivityPolicy()
+        policy.update(track(), at: start)
+        policy.update(track(playing: false), at: start + 1)
+        policy.update(.empty, at: start + 5.9)
+        #expect(policy.nextDeadline == start + 6)
+        policy.tick(at: start + 6)
+        #expect(!policy.visible)
+    }
+
+    @Test func pausingDuringPendingHideStartsGrace() {
+        var policy = ActivityPolicy()
+        policy.update(track(), at: start)
+        policy.update(.empty, at: start + 1)
+        policy.update(track(playing: false), at: start + 1.25)
+        #expect(policy.visible)
+        #expect(policy.nextDeadline == start + 6.25)
+    }
+
+    @Test func briefEmptyStatesDoNotRestartGrace() {
+        var policy = ActivityPolicy()
+        policy.update(track(), at: start)
+        policy.update(track(playing: false), at: start + 1)
+        var time = start + 1.25
+        var empty = true
+        while time < start + 6 {
+            policy.update(empty ? .empty : track(playing: false), at: time)
+            #expect(policy.visible)
+            #expect((policy.nextDeadline ?? .distantFuture) <= start + 6)
+            time += 0.25
+            empty.toggle()
+        }
+        policy.tick(at: start + 6)
         #expect(!policy.visible)
     }
 
