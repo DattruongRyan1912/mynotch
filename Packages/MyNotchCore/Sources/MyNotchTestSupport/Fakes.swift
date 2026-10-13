@@ -1,0 +1,38 @@
+import MyNotchCore
+import SwiftUI
+
+/// Permission center whose answers tests set directly. Unknown permissions are denied.
+public final class FakePermissionCenter: PermissionCenter {
+    public var statuses: [Permission: PermissionStatus] = [:]
+    public init() {}
+    public func status(of permission: Permission) -> PermissionStatus { statuses[permission] ?? .denied }
+    public func openSystemSettings(for permission: Permission) {}
+}
+
+/// Presenter that records requests.
+public final class FakePresenter: NotchPresenter {
+    public private(set) var openedTabs: [ModuleID] = []
+    public private(set) var toastCount = 0
+    public init() {}
+    public func open(tab: ModuleID) { openedTabs.append(tab) }
+    public func showToast(_ content: AnyView, duration: Duration) { toastCount += 1 }
+    public func close() {}
+}
+
+/// Wires a `ModuleRegistry` with in-memory collaborators.
+public struct RegistryHarness {
+    public let settings = SettingsStore(defaults: makeIsolatedDefaults())
+    public let scheduler = ManualScheduler()
+    public let permissions = FakePermissionCenter()
+    public let presenter = FakePresenter()
+    public let activities: ActivityCenter
+    public let registry: ModuleRegistry
+
+    public init(_ modules: [any FeatureModule]) {
+        activities = ActivityCenter(scheduler: scheduler)
+        registry = ModuleRegistry(
+            modules: modules, settings: settings, activities: activities,
+            permissions: permissions, hotkeys: HotkeyRegistry(), presenter: presenter
+        )
+    }
+}

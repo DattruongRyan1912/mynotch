@@ -30,6 +30,7 @@ public struct ModuleSettings {
 
     private func checked<Value>(_ key: SettingKey<Value>) -> SettingKey<Value> {
         precondition(key.name.hasPrefix("module.\(module.rawValue)."), "Key \(key.name) is outside module \(module)")
+        precondition(key.name != Self.qualifiedName("enabled", module: module), "\"enabled\" is reserved for ModuleRegistry")
         return key
     }
 }
