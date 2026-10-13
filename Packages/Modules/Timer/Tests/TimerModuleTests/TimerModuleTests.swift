@@ -1,0 +1,212 @@
+import Foundation
+import MyNotchCore
+import MyNotchTestSupport
+import Testing
+@testable import TimerModule
+
+/// Records instead of playing, so tests are silent.
+final class FakeSoundPlayer: SoundPlaying {
+    private(set) var played: [String] = []
+    func play(named name: String) { played.append(name) }
+}
+
+final class FakeClock {
+    var date = Date(timeIntervalSinceReferenceDate: 1_000)
+    func advance(_ seconds: TimeInterval) { date = date.addingTimeInterval(seconds) }
+}
+
+@MainActor
+struct TimerFixture {
+    let clock = FakeClock()
+    let sound = FakeSoundPlayer()
+    let module: TimerModule
+    let harness: RegistryHarness
+
+    init() {
+        let clock = clock, sound = sound
+        module = TimerModule(now: { clock.date }, sound: sound)
+        harness = RegistryHarness([module])
+    }
+
+    var fileURL: URL { harness.storageRoot.storage(for: "timer").directory.appending(path: "timer.json") }
+
+    func start() async { await harness.registry.bootstrap() }
+
+    /// Moves both the wall clock and the scheduler, as real time does.
+    func advance(_ seconds: Int) {
+        clock.advance(TimeInterval(seconds))
+        harness.scheduler.advance(by: .seconds(seconds))
+    }
+
+    func seedFile(_ model: TimerModel) throws {
+        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(model).write(to: fileURL)
+    }
+
+    func savedModel() throws -> TimerModel {
+        try JSONDecoder().decode(TimerModel.self, from: Data(contentsOf: fileURL))
+    }
+}
+
+@Suite struct TimerModuleTests {
+    @Test func descriptorAndTab() async throws {
+        let fixture = TimerFixture()
+        #expect(fixture.module.descriptor.id == "timer")
+        #expect(fixture.module.descriptor.displayName == "Hẹn giờ")
+        #expect(fixture.module.descriptor.systemImage == "timer")
+        #expect(fixture.module.descriptor.order == 880)
+        let tab = try #require(fixture.module.makeTab())
+        #expect(tab.title == "Hẹn giờ")
+        #expect(tab.preferredHeight == 150)
+    }
+
+    @Test func runningCountdownPublishesOneActivityWithoutPerSecondUpdates() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        #expect(fixture.harness.activities.current == nil)
+        fixture.module.startCountdown(minutes: 5)
+        #expect(fixture.harness.activities.current?.id == "timer/timer")
+        #expect(fixture.harness.activities.current?.activity.priority == .normal)
+        let revision = fixture.harness.activities.current
+        fixture.advance(120)
+        #expect(fixture.harness.activities.current == revision)
+    }
+
+    @Test func pauseAndCancelClearTheActivity() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.startCountdown(minutes: 5)
+        fixture.module.pause()
+        #expect(fixture.harness.activities.current == nil)
+        fixture.module.resume()
+        #expect(fixture.harness.activities.current != nil)
+        fixture.module.cancel()
+        #expect(fixture.harness.activities.current == nil)
+        #expect(fixture.harness.scheduler.pendingCount == 0)
+    }
+
+    @Test func finishingShowsHighActivityPlaysSoundOnceAndExpiresAfter30Seconds() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.startCountdown(minutes: 1)
+        fixture.advance(59)
+        #expect(fixture.sound.played.isEmpty)
+        fixture.advance(1)
+        #expect(fixture.sound.played == ["Glass"])
+        #expect(fixture.module.state.model == .finished)
+        #expect(fixture.harness.activities.current?.activity.priority == .high)
+        fixture.advance(29)
+        #expect(fixture.harness.activities.current != nil)
+        fixture.advance(1)
+        #expect(fixture.harness.activities.current == nil)
+        #expect(fixture.module.state.model == .finished)
+        #expect(fixture.sound.played == ["Glass"])
+    }
+
+    @Test func cancellingTheFinishedTimerDismissesIt() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.startCountdown(minutes: 1)
+        fixture.advance(60)
+        fixture.module.cancel()
+        #expect(fixture.harness.activities.current == nil)
+        #expect(fixture.module.state.model == .idle)
+    }
+
+    @Test func addMinuteAfterFinishingRestartsTheCountdown() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.startCountdown(minutes: 1)
+        fixture.advance(60)
+        fixture.module.addMinute()
+        #expect(fixture.harness.activities.current?.activity.priority == .normal)
+        fixture.advance(60)
+        #expect(fixture.sound.played == ["Glass", "Glass"])
+    }
+
+    @Test func sleepingPastTheEndFinishesWhenTheTimerFires() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.startCountdown(minutes: 5)
+        fixture.clock.advance(3_600)
+        fixture.harness.scheduler.advance(by: .seconds(300))
+        #expect(fixture.module.state.model == .finished)
+    }
+
+    @Test func stopwatchPublishesAnActivityAndNeverFinishes() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.startStopwatch()
+        #expect(fixture.harness.activities.current?.id == "timer/timer")
+        fixture.advance(10_000)
+        #expect(fixture.sound.played.isEmpty)
+        #expect(fixture.module.state.model.elapsed(now: fixture.clock.date) == 10_000)
+    }
+
+    @Test func everyChangeIsSavedToTimerJson() async throws {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.startCountdown(minutes: 10)
+        #expect(try fixture.savedModel() == .countdown(endDate: fixture.clock.date.addingTimeInterval(600)))
+        fixture.advance(60)
+        fixture.module.pause()
+        #expect(try fixture.savedModel() == .countdownPaused(remaining: 540))
+        fixture.module.cancel()
+        #expect(try fixture.savedModel() == .idle)
+    }
+
+    @Test func runningCountdownIsRestoredWithTheRightRemainingTime() async throws {
+        let fixture = TimerFixture()
+        try fixture.seedFile(.countdown(endDate: fixture.clock.date.addingTimeInterval(400)))
+        await fixture.start()
+        #expect(fixture.module.state.model.remaining(now: fixture.clock.date) == 400)
+        #expect(fixture.harness.activities.current?.activity.priority == .normal)
+        fixture.advance(400)
+        #expect(fixture.module.state.model == .finished)
+        #expect(fixture.sound.played == ["Glass"])
+    }
+
+    @Test func countdownThatFinishedWhileTheAppWasClosedShowsFinishedWithoutASound() async throws {
+        let fixture = TimerFixture()
+        try fixture.seedFile(.countdown(endDate: fixture.clock.date.addingTimeInterval(-5)))
+        await fixture.start()
+        #expect(fixture.module.state.model == .finished)
+        #expect(fixture.harness.activities.current?.activity.priority == .high)
+        #expect(fixture.sound.played.isEmpty)
+        #expect(try fixture.savedModel() == .finished)
+    }
+
+    @Test func pausedAndStopwatchStatesAreRestored() async throws {
+        let paused = TimerFixture()
+        try paused.seedFile(.countdownPaused(remaining: 77))
+        await paused.start()
+        #expect(paused.module.state.model == .countdownPaused(remaining: 77))
+        #expect(paused.harness.activities.current == nil)
+
+        let watch = TimerFixture()
+        let began = watch.clock.date.addingTimeInterval(-50)
+        try watch.seedFile(.stopwatch(accumulated: 10, startedAt: began))
+        await watch.start()
+        #expect(watch.module.state.model.elapsed(now: watch.clock.date) == 60)
+        #expect(watch.harness.activities.current != nil)
+    }
+
+    @Test func corruptFileStartsIdle() async throws {
+        let fixture = TimerFixture()
+        try FileManager.default.createDirectory(at: fixture.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("nope".utf8).write(to: fixture.fileURL)
+        await fixture.start()
+        #expect(fixture.harness.registry.state(of: "timer") == .running)
+        #expect(fixture.module.state.model == .idle)
+    }
+
+    @Test func disablingStopsTheTimerAndRemovesTheActivity() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.startCountdown(minutes: 1)
+        await fixture.harness.registry.setEnabled(false, for: "timer")
+        #expect(fixture.harness.activities.current == nil)
+        fixture.advance(120)
+        #expect(fixture.sound.played.isEmpty)
+    }
+}
