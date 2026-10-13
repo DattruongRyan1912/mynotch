@@ -3,7 +3,8 @@ import MyNotchCore
 import SwiftUI
 
 /// Hosts the SwiftUI settings UI in a regular window and brings it to the front.
-final class SettingsWindowController {
+/// While the window is open the app shows a Dock icon and appears in ⌘Tab, so the window is easy to find again.
+final class SettingsWindowController: NSObject {
     private let settings: SettingsStore
     private let registry: ModuleRegistry
     private let permissions: any PermissionCenter
@@ -26,10 +27,21 @@ final class SettingsWindowController {
             window.setContentSize(NSSize(width: 760, height: 520))
             window.contentMinSize = NSSize(width: 600, height: 400)
             window.isReleasedWhenClosed = false
+            // Set only here: the window is reused, so showing it again never registers a second close handler.
+            window.delegate = self
             window.center()
             self.window = window
         }
+        // Switch the policy first, so the app comes forward as a regular app with its menu bar.
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
+    }
+}
+
+extension SettingsWindowController: NSWindowDelegate {
+    /// Minimizing keeps the window, and so the Dock icon that brings it back; only closing returns to a menu bar app.
+    func windowWillClose(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
     }
 }

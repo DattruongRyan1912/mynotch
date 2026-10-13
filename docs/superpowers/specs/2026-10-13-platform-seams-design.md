@@ -1,7 +1,7 @@
 # MyNotch — Điểm nối nền tảng (dự án con 0.5)
 
 - **Ngày:** 2026-10-13
-- **Trạng thái:** Triển khai trên nhánh `feat/modules` (nối tiếp `feat/foundation`)
+- **Trạng thái:** Đã triển khai trên nhánh `feat/modules` (nối tiếp `feat/foundation`)
 - **Nguồn:** review cuối toàn nhánh nền tảng. Các module tiếp theo cần những điểm nối mà nền tảng còn thiếu.
 
 ## 1. Mục tiêu
@@ -157,3 +157,28 @@ public struct ModuleSettingsEnvironment {
 | B6 | `shutdown` dừng module đang chạy, không đổi `enabled`, `bootstrap`/`setEnabled` sau đó không khởi động |
 
 A2 và A4 phụ thuộc AppKit key window, kiểm thử tay trong checklist của Clipboard.
+
+## 6. Ghi chú triển khai
+
+Các điểm dưới đây khác hoặc chi tiết hơn thiết kế ở mục 2–4.
+
+### NotchUI
+
+- **A1.** Click vào bất kỳ cửa sổ nào khác của MyNotch (Settings, alert, menu) cũng tính là "ngoài notch". Module phải ghim notch khi mở UI phụ.
+- **A2, khi nào nhận bàn phím.** Notch chỉ chiếm bàn phím khi được mở có chủ ý: click, phím tắt, hoặc module gọi `open(tab:)`. Mở do rê chuột thì không; tab mở do rê chuột nhận bàn phím khi người dùng click vào.
+- **A2, toast.** Toast che tab nhận bàn phím vẫn giữ bàn phím. Khi toast che tab, notch giữ chiều cao của tab.
+- **A2, đóng.** Mất key window thì đóng notch theo cùng quy tắc với click ra ngoài (trừ khi ghim hoặc đang kéo). Esc đóng notch qua cả `cancelOperation` và `.onExitCommand`.
+- **A3.** Toast hết hạn quay lại tab qua cùng logic chọn tab như `open(tab:)`. Tab bị che vẫn được giữ trong cây view (ẩn) để không mất trạng thái.
+
+### MyNotchCore
+
+- **B1.** `set` với id đã có giữ nguyên thứ tự (`sequence`); thêm `raise(id:)`; `Entry` có `revision`. Hết hạn được bảo vệ bằng `revision`: hẹn hết hạn của lần `set` cũ không xoá activity đã được `set` lại.
+- **B2/B5.** `context.scheduler` là scheduler riêng của module: mọi việc đã hẹn bị huỷ khi module dừng, kể cả khi `start` lỗi.
+- **B3.** `ModuleSettingsEnvironment` không có init public. Test của package module lấy nó qua `RegistryHarness.settingsEnvironment(for:)`.
+- **B4.** Accessibility và Screen Recording có `Permission.isSettingsOnly`. Với hai quyền này, `grant` luôn gọi `request` trước (để app có trong danh sách của System Settings) rồi mới mở System Settings nếu vẫn chưa có quyền. Nút "Cấp quyền" bị khoá khi đang xin.
+- **B6.** Sau `shutdown()`, mọi đường khởi động module đều bị chặn: `bootstrap`, `setEnabled`, retry, `resumeAll`, `refreshPermissions`, `grant`.
+
+### Khung ứng dụng và công cụ
+
+- Settings: `show()` đặt `.regular` trước `NSApp.activate()`; `windowWillClose` (cửa sổ có delegate là controller, đặt một lần) trả về `.accessory`. Thu nhỏ cửa sổ vẫn giữ icon Dock.
+- `verify.sh` dọn thư mục tạm `MyNotchTests-*` của harness, và tự xoá `.build` của package phụ thuộc khi danh sách file của MyNotchCore/NotchUI đổi.

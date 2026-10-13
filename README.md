@@ -15,7 +15,7 @@ xcodegen generate
 open MyNotch.xcodeproj
 ```
 
-Chọn scheme **MyNotch** rồi Run (⌘R). App không có icon Dock; tìm icon trên menu bar.
+Chọn scheme **MyNotch** rồi Run (⌘R). App chạy trên menu bar; icon Dock chỉ hiện khi cửa sổ Settings đang mở.
 
 Kiểm tra toàn bộ (test mọi package rồi build app):
 
@@ -40,6 +40,9 @@ Kiểm tra toàn bộ (test mọi package rồi build app):
 3. Module cần quyền mới: thêm usage description và entitlement tương ứng vào `project.yml`.
 4. Thêm một dòng vào `App/ModuleList.swift`.
 5. `xcodegen generate`. `scripts/verify.sh` tự chạy test của mọi package trong `Packages/Modules/`.
+
+Module dùng được: `context.storage` (thư mục dữ liệu riêng), `context.scheduler` (việc đã hẹn tự huỷ khi module dừng), `NotchTab(acceptsKeyboard:)` (tab nhận bàn phím),
+`@Environment(\.notch)` (ghim/đóng notch từ view) và `optionalPermissions` trong `ModuleDescriptor` (quyền không bắt buộc).
 
 ## Bản Release
 

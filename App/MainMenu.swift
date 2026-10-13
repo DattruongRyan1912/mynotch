@@ -1,7 +1,7 @@
 import AppKit
 
-/// Main menu for an accessory app. It is never visible, but its key equivalents make ⌘, ⌘Q, ⌘W, ⌘M
-/// and the standard editing shortcuts work in the Settings window.
+/// Main menu. It shows in the menu bar only while Settings is open (the app is then `.regular`);
+/// its key equivalents make ⌘, ⌘Q, ⌘W, ⌘M and the standard editing shortcuts work in the Settings window.
 enum MainMenu {
     static func make(settingsTarget: AnyObject, settingsAction: Selector) -> NSMenu {
         let main = NSMenu()
