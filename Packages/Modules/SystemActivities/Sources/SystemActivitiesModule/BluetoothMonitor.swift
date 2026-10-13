@@ -12,9 +12,11 @@ protocol BluetoothMonitoring: AnyObject {
 }
 
 /// Watches IOBluetooth connect notifications and a disconnect notification per device.
-/// Starting it is what first touches Bluetooth, so the permission prompt belongs to `start`.
+/// Starting it is what first touches Bluetooth, so the permission prompt belongs to `start`. The first IOBluetooth
+/// call blocks until the user answers it, so `start` makes that call off the main thread and registers afterwards.
 final class BluetoothMonitor: NSObject, BluetoothMonitoring {
     private var onEvent: (@MainActor (BluetoothEvent) -> Void)?
+    private var starting: Task<Void, Never>?
     private var tracker = BluetoothConnectionTracker(connectedAtStart: [String]())
     private let batteryRetry: BluetoothBatteryRetry
     private var connectNotification: IOBluetoothUserNotification?
@@ -29,6 +31,19 @@ final class BluetoothMonitor: NSObject, BluetoothMonitoring {
     func start(_ onEvent: @escaping @MainActor (BluetoothEvent) -> Void) {
         stop()
         self.onEvent = onEvent
+        starting = Task { [weak self] in
+            await Self.waitForAccessDecision()
+            guard !Task.isCancelled else { return }
+            self?.register()
+        }
+    }
+
+    /// Once the user has decided, the calls in `register()` no longer block.
+    @concurrent private static func waitForAccessDecision() async {
+        autoreleasepool { _ = IOBluetoothDevice.pairedDevices() }
+    }
+
+    private func register() {
         connectNotification = IOBluetoothDevice.register(
             forConnectNotifications: self, selector: #selector(deviceConnected(_:device:)))
         // Devices connected before start are not announced, but their disconnect still is.
@@ -38,6 +53,8 @@ final class BluetoothMonitor: NSObject, BluetoothMonitoring {
     }
 
     func stop() {
+        starting?.cancel()
+        starting = nil
         connectNotification?.unregister()
         connectNotification = nil
         disconnectNotifications.values.forEach { $0.unregister() }

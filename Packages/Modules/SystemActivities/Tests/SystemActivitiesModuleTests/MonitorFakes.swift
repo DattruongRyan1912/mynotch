@@ -38,15 +38,24 @@ final class FakeNetworkMonitor: NetworkMonitoring {
 
 final class FakeDownloadsWatcher: DownloadsWatching {
     private var onDownload: ((DownloadEvent) -> Void)?
+    private var held: [CheckedContinuation<Void, Never>] = []
     var isRunning: Bool { onDownload != nil }
     var canStart = true
+    /// Makes `start` wait for `finishStarts()`, like a folder probe blocked on macOS's access prompt.
+    var holdsStart = false
     private(set) var startCount = 0
-    func start(_ onDownload: @escaping (DownloadEvent) -> Void) -> Bool {
+    func start(_ onDownload: @escaping (DownloadEvent) -> Void) async -> Bool {
         startCount += 1
-        guard canStart else { return false }
+        let result = canStart
+        if holdsStart { await withCheckedContinuation { held.append($0) } }
+        guard result else { return false }
         self.onDownload = onDownload
         return true
     }
     func stop() { onDownload = nil }
     func send(_ event: DownloadEvent) { onDownload?(event) }
+    func finishStarts() {
+        held.forEach { $0.resume() }
+        held = []
+    }
 }

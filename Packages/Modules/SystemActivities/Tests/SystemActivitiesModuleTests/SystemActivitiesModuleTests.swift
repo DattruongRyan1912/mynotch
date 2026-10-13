@@ -28,7 +28,11 @@ import Testing
         harness = RegistryHarness([SystemActivitiesModule(makeMonitors: { _ in fakes.monitors })])
     }
 
-    func start() async { await harness.registry.bootstrap() }
+    /// Downloads start after the module has: the folder probe runs off the main thread.
+    func start() async {
+        await harness.registry.bootstrap()
+        await settle { fakes.downloads.startCount > 0 }
+    }
 
     func setting(_ name: String, _ value: Bool) {
         harness.settings.set(value, for: SettingKey("module.system.\(name)", default: true))
@@ -139,6 +143,45 @@ import Testing
         harness.scheduler.advance(by: .seconds(seconds + 0.05 - readableAt))
         // Past the name-only activity's own expiry: only an update in place keeps the entry.
         #expect(entries.map(\.id) == ["system/bluetooth"])
+    }
+
+    @Test func aDownloadsStartWaitingOnAPromptDoesNotHoldBackTheModuleOrTheOtherMonitors() async {
+        fakes.downloads.holdsStart = true
+        await start()
+        #expect(harness.registry.state(of: "system") == .running)
+        #expect(fakes.network.isRunning)
+        #expect(fakes.downloads.startCount == 1)
+        #expect(!fakes.downloads.isRunning)
+        fakes.capsLock.send(true)
+        #expect(entries.map(\.id) == ["system/capslock"])
+
+        fakes.downloads.finishStarts()
+        await settle { fakes.downloads.isRunning }
+        #expect(fakes.downloads.isRunning)
+        fakes.downloads.send(DownloadEvent(url: URL(fileURLWithPath: "/d/a.zip"), name: "a.zip"))
+        #expect(Set(entries.map(\.id)) == ["system/capslock", "system/download"])
+    }
+
+    @Test func aRefusalThatArrivesAfterTheKindWasTurnedOffAndOnIsNotHeldAgainstTheNewStart() async {
+        fakes.downloads.holdsStart = true
+        fakes.downloads.canStart = false
+        await start()
+        setting("downloads", false)
+        setting("network", false)
+        // The network monitor stopping shows the module has seen the settings with downloads already off.
+        await settle { !fakes.network.isRunning }
+        fakes.downloads.canStart = true
+        setting("downloads", true)
+        await settle { fakes.downloads.startCount == 2 }
+        #expect(fakes.downloads.startCount == 2)
+
+        fakes.downloads.finishStarts()
+        await settle { fakes.downloads.isRunning }
+        #expect(fakes.downloads.isRunning)
+        // Had the first start's refusal counted, the module would think downloads never ran and leave this watcher on.
+        setting("downloads", false)
+        await settle { !fakes.downloads.isRunning }
+        #expect(!fakes.downloads.isRunning)
     }
 
     @Test func aFailedDownloadWatcherDoesNotBreakTheOthers() async {

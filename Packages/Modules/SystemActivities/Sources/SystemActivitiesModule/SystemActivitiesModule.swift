@@ -42,8 +42,9 @@ public final class SystemActivitiesModule: FeatureModule {
     private let makeMonitors: (any Scheduler) -> SystemMonitors
     private var context: ModuleContext?
     private var monitors: SystemMonitors?
-    /// Keys of the kinds whose monitor is running.
+    /// Keys of the kinds whose monitor is running. Downloads count from the moment they are asked to start.
     private var running: Set<String> = []
+    private var downloadsStart: Task<Void, Never>?
     /// Keys of the kinds whose monitor could not start: retried only after their own switch is turned off and on,
     /// not on every other settings change.
     private var failed: Set<String> = []
@@ -126,17 +127,38 @@ public final class SystemActivitiesModule: FeatureModule {
                 stop: monitors.capsLock.stop),
             "download": Kind(
                 key: keys.downloads,
-                start: {
-                    let started = monitors.downloads.start { [weak self] in self?.publish(.download($0)) }
-                    if !started { context.logger.error("Downloads folder cannot be watched") }
-                    return started
-                },
-                stop: monitors.downloads.stop),
+                start: { [weak self] in self?.startDownloads(monitors.downloads); return true },
+                stop: { [weak self] in self?.stopDownloads(monitors.downloads) }),
             "volume": Kind(
                 key: keys.volume,
                 start: { monitors.volume.start { [weak self] in self?.publish(.volume($0)) }; return true },
                 stop: monitors.volume.stop),
         ]
+    }
+
+    /// The first read of Downloads blocks until the user answers macOS's access prompt, so the watcher starts in a
+    /// task that suspends instead of freezing the notch. A refusal arrives later, through `downloadsFailed()`.
+    private func startDownloads(_ downloads: any DownloadsWatching) {
+        downloadsStart?.cancel()
+        downloadsStart = Task { [weak self] in
+            let started = await downloads.start { [weak self] in self?.publish(.download($0)) }
+            // A cancelled start belongs to an earlier switch position; its result says nothing about this one.
+            guard !Task.isCancelled else { return }
+            if !started { self?.downloadsFailed() }
+        }
+    }
+
+    private func stopDownloads(_ downloads: any DownloadsWatching) {
+        downloadsStart?.cancel()
+        downloadsStart = nil
+        downloads.stop()
+    }
+
+    /// Like a monitor that failed to start: retried only after its own switch is turned off and on.
+    private func downloadsFailed() {
+        guard running.remove("download") != nil else { return }
+        failed.insert("download")
+        context?.logger.error("Downloads folder cannot be watched")
     }
 
     private func publish(_ content: SystemActivityContent) {
