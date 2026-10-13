@@ -34,6 +34,18 @@ import Testing
         #expect(window?.title == nil)
     }
 
+    @Test func skipsFullyTransparentWindows() {
+        var transparent = Self.entry(id: 1)
+        transparent[kCGWindowAlpha as String] = NSNumber(value: 0.0)
+        var faded = Self.entry(id: 2)
+        faded[kCGWindowAlpha as String] = NSNumber(value: Float(0.5))
+        var opaque = Self.entry(id: 3)
+        opaque[kCGWindowAlpha as String] = NSNumber(value: 1)
+        let unknown = Self.entry(id: 4)
+
+        #expect(CapturableWindow.parse([transparent, faded, opaque, unknown]).map(\.id) == [2, 3, 4])
+    }
+
     @Test func skipsMalformedEntries() {
         var missingID = Self.entry()
         missingID[kCGWindowNumber as String] = nil

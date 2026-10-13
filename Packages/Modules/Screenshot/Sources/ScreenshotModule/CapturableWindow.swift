@@ -12,7 +12,8 @@ nonisolated struct CapturableWindow: Equatable, Sendable {
     var ownerName: String?
     var title: String?
 
-    /// Reads `CGWindowListCopyWindowInfo` entries, keeping their front-to-back order and skipping malformed ones.
+    /// Reads `CGWindowListCopyWindowInfo` entries, keeping their front-to-back order and skipping malformed ones
+    /// and fully transparent ones, which cannot be seen and so must not be highlighted or captured.
     static func parse(_ list: [[String: Any]]) -> [CapturableWindow] {
         list.compactMap { info in
             guard let id = info[kCGWindowNumber as String] as? CGWindowID,
@@ -20,6 +21,7 @@ nonisolated struct CapturableWindow: Equatable, Sendable {
                   let layer = info[kCGWindowLayer as String] as? Int,
                   let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
                   let bounds = CGRect(dictionaryRepresentation: boundsDict) else { return nil }
+            if let alpha = info[kCGWindowAlpha as String] as? Double, alpha == 0 { return nil }
             return CapturableWindow(
                 id: id, ownerPID: pid, layer: layer, bounds: bounds,
                 ownerName: info[kCGWindowOwnerName as String] as? String,

@@ -7,8 +7,8 @@ nonisolated struct OCRService: Sendable {
     /// Vietnamese is only available at `.accurate`, which is the level used here.
     static let defaultLanguages = ["vi-VN", "en-US"]
 
-    /// The text as lines, top to bottom; "" when there is none. Unsupported `languages` (BCP 47) are skipped,
-    /// and when none is supported Vision's default languages apply.
+    /// The text one visual line per line, top to bottom; "" when there is none. Unsupported `languages` (BCP 47)
+    /// are skipped, and when none is supported Vision's default languages apply.
     @concurrent
     func recognize(_ image: CGImage, languages: [String]) async throws -> String {
         var request = RecognizeTextRequest()
@@ -20,7 +20,7 @@ nonisolated struct OCRService: Sendable {
         let fragments = observations.compactMap { observation in
             observation.topCandidates(1).first.map { (text: $0.string, box: observation.boundingBox.cgRect) }
         }
-        return Self.readingOrder(fragments).joined(separator: "\n")
+        return Self.lines(from: fragments).joined(separator: "\n")
     }
 
     /// The supported language for each requested identifier: an exact match, else one with the same language code,
@@ -51,9 +51,10 @@ nonisolated struct OCRService: Sendable {
         return context.makeImage() ?? image
     }
 
-    /// Text fragments in reading order. Boxes are Vision's normalised rects (origin bottom-left); fragments whose
-    /// vertical centres are closer than half the shorter height share a line and are read left to right.
-    static func readingOrder(_ fragments: [(text: String, box: CGRect)]) -> [String] {
+    /// Text fragments grouped into lines, top to bottom. Boxes are Vision's normalised rects (origin bottom-left);
+    /// fragments whose vertical centres are closer than half the shorter height share a line, read left to right
+    /// and joined with a space, as words far apart on one line (a table row) belong together.
+    static func lines(from fragments: [(text: String, box: CGRect)]) -> [String] {
         var lines: [[(text: String, box: CGRect)]] = []
         for fragment in fragments.sorted(by: { $0.box.midY > $1.box.midY }) {
             if let first = lines.last?.first,
@@ -63,6 +64,6 @@ nonisolated struct OCRService: Sendable {
                 lines.append([fragment])
             }
         }
-        return lines.flatMap { line in line.sorted { $0.box.minX < $1.box.minX }.map(\.text) }
+        return lines.map { line in line.sorted { $0.box.minX < $1.box.minX }.map(\.text).joined(separator: " ") }
     }
 }

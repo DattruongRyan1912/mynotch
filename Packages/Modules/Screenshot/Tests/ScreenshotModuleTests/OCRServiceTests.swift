@@ -8,10 +8,13 @@ import Testing
     static let vietnamese = "Xin chào thế giới — Tiếng Việt có dấu"
     static let english = "Hello OCR 2026"
 
-    /// Black text on white drawn with CoreText at `pointSize` on a `scale`× bitmap, one line per entry.
-    static func render(_ lines: [String], pointSize: CGFloat = 32, scale: CGFloat = 2) throws -> CGImage {
+    /// Black text on white drawn with CoreText at `pointSize` on a `scale`× bitmap: one line per entry, whose
+    /// fragments start 700 pt apart.
+    static func render(_ lines: [[String]], pointSize: CGFloat = 32, scale: CGFloat = 2, minimumPixelHeight: Int = 0) throws -> CGImage {
         let lineHeight = pointSize * 2 * scale
-        let width = Int(900 * scale), height = Int(lineHeight * CGFloat(lines.count + 1))
+        let columns = CGFloat(lines.map(\.count).max() ?? 1)
+        let width = Int((200 + 700 * columns) * scale)
+        let height = max(Int(lineHeight * CGFloat(lines.count + 1)), minimumPixelHeight)
         let context = try #require(CGContext(
             data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
@@ -19,13 +22,15 @@ import Testing
         context.setFillColor(CGColor(gray: 1, alpha: 1))
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         let font = CTFontCreateUIFontForLanguage(.system, pointSize * scale, nil)
-        for (index, text) in lines.enumerated() {
-            let attributes: [NSAttributedString.Key: Any] = [
-                NSAttributedString.Key(kCTFontAttributeName as String): try #require(font),
-                NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 1),
-            ]
-            context.textPosition = CGPoint(x: 40 * scale, y: CGFloat(height) - lineHeight * CGFloat(index + 1))
-            CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes)), context)
+        let attributes: [NSAttributedString.Key: Any] = [
+            NSAttributedString.Key(kCTFontAttributeName as String): try #require(font),
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 1),
+        ]
+        for (row, fragments) in lines.enumerated() {
+            for (column, text) in fragments.enumerated() {
+                context.textPosition = CGPoint(x: (40 + 700 * CGFloat(column)) * scale, y: CGFloat(height) - lineHeight * CGFloat(row + 1))
+                CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes)), context)
+            }
         }
         return try #require(context.makeImage())
     }
@@ -47,17 +52,29 @@ import Testing
     }
 
     @Test func recognisesVietnameseAndEnglishText() async throws {
-        let text = try await OCRService().recognize(Self.render([Self.vietnamese, Self.english]), languages: OCRService.defaultLanguages)
+        let text = try await OCRService().recognize(Self.render([[Self.vietnamese], [Self.english]]), languages: OCRService.defaultLanguages)
         #expect(Self.normalised(text).contains(Self.normalised(Self.vietnamese)))
         #expect(Self.normalised(text).contains(Self.english))
         #expect(text.split(separator: "\n").count == 2)
     }
 
     @Test func recognisesTextInSmallImages() async throws {
-        let image = try Self.render([Self.english], pointSize: 14, scale: 1)
+        let image = try Self.render([[Self.english]], pointSize: 14, scale: 1)
         #expect(min(image.width, image.height) < 600)
         let text = try await OCRService().recognize(image, languages: ["en-US"])
         #expect(Self.normalised(text).contains(Self.english))
+    }
+
+    @Test func recognisesLargeImagesWithoutUpscaling() async throws {
+        let image = try Self.render([[Self.english]], minimumPixelHeight: 600)
+        #expect(OCRService.preparedForRecognition(image) === image)
+        let text = try await OCRService().recognize(image, languages: ["en-US"])
+        #expect(Self.normalised(text) == Self.english)
+    }
+
+    @Test func joinsWordsOnOneLineWithASpace() async throws {
+        let text = try await OCRService().recognize(Self.render([["Hello", "World"], [Self.english]]), languages: ["en-US"])
+        #expect(text.components(separatedBy: "\n").map(Self.normalised) == ["Hello World", Self.english])
     }
 
     @Test func blankImageHasNoText() async throws {
@@ -65,9 +82,9 @@ import Testing
     }
 
     @Test func unsupportedLanguagesAreSkipped() async throws {
-        let text = try await OCRService().recognize(Self.render([Self.english]), languages: ["xx-YY", "en-US"])
+        let text = try await OCRService().recognize(Self.render([[Self.english]]), languages: ["xx-YY", "en-US"])
         #expect(Self.normalised(text).contains(Self.english))
-        let fallback = try await OCRService().recognize(Self.render([Self.english]), languages: ["xx-YY"])
+        let fallback = try await OCRService().recognize(Self.render([[Self.english]]), languages: ["xx-YY"])
         #expect(Self.normalised(fallback).contains(Self.english))
     }
 
@@ -84,7 +101,7 @@ import Testing
         #expect(OCRService.preparedForRecognition(large) === large)
     }
 
-    @Test func ordersFragmentsTopToBottomThenLeftToRight() {
+    @Test func groupsFragmentsIntoLinesTopToBottom() {
         // Vision boxes are normalised with the origin at the bottom-left.
         let fragments: [(text: String, box: CGRect)] = [
             ("third", CGRect(x: 0.1, y: 0.10, width: 0.3, height: 0.1)),
@@ -92,6 +109,6 @@ import Testing
             ("first right", CGRect(x: 0.6, y: 0.72, width: 0.3, height: 0.1)),
             ("first left", CGRect(x: 0.1, y: 0.70, width: 0.3, height: 0.1)),
         ]
-        #expect(OCRService.readingOrder(fragments) == ["first left", "first right", "second", "third"])
+        #expect(OCRService.lines(from: fragments) == ["first left first right", "second", "third"])
     }
 }
