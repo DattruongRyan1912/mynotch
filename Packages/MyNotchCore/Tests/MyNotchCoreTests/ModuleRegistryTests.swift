@@ -52,6 +52,19 @@ import MyNotchTestSupport
         #expect(module.startCount == 1)
     }
 
+    @Test func grantLeavesSettingsClosedWhenTheUserDeniesThePrompt() async {
+        let module = FakeModule("needy", permissions: [.calendars])
+        let harness = Harness([module])
+        harness.permissions.statuses[.calendars] = .notDetermined
+        harness.permissions.requestResult = .denied
+        await harness.registry.bootstrap()
+        await harness.registry.grant(.calendars)
+        #expect(harness.permissions.requested == [.calendars])
+        #expect(harness.permissions.openedSettings.isEmpty)
+        #expect(harness.registry.state(of: "needy") == .needsPermission(.calendars))
+        #expect(module.startCount == 0)
+    }
+
     @Test func grantOpensSystemSettingsForADeniedPermission() async {
         let module = FakeModule("needy", permissions: [.calendars])
         let harness = Harness([module])

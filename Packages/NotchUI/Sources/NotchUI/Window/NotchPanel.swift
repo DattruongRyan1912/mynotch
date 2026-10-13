@@ -15,6 +15,8 @@ final class NotchPanel: NSPanel {
         isReleasedWhenClosed = false
         // The app is never active, so tooltips (e.g. tab names) must be allowed while inactive.
         allowsToolTipsWhenApplicationIsInactive = true
+        // NSPanel hides on deactivate by default; Settings activates the app, so leaving it would hide every notch.
+        hidesOnDeactivate = false
     }
 
     /// True only while an open tab accepts keyboard input; the panel never takes the keyboard otherwise.

@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     )
     private var statusItem: StatusItemController?
     private var permissionPolling: Task<Void, Never>?
+    private var repliedToTerminate = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = MainMenu.make(settingsTarget: self, settingsAction: #selector(showSettings))
@@ -49,12 +50,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Modules save their data in `stop`, so quitting waits for them, but never longer than three seconds.
-    /// The deadline ends early once shutdown finishes, and only its end replies, so the reply comes exactly once.
+    /// The deadline is a run-loop timer in `.common` modes, not a Swift task: if `terminate` is ever called from a
+    /// main-queue task, AppKit's modal wait for the reply starves Swift tasks, while run-loop timers still fire.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        let deadline = Task { try? await Task.sleep(for: .seconds(3)) }
-        Task { await registry.shutdown(); deadline.cancel() }
-        Task { await deadline.value; NSApp.reply(toApplicationShouldTerminate: true) }
+        let deadline = Timer(timeInterval: 3, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.replyToTerminate() }
+        }
+        RunLoop.main.add(deadline, forMode: .common)
+        Task { await registry.shutdown(); replyToTerminate() }
         return .terminateLater
+    }
+
+    /// Shutdown and the deadline both end here; only the first one replies.
+    private func replyToTerminate() {
+        guard !repliedToTerminate else { return }
+        repliedToTerminate = true
+        NSApp.reply(toApplicationShouldTerminate: true)
     }
 
     @objc private func showSettings() { settingsWindow.show() }

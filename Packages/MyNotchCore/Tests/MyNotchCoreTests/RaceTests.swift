@@ -52,7 +52,7 @@ final class GatedModule: FeatureModule {
     func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? { nil }
 }
 
-@Suite struct RaceTests {
+@Suite(.timeLimit(.minutes(1))) struct RaceTests {
     @Test func disableWhileStarting() async {
         let m = GatedModule("m"); m.gateStart = true
         let h = RegistryHarness([m])
@@ -167,7 +167,7 @@ final class GatedModule: FeatureModule {
     }
 }
 
-@Suite struct IsolationTests {
+@Suite(.timeLimit(.minutes(1))) struct IsolationTests {
     @Test func slowStartDoesNotHoldUpOtherModules() async {
         let slow = GatedModule("slow", order: 1); slow.gateStart = true
         let fast = GatedModule("fast", order: 2)
