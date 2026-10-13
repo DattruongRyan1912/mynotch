@@ -36,15 +36,27 @@ nonisolated struct PlaybackProgress: Equatable, Sendable {
     var elapsedText: String { elapsed.map(Self.format) ?? "--:--" }
 
     /// Empty while the length is unknown, so live streams show only the elapsed time.
+    /// Whole seconds minus whole seconds, so it changes on the same tick as the elapsed time.
     var remainingText: String {
-        guard let duration else { return "" }
-        return "-" + Self.format(duration - (elapsed ?? 0))
+        guard let duration, duration.isFinite else { return "" }
+        return "-" + Self.format(wholeSeconds: max(Self.wholeSeconds(duration) - Self.wholeSeconds(elapsed ?? 0), 0))
     }
+
+    /// A position this close below a whole second counts as that second: a tick scheduled for the moment the
+    /// position reaches it computes the position from dates, which can land a hair below.
+    static let secondTolerance = 0.001
 
     /// `m:ss`, or `h:mm:ss` from one hour.
     static func format(_ seconds: Double) -> String {
         guard seconds.isFinite else { return "--:--" }
-        let total = Int(max(seconds, 0).rounded(.down))
+        return format(wholeSeconds: wholeSeconds(seconds))
+    }
+
+    private static func wholeSeconds(_ seconds: Double) -> Int {
+        seconds.isFinite ? Int((max(seconds, 0) + secondTolerance).rounded(.down)) : 0
+    }
+
+    private static func format(wholeSeconds total: Int) -> String {
         let (hours, minutes, rest) = (total / 3600, total / 60 % 60, total % 60)
         return hours > 0
             ? String(format: "%d:%02d:%02d", hours, minutes, rest)

@@ -56,6 +56,42 @@ import Testing
         #expect(store.artworkImage == nil)
     }
 
+    @Test func activityKeepsTheLastActiveTrackWhileTheStateIsEmpty() throws {
+        let icon = NSImage(size: NSSize(width: 1, height: 1))
+        let lookups = Lookups()
+        lookups.apps = ["com.example.Player": PlayerApp(name: "Player", icon: icon)]
+        let store = makeStore(lookups)
+        #expect(store.activityArtwork == nil)
+        #expect(!store.activityIsPlaying)
+
+        store.apply(line: AdapterLines.track(artworkBase64: Self.png(size: 2)), receivedAt: Date())
+        let artwork = try #require(store.artworkImage)
+        #expect(store.activityArtwork === artwork)
+        #expect(store.activityAppIcon === icon)
+        #expect(store.activityIsPlaying)
+
+        // A track change: briefly nothing, then the next track.
+        store.apply(line: AdapterLines.empty, receivedAt: Date())
+        #expect(store.artworkImage == nil)
+        #expect(store.appIcon == nil)
+        #expect(!store.state.isPlaying)
+        #expect(store.activityArtwork === artwork)
+        #expect(store.activityAppIcon === icon)
+        #expect(store.activityIsPlaying)
+
+        store.apply(line: AdapterLines.track("Next", playing: false), receivedAt: Date())
+        #expect(store.activityArtwork == nil)
+        #expect(store.activityAppIcon === icon)
+        #expect(!store.activityIsPlaying)
+
+        store.apply(line: AdapterLines.playing(true), receivedAt: Date())
+        #expect(store.activityIsPlaying)
+
+        store.reset()
+        #expect(store.activityAppIcon == nil)
+        #expect(!store.activityIsPlaying)
+    }
+
     @Test func undecodableArtworkGivesNoImage() {
         let store = makeStore()
         store.apply(line: AdapterLines.track(artworkBase64: "AQID"), receivedAt: Date())

@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import MediaModule
 
@@ -20,6 +22,16 @@ import Testing
         #expect(PlaybackProgress.format(3723) == "1:02:03")
         #expect(PlaybackProgress.format(-4) == "0:00")
         #expect(PlaybackProgress.format(.infinity) == "--:--")
+        // A tick on a whole second can compute a hair below it; that is still the new second.
+        #expect(PlaybackProgress.format(10.9999999) == "0:11")
+    }
+
+    @Test func remainingStepsTogetherWithElapsed() {
+        // With a fractional length the remaining time still changes when the elapsed second does.
+        #expect(PlaybackProgress(elapsed: 75.0, duration: 213.4).remainingText == "-2:18")
+        #expect(PlaybackProgress(elapsed: 75.9, duration: 213.4).remainingText == "-2:18")
+        #expect(PlaybackProgress(elapsed: 76.0, duration: 213.4).remainingText == "-2:17")
+        #expect(PlaybackProgress(elapsed: 250, duration: 213.4).remainingText == "-0:00")
     }
 
     @Test func texts() {
@@ -69,13 +81,61 @@ import Testing
 @Suite struct NowPlayingBarsTests {
     @Test func fakeLevelsStayInRangeAndMove() {
         let start = Date(timeIntervalSinceReferenceDate: 800_000_000)
-        var samples: [[Double]] = []
-        for frame in 0..<120 {
-            let levels = NowPlayingBars.levels(at: start + Double(frame) / 30)
-            #expect(levels.count == NowPlayingBars.barCount)
+        for bar in 0..<NowPlayingBars.barCount {
+            let levels = (0..<120).map { NowPlayingBars.level(bar: bar, at: start + Double($0) / 30) }
             #expect(levels.allSatisfy { (0...1).contains($0) })
-            samples.append(levels)
+            #expect(Set(levels).count > 60)
         }
-        #expect(Set(samples.map { $0[0] }).count > 60)
+        #expect(NowPlayingBars.level(bar: 0, at: start) != NowPlayingBars.level(bar: 1, at: start))
+    }
+}
+
+@Suite struct PlaybackTickScheduleTests {
+    let start = Date(timeIntervalSince1970: 1_000)
+
+    func entries(_ schedule: PlaybackTickSchedule, from date: Date, count: Int = 4) -> [TimeInterval] {
+        Array(schedule.entries(from: date, mode: .normal).prefix(count)).map { $0.timeIntervalSince(start) }
+    }
+
+    func expectClose(_ actual: [TimeInterval], _ expected: [TimeInterval]) {
+        #expect(actual.count == expected.count)
+        #expect(zip(actual, expected).allSatisfy { abs($0 - $1) < 1e-6 }, "\(actual) != \(expected)")
+    }
+
+    @Test func ticksWhenThePositionReachesWholeSeconds() {
+        let anchor = PlaybackAnchor(elapsedSeconds: 10.4, timestamp: start, rate: 1)
+        let schedule = PlaybackTickSchedule(anchor: anchor, isPlaying: true)
+        expectClose(entries(schedule, from: start), [0, 0.6, 1.6, 2.6])
+        // Starting later keeps the same phase instead of counting seconds from the start date.
+        expectClose(entries(schedule, from: start + 5.3), [5.3, 5.6, 6.6, 7.6])
+        // Exactly on a whole second the next tick is a full second away.
+        expectClose(entries(schedule, from: start + 0.6, count: 2), [0.6, 1.6])
+    }
+
+    @Test func fasterPlaybackTicksMoreOften() {
+        let schedule = PlaybackTickSchedule(anchor: PlaybackAnchor(elapsedSeconds: 3, timestamp: start, rate: 2), isPlaying: true)
+        expectClose(entries(schedule, from: start + 0.1), [0.1, 0.5, 1, 1.5])
+    }
+
+    @Test func pausedOrUnknownPositionTicksOnce() {
+        let paused = PlaybackTickSchedule(anchor: PlaybackAnchor(elapsedSeconds: 3, timestamp: start, rate: 0), isPlaying: false)
+        #expect(entries(paused, from: start + 2) == [2])
+        #expect(entries(PlaybackTickSchedule(anchor: nil, isPlaying: true), from: start) == [0])
+    }
+}
+
+@Suite struct PlayerAppCacheTests {
+    @Test func looksEachBundleUpOnce() {
+        var requested: [String] = []
+        let icon = NSImage(size: NSSize(width: 1, height: 1))
+        let cache = PlayerAppCache { bundleID in
+            requested.append(bundleID)
+            return bundleID == "com.example.Player" ? PlayerApp(name: "Player", icon: icon) : nil
+        }
+        #expect(cache.app(for: "com.example.Player")?.name == "Player")
+        #expect(cache.app(for: "com.example.Player")?.name == "Player")
+        #expect(cache.app(for: "com.example.Missing") == nil)
+        #expect(cache.app(for: "com.example.Missing") == nil)
+        #expect(requested == ["com.example.Player", "com.example.Missing"])
     }
 }

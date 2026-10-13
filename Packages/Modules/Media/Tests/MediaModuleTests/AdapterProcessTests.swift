@@ -418,4 +418,20 @@ import Testing
         #expect(contents("commands") == expected)
         #expect(launches == 3)
     }
+
+    @Test func stopDropsQueuedCommands() async throws {
+        let adapter = try slowCommands()
+        adapter.send(.play)
+        adapter.send(.nextTrack)
+        adapter.seek(toSeconds: 2)
+        adapter.stop()
+
+        // The running command finishes; nothing that waited behind it runs.
+        #expect(await eventually { contents("commands") == commandLog("send 0") })
+        try await settle()
+        #expect(contents("commands") == commandLog("send 0"))
+
+        adapter.send(.pause)
+        #expect(await eventually { contents("commands") == commandLog("send 0", "send 1") })
+    }
 }

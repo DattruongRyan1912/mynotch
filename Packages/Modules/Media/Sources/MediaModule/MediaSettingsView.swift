@@ -25,6 +25,8 @@ struct MediaSettingsView: View {
 /// Apps whose playback never shows beside the notch, picked as .app bundles and stored as bundle IDs.
 struct HiddenAppsRows: View {
     @Binding var bundleIDs: [String]
+    /// A plain class held in state: filling it while drawing changes no state, and it lives as long as the rows.
+    @State private var apps = PlayerAppCache()
 
     var body: some View {
         LabeledContent {
@@ -34,7 +36,7 @@ struct HiddenAppsRows: View {
             Text("Nhạc từ các app này vẫn có trong tab Media.")
         }
         ForEach(bundleIDs, id: \.self) { bundleID in
-            HiddenAppRow(bundleID: bundleID) { bundleIDs.removeAll { $0 == bundleID } }
+            HiddenAppRow(bundleID: bundleID, app: apps.app(for: bundleID)) { bundleIDs.removeAll { $0 == bundleID } }
         }
     }
 
@@ -68,10 +70,10 @@ struct HiddenAppsRows: View {
 
 private struct HiddenAppRow: View {
     let bundleID: String
+    let app: PlayerApp?
     let remove: () -> Void
 
     var body: some View {
-        let app = PlayerApp.installed(bundleIdentifier: bundleID)
         HStack(spacing: 8) {
             Group {
                 if let icon = app?.icon {

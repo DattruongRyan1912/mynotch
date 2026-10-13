@@ -20,3 +20,21 @@ struct PlayerApp {
         )
     }
 }
+
+/// Remembers each bundle ID's app, including "not installed", for as long as a view keeps it: LaunchServices
+/// lookups are too slow to repeat on every redraw of a list.
+final class PlayerAppCache {
+    private let lookUp: @MainActor (String) -> PlayerApp?
+    private var apps: [String: PlayerApp?] = [:]
+
+    init(lookUp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed) {
+        self.lookUp = lookUp
+    }
+
+    func app(for bundleID: String) -> PlayerApp? {
+        if let cached = apps[bundleID] { return cached }
+        let app = lookUp(bundleID)
+        apps[bundleID] = .some(app)
+        return app
+    }
+}

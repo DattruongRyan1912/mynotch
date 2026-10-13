@@ -113,6 +113,25 @@ import Testing
         #expect(harness.activities.current == nil)
     }
 
+    @Test func turningShowActivityOnWhileATrackChangeIsPendingWaitsForTheTrack() async {
+        await harness.registry.bootstrap()
+        source.emit(AdapterLines.track())
+        source.emit(AdapterLines.empty)
+        harness.settings.set(false, for: keys.showActivity)
+        await settle { harness.activities.current == nil }
+        #expect(harness.activities.current == nil)
+
+        // Still inside the 300 ms hiding window: nothing to show, so nothing is published.
+        harness.settings.set(true, for: keys.showActivity)
+        await settle { harness.activities.current != nil }
+        #expect(harness.activities.current == nil)
+        harness.scheduler.advance(by: .milliseconds(300))
+        #expect(harness.activities.current == nil)
+
+        source.emit(AdapterLines.track("Next"))
+        #expect(harness.activities.current?.id == "media/nowPlaying")
+    }
+
     @Test func showActivityOffNeverShows() async {
         harness.settings.set(false, for: keys.showActivity)
         await harness.registry.bootstrap()
@@ -224,6 +243,20 @@ import Testing
         #expect(module.store.state == .empty)
         #expect(harness.activities.current == nil)
         #expect(harness.scheduler.pendingCount == 0)
+    }
+
+    @Test func commandsAfterAFailureDoNotReachTheDeadSource() async {
+        await harness.registry.bootstrap()
+        source.fail("gave up")
+        // Each command would start a perl process that fails like the stream did.
+        module.send(.togglePlayPause)
+        module.seek(toSeconds: 10)
+        #expect(source.sent.isEmpty)
+        #expect(source.seeks.isEmpty)
+
+        await harness.registry.retry("media")
+        module.send(.nextTrack)
+        #expect(source.sent == [.nextTrack])
     }
 
     @Test func stoppingStopsTheSourceAndForgetsPlayback() async {

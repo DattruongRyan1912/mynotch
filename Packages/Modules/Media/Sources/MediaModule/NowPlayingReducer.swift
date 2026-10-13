@@ -11,6 +11,9 @@ nonisolated struct NowPlayingReducer: Sendable {
         case ignored
     }
 
+    /// Shared: lines arrive every ~100 ms while something plays, and a decoder holds no per-line state.
+    private static let decoder = JSONDecoder()
+
     private(set) var state = NowPlayingState.empty
     private var payload: [String: JSONValue] = [:]
     /// Base64 text of the current artwork, compared instead of decoding every update (artwork is hundreds of KB).
@@ -21,7 +24,7 @@ nonisolated struct NowPlayingReducer: Sendable {
     ///   the player's fresh elapsed time (~100 ms later, or never); until then the position is anchored here.
     @discardableResult
     mutating func apply(line: String, receivedAt: Date) -> Outcome {
-        guard let message = try? JSONDecoder().decode(Message.self, from: Data(line.utf8)), message.type == "data" else {
+        guard let message = try? Self.decoder.decode(Message.self, from: Data(line.utf8)), message.type == "data" else {
             return .ignored
         }
         let update = message.payload

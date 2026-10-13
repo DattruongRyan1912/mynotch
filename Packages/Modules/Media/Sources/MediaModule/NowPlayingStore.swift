@@ -12,6 +12,13 @@ final class NowPlayingStore {
     /// Set when the source gave up; the tab shows it instead of the player.
     private(set) var failureMessage: String?
 
+    // What the closed-notch activity shows: the current track, or the last active one while the state is empty.
+    // A track change empties the state for up to 300 ms while the activity stays up; it must not flash the
+    // placeholder or stop the bars meanwhile. Separate properties, so the bars observe only `activityIsPlaying`.
+    private(set) var activityArtwork: NSImage?
+    private(set) var activityAppIcon: NSImage?
+    private(set) var activityIsPlaying = false
+
     @ObservationIgnored private var reducer = NowPlayingReducer()
     @ObservationIgnored private let lookUpApp: @MainActor (String) -> PlayerApp?
     /// Revision of `artworkImage`'s bytes; the image is decoded only when it changes.
@@ -46,6 +53,7 @@ final class NowPlayingStore {
     func reset() {
         reducer = NowPlayingReducer()
         update(.empty)
+        showInActivity(artwork: nil, icon: nil, isPlaying: false)
         if failureMessage != nil { failureMessage = nil }
     }
 
@@ -65,5 +73,13 @@ final class NowPlayingStore {
             appName = app?.name
             appIcon = app?.icon
         }
+        if newState.isActive { showInActivity(artwork: artworkImage, icon: appIcon, isPlaying: newState.isPlaying) }
+    }
+
+    /// Assigns only what changed, so the activity's views redraw only for their own value.
+    private func showInActivity(artwork: NSImage?, icon: NSImage?, isPlaying: Bool) {
+        if activityArtwork !== artwork { activityArtwork = artwork }
+        if activityAppIcon !== icon { activityAppIcon = icon }
+        if activityIsPlaying != isPlaying { activityIsPlaying = isPlaying }
     }
 }

@@ -156,6 +156,8 @@ public final class MediaModule: FeatureModule {
 
     private func sourceFailed(_ reason: String) {
         context?.logger.error("Now playing stopped: \(reason, privacy: .public)")
+        // Commands would only start perl processes that fail like the stream did; a restart makes a new source.
+        source = nil
         store.fail(message: Self.blockedMessage)
         policy = ActivityPolicy(pauseGrace: policy.pauseGrace, hiddenBundleIDs: policy.hiddenBundleIDs)
         cancelDeadline()
@@ -220,8 +222,9 @@ public final class MediaModule: FeatureModule {
             return
         }
         let track = store.state.trackIdentity
-        // While a track change is debounced the state is briefly empty; keep the activity as it is meanwhile.
-        guard publishedTrack == nil || (store.state.isActive && track != publishedTrack) else { return }
+        // While a track change is debounced the state is briefly empty: an activity already up keeps showing
+        // the last track (the store's snapshot), and none is published until a track is there to show.
+        guard store.state.isActive, publishedTrack == nil || track != publishedTrack else { return }
         context.activities.set(LiveActivity(
             id: Self.activityID,
             priority: .normal,

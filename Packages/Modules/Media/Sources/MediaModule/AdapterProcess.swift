@@ -110,6 +110,8 @@ final class AdapterProcess: NowPlayingSource {
     func stop() {
         onLine = nil
         onFailure = nil
+        // A command still running finishes; ones waiting behind it are for a session that is over.
+        queuedCommands = []
         cancelTimers()
         guard let stream else { return }
         self.stream = nil

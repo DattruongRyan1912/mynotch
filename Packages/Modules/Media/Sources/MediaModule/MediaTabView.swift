@@ -23,7 +23,7 @@ struct MediaTabView: View {
 
     private var player: some View {
         HStack(spacing: 14) {
-            ArtworkView(store: store, size: Self.artworkSize, cornerRadius: 12)
+            ArtworkView(artwork: store.artworkImage, icon: store.appIcon, size: Self.artworkSize, cornerRadius: 12)
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
                     Text(store.state.title ?? "")
@@ -139,7 +139,7 @@ struct PlaybackProgressView: View {
     @State private var isHovering = false
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+        TimelineView(PlaybackTickSchedule(anchor: store.state.elapsedAnchor, isPlaying: store.state.isPlaying)) { timeline in
             let progress = PlaybackProgress(
                 state: store.state, at: timeline.date, dragFraction: dragFraction, pendingSeek: pendingSeek
             )

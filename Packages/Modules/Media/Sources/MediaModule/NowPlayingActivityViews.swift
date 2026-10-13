@@ -2,12 +2,13 @@ import Foundation
 import NotchUI
 import SwiftUI
 
-/// Left side of the closed notch: small cover art.
+/// Left side of the closed notch: small cover art. Reads the store's activity snapshot, which keeps the
+/// last track's cover through the empty state between two tracks.
 struct NowPlayingActivityArtwork: View {
     let store: NowPlayingStore
 
     var body: some View {
-        ArtworkView(store: store, size: 16, cornerRadius: 4)
+        ArtworkView(artwork: store.activityArtwork, icon: store.activityAppIcon, size: 16, cornerRadius: 4)
     }
 }
 
@@ -22,14 +23,15 @@ struct NowPlayingBars: View {
     let store: NowPlayingStore
 
     var body: some View {
-        let isPlaying = store.state.isPlaying
+        // Only this property: the body must not re-run for every position update of `store.state`.
+        let isPlaying = store.activityIsPlaying
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isPlaying)) { timeline in
-            let levels = isPlaying ? Self.levels(at: timeline.date) : Array(repeating: 0, count: Self.barCount)
             HStack(spacing: 2) {
-                ForEach(levels.indices, id: \.self) { index in
+                ForEach(0..<Self.barCount, id: \.self) { bar in
+                    let level = isPlaying ? Self.level(bar: bar, at: timeline.date) : 0
                     Capsule()
                         .fill(NotchTokens.accent)
-                        .frame(width: Self.barWidth, height: Self.minHeight + (Self.maxHeight - Self.minHeight) * levels[index])
+                        .frame(width: Self.barWidth, height: Self.minHeight + (Self.maxHeight - Self.minHeight) * level)
                 }
             }
             .frame(height: Self.maxHeight)
@@ -38,15 +40,13 @@ struct NowPlayingBars: View {
         .accessibilityHidden(true)
     }
 
-    /// Made-up levels in 0…1: two out-of-step waves per bar so the motion never visibly repeats.
-    /// M5 replaces them with the real spectrum when that setting is on.
-    nonisolated static func levels(at date: Date) -> [Double] {
+    /// A made-up level in 0…1: two out-of-step waves per bar so the motion never visibly repeats.
+    /// M5 replaces it with the real spectrum when that setting is on.
+    nonisolated static func level(bar: Int, at date: Date) -> Double {
         let time = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 3600)
-        return (0..<barCount).map { bar in
-            let offset = Double(bar)
-            let beat = 0.5 + 0.5 * sin(time * (6.3 + offset * 1.7) + offset * 1.9)
-            let swell = 0.5 + 0.5 * sin(time * (2.1 + offset * 0.8) + offset * 2.7)
-            return 0.2 + 0.8 * beat * (0.45 + 0.55 * swell)
-        }
+        let offset = Double(bar)
+        let beat = 0.5 + 0.5 * sin(time * (6.3 + offset * 1.7) + offset * 1.9)
+        let swell = 0.5 + 0.5 * sin(time * (2.1 + offset * 0.8) + offset * 2.7)
+        return 0.2 + 0.8 * beat * (0.45 + 0.55 * swell)
     }
 }
