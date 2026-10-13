@@ -44,7 +44,8 @@ public final class HotkeyRegistry {
         return Dictionary(grouping: assigned, by: \.0)
             .values
             .filter { $0.count > 1 }
-            .map { $0.map(\.1) }
+            .map { $0.map(\.1).sorted { $0.id < $1.id } }
+            .sorted { $0[0].id < $1[0].id }
     }
 
     static func qualifiedName(_ localName: String, owner: ModuleID?) -> String {
@@ -79,7 +80,7 @@ public final class ModuleHotkeys {
         registry.register(localName, title: title, owner: module, initial: initial, action: action)
     }
 
-    /// Called by the registry when the module stops; removes the module's shortcuts and makes this facade inert.
+    /// Called by `ModuleContext.cancelAll()` when the module stops; removes the module's shortcuts and makes this facade inert.
     func invalidate() {
         guard isActive else { return }
         registry.unregisterAll(owner: module)

@@ -10,7 +10,9 @@ public final class ModuleContext {
     public let permissions: any PermissionCenter
     public let logger: Logger
 
-    private var tasks: [Task<Void, Never>] = []
+    private var tasks: [Int: Task<Void, Never>] = [:]
+    private var nextTaskID = 0
+    private var isActive = true
 
     init(
         id: ModuleID,
@@ -29,13 +31,24 @@ public final class ModuleContext {
         self.logger = Log.logger(category: id.rawValue)
     }
 
-    /// Runs work that is cancelled automatically when the module stops.
+    /// Number of `run` tasks that have not finished and were not cancelled (for tests).
+    var runningTaskCount: Int { tasks.count }
+
+    /// Runs work that is cancelled automatically when the module stops. Ignored after the module stopped.
     public func run(_ operation: @escaping @MainActor () async -> Void) {
-        tasks.append(Task { await operation() })
+        guard isActive else { return }
+        nextTaskID += 1
+        let id = nextTaskID
+        tasks[id] = Task { [weak self] in
+            await operation()
+            self?.tasks[id] = nil
+        }
     }
 
     func cancelAll() {
-        tasks.forEach { $0.cancel() }
+        guard isActive else { return }
+        isActive = false
+        tasks.values.forEach { $0.cancel() }
         tasks.removeAll()
         activities.invalidate()
         hotkeys.invalidate()

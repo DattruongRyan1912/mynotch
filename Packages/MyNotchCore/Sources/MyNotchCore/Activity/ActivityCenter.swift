@@ -87,7 +87,7 @@ public final class ActivityPublisher {
         center.clearAll(from: module)
     }
 
-    /// Called by the registry when the module stops; also removes everything the module published.
+    /// Called by `ModuleContext.cancelAll()` when the module stops; also removes everything the module published.
     func invalidate() {
         guard isActive else { return }
         center.clearAll(from: module)

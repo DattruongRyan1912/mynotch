@@ -11,11 +11,13 @@ public struct ModuleSettings {
     }
 
     public func key<Value>(_ name: String, default defaultValue: Value) -> SettingKey<Value> {
-        SettingKey(Self.qualifiedName(name, module: module), default: defaultValue)
+        precondition(name != "enabled", "\"enabled\" is reserved for ModuleRegistry")
+        return SettingKey(Self.qualifiedName(name, module: module), default: defaultValue)
     }
 
     public func key<Value: Comparable>(_ name: String, default defaultValue: Value, clampedTo range: ClosedRange<Value>) -> SettingKey<Value> {
-        SettingKey(Self.qualifiedName(name, module: module), default: defaultValue, clampedTo: range)
+        precondition(name != "enabled", "\"enabled\" is reserved for ModuleRegistry")
+        return SettingKey(Self.qualifiedName(name, module: module), default: defaultValue, clampedTo: range)
     }
 
     public func value<Value>(_ key: SettingKey<Value>) -> Value { store.value(checked(key)) }
