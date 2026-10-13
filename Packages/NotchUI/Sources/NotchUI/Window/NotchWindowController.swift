@@ -18,6 +18,8 @@ final class NotchWindowController {
     private var lastFocus = false
     /// Pasteboard types of the drag in progress, empty when nothing is being dragged.
     private var dragTypes: [String] = []
+    /// Whether the mouse button went down inside the notch, so a drag in progress started there (an item dragged out).
+    private var dragStartedInside = false
 
     init(
         displayID: CGDirectDisplayID,
@@ -77,28 +79,36 @@ final class NotchWindowController {
     /// pasteboard types of a drag in progress; one that a tab accepts enlarges the hit area and opens that tab.
     func pointerMoved(to point: CGPoint, dragTypes: [String]) {
         self.dragTypes = dragTypes
-        updatePointer(point)
+        updatePointer(point, isRefresh: false)
     }
 
-    private func updatePointer(_ point: CGPoint) {
+    private func updatePointer(_ point: CGPoint, isRefresh: Bool) {
         guard isVisible else { return }
-        let dropTab = dragTypes.isEmpty ? nil : DropRouting.tab(for: dragTypes, tabs: registry.tabs)
+        let dropTab = dragTypes.isEmpty
+            ? nil : DropRouting.tab(for: dragTypes, tabs: registry.tabs, preferring: model.displayState.shownTab(tabUnderToast: model.tabUnderToast))
         let inside = currentHitRect(dragging: dropTab != nil).contains(point)
         if panel.ignoresMouseEvents == inside { panel.ignoresMouseEvents = !inside }
-        if inside, let dropTab, !model.isDragging {
-            model.dragEntered(tab: dropTab)
+        let action = DropRouting.dragAction(
+            dropTab: dropTab, inside: inside, isDragging: model.isDragging, startedInside: dragStartedInside, isRefresh: isRefresh
+        )
+        if case .enter(let tab) = action {
+            model.dragEntered(tab: tab)
         } else if inside, !model.isPointerInside {
             model.pointerEntered()
         } else if !inside, model.isPointerInside {
             model.pointerExited()
         }
-        if !inside || dropTab == nil { model.dragExited() }
+        if action == .exit { model.dragExited() }
     }
 
-    /// Called for every mouse-button press, inside this app or not; a press outside the notch closes it.
+    /// Called for every mouse-button press, inside this app or not; a press outside the notch closes it. A new press
+    /// also ends any earlier drag, so its pasteboard types cannot linger.
     func mouseDown(at point: CGPoint) {
-        guard isVisible, !currentHitRect().contains(point) else { return }
-        model.clickedOutside()
+        dragTypes = []
+        guard isVisible else { return }
+        let inside = currentHitRect().contains(point)
+        dragStartedInside = inside
+        if !inside { model.clickedOutside() }
     }
 
     func close() {
@@ -111,7 +121,7 @@ final class NotchWindowController {
 
     /// The shape can change while the mouse is still (hotkey, toast, activity), so re-check the pointer.
     private func refreshHitTesting() {
-        updatePointer(NSEvent.mouseLocation)
+        updatePointer(NSEvent.mouseLocation, isRefresh: true)
     }
 
     private func currentHitRect(dragging: Bool = false) -> CGRect {
@@ -149,7 +159,7 @@ final class NotchWindowController {
 
     private func observe() {
         observation = Task { [weak self, activities, registry, model] in
-            for await (hasActivity, _, _, wantsKeyboard, focusesKeyboard) in Observations({
+            for await (hasActivity, _, _, wantsKeyboard, focusesKeyboard, isDragging) in Observations({
                 let state = model.displayState
                 let covered = model.tabUnderToast
                 return (
@@ -159,11 +169,14 @@ final class NotchWindowController {
                     NotchKeyboardPolicy.wantsKeyboard(state: state, tabUnderToast: covered, tabs: registry.tabs),
                     NotchKeyboardPolicy.focusesKeyboard(
                         state: state, tabUnderToast: covered, tabs: registry.tabs, onPurpose: model.isOpenedOnPurpose
-                    )
+                    ),
+                    model.isDragging
                 )
             }) {
                 guard let self else { return }
                 self.model.hasActivity = hasActivity
+                // A finished drag (drop, or the pointer left) must not leave its types behind for later refreshes.
+                if !isDragging { self.dragTypes = [] }
                 self.refreshHitTesting()
                 self.updateKeyboard(wants: wantsKeyboard, focuses: focusesKeyboard)
             }

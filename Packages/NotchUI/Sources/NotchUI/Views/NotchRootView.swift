@@ -30,7 +30,7 @@ struct NotchRootView: View {
     /// Hands the items to the shown tab when it accepts them, else to the first tab that does.
     private func drop(_ providers: [NSItemProvider]) -> Bool {
         let types = providers.flatMap(\.registeredTypeIdentifiers)
-        let target = shownTab.flatMap { DropRouting.tab(for: types, tabs: [$0]) } ?? DropRouting.tab(for: types, tabs: registry.tabs)
+        let target = DropRouting.tab(for: types, tabs: registry.tabs, preferring: shownTab?.id)
         return registry.tabs.first { $0.id == target }?.onDrop?(providers) ?? false
     }
 
@@ -51,6 +51,8 @@ struct NotchRootView: View {
             // Once open, taps belong to the tab content; the root tap only opens the notch.
             .gesture(TapGesture().onEnded { model.click() }, including: isOpen ? .subviews : .all)
             .animation(NotchTokens.spring, value: state)
+            // SwiftUI only reports targeting here. The window controller starts drag mode from the pointer, so
+            // only the end of a drag is forwarded, and the getter just reflects the model.
             .onDrop(of: allDropTypes, isTargeted: Binding(get: { model.isDragging }, set: { if !$0 { model.setDragging(false) } })) { providers in
                 drop(providers)
             }

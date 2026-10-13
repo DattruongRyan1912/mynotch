@@ -1,6 +1,7 @@
 import AppKit
 
-/// Reports pointer movement and mouse-button presses anywhere on screen, and the pasteboard types of a drag that carries data. Mouse monitors need no Accessibility permission.
+/// Reports pointer movement and mouse-button presses anywhere on screen, and the pasteboard types of a drag that
+/// carries data. Mouse monitors need no Accessibility permission.
 final class NotchHoverTracker {
     private var monitors: [Any] = []
     private let onMove: (CGPoint, [String]) -> Void
