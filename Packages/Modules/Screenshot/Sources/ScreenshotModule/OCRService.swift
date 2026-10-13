@@ -23,15 +23,22 @@ nonisolated struct OCRService: Sendable {
         return Self.lines(from: fragments).joined(separator: "\n")
     }
 
-    /// The supported language for each requested identifier: an exact match, else one with the same language code,
+    /// The languages Vision recognises at `.accurate`, by its own identifiers.
+    static let supportedLanguages: [Locale.Language] = RecognizeTextRequest().supportedRecognitionLanguages
+
+    /// The supported language for each requested identifier: an exact match, else one with the same language code
+    /// (and the same script when the identifier names one, so Traditional Chinese is not read as Simplified),
     /// because Vision reports some languages under another region (Vietnamese is `vi-VT`, not `vi-VN`).
     static func recognitionLanguages(for identifiers: [String], supported: [Locale.Language]) -> [Locale.Language] {
         var matched: [Locale.Language] = []
         for identifier in identifiers {
             let requested = Locale.Language(identifier: identifier)
-            guard let code = requested.languageCode,
-                  let language = supported.first(where: { $0 == requested }) ?? supported.first(where: { $0.languageCode == code }),
-                  !matched.contains(language) else { continue }
+            guard let code = requested.languageCode else { continue }
+            let candidates = supported.filter { $0.languageCode == code }
+            guard let language = candidates.first(where: { $0 == requested })
+                ?? candidates.first(where: { requested.script != nil && $0.script == requested.script })
+                ?? candidates.first,
+                !matched.contains(language) else { continue }
             matched.append(language)
         }
         return matched

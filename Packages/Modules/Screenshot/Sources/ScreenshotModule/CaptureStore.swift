@@ -132,10 +132,14 @@ final class CaptureStore {
     /// Copies a capture into `directory` as "Ảnh chụp <yyyy-MM-dd HH.mm.ss>.png", adding " 2", " 3"… when taken.
     func export(id: UUID, to directory: URL) throws -> URL {
         guard let record = record(id) else { throw StoreError.unknownCapture }
-        let baseName = "Ảnh chụp \(Self.timestamp(record.createdAt, format: "yyyy-MM-dd HH.mm.ss"))"
-        let destination = Self.freeURL(in: directory, baseName: baseName, separator: " ", pathExtension: "png")
+        let destination = Self.freeURL(in: directory, baseName: Self.exportBaseName(of: record), separator: " ", pathExtension: "png")
         try FileManager.default.copyItem(at: fileURL(of: record), to: destination)
         return destination
+    }
+
+    /// "Ảnh chụp <yyyy-MM-dd HH.mm.ss>": the name a capture gets outside the store, from when it was taken.
+    static func exportBaseName(of record: CaptureRecord) -> String {
+        "Ảnh chụp \(timestamp(record.createdAt, format: "yyyy-MM-dd HH.mm.ss"))"
     }
 
     private var indexURL: URL { capturesDirectory.appending(path: "captures.json") }
@@ -282,7 +286,7 @@ final class CaptureStore {
 
     /// PNG bytes via ImageIO with a DPI of 72 × `scale`. Encoding a large capture takes a while, hence off the main actor.
     @concurrent
-    private nonisolated static func pngData(_ image: CGImage, scale: CGFloat) async throws -> Data {
+    nonisolated static func pngData(_ image: CGImage, scale: CGFloat) async throws -> Data {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
             throw StoreError.encodingFailed

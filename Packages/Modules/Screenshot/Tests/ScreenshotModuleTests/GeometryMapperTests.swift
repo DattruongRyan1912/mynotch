@@ -91,4 +91,55 @@ import Testing
         #expect(GeometryMapper.normalizedSelection(from: CGPoint(x: 10, y: 60), to: CGPoint(x: 40, y: 20)) == expected)
         #expect(GeometryMapper.normalizedSelection(from: CGPoint(x: 5, y: 5), to: CGPoint(x: 5, y: 5)) == CGRect(x: 5, y: 5, width: 0, height: 0))
     }
+
+    // MARK: Pixel grid
+
+    @Test func snapsEachEdgeToTheNearestPixel() {
+        // Scale 2: x 200.4 → 200 px, 401.2 → 401 px; y measured from the display's top (982): 1663.8 → 1664, 1763.4 → 1763.
+        let snapped = GeometryMapper.snapped(CGRect(x: 100.2, y: 100.3, width: 100.4, height: 49.8), to: primary)
+        #expect(snapped == CGRect(x: 100, y: 100.5, width: 100.5, height: 49.5))
+        #expect(GeometryMapper.snapped(snapped, to: primary) == snapped)
+    }
+
+    @Test func snappingStandardisesAndKeepsWholeScaleDisplaysOnIntegers() {
+        let reversed = CGRect(x: 10.4, y: 20.6, width: -5.2, height: -3.0)
+        #expect(GeometryMapper.snapped(reversed, to: external) == CGRect(x: 5, y: 18, width: 5, height: 3))
+    }
+
+    @Test func snappedRectCropsExactlyTheSnappedPixelsOnFractionalScales() {
+        // A 2560×1440 "looks like" mode on a 4K panel (scale 1.5) and an odd scale: n / scale × scale is not always n.
+        for scale in [1.5, 3.0, 1.25, 2.0 / 3.0] as [CGFloat] {
+            let display = DisplayInfo(id: 3, frame: CGRect(x: 100, y: -300, width: 1280, height: 720), scale: scale)
+            for left in 0..<120 {
+                for top in [0, 5, 13, 100] {
+                    let pixels = CGRect(x: left, y: top, width: 7, height: 9)
+                    let selection = CGRect(
+                        x: display.frame.minX + pixels.minX / scale, y: display.frame.maxY - pixels.maxY / scale,
+                        width: pixels.width / scale, height: pixels.height / scale
+                    )
+                    let snapped = GeometryMapper.snapped(selection, to: display)
+                    #expect(GeometryMapper.pixelRect(for: snapped, on: display) == pixels, "scale \(scale), left \(left), top \(top)")
+                }
+            }
+        }
+    }
+
+    // MARK: Windows and displays
+
+    @Test func primaryHeightIsTheHeightOfTheDisplayAtTheOrigin() {
+        #expect(GeometryMapper.primaryHeight(of: [external, primary]) == 982)
+        #expect(GeometryMapper.primaryHeight(of: [external]) == nil)
+        #expect(GeometryMapper.primaryHeight(of: []) == nil)
+    }
+
+    @Test func displayOfAWindowIsTheOneUnderItsCentre() {
+        // CG global: the external display lies above the primary, at y -2160…0, x -1164…2676.
+        let onExternal = CGRect(x: 0, y: -1000, width: 400, height: 300)
+        let onPrimary = CGRect(x: 100, y: 100, width: 400, height: 300)
+        let straddling = CGRect(x: 100, y: -100, width: 400, height: 600)
+        #expect(GeometryMapper.display(containingCenterOf: onExternal, in: displays, primaryHeight: 982) == external)
+        #expect(GeometryMapper.display(containingCenterOf: onPrimary, in: displays, primaryHeight: 982) == primary)
+        #expect(GeometryMapper.display(containingCenterOf: straddling, in: displays, primaryHeight: 982) == primary)
+        #expect(GeometryMapper.display(containingCenterOf: CGRect(x: 9000, y: 9000, width: 10, height: 10), in: displays, primaryHeight: 982) == nil)
+    }
 }

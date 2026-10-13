@@ -94,6 +94,20 @@ import Testing
         #expect(matched == ["vi-VT", "en-US", "zh-Hant"].map(Locale.Language.init(identifier:)))
     }
 
+    @Test func matchesVariantsOfALanguageByScript() {
+        // Settings stores the full identifiers ("zh-Hant-TW"), which are not equal to Vision's own ("zh-Hant").
+        let supported = ["zh-Hans", "zh-Hant", "vi-VT"].map(Locale.Language.init(identifier:))
+        let matched = OCRService.recognitionLanguages(for: ["zh-Hant-TW", "zh-Hans-CN", "vi-Latn-VN"], supported: supported)
+        #expect(matched == ["zh-Hant", "zh-Hans", "vi-VT"].map(Locale.Language.init(identifier:)))
+        // Without a script to go by, the first language with that code is the match.
+        #expect(OCRService.recognitionLanguages(for: ["zh"], supported: supported) == [Locale.Language(identifier: "zh-Hans")])
+    }
+
+    @Test func visionSupportsVietnameseAndEnglish() {
+        let codes = OCRService.supportedLanguages.compactMap(\.languageCode)
+        #expect(codes.contains("vi") && codes.contains("en"))
+    }
+
     @Test func upscalesImagesWithAShortSideUnder600Pixels() throws {
         let small = OCRService.preparedForRecognition(try Self.blank(width: 1000, height: 599))
         #expect((small.width, small.height) == (2000, 1198))

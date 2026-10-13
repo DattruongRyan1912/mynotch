@@ -33,14 +33,39 @@ nonisolated enum GeometryMapper {
 
     /// The selection (AppKit points) as a crop rect in the display's frozen image: origin at the display's
     /// top-left, y down, in pixels. Rounded outward so partially covered pixels are kept, then kept inside the image.
+    /// Edges within rounding noise of a pixel boundary count as on it, so a snapped selection crops exactly its pixels.
     static func pixelRect(for selection: CGRect, on display: DisplayInfo) -> CGRect {
         let rect = selection.standardized, frame = display.frame, scale = display.scale
         let width = (frame.width * scale).rounded(), height = (frame.height * scale).rounded()
-        let minX = ((rect.minX - frame.minX) * scale).rounded(.down).clamped(0, width)
-        let maxX = ((rect.maxX - frame.minX) * scale).rounded(.up).clamped(0, width)
-        let minY = ((frame.maxY - rect.maxY) * scale).rounded(.down).clamped(0, height)
-        let maxY = ((frame.maxY - rect.minY) * scale).rounded(.up).clamped(0, height)
+        let minX = ((rect.minX - frame.minX) * scale).rounded(.down, tolerance: pixelTolerance).clamped(0, width)
+        let maxX = ((rect.maxX - frame.minX) * scale).rounded(.up, tolerance: pixelTolerance).clamped(0, width)
+        let minY = ((frame.maxY - rect.maxY) * scale).rounded(.down, tolerance: pixelTolerance).clamped(0, height)
+        let maxY = ((frame.maxY - rect.minY) * scale).rounded(.up, tolerance: pixelTolerance).clamped(0, height)
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    /// The selection with every edge moved to the nearest pixel of the display's frozen image. The overlay draws
+    /// this rect and crops `pixelRect(for:on:)` of it, so no dimmed sliver ends up in the capture.
+    static func snapped(_ selection: CGRect, to display: DisplayInfo) -> CGRect {
+        let rect = selection.standardized, frame = display.frame, scale = display.scale
+        func fromLeft(_ x: CGFloat) -> CGFloat { frame.minX + ((x - frame.minX) * scale).rounded() / scale }
+        // Image rows count from the top, so y snaps relative to the display's top edge.
+        func fromTop(_ y: CGFloat) -> CGFloat { frame.maxY - ((frame.maxY - y) * scale).rounded() / scale }
+        let minX = fromLeft(rect.minX), maxX = fromLeft(rect.maxX)
+        let minY = fromTop(rect.minY), maxY = fromTop(rect.maxY)
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    /// The height of the primary display, the one at the origin, which anchors the flip between AppKit and CG.
+    static func primaryHeight(of displays: [DisplayInfo]) -> CGFloat? {
+        displays.first { $0.frame.origin == .zero }?.frame.height
+    }
+
+    /// The display under the centre of a window's bounds (CG global points): the best guess for the display
+    /// a window straddling two belongs to.
+    static func display(containingCenterOf cgRect: CGRect, in displays: [DisplayInfo], primaryHeight: CGFloat) -> DisplayInfo? {
+        let center = appKitRect(fromCG: cgRect, primaryHeight: primaryHeight)
+        return display(containing: CGPoint(x: center.midX, y: center.midY), in: displays)
     }
 
     /// The rect spanned by a drag, whichever way the pointer moved.
@@ -55,8 +80,17 @@ nonisolated enum GeometryMapper {
     }
 }
 
+/// Pixel positions computed through a division by the scale and back can miss a whole number by a few ULPs.
+private nonisolated let pixelTolerance: CGFloat = 1e-6
+
 private nonisolated extension CGFloat {
     func clamped(_ lower: CGFloat, _ upper: CGFloat) -> CGFloat {
         Swift.min(Swift.max(self, lower), upper)
+    }
+
+    /// Rounds by `rule`, except that a value within `tolerance` of a whole number becomes that number.
+    func rounded(_ rule: FloatingPointRoundingRule, tolerance: CGFloat) -> CGFloat {
+        let nearest = rounded()
+        return Swift.abs(self - nearest) <= tolerance ? nearest : rounded(rule)
     }
 }

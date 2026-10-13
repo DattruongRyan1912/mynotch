@@ -1,0 +1,51 @@
+import AppKit
+import Foundation
+import ImageIO
+import Testing
+@testable import ScreenshotModule
+
+/// Only a private named pasteboard is ever written, never the general one.
+@Suite final class SystemPasteboardTests {
+    let board = NSPasteboard(name: NSPasteboard.Name("MyNotchTests.\(UUID().uuidString)"))
+    var writer: SystemPasteboard { SystemPasteboard(pasteboard: board) }
+
+    isolated deinit { board.releaseGlobally() }
+
+    func size(of data: Data) throws -> CGSize {
+        let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+        let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        return CGSize(width: image.width, height: image.height)
+    }
+
+    @Test func writesAPNGAndATIFFOfTheImage() async throws {
+        let image = try CaptureStoreTests.image(width: 30, height: 20)
+        #expect(await writer.write(image, scale: 2))
+        #expect(try size(of: #require(board.data(forType: .png))) == CGSize(width: 30, height: 20))
+        #expect(try size(of: #require(board.data(forType: .tiff))) == CGSize(width: 30, height: 20))
+    }
+
+    @Test func theImageCarriesItsScaleAsDPI() async throws {
+        #expect(await writer.write(try CaptureStoreTests.image(width: 30, height: 20), scale: 2))
+        let png = try #require(board.data(forType: .png))
+        let source = try #require(CGImageSourceCreateWithData(png as CFData, nil))
+        let properties = try #require(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        #expect((properties[kCGImagePropertyDPIWidth] as? Double)?.rounded() == 144)
+    }
+
+    @Test func neverMarksTheWriteAsMyNotchsOwn() async throws {
+        #expect(await writer.write(try CaptureStoreTests.image(width: 4, height: 4), scale: 1))
+        let types = (board.types ?? []).map(\.rawValue)
+        #expect(!types.isEmpty)
+        #expect(!types.contains { $0.contains("mynotch") || $0.hasPrefix("org.nspasteboard") })
+    }
+
+    @Test func replacesWhatWasThere() async throws {
+        board.clearContents()
+        board.setString("old", forType: .string)
+        #expect(await writer.write(try CaptureStoreTests.image(width: 4, height: 4), scale: 1))
+        #expect(board.string(forType: .string) == nil)
+        #expect(writer.write("Xin chào"))
+        #expect(board.string(forType: .string) == "Xin chào")
+        #expect(board.data(forType: .png) == nil)
+    }
+}
