@@ -110,20 +110,21 @@ import Testing
         let board = history.createBoard(name: "Ghim")
         history.pin(itemID: ids[0], to: board)
         history.pin(itemID: ids[2], to: board)
-        let removed = history.prune(limit: 3, retention: .forever, imageByteLimit: .max, now: Self.start + 10)
-        // Pinned items count toward the limit but are never removed.
+        var unchanged = history
+        // Only the three unpinned items count toward the limit.
+        #expect(unchanged.prune(limit: 3, retention: .forever, imageByteLimit: .max, now: Self.start + 10) == [])
+        let removed = history.prune(limit: 1, retention: .forever, imageByteLimit: .max, now: Self.start + 10)
         #expect(removed.map(\.id) == [ids[1], ids[3]])
         #expect(history.items.map(\.id) == [ids[4], ids[2], ids[0]])
     }
 
-    @Test func pruneNeverRemovesPinnedItemsEvenOverTheLimit() {
-        var (history, ids) = Self.history([.text("a"), .text("b"), .text("c")])
+    @Test func morePinnedItemsThanTheLimitStillKeepNewUnpinnedItems() {
+        var (history, ids) = Self.history([.text("a"), .text("b"), .text("c"), .text("d"), .text("e"), .text("f")])
         let board = history.createBoard(name: "Ghim")
-        history.pin(itemID: ids[0], to: board)
-        history.pin(itemID: ids[1], to: board)
-        let removed = history.prune(limit: 1, retention: .forever, imageByteLimit: .max, now: Self.start + 10)
-        #expect(removed.map(\.id) == [ids[2]])
-        #expect(history.items.map(\.id) == [ids[1], ids[0]])
+        for id in ids[..<3] { history.pin(itemID: id, to: board) }
+        let removed = history.prune(limit: 2, retention: .forever, imageByteLimit: .max, now: Self.start + 10)
+        #expect(removed.map(\.id) == [ids[3]])
+        #expect(history.items.map(\.id) == [ids[5], ids[4], ids[2], ids[1], ids[0]])
     }
 
     @Test func pruneByAgeRemovesUnpinnedItemsOlderThanTheRetention() {
@@ -143,23 +144,24 @@ import Testing
         #expect(history.items.map(\.id) == [fresh, atCutoff, pinned])
     }
 
-    @Test func pruneByImageBytesRemovesTheOldestUnpinnedImagesCountingPinnedOnes() {
+    @Test func pruneByImageBytesRemovesTheOldestUnpinnedImages() {
         var (history, ids) = Self.history([
             Self.image("oldest", bytes: 100), Self.image("old", bytes: 100), .text("text"),
             Self.image("pinned", bytes: 100), Self.image("new", bytes: 100),
         ])
         let board = history.createBoard(name: "Ghim")
         history.pin(itemID: ids[3], to: board)
-        let removed = history.prune(limit: 100, retention: .forever, imageByteLimit: 250, now: Self.start + 10)
+        let removed = history.prune(limit: 100, retention: .forever, imageByteLimit: 150, now: Self.start + 10)
         #expect(removed.map(\.id) == [ids[0], ids[1]])
         #expect(history.items.map(\.id) == [ids[4], ids[3], ids[2]])
     }
 
-    @Test func pruneByImageBytesStopsAtPinnedImages() {
-        var (history, ids) = Self.history([Self.image("a", bytes: 300), Self.image("b", bytes: 100), .text("text")])
+    @Test func pinnedImagesDoNotCountTowardTheByteLimit() {
+        var (history, ids) = Self.history([Self.image("pinned", bytes: 300), Self.image("b", bytes: 100), .text("text")])
         let board = history.createBoard(name: "Ghim")
         history.pin(itemID: ids[0], to: board)
-        let removed = history.prune(limit: 100, retention: .forever, imageByteLimit: 250, now: Self.start + 10)
+        #expect(history.prune(limit: 100, retention: .forever, imageByteLimit: 250, now: Self.start + 10) == [])
+        let removed = history.prune(limit: 100, retention: .forever, imageByteLimit: 50, now: Self.start + 10)
         #expect(removed.map(\.id) == [ids[1]])
         #expect(history.items.map(\.id) == [ids[2], ids[0]])
     }

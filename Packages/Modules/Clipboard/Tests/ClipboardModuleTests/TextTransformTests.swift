@@ -51,6 +51,22 @@ import Testing
         """)
     }
 
+    @Test func jsonPrettyKeepsEmptyContainersOnOneLine() {
+        #expect(TextTransform.jsonPretty.apply("{ }") == "{}")
+        #expect(TextTransform.jsonPretty.apply("[\n]") == "[]")
+        // Line breaks inside strings are escaped, so only real empty containers are joined.
+        #expect(TextTransform.jsonPretty.apply(#"{"a": {}, "b": [[], {}], "c": "{\n\n}"}"#) == #"""
+        {
+          "a" : {},
+          "b" : [
+            [],
+            {}
+          ],
+          "c" : "{\n\n}"
+        }
+        """#)
+    }
+
     @Test func jsonMinifyRemovesWhitespaceWithSortedKeys() {
         let json = """
         {

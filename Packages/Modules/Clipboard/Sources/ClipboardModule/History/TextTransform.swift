@@ -45,7 +45,11 @@ nonisolated enum TextTransform: String, CaseIterable {
             lines.sort { $0.localizedStandardCompare($1) == .orderedAscending }
             return lines.joined(separator: "\n") + (endsWithLineBreak ? "\n" : "")
         case .jsonPretty:
-            return Self.reserializeJSON(text, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+            // JSONSerialization prints empty containers as "{\n\n}". Strings never hold a raw line break
+            // (it is escaped), so joining these cannot change a value.
+            return Self.reserializeJSON(text, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])?
+                .replacing(/\{\n\n *\}/, with: "{}")
+                .replacing(/\[\n\n *\]/, with: "[]")
         case .jsonMinify:
             // Sorted keys too: JSONSerialization does not keep the original key order, so this keeps output stable.
             return Self.reserializeJSON(text, options: [.sortedKeys, .withoutEscapingSlashes])

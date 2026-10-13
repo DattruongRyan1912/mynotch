@@ -61,8 +61,8 @@ nonisolated struct ClipboardHistory: Codable, Equatable, Sendable {
     }
 
     /// Enforces the limits in order: item count, age, then image bytes, each removing the oldest unpinned items first.
-    /// Pinned items are never removed but still count toward `limit` and `imageByteLimit`.
-    /// Returns the removed items in removal order.
+    /// The limits apply only to unpinned items: pinned ones are exempt and never removed, so pinning many items
+    /// never pushes new copies out of history. Returns the removed items in removal order.
     mutating func prune(limit: Int, retention: Retention, imageByteLimit: Int, now: Date) -> [ClipboardItem] {
         let pinned = pinnedIDs
         var removed: [ClipboardItem] = []
@@ -73,12 +73,17 @@ nonisolated struct ClipboardHistory: Codable, Equatable, Sendable {
             }
         }
 
-        removeOldestUnpinned { _ in items.count > limit }
+        var unpinnedCount = items.count { !pinned.contains($0.id) }
+        removeOldestUnpinned { _ in
+            guard unpinnedCount > limit else { return false }
+            unpinnedCount -= 1
+            return true
+        }
         if let interval = retention.interval {
             let cutoff = now.addingTimeInterval(-interval)
             removeOldestUnpinned { $0.copiedAt < cutoff }
         }
-        var imageBytes = items.reduce(0) { $0 + ($1.imageByteCount ?? 0) }
+        var imageBytes = items.reduce(0) { pinned.contains($1.id) ? $0 : $0 + ($1.imageByteCount ?? 0) }
         removeOldestUnpinned { item in
             guard imageBytes > imageByteLimit, let bytes = item.imageByteCount else { return false }
             imageBytes -= bytes

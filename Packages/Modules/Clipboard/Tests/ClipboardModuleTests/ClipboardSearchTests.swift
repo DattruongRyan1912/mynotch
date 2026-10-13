@@ -24,14 +24,14 @@ import Testing
     }
 
     func ids(_ query: ClipboardQuery) -> [UUID] {
-        filter(history, query).map(\.id)
+        ClipboardSearch.filter(history, query).map(\.id)
     }
 
     @Test func emptyQueryReturnsEveryItemNewestFirst() {
         let all = [richText, color, files, link, image, text]
         #expect(ids(ClipboardQuery()) == all)
         #expect(ids(ClipboardQuery(text: "  \n\t ")) == all)
-        #expect(filter(history, ClipboardQuery()) == history.items)
+        #expect(ClipboardSearch.filter(history, ClipboardQuery()) == history.items)
     }
 
     @Test func everyWordMustMatch() {
@@ -87,9 +87,9 @@ import Testing
         history.pin(itemID: text, to: board)
         history.pin(itemID: link, to: board)
         history.pin(itemID: files, to: other)
-        #expect(filter(history, ClipboardQuery(boardID: board)).map(\.id) == [link, text, color])
-        #expect(filter(history, ClipboardQuery(text: "o", boardID: board)).map(\.id) == [link, text])
-        #expect(filter(history, ClipboardQuery(kind: .color, boardID: board)).map(\.id) == [color])
-        #expect(filter(history, ClipboardQuery(boardID: UUID())).isEmpty)
+        #expect(ClipboardSearch.filter(history, ClipboardQuery(boardID: board)).map(\.id) == [link, text, color])
+        #expect(ClipboardSearch.filter(history, ClipboardQuery(text: "o", boardID: board)).map(\.id) == [link, text])
+        #expect(ClipboardSearch.filter(history, ClipboardQuery(kind: .color, boardID: board)).map(\.id) == [color])
+        #expect(ClipboardSearch.filter(history, ClipboardQuery(boardID: UUID())).isEmpty)
     }
 }
