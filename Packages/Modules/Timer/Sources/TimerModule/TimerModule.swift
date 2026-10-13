@@ -38,12 +38,14 @@ public final class TimerModule: FeatureModule {
             throw .failed(reason: "Không tạo được thư mục lưu hẹn giờ")
         }
         let url = context.storage.directory.appending(path: "timer.json")
-        var model = (try? JSONDecoder().decode(TimerModel.self, from: Data(contentsOf: url))) ?? .idle
+        let stored = (try? JSONDecoder().decode(TimerModel.self, from: Data(contentsOf: url))) ?? .idle
+        var model = stored
         _ = model.refresh(now: now())   // finished while the app was closed: shown, but not announced with a sound
         self.context = context
         fileURL = url
         state.model = model
-        commit()
+        // One that was already finished at the last quit stays in the tab but is not raised again on every launch.
+        commit(announcesFinish: stored != .finished)
     }
 
     public func stop() async {
@@ -75,10 +77,10 @@ public final class TimerModule: FeatureModule {
     }
 
     /// Saves the state, publishes the matching activity and arms the finish timer.
-    private func commit() {
+    private func commit(announcesFinish: Bool = true) {
         guard let context else { return }
         save(logger: context.logger)
-        publish(to: context.activities)
+        if announcesFinish || state.model != .finished { publish(to: context.activities) }
         scheduleFinish(on: context.scheduler)
     }
 

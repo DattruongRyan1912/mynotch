@@ -77,6 +77,12 @@ import Testing
         #expect(!finished6)
     }
 
+    @Test func pausingAStopwatchWhoseClockMovedBackKeepsWhatItHad() {
+        var model = TimerModel.stopwatch(accumulated: 10, startedAt: t0)
+        model.pause(now: t0.addingTimeInterval(-5))
+        #expect(model == .stopwatchPaused(accumulated: 10))
+    }
+
     @Test func startingWhileBusyReplacesTheTimer() {
         var model = TimerModel.idle
         model.startStopwatch(now: t0)

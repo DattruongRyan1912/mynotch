@@ -133,6 +133,21 @@ struct TimerFixture {
         #expect(fixture.module.state.model == .finished)
     }
 
+    @Test func aClockMovedBackWaitsForTheRestOfTheCountdown() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.startCountdown(minutes: 5)
+        // The scheduler ran the full 300 s, but the wall clock only 200 s of them.
+        fixture.clock.advance(200)
+        fixture.harness.scheduler.advance(by: .seconds(300))
+        #expect(fixture.module.state.model == .countdown(endDate: Date(timeIntervalSinceReferenceDate: 1_300)))
+        #expect(fixture.sound.played.isEmpty)
+        #expect(fixture.harness.scheduler.pendingCount == 1)
+        fixture.advance(100)
+        #expect(fixture.module.state.model == .finished)
+        #expect(fixture.sound.played == ["Glass"])
+    }
+
     @Test func stopwatchPublishesAnActivityAndNeverFinishes() async {
         let fixture = TimerFixture()
         await fixture.start()
@@ -176,6 +191,18 @@ struct TimerFixture {
         #expect(try fixture.savedModel() == .finished)
     }
 
+    @Test func aTimerThatWasAlreadyFinishedWhenTheAppClosedIsNotAnnouncedAgain() async throws {
+        let fixture = TimerFixture()
+        try fixture.seedFile(.finished)
+        await fixture.start()
+        #expect(fixture.module.state.model == .finished)
+        #expect(fixture.harness.activities.current == nil)
+        #expect(fixture.sound.played.isEmpty)
+
+        fixture.module.cancel()
+        #expect(fixture.module.state.model == .idle)
+    }
+
     @Test func pausedAndStopwatchStatesAreRestored() async throws {
         let paused = TimerFixture()
         try paused.seedFile(.countdownPaused(remaining: 77))
@@ -198,6 +225,21 @@ struct TimerFixture {
         await fixture.start()
         #expect(fixture.harness.registry.state(of: "timer") == .running)
         #expect(fixture.module.state.model == .idle)
+    }
+
+    @Test func enablingAgainRestoresARunningCountdownFromTheFile() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.startCountdown(minutes: 5)
+        await fixture.harness.registry.setEnabled(false, for: "timer")
+        #expect(fixture.module.state.model == .idle)
+        fixture.clock.advance(100)
+        await fixture.harness.registry.setEnabled(true, for: "timer")
+        #expect(fixture.module.state.model.remaining(now: fixture.clock.date) == 200)
+        #expect(fixture.harness.activities.current?.activity.priority == .normal)
+        fixture.advance(200)
+        #expect(fixture.module.state.model == .finished)
+        #expect(fixture.sound.played == ["Glass"])
     }
 
     @Test func disablingStopsTheTimerAndRemovesTheActivity() async {

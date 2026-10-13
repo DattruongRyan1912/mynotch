@@ -36,7 +36,7 @@ nonisolated enum TimerModel: Codable, Equatable {
     mutating func pause(now: Date) {
         switch self {
         case .countdown(let endDate): self = .countdownPaused(remaining: max(0, endDate.timeIntervalSince(now)))
-        case .stopwatch(let accumulated, let startedAt): self = .stopwatchPaused(accumulated: accumulated + now.timeIntervalSince(startedAt))
+        case .stopwatch(let accumulated, let startedAt): self = .stopwatchPaused(accumulated: accumulated + max(0, now.timeIntervalSince(startedAt)))
         default: break
         }
     }
