@@ -25,10 +25,11 @@ public final class FakePermissionCenter: PermissionCenter {
 public final class FakePresenter: NotchPresenter {
     public private(set) var openedTabs: [ModuleID] = []
     public private(set) var toastCount = 0
+    public private(set) var closeCount = 0
     public init() {}
     public func open(tab: ModuleID) { openedTabs.append(tab) }
     public func showToast(_ content: AnyView, duration: Duration) { toastCount += 1 }
-    public func close() {}
+    public func close() { closeCount += 1 }
 }
 
 /// Wires a `ModuleRegistry` with in-memory collaborators.
