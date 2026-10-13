@@ -24,14 +24,19 @@ import Testing
         )
     }
 
+    /// A stored image name: the SHA-256 hex of some bytes plus ".png".
+    nonisolated static func imageName(_ seed: String) -> String {
+        Data(seed.utf8).sha256Hex + ".png"
+    }
+
     static func image(_ fileName: String) -> ClipboardContent {
         .image(ClipboardImage(fileName: fileName, pixelWidth: 1, pixelHeight: 1, byteCount: 4))
     }
 
-    /// Three items, one of them an image, and a board pinning the first.
+    /// Three items, one of them the image `imageName("kept")`, and a board pinning the first.
     static func history(_ text: String = "Xin chào") -> ClipboardHistory {
         var history = ClipboardHistory()
-        history.items = [item(.text(text)), item(image("kept.png")), item(.link(URL(string: "https://example.com")!))]
+        history.items = [item(.text(text)), item(image(imageName("kept"))), item(.link(URL(string: "https://example.com")!))]
         let board = history.createBoard(name: "Công việc")
         history.pin(itemID: history.items[0].id, to: board)
         return history
@@ -49,25 +54,33 @@ import Testing
         try FileManager.default.contentsOfDirectory(atPath: url.path(percentEncoded: false))
     }
 
+    /// The stamp of the single `history.corrupt-<stamp>.json` in the store folder.
+    func corruptHistoryStamp() throws -> Substring {
+        let stamps = try contents(of: directory).compactMap { $0.wholeMatch(of: /history\.corrupt-(\d{8}-\d{6})\.json/)?.1 }
+        #expect(stamps.count == 1)
+        return try #require(stamps.first)
+    }
+
     @Test func loadWithoutFilesCreatesTheFoldersAndReturnsAnEmptyHistory() {
         #expect(makeStore().load() == ClipboardHistory())
         #expect(exists(file("images")))
         #expect(!exists(file("history.json")))
     }
 
-    @Test func savedHistoryLoadsBackEqual() {
+    @Test func savedHistoryLoadsBackEqual() async {
         let store = makeStore()
         _ = store.load()
         let history = Self.history()
 
         store.scheduleSave(history)
         scheduler.advance(by: .seconds(1))
+        await store.waitForWrites()
 
         #expect(store.writeCount == 1)
         #expect(makeStore().load() == history)
     }
 
-    @Test func savesWithinOneSecondCoalesceIntoOneWriteOfTheLatestValue() {
+    @Test func savesWithinOneSecondCoalesceIntoOneWriteOfTheLatestValue() async {
         let store = makeStore()
         _ = store.load()
 
@@ -78,57 +91,100 @@ import Testing
         let last = Self.history("third")
         store.scheduleSave(last)
         scheduler.advance(by: .milliseconds(999))
+        await store.waitForWrites()
         #expect(store.writeCount == 0)
         #expect(!exists(file("history.json")))
 
         scheduler.advance(by: .milliseconds(1))
+        await store.waitForWrites()
         #expect(store.writeCount == 1)
         #expect(scheduler.pendingCount == 0)
         #expect(makeStore().load() == last)
     }
 
-    @Test func nothingIsWrittenBeforeTheTimerAndFlushWritesAtOnce() {
+    @Test func changesEveryNineTenthsOfASecondStillWriteWithinFiveSeconds() async {
+        let store = makeStore()
+        _ = store.load()
+        for index in 0..<5 {
+            store.scheduleSave(Self.history("change \(index)"))
+            scheduler.advance(by: .milliseconds(900))
+        }
+        let last = Self.history("change 5")
+        store.scheduleSave(last)
+        scheduler.advance(by: .milliseconds(499))
+        await store.waitForWrites()
+        #expect(store.writeCount == 0)
+
+        scheduler.advance(by: .milliseconds(1))
+        await store.waitForWrites()
+        #expect(store.writeCount == 1)
+        #expect(scheduler.pendingCount == 0)
+        #expect(makeStore().load() == last)
+    }
+
+    @Test func nothingIsWrittenBeforeTheTimerAndFlushWritesAtOnce() async {
         let store = makeStore()
         _ = store.load()
         let history = Self.history()
 
         store.scheduleSave(history)
         scheduler.advance(by: .milliseconds(500))
+        await store.waitForWrites()
         #expect(store.writeCount == 0)
         #expect(!exists(file("history.json")) && !exists(file("boards.json")))
 
-        store.flush()
+        await store.flush()
         #expect(store.writeCount == 1)
         #expect(scheduler.pendingCount == 0)
         #expect(makeStore().load() == history)
 
-        scheduler.advance(by: .seconds(2))
-        store.flush()
+        scheduler.advance(by: .seconds(6))
+        await store.flush()
         #expect(store.writeCount == 1)
     }
 
-    @Test func failedWriteKeepsTheValueForTheNextFlush() throws {
+    @Test func failedWriteKeepsTheValueForTheNextFlushAndWritesBoardsFirst() async throws {
         let store = makeStore()
         _ = store.load()
         let history = Self.history()
-        try FileManager.default.createDirectory(at: file("history.json"), withIntermediateDirectories: false)
+        try FileManager.default.createDirectory(at: file("boards.json"), withIntermediateDirectories: false)
 
         store.scheduleSave(history)
         scheduler.advance(by: .seconds(1))
+        await store.waitForWrites()
         #expect(store.writeCount == 0)
+        #expect(!exists(file("history.json")))
 
-        try FileManager.default.removeItem(at: file("history.json"))
-        store.flush()
+        try FileManager.default.removeItem(at: file("boards.json"))
+        await store.flush()
         #expect(store.writeCount == 1)
         #expect(makeStore().load() == history)
     }
 
-    @Test func undecodableItemIsDroppedAndTheRestLoad() throws {
+    @Test func failedWriteDoesNotReplaceANewerChange() async throws {
+        let store = makeStore()
+        _ = store.load()
+        try FileManager.default.createDirectory(at: file("boards.json"), withIntermediateDirectories: false)
+        store.scheduleSave(Self.history("older"))
+        scheduler.advance(by: .seconds(1))
+        let newer = Self.history("newer")
+        store.scheduleSave(newer)
+        await store.waitForWrites()
+        #expect(store.writeCount == 0)
+
+        try FileManager.default.removeItem(at: file("boards.json"))
+        scheduler.advance(by: .seconds(1))
+        await store.waitForWrites()
+        #expect(store.writeCount == 1)
+        #expect(makeStore().load() == newer)
+    }
+
+    @Test func undecodableItemIsDroppedAndTheRestLoad() async throws {
         let store = makeStore()
         _ = store.load()
         let history = Self.history()
         store.scheduleSave(history)
-        store.flush()
+        await store.flush()
 
         let url = file("history.json")
         var items = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [Any])
@@ -142,12 +198,12 @@ import Testing
     }
 
     @Test(arguments: [#"{"items": []}"#, "not json"])
-    func corruptHistoryIsRenamedAndBoardsStillLoad(corrupt: String) throws {
+    func corruptHistoryIsRenamedAndBoardsStillLoad(corrupt: String) async throws {
         let store = makeStore()
         _ = store.load()
         let history = Self.history()
         store.scheduleSave(history)
-        store.flush()
+        await store.flush()
         try Data(corrupt.utf8).write(to: file("history.json"))
 
         let loaded = makeStore().load()
@@ -155,18 +211,16 @@ import Testing
         #expect(loaded.items.isEmpty)
         #expect(loaded.boards == history.boards)
         #expect(!exists(file("history.json")))
-        let renamed = try contents(of: directory).filter { $0.wholeMatch(of: /history\.corrupt-\d{8}-\d{6}\.json/) != nil }
-        #expect(renamed.count == 1)
-        let kept = try Data(contentsOf: file(try #require(renamed.first)))
+        let kept = try Data(contentsOf: file("history.corrupt-\(try corruptHistoryStamp()).json"))
         #expect(kept == Data(corrupt.utf8))
     }
 
-    @Test func corruptBoardsAreRenamedAndItemsStillLoad() throws {
+    @Test func corruptBoardsAreRenamedAndItemsStillLoad() async throws {
         let store = makeStore()
         _ = store.load()
         let history = Self.history()
         store.scheduleSave(history)
-        store.flush()
+        await store.flush()
         try Data("{}".utf8).write(to: file("boards.json"))
 
         let loaded = makeStore().load()
@@ -174,34 +228,7 @@ import Testing
         #expect(loaded.items == history.items)
         #expect(loaded.boards.isEmpty)
         #expect(try contents(of: directory).contains { $0.wholeMatch(of: /boards\.corrupt-\d{8}-\d{6}\.json/) != nil })
-    }
-
-    @Test func loadDeletesOrphanImagesAndKeepsReferencedOnes() throws {
-        let store = makeStore()
-        _ = store.load()
-        try store.saveImage(Data("kept".utf8), fileName: "kept.png")
-        try store.saveImage(Data("orphan".utf8), fileName: "orphan.png")
-        store.scheduleSave(Self.history())
-        store.flush()
-
-        _ = makeStore().load()
-
-        #expect(try contents(of: file("images")) == ["kept.png"])
-    }
-
-    @Test func saveImageKeepsAnExistingFileAndDeleteImagesRemovesFiles() throws {
-        let store = makeStore()
-        _ = store.load()
-        #expect(store.imageURL(fileName: "a.png") == file("images").appending(path: "a.png"))
-
-        try store.saveImage(Data("first".utf8), fileName: "a.png")
-        try store.saveImage(Data("second".utf8), fileName: "a.png")
-        try store.saveImage(Data("other".utf8), fileName: "b.png")
-        #expect(try Data(contentsOf: #require(store.imageURL(fileName: "a.png"))) == Data("first".utf8))
-
-        store.deleteImages(for: [Self.item(Self.image("a.png")), Self.item(.text("a.png")), Self.item(Self.image("missing.png"))])
-
-        #expect(try contents(of: file("images")) == ["b.png"])
+        #expect(!exists(file("images.corrupt")))
     }
 
     @Test func corruptFilesWithinTheSameSecondGetNumberedNames() throws {
@@ -212,35 +239,88 @@ import Testing
             _ = makeStore { instant }.load()
         }
 
-        let names = try contents(of: directory).filter { $0.hasPrefix("history.corrupt-") }
-        let stems = names.compactMap { $0.wholeMatch(of: /(history\.corrupt-\d{8}-\d{6})\.json/)?.1 }
+        let names = try contents(of: directory).filter { $0.contains(".corrupt-") }
+        let stems = names.compactMap { $0.wholeMatch(of: /history\.corrupt-(\d{8}-\d{6})\.json/)?.1 }
         let stem = try #require(stems.first)
-        #expect(Set(names) == ["\(stem).json", "\(stem)-1.json", "\(stem)-2.json"])
-        for (index, suffix) in ["", "-1", "-2"].enumerated() {
-            #expect(try String(contentsOf: file("\(stem)\(suffix).json"), encoding: .utf8) == "broken \(index)")
+        let suffixes = ["", "-1", "-2"]
+        #expect(Set(names) == Set(suffixes.flatMap { ["history.corrupt-\(stem)\($0).json", "images.corrupt-\(stem)\($0)"] }))
+        for (index, suffix) in suffixes.enumerated() {
+            #expect(try String(contentsOf: file("history.corrupt-\(stem)\(suffix).json"), encoding: .utf8) == "broken \(index)")
         }
     }
 
-    @Test func imagesAreKeptWhenTheHistoryFileIsMovedAside() throws {
+    @Test func unreadableHistoryMovesItsImagesAsideWhereLaterLoadsKeepThem() async throws {
         let store = makeStore()
         _ = store.load()
-        try store.saveImage(Data("kept".utf8), fileName: "kept.png")
-        try store.saveImage(Data("other".utf8), fileName: "other.png")
+        let names = [Self.imageName("kept"), Self.imageName("other")]
+        for name in names { try store.saveImage(Data(name.utf8), fileName: name) }
         store.scheduleSave(Self.history())
-        store.flush()
+        await store.flush()
         try Data("not json".utf8).write(to: file("history.json"))
 
         #expect(makeStore().load().items.isEmpty)
-        #expect(try contents(of: file("images")).sorted() == ["kept.png", "other.png"])
+        _ = makeStore().load()
+
+        #expect(try contents(of: file("images.corrupt-\(try corruptHistoryStamp())")).sorted() == names.sorted())
+        #expect(try contents(of: file("images")).isEmpty)
     }
 
-    nonisolated static let unsafeFileNames = ["", ".", "..", ".hidden.png", "../victim.png", "sub/a.png", "/tmp/a.png"]
+    @Test func loadDeletesOrphanImagesAndKeepsReferencedOnes() async throws {
+        let store = makeStore()
+        _ = store.load()
+        let kept = Self.imageName("kept")
+        try store.saveImage(Data("kept".utf8), fileName: kept)
+        try store.saveImage(Data("orphan".utf8), fileName: Self.imageName("orphan"))
+        store.scheduleSave(Self.history())
+        await store.flush()
+
+        _ = makeStore().load()
+
+        #expect(try contents(of: file("images")) == [kept])
+    }
+
+    @Test func loadKeepsImagesOfTheUnsavedHistory() throws {
+        let store = makeStore()
+        _ = store.load()
+        let kept = Self.imageName("kept")
+        try store.saveImage(Data("kept".utf8), fileName: kept)
+        store.scheduleSave(Self.history())
+
+        _ = store.load()
+
+        #expect(try contents(of: file("images")) == [kept])
+    }
+
+    @Test func saveImageKeepsAnExistingFileAndDeleteImagesRemovesFiles() throws {
+        let store = makeStore()
+        _ = store.load()
+        let first = Self.imageName("a"), second = Self.imageName("b")
+        #expect(store.imageURL(fileName: first) == file("images").appending(path: first))
+
+        try store.saveImage(Data("first".utf8), fileName: first)
+        try store.saveImage(Data("second".utf8), fileName: first)
+        try store.saveImage(Data("other".utf8), fileName: second)
+        #expect(try Data(contentsOf: #require(store.imageURL(fileName: first))) == Data("first".utf8))
+
+        store.deleteImages(for: [Self.item(Self.image(first)), Self.item(.text(first)), Self.item(Self.image(Self.imageName("missing")))])
+
+        #expect(try contents(of: file("images")) == [second])
+    }
+
+    nonisolated static let victim = imageName("victim")
+    nonisolated static let unsafeFileNames: [String] = {
+        let hex = String(victim.dropLast(4))
+        return [
+            "", ".", "..", "a.png", ".hidden.png", "../\(victim)", "sub/\(victim)", "/tmp/\(victim)",
+            "\(hex.uppercased()).png", hex, "\(hex).PNG", "\(hex)0.png", "\(victim).png",
+        ]
+    }()
 
     @Test(arguments: unsafeFileNames)
     func unsafeImageFileNamesAreRejected(fileName: String) throws {
         let store = makeStore()
         _ = store.load()
-        let victim = file("victim.png")
+        let victim = file(Self.victim)
         try Data("keep".utf8).write(to: victim)
 
         #expect(store.imageURL(fileName: fileName) == nil)

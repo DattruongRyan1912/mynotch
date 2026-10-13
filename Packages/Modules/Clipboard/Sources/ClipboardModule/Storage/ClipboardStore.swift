@@ -3,10 +3,11 @@ import MyNotchCore
 import os
 
 /// Keeps the history on disk as `history.json`, `boards.json` and PNG files in `images/`.
-/// Saves wait one second after the last change so a burst of copies costs one write,
-/// and a damaged file costs at most that file, never a crash.
+/// Saves wait one second after the last change (at most five after the first) so a burst of copies costs
+/// one write, encoding and writing run off the main thread, and a damaged file costs at most that file, never a crash.
 final class ClipboardStore {
     private static let saveDelay: Duration = .seconds(1)
+    private static let maxSaveDelay: Duration = .seconds(5)
     private static let corruptTimestamp: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -21,16 +22,17 @@ final class ClipboardStore {
     /// Dates the names of moved-aside files; injected so tests can put two failures in the same second.
     private let now: () -> Date
     private let fileManager = FileManager.default
-    /// Sorted keys keep the files stable. Both directions use the default date strategy,
-    /// which keeps sub-second precision so a saved history loads back equal.
-    private let encoder: JSONEncoder = {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .sortedKeys
-        return encoder
-    }()
-    /// The latest history not yet on disk; kept after a failed write so the next save retries.
-    private var pending: ClipboardHistory?
+    /// Serial, so writes reach the disk in the order they were started.
+    private let writer = DispatchQueue(label: "io.lucasvu.mynotch.clipboard.store")
+    /// The newest history not yet confirmed on disk, numbered so a late failure can tell whether it is still the newest.
+    private var unsaved: (history: ClipboardHistory, version: Int)?
+    /// Whether `unsaved` still has to be handed to the writer: set by every change and again after its write failed.
+    private var needsWrite = false
+    private var version = 0
+    /// Restarted by every change.
     private var saveTimer: ScheduledAction?
+    /// Armed by the first change of a batch and never restarted, so steady changes still get saved.
+    private var maxWaitTimer: ScheduledAction?
     /// Successful writes, so tests can tell coalesced saves apart.
     private(set) var writeCount = 0
 
@@ -42,31 +44,47 @@ final class ClipboardStore {
         self.now = now
     }
 
-    /// Reads both files (missing ones are empty) and deletes image files no item references,
-    /// unless the history file was moved aside: its images stay so it can still be recovered.
+    /// Reads both files (missing ones are empty) and deletes image files that neither the loaded nor the unsaved
+    /// history references. An unreadable history file is moved aside together with `images/`, so no later
+    /// orphan cleanup can delete the images it still references.
     func load() -> ClipboardHistory {
+        let items = read(ClipboardItem.self, from: "history.json")
+        if items == nil { moveAside(["history.json", "images"]) }
+        let boards = read(ClipboardBoard.self, from: "boards.json")
+        if boards == nil { moveAside(["boards.json"]) }
         do {
             try fileManager.createDirectory(at: imagesDirectory, withIntermediateDirectories: true)
         } catch {
-            logger.error("Could not create clipboard storage: \(String(describing: error), privacy: .public)")
+            logFailure("Creating the clipboard folders", error)
         }
-        let items = read(ClipboardItem.self, from: "history")
-        let history = ClipboardHistory(items: items ?? [], boards: read(ClipboardBoard.self, from: "boards") ?? [])
-        if items != nil { deleteOrphanImages(referencedBy: history.items) }
+        let history = ClipboardHistory(items: items ?? [], boards: boards ?? [])
+        if items != nil { deleteOrphanImages(referencedBy: history.items + (unsaved?.history.items ?? [])) }
         return history
     }
 
-    /// Restarts the delay on every call, so changes within a second are written once with the latest value.
+    /// Restarts the one-second delay on every call, so changes in a burst are written once with the latest value.
     func scheduleSave(_ history: ClipboardHistory) {
-        pending = history
+        version += 1
+        unsaved = (history, version)
+        needsWrite = true
         saveTimer?.cancel()
-        saveTimer = scheduler.schedule(after: Self.saveDelay) { [weak self] in self?.writePending() }
+        saveTimer = scheduler.schedule(after: Self.saveDelay) { [weak self] in self?.startWrite() }
+        if maxWaitTimer == nil {
+            maxWaitTimer = scheduler.schedule(after: Self.maxSaveDelay) { [weak self] in self?.startWrite() }
+        }
     }
 
-    /// Writes a pending save now; called when the module stops.
-    func flush() {
-        saveTimer?.cancel()
-        writePending()
+    /// Writes any unsaved change now and waits for every write so far; awaited when the module stops.
+    func flush() async {
+        startWrite()
+        await waitForWrites()
+    }
+
+    /// Waits until every write already handed to the writer has finished and reported back.
+    func waitForWrites() async {
+        await withCheckedContinuation { continuation in
+            writer.async { DispatchQueue.main.async { continuation.resume() } }
+        }
     }
 
     /// File names are content hashes, so an existing file already holds these bytes.
@@ -85,60 +103,89 @@ final class ClipboardStore {
         }
     }
 
-    /// nil unless `fileName` is a plain file name: names come from `history.json`, which may have been edited,
-    /// and must never reach outside `images/` or name the folder itself.
+    /// nil unless `fileName` has the stored form "<SHA-256 hex>.png": names come from `history.json`,
+    /// which may have been edited, and must never reach outside `images/`.
     func imageURL(fileName: String) -> URL? {
-        guard !fileName.isEmpty, !fileName.contains("/"), !fileName.hasPrefix(".") else { return nil }
+        guard fileName.wholeMatch(of: /[0-9a-f]{64}\.png/) != nil else { return nil }
         return imagesDirectory.appending(path: fileName, directoryHint: .notDirectory)
     }
 
-    private func writePending() {
+    /// Hands the unsaved history to the writer and ends the batch: the next change arms both timers again.
+    private func startWrite() {
+        saveTimer?.cancel()
         saveTimer = nil
-        guard let history = pending else { return }
-        do {
-            try encoder.encode(history.items).write(to: fileURL("history"), options: .atomic)
-            try encoder.encode(history.boards).write(to: fileURL("boards"), options: .atomic)
-            pending = nil
-            writeCount += 1
-        } catch {
-            logger.error("Could not save clipboard history, retrying on the next save: \(String(describing: error), privacy: .public)")
+        maxWaitTimer?.cancel()
+        maxWaitTimer = nil
+        guard needsWrite, let unsaved else { return }
+        needsWrite = false
+        let boardsURL = fileURL("boards.json"), itemsURL = fileURL("history.json")
+        writer.async { [weak self] in
+            let result = Result { try Self.write(unsaved.history, boardsURL: boardsURL, itemsURL: itemsURL) }
+            DispatchQueue.main.async { self?.finishWrite(version: unsaved.version, result: result) }
         }
     }
 
+    /// A failure leaves the history unsaved for the next save or flush, unless a newer change replaced it meanwhile.
+    private func finishWrite(version: Int, result: Result<Void, any Error>) {
+        let isNewest = unsaved?.version == version
+        switch result {
+        case .success:
+            writeCount += 1
+            if isNewest { unsaved = nil }
+        case .failure(let error):
+            logFailure("Saving the clipboard history (retrying on the next save)", error)
+            if isNewest { needsWrite = true }
+        }
+    }
+
+    /// Runs on the writer queue. Sorted keys keep the files stable; the default date strategy (also used to read)
+    /// keeps sub-second precision so a saved history loads back equal. Boards go first: if the second write fails,
+    /// a pin may point at a missing item, but a pinned item is never saved as unpinned and pruned on the next launch.
+    private nonisolated static func write(_ history: ClipboardHistory, boardsURL: URL, itemsURL: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        try encoder.encode(history.boards).write(to: boardsURL, options: .atomic)
+        try encoder.encode(history.items).write(to: itemsURL, options: .atomic)
+    }
+
     /// Decodes one element at a time, so an entry from a newer version or a damaged edit loses only itself.
-    /// Returns nil for a file that cannot be read as a JSON array, after moving it aside.
-    private func read<Element: Decodable>(_ type: Element.Type, from name: String) -> [Element]? {
-        let url = fileURL(name)
+    /// Returns nil for a file that cannot be read as a JSON array.
+    private func read<Element: Decodable>(_ type: Element.Type, from fileName: String) -> [Element]? {
+        let url = fileURL(fileName)
         guard fileExists(url) else { return [] }
         do {
             let entries = try JSONDecoder().decode([Lossy<Element>].self, from: Data(contentsOf: url))
             let elements = entries.compactMap(\.value)
             if elements.count < entries.count {
-                logger.error("Dropped \(entries.count - elements.count) unreadable entries from \(name, privacy: .public).json")
+                logger.error("Dropped \(entries.count - elements.count) unreadable entries from \(fileName, privacy: .public)")
             }
             return elements
         } catch {
-            // The error may quote file content, so it stays private.
-            logger.error("\(name, privacy: .public).json is unreadable, starting it empty: \(String(describing: error))")
-            moveAside(url, name: name)
+            logFailure("Reading \(fileName) (starting it empty)", error)
             return nil
         }
     }
 
-    /// Renames to `<name>.corrupt-<time>.json`, numbered `-1`, `-2`, … if that exists, so the next save
-    /// cannot overwrite the broken file and two failures within a second keep both.
-    private func moveAside(_ url: URL, name: String) {
-        let stem = "\(name).corrupt-\(Self.corruptTimestamp.string(from: now()))"
-        var target = directory.appending(path: "\(stem).json")
-        var number = 0
-        while fileExists(target) {
-            number += 1
-            target = directory.appending(path: "\(stem)-\(number).json")
+    /// Renames each existing entry to `<name>.corrupt-<time><ext>` with one stamp free for all of them, numbered
+    /// `-1`, `-2`, … when taken, so the next save cannot overwrite them and two failures within a second keep both.
+    private func moveAside(_ fileNames: [String]) {
+        func target(_ fileName: String, _ stamp: String) -> URL {
+            let dot = fileName.firstIndex(of: ".") ?? fileName.endIndex
+            return fileURL("\(fileName[..<dot]).corrupt-\(stamp)\(fileName[dot...])")
         }
-        do {
-            try fileManager.moveItem(at: url, to: target)
-        } catch {
-            logger.error("Could not move aside \(name, privacy: .public).json: \(String(describing: error), privacy: .public)")
+        let time = Self.corruptTimestamp.string(from: now())
+        var stamp = time
+        var number = 0
+        while fileNames.contains(where: { fileExists(target($0, stamp)) }) {
+            number += 1
+            stamp = "\(time)-\(number)"
+        }
+        for fileName in fileNames where fileExists(fileURL(fileName)) {
+            do {
+                try fileManager.moveItem(at: fileURL(fileName), to: target(fileName, stamp))
+            } catch {
+                logFailure("Moving aside \(fileName)", error)
+            }
         }
     }
 
@@ -151,7 +198,7 @@ final class ClipboardStore {
                 removeFile(file)
             }
         } catch {
-            logger.error("Could not list clipboard images: \(String(describing: error), privacy: .public)")
+            logFailure("Listing clipboard images", error)
         }
     }
 
@@ -159,12 +206,18 @@ final class ClipboardStore {
         do {
             try fileManager.removeItem(at: url)
         } catch {
-            logger.error("Could not delete clipboard image: \(String(describing: error), privacy: .public)")
+            logFailure("Deleting a clipboard image", error)
         }
     }
 
-    private func fileURL(_ name: String) -> URL {
-        directory.appending(path: "\(name).json", directoryHint: .notDirectory)
+    /// Cocoa errors quote full paths and decoding errors may quote file content, so only the domain and code are public.
+    private func logFailure(_ action: String, _ error: any Error) {
+        let nsError = error as NSError
+        logger.error("\(action, privacy: .public) failed (\(nsError.domain, privacy: .public) \(nsError.code, privacy: .public)): \(String(describing: error), privacy: .private)")
+    }
+
+    private func fileURL(_ fileName: String) -> URL {
+        directory.appending(path: fileName)
     }
 
     private func fileExists(_ url: URL) -> Bool {
