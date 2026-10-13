@@ -35,6 +35,14 @@ nonisolated enum BluetoothBattery: Equatable, Sendable {
         return valid(single).map(BluetoothBattery.single)
     }
 
+    /// The single number the activity shows: the weaker earbud, since that is the one that dies first.
+    var displayPercent: Int {
+        switch self {
+        case .single(let level): level
+        case .pods(let left, let right, _): min(left ?? 100, right ?? 100)
+        }
+    }
+
     /// Best effort: `IOBluetoothDevice` has no public battery API, so each private getter is used only if
     /// the object responds to it.
     static func read(from device: NSObject) -> BluetoothBattery? {
@@ -52,4 +60,18 @@ nonisolated struct BluetoothEvent: Equatable, Sendable {
     var kind: BluetoothDeviceKind
     var connected: Bool
     var battery: BluetoothBattery?
+}
+
+/// Remembers which devices were already connected when watching started: IOBluetooth's connect notification can
+/// report them too, and they are not news.
+nonisolated struct BluetoothConnectionTracker {
+    private var connected: Set<String>
+
+    init(connectedAtStart: some Sequence<String>) {
+        connected = Set(connectedAtStart)
+    }
+
+    func announcesConnection(of address: String) -> Bool { !connected.contains(address) }
+
+    mutating func disconnected(_ address: String) { connected.remove(address) }
 }

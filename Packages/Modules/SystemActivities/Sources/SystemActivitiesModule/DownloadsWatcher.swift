@@ -2,9 +2,17 @@ import CoreServices
 import Foundation
 import MyNotchCore
 
+/// Source of finished downloads; faked in tests.
+protocol DownloadsWatching: AnyObject {
+    /// Calls `onDownload` for each download that finishes, until `stop()`. Returns false when watching is impossible.
+    @discardableResult
+    func start(_ onDownload: @escaping (DownloadEvent) -> Void) -> Bool
+    func stop()
+}
+
 /// Watches a folder (`~/Downloads` by default) with file-level FSEvents and reports finished downloads.
 /// Files already in the folder when it starts are not reported.
-final class DownloadsWatcher {
+final class DownloadsWatcher: DownloadsWatching {
     private let directory: URL
     private let scheduler: any Scheduler
     private let now: () -> Date

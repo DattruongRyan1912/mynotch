@@ -1,8 +1,15 @@
 import CoreGraphics
 import MyNotchCore
 
+/// Source of Caps Lock changes; faked in tests.
+protocol CapsLockMonitoring: AnyObject {
+    /// Calls `onChange` with the new state whenever it changes, until `stop()`. The state at start is not reported.
+    func start(_ onChange: @escaping (_ isOn: Bool) -> Void)
+    func stop()
+}
+
 /// Polls the Caps Lock state: reading it needs no permission, unlike a global key tap.
-final class CapsLockMonitor {
+final class CapsLockMonitor: CapsLockMonitoring {
     private let flags: () -> CGEventFlags
     private let scheduler: any Scheduler
     private let interval: Duration

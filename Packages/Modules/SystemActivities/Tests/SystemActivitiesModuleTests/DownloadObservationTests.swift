@@ -20,6 +20,7 @@ import Testing
         #expect(!seen.hasOrigin)
         #expect(!seen.isDirectory)
         #expect(seen.flags == .created)
+        #expect(abs(seen.date.timeIntervalSinceNow) < 60)
 
         try FileManager.default.removeItem(at: file)
         #expect(FileObservation.read(file, flags: [.created, .modified]).flags == .removed)

@@ -6,6 +6,8 @@ final class NWPathSource: PathSource {
 
     init() {}
 
+    isolated deinit { stop() }
+
     func start(_ onUpdate: @escaping @MainActor (NetworkStatus) -> Void) {
         stop()
         let monitor = NWPathMonitor()

@@ -8,9 +8,11 @@ import Testing
     var rule = DownloadCompletionRule()
 
     func observe(
-        _ name: String, _ flags: FileObservation.Flags, size: Int64 = 0, origin: Bool = false, directory: Bool = false
+        _ name: String, _ flags: FileObservation.Flags, size: Int64 = 0, origin: Bool = false, directory: Bool = false,
+        date: Date? = nil
     ) -> FileObservation {
-        FileObservation(path: Self.dir + name, flags: flags, size: size, hasOrigin: origin, isDirectory: directory)
+        FileObservation(
+            path: Self.dir + name, flags: flags, size: size, hasOrigin: origin, isDirectory: directory, date: date ?? start)
     }
 
     mutating func feed(_ observation: FileObservation, at seconds: Double) {
@@ -127,5 +129,50 @@ import Testing
         #expect(rule.hasPending)
         _ = tick(at: 2)
         #expect(!rule.hasPending)
+    }
+
+    @Test mutating func anOldQuarantinedFileTouchedLaterIsNotADownload() {
+        let old = start.addingTimeInterval(-86_400)
+        feed(observe("old.dmg", .modified, size: 500, origin: true, date: old), at: 0)
+        #expect(tick(at: 5).isEmpty)
+        #expect(!rule.hasPending)
+    }
+
+    @Test mutating func anOriginOnlyFileMustBeFreshToStartACandidate() {
+        feed(observe("fresh.dmg", .created, size: 500, origin: true, date: start.addingTimeInterval(-9)), at: 0)
+        feed(observe("stale.dmg", .created, size: 500, origin: true, date: start.addingTimeInterval(-11)), at: 0)
+        #expect(tick(at: 1.1) == [Self.event("fresh.dmg")])
+    }
+
+    @Test mutating func aFileWithAPartialMarkerIgnoresItsDate() {
+        let old = start.addingTimeInterval(-3_600)
+        feed(observe("long.zip.crdownload", .created, size: 10), at: 0)
+        feed(observe("long.zip.crdownload", .removed), at: 1)
+        feed(observe("long.zip", .renamed, size: 900, origin: true, date: old), at: 1)
+        #expect(tick(at: 2.1) == [Self.event("long.zip")])
+    }
+
+    @Test mutating func aCandidateThatNeverCompletesExpiresAfterTenMinutes() {
+        feed(observe("empty.pdf", .created, size: 0, origin: true), at: 0)
+        #expect(tick(at: 599).isEmpty)
+        #expect(rule.hasPending)
+        #expect(tick(at: 600).isEmpty)
+        #expect(!rule.hasPending)
+    }
+
+    @Test mutating func aCompletedFileIsForgottenAfterAnHour() {
+        feed(observe("k.pdf", .created, size: 500, origin: true), at: 0)
+        #expect(tick(at: 1.1).count == 1)
+        let later = start.addingTimeInterval(4_000)
+        feed(observe("k.pdf", .created, size: 500, origin: true, date: later), at: 4_000)
+        #expect(tick(at: 4_001.1) == [Self.event("k.pdf")])
+    }
+
+    @Test mutating func aForgottenPartialMarkerNoLongerMakesTheFinalFileACandidate() {
+        feed(observe("m.zip.crdownload", .created, size: 10), at: 0)
+        feed(observe("m.zip.crdownload", .removed), at: 1)
+        _ = tick(at: 4_000)
+        feed(observe("m.zip", .created, size: 900), at: 4_001)
+        #expect(tick(at: 4_010).isEmpty)
     }
 }

@@ -67,3 +67,28 @@ private final class PodsBatteryObject: NSObject {
     @objc let batteryPercentRight: Int = 40
     @objc let batteryPercentCase: Int = 90
 }
+
+@Suite struct BluetoothConnectionTrackerTests {
+    @Test func devicesConnectedAtStartAreNotAnnouncedAgain() {
+        let tracker = BluetoothConnectionTracker(connectedAtStart: ["aa"])
+        #expect(!tracker.announcesConnection(of: "aa"))
+        #expect(tracker.announcesConnection(of: "bb"))
+    }
+
+    @Test func aDeviceThatDisconnectedAndReconnectsIsAnnounced() {
+        var tracker = BluetoothConnectionTracker(connectedAtStart: ["aa"])
+        tracker.disconnected("aa")
+        #expect(tracker.announcesConnection(of: "aa"))
+    }
+}
+
+@Suite struct BluetoothBatteryDisplayTests {
+    @Test func singleShowsItsValue() {
+        #expect(BluetoothBattery.single(80).displayPercent == 80)
+    }
+
+    @Test func podsShowTheLowerEarbud() {
+        #expect(BluetoothBattery.pods(left: 70, right: 55, case: 90).displayPercent == 55)
+        #expect(BluetoothBattery.pods(left: nil, right: 55, case: nil).displayPercent == 55)
+    }
+}

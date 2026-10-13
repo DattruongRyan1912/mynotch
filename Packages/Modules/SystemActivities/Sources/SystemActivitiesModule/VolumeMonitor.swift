@@ -29,10 +29,15 @@ final class VolumeMonitor: VolumeMonitoring {
     private static let mute = AudioObjectPropertyAddress(
         mSelector: kAudioDevicePropertyMute, mScope: kAudioDevicePropertyScopeOutput,
         mElement: kAudioObjectPropertyElementMain)
+    /// Some devices expose mute only per channel; channel 1 is the left one.
+    private static let muteChannel1 = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyMute, mScope: kAudioDevicePropertyScopeOutput, mElement: 1)
 
     private var onChange: (@MainActor (VolumeState) -> Void)?
     private var systemListener: Listener?
     private var deviceListeners: [Listener] = []
+    /// The mute property of the bound device, nil when it has none.
+    private var muteAddress: AudioObjectPropertyAddress?
 
     init() {}
 
@@ -49,12 +54,14 @@ final class VolumeMonitor: VolumeMonitoring {
         ([systemListener].compactMap { $0 } + deviceListeners).forEach(remove)
         systemListener = nil
         deviceListeners = []
+        muteAddress = nil
         onChange = nil
     }
 
     private func bind() {
         deviceListeners.forEach(remove)
         deviceListeners = []
+        muteAddress = nil
         var address = Self.defaultDevice
         var device = AudioObjectID(kAudioObjectUnknown)
         var size = UInt32(MemoryLayout<AudioObjectID>.size)
@@ -62,9 +69,8 @@ final class VolumeMonitor: VolumeMonitoring {
               device != kAudioObjectUnknown else { return }
         var volume = Self.volume
         guard AudioObjectHasProperty(device, &volume) else { return }
-        for address in [Self.volume, Self.mute] {
-            var address = address
-            guard AudioObjectHasProperty(device, &address) else { continue }
+        muteAddress = [Self.mute, Self.muteChannel1].first { var address = $0; return AudioObjectHasProperty(device, &address) }
+        for address in [Self.volume] + [muteAddress].compactMap({ $0 }) {
             if let listener = add(device, address, { [weak self] in self?.report(device) }) {
                 deviceListeners.append(listener)
             }
@@ -73,7 +79,7 @@ final class VolumeMonitor: VolumeMonitoring {
 
     private func report(_ device: AudioObjectID) {
         guard let level = Self.read(Float32.self, device, Self.volume) else { return }
-        let muted = Self.read(UInt32.self, device, Self.mute).map { $0 != 0 } ?? false
+        let muted = muteAddress.flatMap { Self.read(UInt32.self, device, $0) }.map { $0 != 0 } ?? false
         onChange?(VolumeState(level: min(max(level, 0), 1), muted: muted))
     }
 

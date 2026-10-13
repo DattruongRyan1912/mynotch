@@ -7,8 +7,15 @@ protocol PathSource: AnyObject {
     func stop()
 }
 
+/// Source of network changes; faked in tests.
+protocol NetworkMonitoring: AnyObject {
+    /// Calls `onChange` when connectivity or the interface type changes, until `stop()`. The state at start is not reported.
+    func start(_ onChange: @escaping (NetworkStatus) -> Void)
+    func stop()
+}
+
 /// Reports changes of connectivity or interface type, settled for a while so a flapping link emits once.
-final class NetworkMonitor {
+final class NetworkMonitor: NetworkMonitoring {
     private let source: any PathSource
     private let scheduler: any Scheduler
     private let debounce: Duration
