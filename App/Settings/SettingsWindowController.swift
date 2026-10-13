@@ -45,7 +45,7 @@ extension SettingsWindowController: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         let closing = notification.object as? NSWindow
         let otherTitledWindowVisible = NSApp.windows.contains {
-            $0 !== closing && $0.isVisible && $0.styleMask.contains(.titled)
+            $0 !== closing && ($0.isVisible || $0.isMiniaturized) && $0.styleMask.contains(.titled)
         }
         if !otherTitledWindowVisible { NSApp.setActivationPolicy(.accessory) }
     }
