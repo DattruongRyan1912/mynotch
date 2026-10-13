@@ -113,7 +113,31 @@ import Testing
     @Test func aBatteryReadLaterUpdatesTheBluetoothActivityInPlace() async {
         await start()
         fakes.bluetooth.send(BluetoothEvent(name: "Buds", kind: .headphones, connected: true, battery: nil))
+        let nameOnly = entries.first
         fakes.bluetooth.send(BluetoothEvent(name: "Buds", kind: .headphones, connected: true, battery: .single(60)))
+        #expect(entries.map(\.id) == ["system/bluetooth"])
+        // `Entry` equality includes the revision, which every `set` bumps, so this shows the entry was replaced.
+        #expect(entries.first != nameOnly)
+    }
+
+    /// The monitor reads a late battery on `BluetoothBatteryRetry`'s schedule, so use it with the same clock as the activities.
+    @Test(arguments: [(seconds: 2.5, readableAt: 1.2), (seconds: 1.0, readableAt: 0.2)])
+    func aLateBatteryReadUpdatesTheVisibleBluetoothActivityBeforeItExpires(seconds: Double, readableAt: Double) async {
+        await start()
+        harness.settings.set(seconds, for: SettingKey("module.system.durationSeconds", default: 2.5, clampedTo: 1...6))
+        let bluetooth = fakes.bluetooth
+        final class Reading { var battery: BluetoothBattery? }
+        let reading = Reading()
+        func event(_ battery: BluetoothBattery?) -> BluetoothEvent {
+            BluetoothEvent(name: "Buds", kind: .headphones, connected: true, battery: battery)
+        }
+        let retry = BluetoothBatteryRetry(scheduler: harness.scheduler)
+        bluetooth.send(event(nil))
+        retry.start(key: "aa", read: { reading.battery }, deliver: { bluetooth.send(event($0)) })
+        harness.scheduler.advance(by: .seconds(readableAt))
+        reading.battery = .single(60)
+        harness.scheduler.advance(by: .seconds(seconds + 0.05 - readableAt))
+        // Past the name-only activity's own expiry: only an update in place keeps the entry.
         #expect(entries.map(\.id) == ["system/bluetooth"])
     }
 
@@ -123,6 +147,25 @@ import Testing
         #expect(harness.registry.state(of: "system") == .running)
         fakes.capsLock.send(true)
         #expect(entries.map(\.id) == ["system/capslock"])
+    }
+
+    @Test func aKindThatFailedToStartIsOnlyRetriedWhenItsOwnToggleChanges() async {
+        fakes.downloads.canStart = false
+        await start()
+        #expect(fakes.downloads.startCount == 1)
+        setting("volume", false)
+        await settle { !fakes.volume.isRunning }
+        #expect(!fakes.volume.isRunning)
+        #expect(fakes.downloads.startCount == 1)
+        fakes.downloads.canStart = true
+        setting("downloads", false)
+        setting("network", false)
+        // The network monitor stopping shows the module has seen the settings with downloads already off.
+        await settle { !fakes.network.isRunning }
+        setting("downloads", true)
+        await settle { fakes.downloads.isRunning }
+        #expect(fakes.downloads.isRunning)
+        #expect(fakes.downloads.startCount == 2)
     }
 
     @Test(arguments: [
@@ -154,6 +197,9 @@ import Testing
         #expect(!fakes.bluetooth.isRunning)
         #expect(!fakes.downloads.isRunning)
         #expect(fakes.network.isRunning)
+        // Starting Bluetooth is what raises its permission prompt, so a start followed by a stop is not good enough.
+        #expect(fakes.bluetooth.startCount == 0)
+        #expect(fakes.downloads.startCount == 0)
     }
 
     @Test func settingsRowsExistBeforeTheModuleStarts() {

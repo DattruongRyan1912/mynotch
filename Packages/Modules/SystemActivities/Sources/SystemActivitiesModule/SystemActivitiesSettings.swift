@@ -37,7 +37,7 @@ struct SystemActivitiesSettingsView: View {
             Toggle("Caps Lock bật hoặc tắt", isOn: settings.binding(keys.capsLock))
             Toggle(isOn: settings.binding(keys.downloads)) {
                 Text("Tải xuống hoàn tất")
-                Text("Lần đầu theo dõi, macOS sẽ hỏi quyền truy cập thư mục Tải xuống.")
+                Text("Lần đầu theo dõi, macOS sẽ hỏi quyền truy cập thư mục Tải xuống. Nếu đã từ chối, hãy cấp lại trong Cài đặt Hệ thống > Quyền riêng tư & Bảo mật > Tệp và Thư mục.")
             }
             Toggle(isOn: settings.binding(keys.volume)) {
                 Text("Thay đổi âm lượng")

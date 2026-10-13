@@ -14,18 +14,14 @@ protocol BluetoothMonitoring: AnyObject {
 /// Watches IOBluetooth connect notifications and a disconnect notification per device.
 /// Starting it is what first touches Bluetooth, so the permission prompt belongs to `start`.
 final class BluetoothMonitor: NSObject, BluetoothMonitoring {
-    /// Earbuds often report their battery a moment after connecting.
-    private static let batteryRetryDelay: Duration = .seconds(3)
-
-    private let scheduler: any Scheduler
     private var onEvent: (@MainActor (BluetoothEvent) -> Void)?
     private var tracker = BluetoothConnectionTracker(connectedAtStart: [String]())
-    private var batteryRetries: [String: ScheduledAction] = [:]
+    private let batteryRetry: BluetoothBatteryRetry
     private var connectNotification: IOBluetoothUserNotification?
     private var disconnectNotifications: [String: IOBluetoothUserNotification] = [:]
 
     init(scheduler: any Scheduler) {
-        self.scheduler = scheduler
+        batteryRetry = BluetoothBatteryRetry(scheduler: scheduler)
     }
 
     isolated deinit { stop() }
@@ -46,14 +42,13 @@ final class BluetoothMonitor: NSObject, BluetoothMonitoring {
         connectNotification = nil
         disconnectNotifications.values.forEach { $0.unregister() }
         disconnectNotifications = [:]
-        batteryRetries.values.forEach { $0.cancel() }
-        batteryRetries = [:]
+        batteryRetry.cancelAll()
         onEvent = nil
     }
 
     @objc private func deviceConnected(_ notification: IOBluetoothUserNotification, device: IOBluetoothDevice) {
         watchDisconnect(device)
-        guard tracker.announcesConnection(of: Self.key(device)) else { return }
+        guard tracker.connected(Self.key(device)) else { return }
         let battery = BluetoothBattery.read(from: device)
         emit(device, connected: true, battery: battery)
         if battery == nil { retryBattery(of: device) }
@@ -63,7 +58,7 @@ final class BluetoothMonitor: NSObject, BluetoothMonitoring {
         notification.unregister()
         let key = Self.key(device)
         disconnectNotifications[key] = nil
-        batteryRetries.removeValue(forKey: key)?.cancel()
+        batteryRetry.cancel(key: key)
         tracker.disconnected(key)
         emit(device, connected: false, battery: nil)
     }
@@ -78,13 +73,10 @@ final class BluetoothMonitor: NSObject, BluetoothMonitoring {
     }
 
     private func retryBattery(of device: IOBluetoothDevice) {
-        let key = Self.key(device)
-        batteryRetries[key] = scheduler.schedule(after: Self.batteryRetryDelay) { [weak self] in
-            guard let self else { return }
-            batteryRetries[key] = nil
-            guard let battery = BluetoothBattery.read(from: device), device.isConnected() else { return }
-            emit(device, connected: true, battery: battery)
-        }
+        batteryRetry.start(
+            key: Self.key(device),
+            read: { device.isConnected() ? BluetoothBattery.read(from: device) : nil },
+            deliver: { [weak self] in self?.emit(device, connected: true, battery: $0) })
     }
 
     private func emit(_ device: IOBluetoothDevice, connected: Bool, battery: BluetoothBattery?) {

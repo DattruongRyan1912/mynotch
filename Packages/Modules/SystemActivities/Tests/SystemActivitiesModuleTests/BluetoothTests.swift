@@ -70,15 +70,26 @@ private final class PodsBatteryObject: NSObject {
 
 @Suite struct BluetoothConnectionTrackerTests {
     @Test func devicesConnectedAtStartAreNotAnnouncedAgain() {
-        let tracker = BluetoothConnectionTracker(connectedAtStart: ["aa"])
-        #expect(!tracker.announcesConnection(of: "aa"))
-        #expect(tracker.announcesConnection(of: "bb"))
+        var tracker = BluetoothConnectionTracker(connectedAtStart: ["aa"])
+        let known = tracker.connected("aa")
+        let new = tracker.connected("bb")
+        #expect(!known)
+        #expect(new)
+    }
+
+    @Test func aRepeatedConnectNotificationIsAnnouncedOnce() {
+        var tracker = BluetoothConnectionTracker(connectedAtStart: [String]())
+        let first = tracker.connected("aa")
+        let again = tracker.connected("aa")
+        #expect(first)
+        #expect(!again)
     }
 
     @Test func aDeviceThatDisconnectedAndReconnectsIsAnnounced() {
         var tracker = BluetoothConnectionTracker(connectedAtStart: ["aa"])
         tracker.disconnected("aa")
-        #expect(tracker.announcesConnection(of: "aa"))
+        let reconnected = tracker.connected("aa")
+        #expect(reconnected)
     }
 }
 

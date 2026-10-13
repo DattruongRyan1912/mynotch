@@ -62,16 +62,17 @@ nonisolated struct BluetoothEvent: Equatable, Sendable {
     var battery: BluetoothBattery?
 }
 
-/// Remembers which devices were already connected when watching started: IOBluetooth's connect notification can
-/// report them too, and they are not news.
+/// Remembers which devices are connected, starting with those already connected when watching began: IOBluetooth's
+/// connect notification can report those, or the same device twice, and neither is news.
 nonisolated struct BluetoothConnectionTracker {
-    private var connected: Set<String>
+    private var addresses: Set<String>
 
     init(connectedAtStart: some Sequence<String>) {
-        connected = Set(connectedAtStart)
+        addresses = Set(connectedAtStart)
     }
 
-    func announcesConnection(of address: String) -> Bool { !connected.contains(address) }
+    /// Records the connection and returns whether it is news.
+    mutating func connected(_ address: String) -> Bool { addresses.insert(address).inserted }
 
-    mutating func disconnected(_ address: String) { connected.remove(address) }
+    mutating func disconnected(_ address: String) { addresses.remove(address) }
 }

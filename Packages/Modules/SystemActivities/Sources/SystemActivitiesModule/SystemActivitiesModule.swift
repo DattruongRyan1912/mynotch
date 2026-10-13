@@ -1,5 +1,4 @@
 import MyNotchCore
-import Network
 import Observation
 import SwiftUI
 
@@ -45,6 +44,9 @@ public final class SystemActivitiesModule: FeatureModule {
     private var monitors: SystemMonitors?
     /// Keys of the kinds whose monitor is running.
     private var running: Set<String> = []
+    /// Keys of the kinds whose monitor could not start: retried only after their own switch is turned off and on,
+    /// not on every other settings change.
+    private var failed: Set<String> = []
 
     public convenience init() {
         self.init(makeMonitors: { SystemMonitors.live(scheduler: $0) })
@@ -86,12 +88,15 @@ public final class SystemActivitiesModule: FeatureModule {
         guard let context, let kinds = kinds() else { return }
         for (activityID, kind) in kinds {
             let wanted = context.settings.value(kind.key)
-            if wanted, !running.contains(activityID) {
-                if kind.start() { running.insert(activityID) }
-            } else if !wanted, running.contains(activityID) {
-                kind.stop()
-                running.remove(activityID)
-                context.activities.clear(id: activityID)
+            if wanted, !running.contains(activityID), !failed.contains(activityID) {
+                if kind.start() { running.insert(activityID) } else { failed.insert(activityID) }
+            } else if !wanted {
+                failed.remove(activityID)
+                if running.contains(activityID) {
+                    kind.stop()
+                    running.remove(activityID)
+                    context.activities.clear(id: activityID)
+                }
             }
         }
     }
@@ -100,6 +105,7 @@ public final class SystemActivitiesModule: FeatureModule {
         guard let kinds = kinds() else { return }
         for (activityID, kind) in kinds where running.contains(activityID) { kind.stop() }
         running = []
+        failed = []
     }
 
     private func kinds() -> [String: Kind]? {

@@ -4,7 +4,8 @@ import MyNotchCore
 
 /// Source of finished downloads; faked in tests.
 protocol DownloadsWatching: AnyObject {
-    /// Calls `onDownload` for each download that finishes, until `stop()`. Returns false when watching is impossible.
+    /// Calls `onDownload` for each download that finishes, until `stop()`. Returns false when watching is impossible,
+    /// which includes a folder the user has not allowed access to.
     @discardableResult
     func start(_ onDownload: @escaping (DownloadEvent) -> Void) -> Bool
     func stop()
@@ -32,10 +33,13 @@ final class DownloadsWatcher: DownloadsWatching {
 
     isolated deinit { stop() }
 
-    /// Returns false when the event stream cannot be created.
+    /// Reads the folder once first: FSEvents alone neither makes macOS ask for access to a protected folder such as
+    /// Downloads nor reports that it was refused, while listing it asks on first use and fails when denied.
+    /// Returns false when the folder cannot be read or the event stream cannot be created.
     @discardableResult
     func start(_ onDownload: @escaping (DownloadEvent) -> Void) -> Bool {
         stop()
+        guard (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) != nil else { return false }
         self.onDownload = onDownload
         var context = FSEventStreamContext(
             version: 0, info: Unmanaged.passUnretained(self).toOpaque(), retain: nil, release: nil, copyDescription: nil)
@@ -72,7 +76,9 @@ final class DownloadsWatcher: DownloadsWatching {
         self.stream = nil
     }
 
-    private func receive(_ events: [(path: String, flags: FSEventStreamEventFlags)]) {
+    /// Ignores a callback that was already queued when `stop()` ran.
+    func receive(_ events: [(path: String, flags: FSEventStreamEventFlags)]) {
+        guard onDownload != nil else { return }
         let time = now()
         for event in events {
             let url = URL(fileURLWithPath: event.path)

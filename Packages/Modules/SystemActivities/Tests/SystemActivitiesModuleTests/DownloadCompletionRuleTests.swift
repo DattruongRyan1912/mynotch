@@ -152,6 +152,15 @@ import Testing
         #expect(tick(at: 2.1) == [Self.event("long.zip")])
     }
 
+    @Test mutating func aMarkerOnlySeenRemovedStillMakesTheFinalFileADownload() {
+        // A tiny download creates and renames its marker inside one FSEvents batch, so the marker reads as gone.
+        // The final file may carry the server's old modification date, as Firefox sets it.
+        let old = start.addingTimeInterval(-86_400)
+        feed(observe("tiny.zip.part", .removed), at: 0)
+        feed(observe("tiny.zip", .renamed, size: 900, origin: true, date: old), at: 0)
+        #expect(tick(at: 1.1) == [Self.event("tiny.zip")])
+    }
+
     @Test mutating func aCandidateThatNeverCompletesExpiresAfterTenMinutes() {
         feed(observe("empty.pdf", .created, size: 0, origin: true), at: 0)
         #expect(tick(at: 599).isEmpty)

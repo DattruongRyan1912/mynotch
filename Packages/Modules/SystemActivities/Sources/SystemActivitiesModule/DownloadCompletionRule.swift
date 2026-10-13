@@ -8,10 +8,11 @@ nonisolated struct DownloadEvent: Equatable, Sendable {
 /// Decides when a file in Downloads has finished downloading. Pure: fed observations and clock ticks.
 ///
 /// A path becomes a candidate when a browser's partial marker (`.download` bundle, `.crdownload`, `.part`)
-/// was seen for it, or when it carries a download origin attribute. A plain file copied in has neither, so it
-/// never counts; an origin-only file must also have been modified in the last few seconds, or an old
-/// quarantined file touched by Gatekeeper or a rename would look like a download. A candidate completes once no marker is present, it is not empty, and its size has been
-/// stable for a second and nothing was observed for a short while.
+/// was seen for it, even only as already removed, or when it carries a download origin attribute. A plain file
+/// copied in has neither, so it never counts; an origin-only file must also have been modified in the last few
+/// seconds, or an old quarantined file touched by Gatekeeper or a rename would look like a download. A candidate
+/// completes once no marker is present, it is not empty, and its size has been stable for a second and nothing
+/// was observed for a short while.
 nonisolated struct DownloadCompletionRule {
     static let partialExtensions: Set<String> = ["download", "crdownload", "part"]
 
@@ -56,12 +57,13 @@ nonisolated struct DownloadCompletionRule {
             let final = url.deletingPathExtension().path
             // Only `.download` is a bundle; a directory with the other extensions is not a download.
             guard !observation.isDirectory || url.pathExtension == "download" else { return }
+            // A tiny download creates and renames its marker within one batch of events, so the marker reads as removed.
+            hadPartial[final] = now
             if removed {
                 partials.remove(final)
                 candidates[final]?.sizeChangedAt = now
             } else {
                 partials.insert(final)
-                hadPartial[final] = now
                 completed[final] = nil
             }
             return
