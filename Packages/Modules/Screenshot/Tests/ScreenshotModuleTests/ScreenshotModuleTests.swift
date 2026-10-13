@@ -590,7 +590,22 @@ import Testing
 
         let source = try #require(CGImageSourceCreateWithURL(destination as CFURL, nil))
         #expect(CGImageSourceGetCount(source) == 1)
+        #expect(try Data(contentsOf: destination) == pngData(of: record))
         #expect(harness.presenter.toastCount == 1)
+    }
+
+    @Test func aFailedSaveAsKeepsTheFileItWasToReplace() async throws {
+        let record = try await capturedRecord()
+        let destination = temporaryRoot.appending(path: "chosen.png")
+        try Data("old".utf8).write(to: destination)
+        // With the stored PNG gone the copy fails, as a full disk would make it.
+        try FileManager.default.removeItem(at: #require(module.store?.url(for: record.id)))
+        let toasts = harness.presenter.toastCount
+
+        await module.export(record, to: destination)
+
+        #expect(try Data(contentsOf: destination) == Data("old".utf8))
+        #expect(harness.presenter.toastCount == toasts + 1)
     }
 
     @Test func deleteRemovesTheCaptureAndItsFile() async throws {

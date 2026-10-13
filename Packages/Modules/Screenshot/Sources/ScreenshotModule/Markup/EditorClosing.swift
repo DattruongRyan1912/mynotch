@@ -5,4 +5,10 @@ nonisolated enum EditorClosing {
     static func needsConfirmation(current: MarkupDocument, saved: MarkupDocument, closesWithoutAsking: Bool) -> Bool {
         !closesWithoutAsking && current != saved
     }
+
+    /// Whether the window closes once a save is done: not when the editor changed while it ran, since `saved` is
+    /// what the file holds and the newer edits would be lost.
+    static func shouldCloseAfterSave(saved: MarkupDocument, current: MarkupDocument) -> Bool {
+        saved == current
+    }
 }

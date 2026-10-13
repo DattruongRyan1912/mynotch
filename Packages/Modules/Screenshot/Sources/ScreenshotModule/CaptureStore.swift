@@ -94,8 +94,9 @@ final class CaptureStore {
     }
 
     /// Overwrites a capture's PNG with its marked-up version; thumbnails are rebuilt on the next request.
-    /// The record changes only once the index is saved.
-    func replaceImage(id: UUID, with image: CGImage, scale: CGFloat = 1) async throws {
+    /// `hasMarkup` is whether annotations remain on it. Every call gives the record a new `editedAt`, so views
+    /// that key on the record reload. The record changes only once the index is saved.
+    func replaceImage(id: UUID, with image: CGImage, scale: CGFloat = 1, hasMarkup: Bool = true) async throws {
         guard record(id) != nil else { throw StoreError.unknownCapture }
         let data = try await Self.pngData(image, scale: scale)
         guard let index = records.firstIndex(where: { $0.id == id }) else { throw StoreError.unknownCapture }
@@ -104,7 +105,8 @@ final class CaptureStore {
         var updated = records
         updated[index].pixelWidth = image.width
         updated[index].pixelHeight = image.height
-        updated[index].hasMarkup = true
+        updated[index].hasMarkup = hasMarkup
+        updated[index].editedAt = .now
         try save(updated)
         records = updated
     }

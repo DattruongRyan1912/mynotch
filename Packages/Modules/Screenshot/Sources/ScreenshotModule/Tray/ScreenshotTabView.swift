@@ -124,7 +124,7 @@ struct ScreenshotCardView: View {
             .lineLimit(1)
         }
         .frame(width: Self.thumbnailSize.width)
-        // The record changes when the editor saves markup, which makes the old thumbnail stale.
+        // Every markup save changes the record (`editedAt`), which makes the old thumbnail stale.
         .task(id: record) { thumbnail = await module.thumbnail(for: record, maxPixel: Self.thumbnailMaxPixel) }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Ảnh chụp lúc \(record.createdAt.formatted(date: .omitted, time: .shortened)), \(record.pixelWidth) × \(record.pixelHeight) pixel")

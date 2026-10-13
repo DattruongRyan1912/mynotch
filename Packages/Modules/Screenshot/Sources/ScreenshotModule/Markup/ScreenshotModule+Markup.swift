@@ -58,7 +58,7 @@ extension ScreenshotModule {
             let flattened = try await Self.keepSidecars(
                 of: current, original: original, markup: store.markupURL(for: record.id), document: document, image: source.image
             )
-            try await store.replaceImage(id: record.id, with: flattened, scale: source.scale)
+            try await store.replaceImage(id: record.id, with: flattened, scale: source.scale, hasMarkup: !document.annotations.isEmpty)
             refreshRecords()
             showToast("Đã lưu ảnh đã sửa", systemImage: "checkmark.circle.fill")
             return true

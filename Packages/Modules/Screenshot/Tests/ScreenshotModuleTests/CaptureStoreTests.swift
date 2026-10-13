@@ -426,6 +426,32 @@ import Testing
         #expect(makeStore().load() == [updated])
     }
 
+    @Test func everyReplacementChangesTheRecordSoTheTrayReloadsTheThumbnail() async throws {
+        let store = makeStore()
+        let original = try await store.add(Self.image(width: 40, height: 30), keepCount: 30)
+
+        var versions = [original]
+        for gray in [0.2, 0.8, 0.5] as [CGFloat] {
+            try await store.replaceImage(id: original.id, with: Self.image(width: 40, height: 30, gray: gray))
+            versions.append(try #require(store.records.first))
+        }
+
+        // The tray reloads a card's thumbnail when its record changes, so no two versions may be equal.
+        #expect(Set(versions.map(\.editedAt)).count == versions.count)
+        #expect(zip(versions, versions.dropFirst()).allSatisfy { $0 != $1 })
+        #expect(makeStore().load() == [versions[3]])
+    }
+
+    @Test func anIndexWrittenBeforeEditedAtExistedStillLoads() async throws {
+        let record = try await makeStore().add(Self.image(width: 10, height: 10), keepCount: 30)
+        let legacy = #"[{"id":"\#(record.id.uuidString)","fileName":"\#(record.fileName)","createdAt":0,"pixelWidth":10,"pixelHeight":10,"hasMarkup":false}]"#
+        try writeIndex(legacy)
+
+        let loaded = try #require(makeStore().load().first)
+        #expect(loaded.id == record.id)
+        #expect(loaded.editedAt == nil)
+    }
+
     @Test func replaceImageKeepsTheRecordWhenTheIndexCannotBeSaved() async throws {
         let store = makeStore()
         let record = try await store.add(Self.image(width: 40, height: 30), keepCount: 30)

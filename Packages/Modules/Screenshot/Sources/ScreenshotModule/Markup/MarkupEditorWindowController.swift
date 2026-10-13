@@ -64,7 +64,8 @@ final class MarkupEditorWindowController: NSObject {
         window.makeKeyAndOrderFront(nil)
     }
 
-    /// Closes every editor without asking, e.g. when the module stops.
+    /// Closes every editor without asking, e.g. when the module stops. Annotations not saved by then are lost: there
+    /// is no moment left to ask, and for this personal app that is accepted.
     func closeAll() {
         for session in Array(sessions.values) {
             session.closesWithoutAsking = true
@@ -80,8 +81,7 @@ final class MarkupEditorWindowController: NSObject {
             session.isSaving = false
             guard saved else { return }
             session.savedDocument = document
-            // Edits made while the save ran are not in the file: keep the window so they are not lost.
-            guard session.model.finishedDocument() == document else { return }
+            guard EditorClosing.shouldCloseAfterSave(saved: document, current: session.model.finishedDocument()) else { return }
             session.closesWithoutAsking = true
             session.window?.close()
         }
@@ -101,7 +101,10 @@ extension MarkupEditorWindowController: NSWindowDelegate {
     /// Asks before throwing away annotations that were not saved.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard sender.attachedSheet == nil else { return false }
-        guard let session = session(of: sender), EditorClosing.needsConfirmation(
+        guard let session = session(of: sender) else { return true }
+        // A save that succeeds closes the window itself; asking now would be about work that is being saved.
+        guard !session.isSaving else { return false }
+        guard EditorClosing.needsConfirmation(
             current: session.model.finishedDocument(), saved: session.savedDocument,
             closesWithoutAsking: session.closesWithoutAsking
         ) else { return true }

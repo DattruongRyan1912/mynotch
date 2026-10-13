@@ -81,6 +81,38 @@ extension ScreenshotModuleTests {
         #expect(visible.pixel(39, 49) == Bitmap.Pixel(r: 59, g: 79, b: 0, a: 255))
     }
 
+    @Test func everySaveChangesTheRecordTheTrayShows() async throws {
+        let record = try await capturedRecord()
+        let another = MarkupDocument(
+            imageSize: Self.redaction.imageSize, annotations: [.redact(CGRect(x: 0, y: 0, width: 10, height: 10))]
+        )
+        var shown = [record]
+
+        // The tab reloads a card's thumbnail when its record changes, also after the second and third save.
+        for document in [Self.redaction, another, Self.redaction] {
+            let source = try #require(await module.editorSource(for: shown.last ?? record))
+            #expect(await module.saveMarkup(document, of: source, for: record))
+            shown.append(try #require(module.state.records.first))
+        }
+
+        #expect(zip(shown, shown.dropFirst()).allSatisfy { $0 != $1 })
+    }
+
+    @Test func removingEveryAnnotationClearsTheMarkupBadge() async throws {
+        let record = try await capturedRecord()
+        let first = try #require(await module.editorSource(for: record))
+        #expect(await module.saveMarkup(Self.redaction, of: first, for: record))
+        #expect(module.state.records.first?.hasMarkup == true)
+        let second = try #require(await module.editorSource(for: record))
+
+        #expect(await module.saveMarkup(MarkupDocument(imageSize: Self.redaction.imageSize), of: second, for: record))
+
+        #expect(module.state.records.first?.hasMarkup == false)
+        // The original and the (empty) annotations stay, so the next edit still starts from the original.
+        let store = try #require(module.store)
+        #expect(FileManager.default.fileExists(atPath: store.originalURL(for: record.id).path(percentEncoded: false)))
+    }
+
     @Test func savingWithoutAnnotationsOfACaptureNeverEditedChangesNothing() async throws {
         let record = try await capturedRecord()
         let before = try pngData(of: record)

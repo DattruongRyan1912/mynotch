@@ -48,8 +48,8 @@ struct MarkupToolbar: View {
 
             HStack(spacing: 8) {
                 Button("Huỷ", action: onCancel)
-                Button("Copy", action: onCopy)
-                    .help("Copy ảnh đã sửa")
+                Button("Chép", action: onCopy)
+                    .help("Chép ảnh đã sửa")
                 Button("Lưu", action: onSave)
                     .keyboardShortcut("s", modifiers: .command)
                     .buttonStyle(.borderedProminent)

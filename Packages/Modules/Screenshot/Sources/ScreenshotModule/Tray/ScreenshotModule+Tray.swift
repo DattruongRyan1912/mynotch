@@ -69,12 +69,19 @@ extension ScreenshotModule {
         }
     }
 
+    /// The copy is made before the old file is touched, so a failed copy leaves the file the panel asked about.
     @concurrent
     private nonisolated static func copyReplacing(_ source: URL, to destination: URL) async throws {
-        if FileManager.default.fileExists(atPath: destination.path(percentEncoded: false)) {
-            try FileManager.default.removeItem(at: destination)
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: destination.path(percentEncoded: false)) else {
+            try fileManager.copyItem(at: source, to: destination)
+            return
         }
-        try FileManager.default.copyItem(at: source, to: destination)
+        let folder = try fileManager.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: destination, create: true)
+        defer { try? fileManager.removeItem(at: folder) }
+        let copy = folder.appending(path: destination.lastPathComponent, directoryHint: .notDirectory)
+        try fileManager.copyItem(at: source, to: copy)
+        _ = try fileManager.replaceItemAt(destination, withItemAt: copy)
     }
 
     func delete(_ record: CaptureRecord) {

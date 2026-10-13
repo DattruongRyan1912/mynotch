@@ -22,6 +22,15 @@ import Testing
         #expect(!EditorClosing.needsConfirmation(current: edited, saved: saved, closesWithoutAsking: true))
     }
 
+    @Test func theWindowClosesAfterASaveOfWhatTheEditorShows() {
+        #expect(EditorClosing.shouldCloseAfterSave(saved: edited, current: edited))
+    }
+
+    @Test func editsMadeWhileSavingKeepTheWindowOpen() {
+        // The save wrote `saved`; closing would lose what was added since.
+        #expect(!EditorClosing.shouldCloseAfterSave(saved: saved, current: edited))
+    }
+
     @Test func editsMadeAfterASaveStillNeedConfirmation() {
         // The saved document is what the save wrote, not what the editor shows now.
         #expect(EditorClosing.needsConfirmation(current: edited, saved: saved, closesWithoutAsking: false))
