@@ -34,6 +34,14 @@ packages:
     path: Packages/Modules/Media
   ScreenshotModule:
     path: Packages/Modules/Screenshot
+  ShelfModule:
+    path: Packages/Modules/Shelf
+  ShortcutsModule:
+    path: Packages/Modules/Shortcuts
+  SystemActivitiesModule:
+    path: Packages/Modules/SystemActivities
+  TimerModule:
+    path: Packages/Modules/Timer
   TranslationModule:
     path: Packages/Modules/Translation
   KeyboardShortcuts:
@@ -57,6 +65,10 @@ targets:
       - package: ClipboardModule
       - package: MediaModule
       - package: ScreenshotModule
+      - package: ShelfModule
+      - package: ShortcutsModule
+      - package: SystemActivitiesModule
+      - package: TimerModule
       - package: TranslationModule
       - package: KeyboardShortcuts
       # Copied into Contents/Frameworks for perl to load; the app binary never links it.
@@ -64,6 +76,13 @@ targets:
         embed: true
         link: false
         codeSign: true
+      # Copied into Contents/MacOS, where AIAgentsModule's HookSetup looks for the helper.
+      - target: mynotch-hook
+        embed: true
+        link: false
+        codeSign: true
+        copy:
+          destination: executables
     info:
       path: App/Info.plist
       properties:
@@ -140,5 +159,20 @@ targets:
         # Upstream declares its C functions as `void f();`, which floods the build log with one warning per use.
         CLANG_WARN_STRICT_PROTOTYPES: NO
         DEFINES_MODULE: NO
+        SKIP_INSTALL: YES
+        ENABLE_HARDENED_RUNTIME: YES
+  # The hook helper Claude Code and Codex run (see AIAgents' HookSetup); it only sends a datagram to the app.
+  mynotch-hook:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Tools/mynotch-hook
+    dependencies:
+      - package: AIAgentsModule
+        product: AgentHookKit
+    settings:
+      groups: [signing]
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch.hook
         SKIP_INSTALL: YES
         ENABLE_HARDENED_RUNTIME: YES

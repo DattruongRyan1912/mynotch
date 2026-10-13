@@ -5,6 +5,10 @@ import ClipboardModule
 import MediaModule
 import MyNotchCore
 import ScreenshotModule
+import ShelfModule
+import ShortcutsModule
+import SystemActivitiesModule
+import TimerModule
 import TranslationModule
 
 /// The ONLY place modules are wired into the app. Add one line per new module.
@@ -18,6 +22,10 @@ enum ModuleList {
             ScreenshotModule(),
             AIAgentsModule(),
             BatteryModule(),
+            ShortcutsModule(),
+            TimerModule(),
+            ShelfModule(),
+            SystemActivitiesModule(),
         ]
     }
 }
