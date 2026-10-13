@@ -12,7 +12,7 @@ nonisolated public struct SettingKey<Value: Codable & Sendable>: Sendable {
 }
 
 extension SettingKey where Value: Comparable {
-    /// A key whose stored value is clamped into `range` when read.
+    /// A key whose value is clamped into `range` on read and write, including the default.
     public init(_ name: String, default defaultValue: Value, clampedTo range: ClosedRange<Value>) {
         self.name = name
         self.defaultValue = defaultValue
