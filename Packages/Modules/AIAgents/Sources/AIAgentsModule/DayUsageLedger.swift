@@ -41,7 +41,7 @@ nonisolated struct DayUsageLedger: Equatable, Sendable {
     /// What was seen of messages before the current day began, so a message whose records straddle midnight
     /// counts only what came after. Replaced at each new day.
     private var earlier: [MessageKey: UsageTotals] = [:]
-    /// The latest running total of each session that reports totals (Codex). It is a baseline, not a day's
+    /// The highest running total of each session that reports totals (Codex). It is a baseline, not a day's
     /// usage, so it is kept across midnight: what a session adds after midnight is the difference from it.
     private var runningTotals: [SessionKey: UsageTotals] = [:]
     private var totalOrder: [SessionKey] = []
@@ -60,10 +60,12 @@ nonisolated struct DayUsageLedger: Equatable, Sendable {
         if usage.isCumulative {
             let key = SessionKey(source: source, sessionID: sessionID)
             let previous = runningTotals[key]
-            remember(total: totals, for: key)
-            // Fewer tokens than before means the agent counts from zero again. With nothing before it, the total
-            // is a starting point unless the whole session was read, since it may hold work from before anything was watched.
-            added = previous.map { totals.isAtLeast($0) ? totals - $0 : totals } ?? (usage.startsFromZero ? totals : UsageTotals())
+            // The highest total seen is the baseline: a session's file read again from its start (the agent was turned
+            // off and on, or the session was dropped and came back) repeats lower totals, which are already counted.
+            if previous.map({ totals.isAtLeast($0) }) ?? true { remember(total: totals, for: key) }
+            // With nothing before it, the total is a starting point unless the whole session was read, since it may
+            // hold work from before anything was watched.
+            added = previous.map { totals.isAtLeast($0) ? totals - $0 : UsageTotals() } ?? (usage.startsFromZero ? totals : UsageTotals())
         } else if let id = usage.messageID {
             if messagesDay != dayStart {
                 earlier = messages

@@ -27,6 +27,7 @@ final class FakeOpener {
     let sandbox: Sandbox
     let fileSystem = FakeAgentFileSystem()
     let opener = FakeOpener()
+    let hookInstaller = FakeHookInstaller()
     let module: AIAgentsModule
     let harness: RegistryHarness
     /// Unix socket paths are short, so this is outside the sandboxed temporary directory.
@@ -40,7 +41,7 @@ final class FakeOpener {
         fileSystem.setAlive(4242)
         module = AIAgentsModule(
             fileSystem: fileSystem, claudeRoot: sandbox.claude, codexRoot: sandbox.codex, opener: opener.opener,
-            hookSetup: FakeHookInstaller().setup(in: sandbox.directory), socketPath: socketDirectory.appending(path: "agent.sock").path
+            hookSetup: hookInstaller.setup(in: sandbox.directory), socketPath: socketDirectory.appending(path: "agent.sock").path
         )
         harness = RegistryHarness([module])
     }
@@ -409,6 +410,24 @@ final class FakeOpener {
         #expect(await waitUntil { store.sessions[key(codexID, .codex)] != nil })
     }
 
+    @Test func aCodexRolloutIsCountedOnceHoweverOftenCodexIsTurnedOffAndOn() async throws {
+        try sandbox.write(
+            Line.codexMeta() + Line.codexContext + Line.codexTurn() + Line.codexTokens(input: 1_000, output: 0) + Line.codexTokens(input: 1_500, output: 0),
+            to: sandbox.rollout(codexID)
+        )
+        await start()
+        #expect(await waitUntil { store.todayUsage[.codex]?.tokens.input == 1_500 })
+        for _ in 0..<3 {
+            harness.settings.set(false, for: keys.codexEnabled)
+            await settle { store.sessions[key(codexID, .codex)] == nil }
+            #expect(store.sessions[key(codexID, .codex)] == nil)
+            // The rollout is read again from its first line, whose total is lower than the last one seen.
+            harness.settings.set(true, for: keys.codexEnabled)
+            #expect(await waitUntil { store.sessions[key(codexID, .codex)] != nil })
+        }
+        #expect(store.todayUsage[.codex]?.tokens.input == 1_500)
+    }
+
     @Test func nothingIsWatchedWhileBothAgentsAreOff() async throws {
         try liveClaudeSession()
         try codexRollout()
@@ -420,6 +439,26 @@ final class FakeOpener {
         #expect(store.sessions.isEmpty)
         harness.settings.set(true, for: keys.codexEnabled)
         #expect(await waitUntil { fileSystem.isWatching && store.sessions.count == 1 })
+    }
+
+    @Test func eachAgentHasOneWatchHoweverOftenTheSettingsChange() async throws {
+        try sandbox.createDirectory(sandbox.claude)
+        try sandbox.createDirectory(sandbox.codex)
+        await start()
+        #expect(await waitUntil { fileSystem.activeWatchCount == 2 })
+        harness.settings.set(7, for: keys.finishedSeconds)
+        harness.settings.set(false, for: keys.showWorkingActivity)
+        await settle { store.finishedSeconds == 7 }
+        harness.settings.set(false, for: keys.codexEnabled)
+        #expect(await waitUntil { fileSystem.activeWatchCount == 1 })
+        harness.settings.set(true, for: keys.codexEnabled)
+        #expect(await waitUntil { fileSystem.activeWatchCount == 2 })
+        harness.settings.set(8, for: keys.finishedSeconds)
+        await settle { store.finishedSeconds == 8 }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(fileSystem.activeWatchCount == 2)
+        await harness.registry.setEnabled(false, for: "aiagents")
+        #expect(await waitUntil { fileSystem.activeWatchCount == 0 })
     }
 
     @Test func turningAnAgentOffClearsItsActivity() async throws {
@@ -461,8 +500,8 @@ final class FakeOpener {
 
     // MARK: Precise status
 
-    func sendHook(_ event: String, id: String = "s1") throws {
-        let payload = HookPayload(source: "claude", event: event, sessionID: id, tool: event == "PreToolUse" ? "Bash" : nil, timestamp: Date())
+    func sendHook(_ event: String, source: String = "claude", id: String = "s1") throws {
+        let payload = HookPayload(source: source, event: event, sessionID: id, tool: event == "PreToolUse" ? "Bash" : nil, timestamp: Date())
         HookDatagramSender.send(try #require(payload.encodedDatagram()), to: socketPath)
     }
 
@@ -499,6 +538,71 @@ final class FakeOpener {
         try sendHook("UserPromptSubmit")
         try await Task.sleep(for: .milliseconds(100))
         #expect(store.sessions.isEmpty)
+    }
+
+    @Test func hookEventsOfAnAgentThatIsTurnedOffAreIgnored() async throws {
+        harness.settings.set(false, for: keys.claudeEnabled)
+        harness.settings.set(true, for: keys.preciseStatus)
+        await start()
+        try sendHook("PermissionRequest")
+        try sendHook("UserPromptSubmit", source: "codex", id: "c1")
+        // The datagrams are delivered in order, so the Codex session shows once the Claude one was dealt with.
+        #expect(await waitUntil { store.sessions[key("c1", .codex)] != nil })
+        #expect(store.sessions[key()] == nil)
+        await settle { module.publishedActivity != nil }
+        #expect(module.publishedActivity?.source == .codex)
+        // On again, its hooks count; off again, they stop, though the socket keeps listening for Codex.
+        harness.settings.set(true, for: keys.claudeEnabled)
+        try sendHook("UserPromptSubmit", id: "on")
+        #expect(await waitUntil { store.sessions[key("on")] != nil })
+        harness.settings.set(false, for: keys.claudeEnabled)
+        await settle { store.sessions[key("on")] == nil }
+        try sendHook("UserPromptSubmit", id: "off")
+        try sendHook("UserPromptSubmit", source: "codex", id: "c2")
+        #expect(await waitUntil { store.sessions[key("c2", .codex)] != nil })
+        #expect(store.sessions[key("off")] == nil)
+    }
+
+    @Test func installingHooksTurnsPreciseStatusOnSoTheyGoSomewhere() throws {
+        let environment = try #require(harness.settingsEnvironment(for: "aiagents"))
+        let hooks = module.hookSetupModel(for: environment)
+        #expect(!environment.settings.value(keys.preciseStatus))
+        hookInstaller.helperFailure = HookHelper.Unavailable(path: "/app/mynotch-hook")
+        hooks.merge(.claude)
+        #expect(!environment.settings.value(keys.preciseStatus))
+        hookInstaller.helperFailure = nil
+        hooks.merge(.codex)
+        #expect(environment.settings.value(keys.preciseStatus))
+        environment.settings.set(false, for: keys.preciseStatus)
+        hooks.installClaudePlugin()
+        #expect(environment.settings.value(keys.preciseStatus))
+    }
+
+    @Test func theInstallButtonsKeepTheirModelWhenTheSettingsRowsAreBuiltAgain() throws {
+        let environment = try #require(harness.settingsEnvironment(for: "aiagents"))
+        let hooks = module.hookSetupModel(for: environment)
+        hooks.merge(.claude)
+        #expect(module.hookSetupModel(for: environment) === hooks)
+        #expect(!module.hookSetupModel(for: environment).message.isEmpty)
+    }
+
+    @Test func aSocketThatCannotBeOpenedIsNotRetriedWithEveryChange() async throws {
+        // A file where the socket's folder should be.
+        try Data().write(to: socketDirectory)
+        harness.settings.set(true, for: keys.preciseStatus)
+        await start()
+        try FileManager.default.removeItem(at: socketDirectory)
+        harness.settings.set(7, for: keys.finishedSeconds)
+        await settle { store.finishedSeconds == 7 }
+        #expect(store.finishedSeconds == 7)
+        #expect(!FileManager.default.fileExists(atPath: socketPath))
+        // Switching the setting off and on tries again.
+        // The finished-seconds change shows that a refresh has run with the setting off.
+        harness.settings.set(false, for: keys.preciseStatus)
+        harness.settings.set(8, for: keys.finishedSeconds)
+        await settle { store.finishedSeconds == 8 }
+        harness.settings.set(true, for: keys.preciseStatus)
+        #expect(await waitUntil { FileManager.default.fileExists(atPath: socketPath) })
     }
 
     @Test func disablingTheModuleStopsListening() async {

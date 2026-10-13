@@ -58,7 +58,8 @@ public final class AIAgentsModule: FeatureModule {
     private let claudeRoot: URL
     private let codexRoot: URL
     private let opener: AgentOpener
-    private let hookSetup: HookSetup
+    /// Nil is the real installer, which needs the module's storage and so is made with the Settings rows.
+    private let hookSetup: HookSetup?
     /// Where the hook socket is; nil is the standard place in the module's storage.
     private let socketPath: String?
     private var context: ModuleContext?
@@ -66,6 +67,10 @@ public final class AIAgentsModule: FeatureModule {
     private var watchers: [AgentSource: AgentWatcher] = [:]
     /// Set while the setting `preciseStatus` is on and the socket could be opened.
     private var eventServer: AgentEventServer?
+    /// The socket could not be opened; it is tried again only after the setting was switched off and on.
+    private var listenFailed = false
+    /// Kept here because the Settings rows are built again whenever the page refreshes, which would reset its message.
+    private var hookModel: HookSetupModel?
 
     /// Reads the real `~/.claude` and `~/.codex`.
     public convenience init() {
@@ -77,7 +82,7 @@ public final class AIAgentsModule: FeatureModule {
     /// they use instead of the real ones.
     init(
         fileSystem: any AgentFileSystem, claudeRoot: URL, codexRoot: URL, opener: AgentOpener,
-        hookSetup: HookSetup = .system, socketPath: String? = nil
+        hookSetup: HookSetup? = nil, socketPath: String? = nil
     ) {
         self.fileSystem = fileSystem
         self.claudeRoot = claudeRoot
@@ -117,6 +122,7 @@ public final class AIAgentsModule: FeatureModule {
         watchers = [:]
         eventServer?.stop()
         eventServer = nil
+        listenFailed = false
     }
 
     public func makeTab() -> NotchTab? {
@@ -135,10 +141,23 @@ public final class AIAgentsModule: FeatureModule {
             showWorkingActivity: environment.settings.binding(keys.showWorkingActivity),
             finishedSeconds: environment.settings.binding(keys.finishedSeconds),
             preciseStatus: environment.settings.binding(keys.preciseStatus),
-            hooks: HookSetupModel(
-                setup: hookSetup, pluginDirectory: environment.storage.directory.appending(path: "claude-plugin", directoryHint: .isDirectory)
-            )
+            hooks: hookSetupModel(for: environment)
         ))
+    }
+
+    /// Installing hooks turns `preciseStatus` on, since hooks that nothing listens to do nothing.
+    func hookSetupModel(for environment: ModuleSettingsEnvironment) -> HookSetupModel {
+        if let hookModel { return hookModel }
+        let storage = environment.storage.directory
+        let settings = environment.settings
+        let preciseStatus = AIAgentsSettingsKeys(settings).preciseStatus
+        let model = HookSetupModel(
+            setup: hookSetup ?? .system(storageDirectory: storage),
+            pluginDirectory: storage.appending(path: "claude-plugin", directoryHint: .isDirectory),
+            didInstall: { settings.set(true, for: preciseStatus) }
+        )
+        hookModel = model
+        return model
     }
 
     var actions: AgentTabActions {
@@ -221,17 +240,23 @@ public final class AIAgentsModule: FeatureModule {
         guard enabled else {
             eventServer?.stop()
             eventServer = nil
+            listenFailed = false
             return
         }
-        guard eventServer == nil else { return }
+        guard eventServer == nil, !listenFailed else { return }
         let path = socketPath ?? AgentSocket.path(inStorageDirectory: context.storage.directory)
+        let settings = context.settings
+        let keys = AIAgentsSettingsKeys(settings)
         let server = AgentEventServer(directory: URL(filePath: path).deletingLastPathComponent()) { [weak store] payload in
-            store?.apply(payload.agentEvents, fromHooks: true)
+            // Read when the event arrives, so an agent turned off since the socket opened stays quiet.
+            let events = payload.agentEvents.filter { settings.value($0.source == .claude ? keys.claudeEnabled : keys.codexEnabled) }
+            if !events.isEmpty { store?.apply(events, fromHooks: true) }
         }
         do {
             try server.start()
             eventServer = server
         } catch {
+            listenFailed = true
             context.logger.error("Cannot listen for agent hooks: \(String(describing: error), privacy: .public)")
         }
     }

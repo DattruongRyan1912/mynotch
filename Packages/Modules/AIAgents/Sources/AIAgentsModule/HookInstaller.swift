@@ -18,6 +18,10 @@ struct HookInstaller {
     static let codexTrustNote = "Codex sẽ hỏi bạn tin cậy hook mới (xem lại trong Codex) trước khi chạy chúng."
     static let pluginName = "mynotch"
     static let marketplaceName = "mynotch-local"
+    /// Shown with the plugin route: the app does not run the plugin commands, so it cannot undo them either.
+    static let pluginUninstallCommand = "claude plugin uninstall \(pluginName)@\(marketplaceName)"
+    /// A hook that has not answered by then is killed, so a stuck helper never holds up the agent.
+    static let hookTimeoutSeconds = 5
 
     var now: () -> Date = { Date() }
     var calendar: Calendar = .autoupdatingCurrent
@@ -171,17 +175,20 @@ struct HookInstaller {
     // MARK: Hook entries
 
     private static func group(helperPath: String, source: String) -> [String: Any] {
-        ["hooks": [["type": "command", "command": command(helperPath: helperPath, source: source)]]]
+        ["hooks": [["type": "command", "command": command(helperPath: helperPath, source: source), "timeout": hookTimeoutSeconds]]]
     }
 
-    private static func command(helperPath: String, source: String) -> String {
-        "\(shellQuoted(helperPath)) --source \(source)"
+    /// Runs the helper only while it is there: a moved or trashed app would otherwise make the shell exit 127, which
+    /// the agent reports as a hook error on every event. The helper itself always exits 0.
+    static func command(helperPath: String, source: String) -> String {
+        "P=\(shellQuoted(helperPath)); [ -x \"$P\" ] && exec \"$P\" --source \(source); exit 0"
     }
 
-    /// The command is the quoted helper path followed by its arguments, so a longer path that starts the same is not ours.
+    /// The command starts with the quoted helper path, so a longer path that starts the same is not ours. The
+    /// bare `'<path>' --source …` form of the first version is still ours, so it can be removed.
     private static func runsHelper(_ command: String, helperPath: String) -> Bool {
         let quoted = shellQuoted(helperPath)
-        return command == quoted || command.hasPrefix(quoted + " ")
+        return command.hasPrefix("P=" + quoted + "; ") || command == quoted || command.hasPrefix(quoted + " ")
     }
 
     private static func commands(in group: Any) -> [String] {

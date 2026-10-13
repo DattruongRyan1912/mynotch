@@ -54,6 +54,7 @@ struct AIAgentsSettingsView: View {
                 Text(hooks.message)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
             }
         }
         .alert(
@@ -63,7 +64,7 @@ struct AIAgentsSettingsView: View {
             Button("Thêm") { hooks.merge(target) }
             Button("Huỷ", role: .cancel) {}
         } message: { target in
-            Text("Một bản sao lưu \(hooks.url(of: target).lastPathComponent).mynotch-<thời gian>.bak được tạo cạnh file trước khi sửa. Hook của công cụ khác và mọi khoá khác được giữ nguyên.")
+            Text(hooks.preview(of: target))
         }
     }
 }

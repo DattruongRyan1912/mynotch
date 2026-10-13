@@ -141,6 +141,17 @@ import Testing
         }
     }
 
+    @Test func aLongerNumberAfterTheNameIsAnotherModelNotTheShorterOne() {
+        // `claude-opus-4-11` is not `claude-opus-4-1` with a stray digit; only an eight-digit date may follow a dash.
+        for model in [
+            "claude-opus-4-11", "claude-opus-4-10", "claude-fable-5-10", "claude-sonnet-4-60", "claude-opus-5-100",
+            "claude-opus-5-5-100", "claude-opus-4-1-2025080", "claude-opus-4-1-202508051",
+        ] {
+            #expect(UsageCalculator.price(for: model) == nil, "\(model)")
+        }
+        #expect(UsageCalculator.price(for: "claude-opus-4-1-20250805")?.input == 15)
+    }
+
     @Test func unpricedUsageShowsNoCost() {
         #expect(UsageCalculator.estimatedCost(of: UsageTotals(input: 5_000), model: "claude-opus-9") == nil)
     }

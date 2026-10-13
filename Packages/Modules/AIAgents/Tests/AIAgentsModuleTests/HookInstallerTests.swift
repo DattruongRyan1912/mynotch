@@ -33,6 +33,23 @@ import Testing
         (group["hooks"] as? [NSDictionary])?.compactMap { $0["command"] as? String } ?? []
     }
 
+    func firstHook(_ group: NSDictionary) -> NSDictionary? {
+        (group["hooks"] as? [NSDictionary])?.first
+    }
+
+    /// Runs a hook command as the agents do, through a shell.
+    func run(_ command: String) throws -> (status: Int32, output: String) {
+        let process = Process()
+        process.executableURL = URL(filePath: "/bin/sh")
+        process.arguments = ["-c", command]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+    }
+
     func ours(_ root: NSDictionary, _ event: String) -> [NSDictionary] {
         groups(root, event).filter { commands($0).contains { $0.contains(helper) } }
     }
@@ -60,7 +77,8 @@ import Testing
         let merged = try object(at: url)
         for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Notification", "Stop", "StopFailure", "SessionEnd"] {
             #expect(ours(merged, event).count == 1, "\(event)")
-            #expect(commands(ours(merged, event)[0]).first?.hasSuffix("--source claude") == true)
+            #expect(commands(ours(merged, event)[0]) == [HookInstaller.command(helperPath: helper, source: "claude")], "\(event)")
+            #expect(firstHook(ours(merged, event)[0])?["timeout"] as? Int == 5, "\(event)")
         }
         #expect(groups(merged, "PreToolUse").count == 2)
         #expect(groups(merged, "Stop").count == 2)
@@ -158,11 +176,14 @@ import Testing
     @Test func onlyTheExactQuotedHelperIsOurs() throws {
         defer { cleanUp() }
         let sibling = "'\(helper)-beta' --source claude"
-        let url = try write(#"{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "\#(sibling)"}]}]}}"#, to: "settings.json")
+        let guardedSibling = HookInstaller.command(helperPath: helper + "-beta", source: "claude")
+        let entries = [sibling, guardedSibling].map { ["type": "command", "command": $0] }
+        let json = try JSONSerialization.data(withJSONObject: ["hooks": ["Stop": [["hooks": entries]]]])
+        let url = try write(String(decoding: json, as: UTF8.self), to: "settings.json")
         _ = try installer.mergeClaudeSettings(settingsURL: url, helperPath: helper)
         #expect(groups(try object(at: url), "Stop").count == 2)
         _ = try installer.removeClaude(settingsURL: url, helperPath: helper)
-        #expect(groups(try object(at: url), "Stop").map(commands) == [[sibling]])
+        #expect(groups(try object(at: url), "Stop").map(commands) == [[sibling, guardedSibling]])
     }
 
     @Test func aWriteKeepsThePermissionsOfTheFile() throws {
@@ -203,7 +224,8 @@ import Testing
         let merged = try object(at: url)
         for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd"] {
             #expect(ours(merged, event).count == 1, "\(event)")
-            #expect(commands(ours(merged, event)[0]).first?.hasSuffix("--source codex") == true)
+            #expect(commands(ours(merged, event)[0]) == [HookInstaller.command(helperPath: helper, source: "codex")], "\(event)")
+            #expect(firstHook(ours(merged, event)[0])?["timeout"] as? Int == 5, "\(event)")
         }
         #expect(groups(merged, "PreToolUse").count == 2)
         #expect(try installer.mergeCodexHooks(hooksURL: url, helperPath: helper).isEmpty)
@@ -214,6 +236,7 @@ import Testing
     }
 
     @Test func codexAsksToTrustNewHooks() {
+        defer { cleanUp() }
         #expect(HookInstaller.codexTrustNote.contains("Codex"))
     }
 
@@ -243,6 +266,8 @@ import Testing
         let hooks = try object(at: plugin.appending(path: "hooks/hooks.json"))
         for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Notification", "Stop", "StopFailure", "SessionEnd"] {
             #expect(ours(hooks, event).count == 1, "\(event)")
+            #expect(commands(ours(hooks, event)[0]) == [HookInstaller.command(helperPath: helper, source: "claude")], "\(event)")
+            #expect(firstHook(ours(hooks, event)[0])?["timeout"] as? Int == 5, "\(event)")
         }
         #expect(commandsToShow == [
             "claude plugin marketplace add '\(plugin.path)'",
@@ -250,7 +275,36 @@ import Testing
         ])
     }
 
+    // MARK: The command
+
+    @Test func aHelperThatIsMissingOrNotExecutableIsASilentSuccessNotAHookError() throws {
+        defer { cleanUp() }
+        let missing = HookInstaller.command(helperPath: directory.appending(path: "gone's/mynotch-hook").path, source: "claude")
+        let missingResult = try run(missing)
+        #expect(missingResult.status == 0)
+        #expect(missingResult.output.isEmpty)
+        let plain = try write("#!/bin/sh\nexit 3\n", to: "plain-hook")
+        let plainResult = try run(HookInstaller.command(helperPath: plain.path, source: "claude"))
+        #expect(plainResult.status == 0)
+        #expect(plainResult.output.isEmpty)
+    }
+
+    @Test func theCommandRunsTheHelperWithItsSourceFromAPathWithSpacesAndAQuote() throws {
+        defer { cleanUp() }
+        let folder = directory.appending(path: "Application Support's bin", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let marker = directory.appending(path: "arguments.txt")
+        let script = folder.appending(path: "mynotch-hook")
+        try Data("#!/bin/sh\necho \"$@\" > '\(marker.path)'\nexit 7\n".utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        let result = try run(HookInstaller.command(helperPath: script.path, source: "codex"))
+        #expect(try String(contentsOf: marker, encoding: .utf8) == "--source codex\n")
+        // The helper's own status is what the agent sees; the real helper always exits 0.
+        #expect(result.status == 7)
+    }
+
     @Test func shellQuotingSurvivesASingleQuoteInThePath() {
+        defer { cleanUp() }
         #expect(HookInstaller.shellQuoted("/a b/it's") == "'/a b/it'\\''s'")
     }
 }

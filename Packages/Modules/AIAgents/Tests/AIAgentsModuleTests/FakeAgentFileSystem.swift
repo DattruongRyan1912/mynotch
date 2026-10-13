@@ -16,6 +16,8 @@ nonisolated final class FakeAgentFileSystem: AgentFileSystem, @unchecked Sendabl
 
     var watchedRoots: [URL] { lock.withLock { roots } }
     var isWatching: Bool { lock.withLock { !handlers.isEmpty } }
+    /// How many watches are live; `watchedRoots` only remembers the last one's roots.
+    var activeWatchCount: Int { lock.withLock { handlers.count } }
 
     func setAlive(_ pids: pid_t...) {
         lock.withLock { alivePIDs = Set(pids) }

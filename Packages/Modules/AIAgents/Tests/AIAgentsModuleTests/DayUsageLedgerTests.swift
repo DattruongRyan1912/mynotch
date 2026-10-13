@@ -141,6 +141,28 @@ import Testing
         #expect(ledger.usage(now: noon, calendar: calendar)[.codex]?.tokens.input == 100)
     }
 
+    @Test func aRolloutReadAgainFromItsFirstTotalCountsNothingMore() {
+        var ledger = DayUsageLedger()
+        record(&ledger, total(1_000, fromStart: true), .codex, session: "x")
+        record(&ledger, total(1_500), .codex, session: "x")
+        for _ in 0..<3 {
+            record(&ledger, total(1_000, fromStart: true), .codex, session: "x")
+            record(&ledger, total(1_500), .codex, session: "x")
+        }
+        #expect(ledger.usage(now: noon, calendar: calendar)[.codex]?.tokens.input == 1_500)
+        record(&ledger, total(1_800), .codex, session: "x")
+        #expect(ledger.usage(now: noon, calendar: calendar)[.codex]?.tokens.input == 1_800)
+    }
+
+    @Test func aTotalBelowTheHighestSeenAddsNothingAndLeavesTheBaseline() {
+        var ledger = DayUsageLedger()
+        record(&ledger, total(5_000, fromStart: true), .codex, session: "x")
+        record(&ledger, total(300), .codex, session: "x")
+        #expect(ledger.usage(now: noon, calendar: calendar)[.codex]?.tokens.input == 5_000)
+        record(&ledger, total(5_100), .codex, session: "x")
+        #expect(ledger.usage(now: noon, calendar: calendar)[.codex]?.tokens.input == 5_100)
+    }
+
     @Test func theRunningTotalMemoryIsBounded() {
         var ledger = DayUsageLedger()
         for number in 0..<(DayUsageLedger.totalMemory + 50) {

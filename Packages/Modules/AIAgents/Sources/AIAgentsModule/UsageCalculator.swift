@@ -65,13 +65,17 @@ nonisolated enum UsageCalculator {
         return exactPrices[model] ?? prefixPrices.first { matches(model, prefix: $0.prefix) }?.price
     }
 
-    /// `prefix` names the model, optionally followed by a suffix (`[1m]`) or a date (`-20260101`). A short number
-    /// after a dash (`claude-opus-5` against `claude-opus-5-9`) is another release with a price of its own.
+    /// `prefix` names the model, optionally followed by a suffix (`[1m]`) or a date (`-20260101`). Any other number
+    /// after it (`claude-opus-5` against `claude-opus-5-9`, or `claude-opus-4-1` against `claude-opus-4-11`) is
+    /// another release with a price of its own.
     private static func matches(_ model: String, prefix: String) -> Bool {
         guard model.hasPrefix(prefix) else { return false }
         let rest = model.dropFirst(prefix.count)
-        guard rest.first == "-" else { return true }
-        return !(1...2).contains(rest.dropFirst().prefix(while: \.isNumber).count)
+        guard let next = rest.first else { return true }
+        guard !next.isNumber else { return false }
+        guard next == "-" else { return true }
+        let digits = rest.dropFirst().prefix(while: \.isNumber).count
+        return digits == 0 || digits == 8
     }
 
     /// Nil when the model has no price.

@@ -330,13 +330,19 @@ import Testing
         #expect(store.todayUsage[.codex]?.tokens == UsageTotals(input: 2_000))
     }
 
-    @Test func aCodexTotalThatGoesDownStartsCountingAgain() {
+    @Test func aCodexRolloutReadAgainFromItsFirstTotalIsNotCountedAgain() {
         func total(_ input: Int, fromStart: Bool = false) -> AgentUsage {
             AgentUsage(input: input, model: "gpt-5-codex", isCumulative: true, startsFromZero: fromStart)
         }
-        store.apply(event(.usageUpdated, .codex, usage: total(5_000, fromStart: true)))
-        store.apply(event(.usageUpdated, .codex, usage: total(300)))
-        #expect(store.todayUsage[.codex]?.tokens.input == 5_300)
+        store.apply(event(.usageUpdated, .codex, usage: total(1_000, fromStart: true)))
+        store.apply(event(.usageUpdated, .codex, usage: total(1_500)))
+        store.apply(event(.sessionEnded, .codex))
+        // The whole rollout comes back, so its earlier totals are lower than the last one seen.
+        store.apply(event(.usageUpdated, .codex, usage: total(1_000, fromStart: true)))
+        store.apply(event(.usageUpdated, .codex, usage: total(1_500)))
+        #expect(store.todayUsage[.codex]?.tokens.input == 1_500)
+        store.apply(event(.usageUpdated, .codex, usage: total(1_700)))
+        #expect(store.todayUsage[.codex]?.tokens.input == 1_700)
     }
 
     @Test func usageIsKeptPerModelAndPricedFromTheTable() {
@@ -621,11 +627,26 @@ import Testing
         #expect(state() == .idle)
     }
 
-    @Test func waitingForInputIsNotAnInterruptedTurn() {
-        store.apply(event(.waitingForInput))
+    @Test func aWaitingClaudeSessionWhoseRegistryIsIdleStopsAfterNinetySeconds() {
+        // Esc at a permission prompt fires no hook, so only the registry shows that the turn is over.
+        store.apply([event(.waitingForInput)], fromHooks: true)
         store.updateRegistry([registryEntry(status: .idle)])
-        elapse(300, step: 5)
+        elapse(89)
         #expect(state() == .waitingForInput)
+        elapse(1)
+        #expect(state() == .idle)
+    }
+
+    @Test func aWaitingSessionStaysWhileTheRegistryIsBusyOrSaysNothingAndForCodex() {
+        store.apply(event(.waitingForInput))
+        store.apply(event(.waitingForInput, id: "unknown"))
+        store.apply(event(.waitingForInput, .codex))
+        store.updateRegistry([registryEntry(status: .busy), registryEntry("unknown", pid: 101, status: nil)])
+        elapse(600, step: 5)
+        #expect(state() == .waitingForInput)
+        #expect(state("unknown") == .waitingForInput)
+        // Without a registry, silence is a user who is away as much as an interruption.
+        #expect(state("s1", .codex) == .waitingForInput)
     }
 
     @Test func theFallbackCanBeDrivenByHandWithAnExplicitTime() {

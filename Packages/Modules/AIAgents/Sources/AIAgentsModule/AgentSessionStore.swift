@@ -6,8 +6,8 @@ import Observation
 /// events from the watcher; time only matters through the injected clock and scheduler, so tests can drive it.
 @Observable
 final class AgentSessionStore {
-    /// A working session silent for this long, whose registry says idle, was probably interrupted: Claude Code
-    /// writes no record when the user presses Esc.
+    /// A working or waiting session silent for this long, whose registry says idle, was probably interrupted:
+    /// Claude Code writes no record and fires no hook when the user presses Esc.
     static let interruptSeconds: TimeInterval = 90
     /// A session silent for this long is dropped; it comes back with its next event.
     static let inactivitySeconds: TimeInterval = 2 * 3600
@@ -241,9 +241,18 @@ final class AgentSessionStore {
     // MARK: Removal
 
     private func isInterrupted(_ session: AgentSession, now: Date) -> Bool {
-        guard case .working = session.state, now.timeIntervalSince(session.lastEventAt) >= Self.interruptSeconds else { return false }
-        // Codex has no registry to confirm the turn is over, so silence alone decides.
-        return session.key.source == .codex || registry[session.key.sessionID]?.status == .idle
+        guard now.timeIntervalSince(session.lastEventAt) >= Self.interruptSeconds else { return false }
+        let registryIsIdle = session.key.source == .claude && registry[session.key.sessionID]?.status == .idle
+        switch session.state {
+        case .working:
+            // Codex has no registry to confirm the turn is over, so silence alone decides.
+            return session.key.source == .codex || registryIsIdle
+        case .waitingForInput:
+            // Esc at a prompt fires no hook, and silence alone may be a user who is away: only the registry tells.
+            return registryIsIdle
+        case .finished, .idle, .error:
+            return false
+        }
     }
 
     private func prune(now: Date) {
