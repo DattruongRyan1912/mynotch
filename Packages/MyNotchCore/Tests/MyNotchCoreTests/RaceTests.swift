@@ -62,7 +62,6 @@ final class GatedModule: FeatureModule {
         for _ in 0..<20 { await Task.yield() }
         m.startGate.open()
         await boot.value; await off.value
-        print("R1 disableWhileStarting: isEnabled=\(h.registry.isEnabled("m")) state=\(h.registry.state(of: "m")) tabs=\(h.registry.tabs.map(\.id.rawValue)) internallyRunning=\(m.internallyRunning) stopCount=\(m.stopCount) activities=\(h.activities.entries.count)")
         #expect(h.registry.state(of: "m") == .disabled)
         #expect(h.registry.tabs.isEmpty)
         #expect(!m.internallyRunning)
@@ -79,7 +78,6 @@ final class GatedModule: FeatureModule {
         for _ in 0..<20 { await Task.yield() }
         m.stopGate.open()
         await off.value; await on.value
-        print("R2 reenableWhileStopping: isEnabled=\(h.registry.isEnabled("m")) state=\(h.registry.state(of: "m")) tabs=\(h.registry.tabs.map(\.id.rawValue)) internallyRunning=\(m.internallyRunning) maxInFlight=\(m.maxInFlight) activities=\(h.activities.entries.count)")
         #expect(h.registry.state(of: "m") == .running)
         #expect(h.activities.entries.count == 1)
         #expect(m.maxInFlight == 1)
@@ -95,7 +93,6 @@ final class GatedModule: FeatureModule {
         for _ in 0..<20 { await Task.yield() }
         a.startGate.open()
         await boot.value; await pause.value
-        print("R3 pauseDuringBootstrap: isPaused=\(h.registry.isPaused) a=\(h.registry.state(of: "a")) b=\(h.registry.state(of: "b")) tabs=\(h.registry.tabs.map(\.id.rawValue)) aRunning=\(a.internallyRunning) bRunning=\(b.internallyRunning) activities=\(h.activities.entries.map(\.id))")
         #expect(h.registry.state(of: "a") == .disabled)
         #expect(h.registry.state(of: "b") == .disabled)
         #expect(!b.internallyRunning)
@@ -115,13 +112,12 @@ final class GatedModule: FeatureModule {
         for _ in 0..<50 where m.startGate.waiting == 0 { await Task.yield() }  // second start (if serialized)
         m.startGate.open()
         await boot.value; await off.value; await on.value
-        print("R4 staleFailedStart: state=\(h.registry.state(of: "m")) maxInFlight=\(m.maxInFlight) activities=\(h.activities.entries.count) tabs=\(h.registry.tabs.map(\.id.rawValue))")
         #expect(m.maxInFlight == 1)
         #expect(h.registry.state(of: "m") == .running)
         #expect(h.activities.entries.count == 1)
     }
 
-    @Test func retryWhileStopping() async {
+    @Test func resumeWhilePausing() async {
         let m = GatedModule("m")
         let h = RegistryHarness([m])
         await h.registry.bootstrap()
@@ -133,7 +129,6 @@ final class GatedModule: FeatureModule {
         for _ in 0..<20 { await Task.yield() }
         m.stopGate.open()
         await pause.value; await resume.value
-        print("R5 resumeWhilePausing: isPaused=\(h.registry.isPaused) state=\(h.registry.state(of: "m")) internallyRunning=\(m.internallyRunning) maxInFlight=\(m.maxInFlight) activities=\(h.activities.entries.count)")
         #expect(h.registry.state(of: "m") == .running)
         #expect(h.activities.entries.count == 1)
     }
@@ -147,7 +142,6 @@ final class GatedModule: FeatureModule {
         let boot = Task { await h.registry.bootstrap() }
         await slow.startGate.untilWaiting()
         for _ in 0..<20 { await Task.yield() }
-        print("R6 slowStart: fast=\(h.registry.state(of: "fast"))")
         #expect(h.registry.state(of: "fast") == .running)
         slow.startGate.open()
         await boot.value
