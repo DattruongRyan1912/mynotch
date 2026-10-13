@@ -25,8 +25,22 @@ final class FakeHTTPClient: HTTPClient {
 
 /// lrclib `GET /api/get` answers, shaped like the real ones (id, names, duration and the three lyrics fields).
 enum LrclibReplies {
-    static let lrc = "[00:01.00] First\n[00:05.00] Second"
-    static let firstTwoLines = [LyricLine(time: 1, text: "First"), LyricLine(time: 5, text: "Second")]
+    static let lrc = "[00:01.00] First\n[00:05.00] Second\n[00:09.00] Third\n[00:13.00] Fourth"
+    /// What `lrc` parses to: four lines, the fewest the service accepts as lyrics rather than a stub.
+    static let syncedLines = [
+        LyricLine(time: 1, text: "First"), LyricLine(time: 5, text: "Second"),
+        LyricLine(time: 9, text: "Third"), LyricLine(time: 13, text: "Fourth"),
+    ]
+
+    /// Synced lyrics of `count` lines reading "<tag> 1", "<tag> 2", ..., so records can be told apart.
+    static func lrcText(_ count: Int, tag: String) -> String {
+        (0..<count).map { String(format: "[00:%02d.00] ", 1 + 4 * $0) + "\(tag) \($0 + 1)" }.joined(separator: "\n")
+    }
+
+    /// What `lrcText(count, tag:)` parses to.
+    static func lyricLines(_ count: Int, tag: String) -> [LyricLine] {
+        (0..<count).map { LyricLine(time: Double(1 + 4 * $0), text: "\(tag) \($0 + 1)") }
+    }
 
     static func found(synced: String? = lrc, plain: String? = "First\nSecond", instrumental: Bool = false) -> HTTPReply {
         var object: [String: Any] = [

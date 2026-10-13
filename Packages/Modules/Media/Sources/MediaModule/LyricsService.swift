@@ -11,6 +11,8 @@ final class LyricsService {
     static let searchEndpoint = URL(string: "https://lrclib.net/api/search")!
     /// How far a search result's length may be from the track's and still count as the same recording.
     static let durationTolerance = 3.0
+    /// Synced lyrics of fewer lines are a stub (lrclib has records with a single line): kept only as a last resort.
+    static let minSyncedLines = 4
     static let requestTimeout: TimeInterval = 10
     /// How long to stay quiet after a 429 or 503 without a usable `Retry-After`.
     static let defaultCooldownSeconds = 60
@@ -62,7 +64,9 @@ final class LyricsService {
     ///
     /// A lookup is a chain of requests, each after the spacing: the exact match with the album, the exact match
     /// without it (an album spelled differently from lrclib's breaks the first), a search by name and artist, a
-    /// free-text search. The first step with lyrics ends it, and so does a rate limit or any other failure.
+    /// free-text search. The first step with usable lyrics ends it: synced ones of at least `minSyncedLines`, or an
+    /// instrumental. What is less (a stub, plain words) is kept as a fallback, the answer when no step does better.
+    /// A rate limit or any other failure ends the chain as `.unavailable`, fallback or not.
     ///
     /// A rate-limited request is not retried: the answer is `.unavailable` and the next uncached track waits out
     /// the cooldown, which is the retry. Cancelling the caller cancels the request in flight; a cancelled call
@@ -130,6 +134,8 @@ final class LyricsService {
         steps.append(Step(endpoint: Self.searchEndpoint, items: named))
         steps.append(Step(endpoint: Self.searchEndpoint, items: [("q", "\(artist) \(title)")]))
 
+        let duration = Double(track.durationSeconds)
+        var fallback: LyricsResult?
         for (index, step) in steps.enumerated() {
             if index > 0 {
                 if let reason = reasonToStop { return reason }
@@ -141,14 +147,20 @@ final class LyricsService {
                 return result
             case .notFound:
                 continue
-            case .body(let body) where step.isSearch:
-                guard let entries = try? JSONDecoder().decode([Entry].self, from: body) else { return .unavailable("Unreadable answer") }
-                if let match = Self.bestMatch(in: entries, duration: Double(track.durationSeconds)) { return match }
             case .body(let body):
-                return Self.result(from: body) ?? .unavailable("Unreadable answer")
+                let answer = step.isSearch ? Self.bestMatch(in: body, duration: duration) : Self.result(from: body)
+                switch answer {
+                case .unavailable:
+                    return answer
+                case .notFound:
+                    continue
+                default:
+                    if Self.isUsable(answer) { return answer }
+                    fallback = Self.better(fallback, answer)
+                }
             }
         }
-        return .notFound
+        return fallback ?? .notFound
     }
 
     /// Why the chain sends nothing more, nil to go on.
@@ -210,33 +222,54 @@ final class LyricsService {
         value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? ""
     }
 
-    /// The lrclib track entry as a result: synced lyrics when they parse, else plain ones, else nothing.
-    private static func result(from body: Data) -> LyricsResult? {
-        guard let entry = try? JSONDecoder().decode(Entry.self, from: body) else { return nil }
-        if entry.instrumental == true { return .instrumental }
+    /// The lrclib track entry as a result: instrumental, else synced lyrics when they parse, else plain ones, else
+    /// `.notFound`; `.unavailable` when the body is no entry.
+    private static func result(from body: Data) -> LyricsResult {
+        guard let entry = try? JSONDecoder().decode(Entry.self, from: body) else { return .unavailable("Unreadable answer") }
+        return entry.instrumental == true ? .instrumental : lyrics(of: entry) ?? .notFound
+    }
+
+    /// The lyrics of an entry: synced when they parse, else plain; nil without either.
+    private static func lyrics(of entry: Entry) -> LyricsResult? {
         let synced = LRCParser.parse(entry.syncedLyrics ?? "")
         if !synced.isEmpty { return .synced(synced) }
         let plain = (entry.plainLyrics ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return plain.isEmpty ? .notFound : .plain(plain)
+        return plain.isEmpty ? nil : .plain(plain)
     }
 
-    /// The search result closest in length (within `durationTolerance`) with synced lyrics, else the closest with
-    /// plain ones; nil when no result fits.
-    private static func bestMatch(in entries: [Entry], duration: Double) -> LyricsResult? {
+    /// The lyrics worth showing as they are: an instrumental, or synced ones that are more than a stub.
+    private static func isUsable(_ result: LyricsResult) -> Bool {
+        switch result {
+        case .synced(let lines): lines.count >= minSyncedLines
+        case .instrumental: true
+        case .plain, .notFound, .unavailable: false
+        }
+    }
+
+    /// Synced lyrics rank by their lines, plain ones below them.
+    private static func rank(_ result: LyricsResult) -> Int {
+        if case .synced(let lines) = result { lines.count } else { 0 }
+    }
+
+    /// The better of two fallbacks; the older one when they rank the same.
+    private static func better(_ old: LyricsResult?, _ new: LyricsResult) -> LyricsResult {
+        guard let old else { return new }
+        return rank(new) > rank(old) ? new : old
+    }
+
+    /// The search result closest in length (within `durationTolerance`; the one with more lines of two equally
+    /// close) with usable synced lyrics, else the best fallback among the close ones; `.notFound` when none fits.
+    private static func bestMatch(in body: Data, duration: Double) -> LyricsResult {
+        guard let entries = try? JSONDecoder().decode([Entry].self, from: body) else { return .unavailable("Unreadable answer") }
         let close = entries
             .filter { $0.instrumental != true }
-            .compactMap { entry in entry.duration.map { (entry, abs($0 - duration)) } }
-            .filter { $0.1 <= durationTolerance }
-            .sorted { $0.1 < $1.1 }
-        for (entry, _) in close {
-            let synced = LRCParser.parse(entry.syncedLyrics ?? "")
-            if !synced.isEmpty { return .synced(synced) }
-        }
-        for (entry, _) in close {
-            let plain = (entry.plainLyrics ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !plain.isEmpty { return .plain(plain) }
-        }
-        return nil
+            .compactMap { entry -> (result: LyricsResult, difference: Double)? in
+                guard let length = entry.duration, abs(length - duration) <= durationTolerance, let result = lyrics(of: entry) else { return nil }
+                return (result, abs(length - duration))
+            }
+            .sorted { ($0.difference, -rank($0.result)) < ($1.difference, -rank($1.result)) }
+        if let usable = close.first(where: { isUsable($0.result) }) { return usable.result }
+        return close.map(\.result).reduce(nil as LyricsResult?, better) ?? .notFound
     }
 
     private nonisolated struct Entry: Decodable {

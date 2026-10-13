@@ -83,7 +83,7 @@ import Testing
         await harness.registry.bootstrap()
         playTrack()
         await settle { store.syncedLyrics != nil }
-        #expect(store.syncedLyrics == LrclibReplies.firstTwoLines)
+        #expect(store.syncedLyrics == LrclibReplies.syncedLines)
 
         let request = try #require(client.requests.first)
         #expect(client.requests.count == 1)
@@ -99,7 +99,7 @@ import Testing
         client.reply(LrclibReplies.found())
         enableLyrics()
         await settle { store.syncedLyrics != nil }
-        #expect(store.syncedLyrics == LrclibReplies.firstTwoLines)
+        #expect(store.syncedLyrics == LrclibReplies.syncedLines)
     }
 
     @Test func positionAndPlayStateChangesDoNotFetchAgain() async {
@@ -115,7 +115,7 @@ import Testing
         source.emit(AdapterLines.position(2))
         await settle { client.requests.count > 1 }
         #expect(client.requests.count == 1)
-        #expect(store.syncedLyrics == LrclibReplies.firstTwoLines)
+        #expect(store.syncedLyrics == LrclibReplies.syncedLines)
     }
 
     @Test func anotherTrackClearsTheOldLyricsAndFetchesItsOwn() async {
@@ -125,8 +125,8 @@ import Testing
         playTrack("First")
         await settle { store.syncedLyrics != nil }
 
-        let second = [LyricLine(time: 2, text: "Other")]
-        client.reply(LrclibReplies.found(synced: "[00:02.00] Other"))
+        let second = LrclibReplies.lyricLines(4, tag: "Other")
+        client.reply(LrclibReplies.found(synced: LrclibReplies.lrcText(4, tag: "Other")))
         playTrack("Second")
         #expect(store.syncedLyrics == nil)
         // The service spaces requests 300 ms apart.
@@ -188,9 +188,16 @@ import Testing
     @Test func plainLyricsOnlyMarkTheTrackAsUnsynced() async {
         enableLyrics()
         await harness.registry.bootstrap()
-        client.reply(LrclibReplies.found(synced: nil, plain: "La la"))
+        // Plain-only records are a fallback: the chain runs to its end (two lookups by name, two searches) first.
+        client.handler = { request in
+            request.url!.path() == "/api/get" ? LrclibReplies.found(synced: nil, plain: "La la") : LrclibReplies.results([])
+        }
         playTrack("Plain")
-        await settle { store.lyricsAreUnsynced }
+        for _ in 0..<5 {
+            await settle { store.lyricsAreUnsynced }
+            harness.scheduler.advance(by: .milliseconds(300))
+        }
+        #expect(client.requests.count == 4)
         #expect(store.lyricsAreUnsynced)
         #expect(store.syncedLyrics == nil)
 
@@ -210,9 +217,9 @@ import Testing
             if isFirst {
                 isFirst = false
                 await gate.wait()
-                return LrclibReplies.found(synced: "[00:01.00] Old song")
+                return LrclibReplies.found(synced: LrclibReplies.lrcText(4, tag: "Old song"))
             }
-            return LrclibReplies.found(synced: "[00:03.00] New song")
+            return LrclibReplies.found(synced: LrclibReplies.lrcText(4, tag: "New song"))
         }
         await harness.registry.bootstrap()
         playTrack("Old")
@@ -224,7 +231,7 @@ import Testing
         #expect(store.syncedLyrics == nil)
         harness.scheduler.advance(by: .milliseconds(300))
         await settle { store.syncedLyrics != nil }
-        #expect(store.syncedLyrics == [LyricLine(time: 3, text: "New song")])
+        #expect(store.syncedLyrics == LrclibReplies.lyricLines(4, tag: "New song"))
         #expect(client.requests.count == 2)
     }
 
@@ -255,7 +262,7 @@ import Testing
         #expect(client.requests.count == 1)
         harness.scheduler.advance(by: .seconds(1))
         await settle { store.syncedLyrics != nil }
-        #expect(store.syncedLyrics == LrclibReplies.firstTwoLines)
+        #expect(store.syncedLyrics == LrclibReplies.syncedLines)
         #expect(client.requests.count == 2)
     }
 
@@ -336,7 +343,7 @@ import Testing
         await harness.registry.setEnabled(true, for: "media")
         playTrack()
         await settle { store.syncedLyrics != nil }
-        #expect(store.syncedLyrics == LrclibReplies.firstTwoLines)
+        #expect(store.syncedLyrics == LrclibReplies.syncedLines)
         #expect(client.requests.count == 1)
     }
 

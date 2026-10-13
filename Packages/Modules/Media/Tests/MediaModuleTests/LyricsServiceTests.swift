@@ -54,17 +54,17 @@ import Testing
 
     @Test func syncedLyricsAreParsed() async {
         client.reply(LrclibReplies.found())
-        #expect(await makeService().lyrics(for: key()) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await makeService().lyrics(for: key()) == .synced(LrclibReplies.syncedLines))
     }
 
     @Test func plainLyricsWhenThereAreNoTimestamps() async {
-        client.reply(LrclibReplies.found(synced: nil, plain: "La la\nLa"))
-        #expect(await makeService().lyrics(for: key()) == .plain("La la\nLa"))
+        route(get: LrclibReplies.found(synced: nil, plain: "La la\nLa"), search: LrclibReplies.results([]), query: LrclibReplies.results([]))
+        #expect(await lookup(makeService(), key()) == .plain("La la\nLa"))
     }
 
     @Test func syncedLyricsWithoutUsableLinesFallBackToPlain() async {
-        client.reply(LrclibReplies.found(synced: "[ar:Artist]\nnot lrc", plain: "La la"))
-        #expect(await makeService().lyrics(for: key()) == .plain("La la"))
+        route(get: LrclibReplies.found(synced: "[ar:Artist]\nnot lrc", plain: "La la"), search: LrclibReplies.results([]), query: LrclibReplies.results([]))
+        #expect(await lookup(makeService(), key()) == .plain("La la"))
     }
 
     @Test func instrumentalTracks() async {
@@ -73,8 +73,10 @@ import Testing
     }
 
     @Test func aFoundTrackWithoutAnyLyricsIsNotFound() async {
-        client.reply(LrclibReplies.found(synced: "", plain: nil))
-        #expect(await makeService().lyrics(for: key()) == .notFound)
+        route(getWithAlbum: LrclibReplies.found(synced: "", plain: nil), get: LrclibReplies.found(synced: "", plain: nil),
+              search: LrclibReplies.results([]), query: LrclibReplies.results([]))
+        #expect(await lookup(makeService(), key()) == .notFound)
+        #expect(client.requests.count == 4)
     }
 
     @Test func status404IsNotFound() async {
@@ -98,7 +100,7 @@ import Testing
         // None of them was cached, so the next ask goes to the server again.
         scheduler.advance(by: .seconds(1))
         client.reply(LrclibReplies.found())
-        #expect(await service.lyrics(for: key()) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await service.lyrics(for: key()) == .synced(LrclibReplies.syncedLines))
         #expect(client.requests.count == 4)
     }
 
@@ -165,21 +167,22 @@ import Testing
     @Test func aRepeatedTrackComesFromTheCacheEvenAfterARestart() async {
         client.reply(LrclibReplies.found())
         let first = makeService()
-        #expect(await first.lyrics(for: key()) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await first.lyrics(for: key()) == .synced(LrclibReplies.syncedLines))
         // The spacing is over, so a call that wrongly went to the network would show in the count, not hang.
         scheduler.advance(by: .seconds(1))
-        #expect(await first.lyrics(for: key()) == .synced(LrclibReplies.firstTwoLines))
-        #expect(await makeService().lyrics(for: key()) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await first.lyrics(for: key()) == .synced(LrclibReplies.syncedLines))
+        #expect(await makeService().lyrics(for: key()) == .synced(LrclibReplies.syncedLines))
         #expect(client.requests.count == 1)
     }
 
     @Test func plainLyricsAreCachedToo() async {
-        client.reply(LrclibReplies.found(synced: nil, plain: "La la"))
+        route(get: LrclibReplies.found(synced: nil, plain: "La la"), search: LrclibReplies.results([]), query: LrclibReplies.results([]))
         let service = makeService()
-        _ = await service.lyrics(for: key())
+        _ = await lookup(service, key())
+        let asked = client.requests.count
         scheduler.advance(by: .seconds(1))
         #expect(await service.lyrics(for: key()) == .plain("La la"))
-        #expect(client.requests.count == 1)
+        #expect(client.requests.count == asked)
     }
 
     @Test func negativeResultsAreCached() async {
@@ -218,7 +221,7 @@ import Testing
         #expect(await lookup(service, key(duration: 260)) == .notFound)
         let asked = client.requests.count
         scheduler.advance(by: .seconds(1))
-        #expect(await service.lyrics(for: key(duration: 200)) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await service.lyrics(for: key(duration: 200)) == .synced(LrclibReplies.syncedLines))
         #expect(client.requests.count == asked)
     }
 
@@ -228,8 +231,8 @@ import Testing
         let file = cacheDirectory.appending(path: "\(track.cacheKey).json")
         try Data("{ not json".utf8).write(to: file)
         client.reply(LrclibReplies.found())
-        #expect(await makeService().lyrics(for: track) == .synced(LrclibReplies.firstTwoLines))
-        #expect(await makeService().lyrics(for: track) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await makeService().lyrics(for: track) == .synced(LrclibReplies.syncedLines))
+        #expect(await makeService().lyrics(for: track) == .synced(LrclibReplies.syncedLines))
         #expect(client.requests.count == 1)
     }
 
@@ -250,7 +253,7 @@ import Testing
     @Test func theAlbumIsAskedFirstAndWithoutItOn404() async {
         route(get: LrclibReplies.found())
         let result = await lookup(makeService(), key())
-        #expect(result == .synced(LrclibReplies.firstTwoLines))
+        #expect(result == .synced(LrclibReplies.syncedLines))
         #expect(calls == [
             "/api/get track_name=Song artist_name=Artist album_name=Album duration=200",
             "/api/get track_name=Song artist_name=Artist duration=200",
@@ -259,23 +262,23 @@ import Testing
 
     @Test func aMatchOnTheAlbumEndsTheChain() async {
         route(getWithAlbum: LrclibReplies.found())
-        #expect(await lookup(makeService(), key()) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await lookup(makeService(), key()) == .synced(LrclibReplies.syncedLines))
         #expect(client.requests.count == 1)
     }
 
     @Test func withoutAnAlbumTheChainStartsWithoutIt() async {
         route(get: LrclibReplies.found())
         let track = TrackKey(artist: "Artist", title: "Song", album: nil, duration: 200)!
-        #expect(await lookup(makeService(), track) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await lookup(makeService(), track) == .synced(LrclibReplies.syncedLines))
         #expect(calls == ["/api/get track_name=Song artist_name=Artist duration=200"])
     }
 
     @Test func searchIsNextAndTakesTheClosestDuration() async {
-        let far = LrclibReplies.entry(duration: 203, synced: "[00:09.00] Far")
+        let far = LrclibReplies.entry(duration: 203, synced: LrclibReplies.lrcText(4, tag: "Far"))
         let near = LrclibReplies.entry(duration: 199)
-        let off = LrclibReplies.entry(duration: 230, synced: "[00:09.00] Off")
+        let off = LrclibReplies.entry(duration: 230, synced: LrclibReplies.lrcText(4, tag: "Off"))
         route(search: LrclibReplies.results([far, off, near]))
-        #expect(await lookup(makeService(), key()) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await lookup(makeService(), key()) == .synced(LrclibReplies.syncedLines))
         #expect(calls == [
             "/api/get track_name=Song artist_name=Artist album_name=Album duration=200",
             "/api/get track_name=Song artist_name=Artist duration=200",
@@ -287,11 +290,11 @@ import Testing
         let plainOnly = LrclibReplies.entry(duration: 200, synced: nil, plain: "Plain")
         let synced = LrclibReplies.entry(duration: 202)
         route(search: LrclibReplies.results([plainOnly, synced]))
-        #expect(await lookup(makeService(), key()) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await lookup(makeService(), key()) == .synced(LrclibReplies.syncedLines))
     }
 
     @Test func searchFallsBackToPlainLyricsWithinThreeSeconds() async {
-        let far = LrclibReplies.entry(duration: 240, synced: "[00:09.00] Far")
+        let far = LrclibReplies.entry(duration: 240, synced: LrclibReplies.lrcText(4, tag: "Far"))
         let farther = LrclibReplies.entry(duration: 203, synced: nil, plain: "Third")
         let nearer = LrclibReplies.entry(duration: 201, synced: nil, plain: "Nearer")
         route(search: LrclibReplies.results([far, farther, nearer]))
@@ -300,15 +303,15 @@ import Testing
 
     @Test func aDurationOfExactlyThreeSecondsOffCountsAndFourDoesNot() async {
         route(search: LrclibReplies.results([LrclibReplies.entry(duration: 197)]))
-        #expect(await lookup(makeService(), key()) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await lookup(makeService(), key()) == .synced(LrclibReplies.syncedLines))
         route(search: LrclibReplies.results([LrclibReplies.entry(duration: 204)]))
         #expect(await lookup(makeService(), key("Other")) == .notFound)
     }
 
     @Test func theFreeTextSearchIsTheLastStep() async {
-        let far = LrclibReplies.entry(duration: 230, synced: "[00:09.00] Far")
+        let far = LrclibReplies.entry(duration: 230, synced: LrclibReplies.lrcText(4, tag: "Far"))
         route(search: LrclibReplies.results([]), query: LrclibReplies.results([far, LrclibReplies.entry(duration: 200)]))
-        #expect(await lookup(makeService(), key()) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await lookup(makeService(), key()) == .synced(LrclibReplies.syncedLines))
         #expect(calls.count == 4)
         #expect(calls.last == "/api/search q=Artist Song")
     }
@@ -349,6 +352,105 @@ import Testing
         #expect(result == .notFound)
     }
 
+    // MARK: stub records
+
+    /// A record lrclib has but that is no lyrics: one timestamped line.
+    var stub: HTTPReply { LrclibReplies.found(synced: LrclibReplies.lrcText(1, tag: "Stub"), plain: "Stub 1") }
+    var stubLines: [LyricLine] { LrclibReplies.lyricLines(1, tag: "Stub") }
+    let albumless = TrackKey(artist: "Artist", title: "Song", album: nil, duration: 200)!
+
+    @Test func aStubFromTheFirstStepDoesNotEndTheChainAndSearchFindsTheFullVersion() async {
+        let full = LrclibReplies.entry(duration: 201, synced: LrclibReplies.lrcText(6, tag: "Full"))
+        route(get: stub, search: LrclibReplies.results([full]))
+        #expect(await lookup(makeService(), albumless) == .synced(LrclibReplies.lyricLines(6, tag: "Full")))
+        #expect(calls == [
+            "/api/get track_name=Song artist_name=Artist duration=200",
+            "/api/search track_name=Song artist_name=Artist",
+        ])
+    }
+
+    @Test func aStubFromTheAlbumStepIsAlsoOnlyAFallback() async {
+        let full = LrclibReplies.entry(duration: 201, synced: LrclibReplies.lrcText(6, tag: "Full"))
+        route(getWithAlbum: stub, search: LrclibReplies.results([full]))
+        #expect(await lookup(makeService(), key()) == .synced(LrclibReplies.lyricLines(6, tag: "Full")))
+        #expect(calls.count == 3)
+    }
+
+    @Test func aStubWithNothingBetterIsReturnedAndCached() async {
+        route(get: stub, search: LrclibReplies.results([]), query: LrclibReplies.results([]))
+        let service = makeService()
+        #expect(await lookup(service, albumless) == .synced(stubLines))
+        #expect(client.requests.count == 3)
+        scheduler.advance(by: .seconds(1))
+        #expect(await makeService().lyrics(for: albumless) == .synced(stubLines))
+        #expect(client.requests.count == 3)
+    }
+
+    @Test func threeLinesAreAStubAndFourAreLyrics() async {
+        route(get: LrclibReplies.found(synced: LrclibReplies.lrcText(3, tag: "Short"), plain: nil), search: LrclibReplies.results([]), query: LrclibReplies.results([]))
+        #expect(await lookup(makeService(), albumless) == .synced(LrclibReplies.lyricLines(3, tag: "Short")))
+        #expect(client.requests.count == 3)
+
+        route(get: LrclibReplies.found(synced: LrclibReplies.lrcText(4, tag: "Full"), plain: nil))
+        let other = TrackKey(artist: "Artist", title: "Other", album: nil, duration: 200)!
+        #expect(await lookup(makeService(), other) == .synced(LrclibReplies.lyricLines(4, tag: "Full")))
+        #expect(client.requests.count == 4)
+    }
+
+    @Test func aPlainOnlyRecordIsAFallbackThatSyncedSearchResultsBeat() async {
+        let synced = LrclibReplies.entry(duration: 200)
+        route(get: LrclibReplies.found(synced: nil, plain: "Plain"), search: LrclibReplies.results([synced]))
+        #expect(await lookup(makeService(), albumless) == .synced(LrclibReplies.syncedLines))
+        #expect(calls.count == 2)
+    }
+
+    @Test func theSyncedStubBeatsAPlainRecordAsTheFallback() async {
+        route(getWithAlbum: LrclibReplies.found(synced: nil, plain: "Plain"), get: stub, search: LrclibReplies.results([]), query: LrclibReplies.results([]))
+        #expect(await lookup(makeService(), key()) == .synced(stubLines))
+        #expect(client.requests.count == 4)
+    }
+
+    @Test func aStubInTheSearchIsNoSyncedCandidateEvenWhenItIsTheClosest() async {
+        let closeStub = LrclibReplies.entry(duration: 200, synced: LrclibReplies.lrcText(1, tag: "Stub"))
+        let full = LrclibReplies.entry(duration: 202, synced: LrclibReplies.lrcText(5, tag: "Full"))
+        route(search: LrclibReplies.results([closeStub, full]))
+        #expect(await lookup(makeService(), key()) == .synced(LrclibReplies.lyricLines(5, tag: "Full")))
+        #expect(calls.count == 3)
+    }
+
+    @Test func aSearchTieOnDurationGoesToTheLongerLyrics() async {
+        let shorter = LrclibReplies.entry(duration: 201, synced: LrclibReplies.lrcText(5, tag: "Shorter"))
+        let longer = LrclibReplies.entry(duration: 201, synced: LrclibReplies.lrcText(9, tag: "Longer"))
+        let farther = LrclibReplies.entry(duration: 203, synced: LrclibReplies.lrcText(12, tag: "Farther"))
+        route(search: LrclibReplies.results([shorter, longer, farther]))
+        #expect(await lookup(makeService(), key()) == .synced(LrclibReplies.lyricLines(9, tag: "Longer")))
+    }
+
+    @Test func aSearchedPlainMatchIsOnlyAFallbackUntilTheFreeTextSearchHasNothingBetter() async {
+        let plainOnly = LrclibReplies.entry(duration: 200, synced: nil, plain: "Plain")
+        route(search: LrclibReplies.results([plainOnly]), query: LrclibReplies.results([LrclibReplies.entry(duration: 201)]))
+        #expect(await lookup(makeService(), key()) == .synced(LrclibReplies.syncedLines))
+        #expect(calls.count == 4)
+
+        route(search: LrclibReplies.results([plainOnly]), query: LrclibReplies.results([]))
+        #expect(await lookup(makeService(), key("Other")) == .plain("Plain"))
+    }
+
+    @Test func aFallbackIsNotReturnedWhenARateLimitEndsTheChain() async {
+        route(getWithAlbum: stub, search: LrclibReplies.busy(retryAfter: "30"))
+        let service = makeService()
+        #expect(await lookup(service, key()).isUnavailable)
+        #expect(client.requests.count == 3)
+        #expect(service.isCoolingDown)
+        #expect(!FileManager.default.fileExists(atPath: cacheDirectory.path()))
+    }
+
+    @Test func aFallbackIsNotReturnedWhenAStepFails() async {
+        route(getWithAlbum: stub, get: HTTPReply(status: 500))
+        #expect(await lookup(makeService(), key()).isUnavailable)
+        #expect(client.requests.count == 2)
+    }
+
     /// Answers 404 to every request of the chain before the one numbered `step` (from 0), which gets `reply`.
     func answer404UntilStep(_ step: Int, with reply: HTTPReply) {
         var index = 0
@@ -371,7 +473,7 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: cacheDirectory.path()))
         scheduler.advance(by: .seconds(30))
         route(getWithAlbum: LrclibReplies.found())
-        #expect(await lookup(service, key()) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await lookup(service, key()) == .synced(LrclibReplies.syncedLines))
     }
 
     @Test func aFailureInTheMiddleEndsTheChainWithoutCaching() async {
@@ -437,7 +539,7 @@ import Testing
         let file = cacheDirectory.appending(path: "\(key().cacheKey).json")
         try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-8 * 86_400)], ofItemAtPath: file.path())
         route(getWithAlbum: LrclibReplies.found())
-        #expect(await lookup(service, key()) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await lookup(service, key()) == .synced(LrclibReplies.syncedLines))
         #expect(client.requests.count == asked + 1)
     }
 
@@ -468,7 +570,7 @@ import Testing
         #expect(client.requests.isEmpty)
         // Not cached, and it did not take the turn: the next track goes out at once.
         #expect(!FileManager.default.fileExists(atPath: cacheDirectory.path()))
-        #expect(await service.lyrics(for: key()) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await service.lyrics(for: key()) == .synced(LrclibReplies.syncedLines))
     }
 
     // MARK: rate limits
@@ -488,7 +590,7 @@ import Testing
         #expect(client.requests.count == 1)
 
         scheduler.advance(by: .milliseconds(1))
-        #expect(await service.lyrics(for: key("B")) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await service.lyrics(for: key("B")) == .synced(LrclibReplies.syncedLines))
         #expect(client.requests.count == 2)
     }
 
@@ -530,7 +632,7 @@ import Testing
         client.reply(LrclibReplies.busy())
         _ = await service.lyrics(for: key("Other"))
         scheduler.advance(by: .seconds(1))
-        #expect(await service.lyrics(for: key("Cached")) == .synced(LrclibReplies.firstTwoLines))
+        #expect(await service.lyrics(for: key("Cached")) == .synced(LrclibReplies.syncedLines))
         #expect(client.requests.count == 2)
     }
 
@@ -551,7 +653,7 @@ import Testing
         #expect(client.requests.count == 1)
 
         scheduler.advance(by: .milliseconds(1))
-        #expect(await second.value == .synced(LrclibReplies.firstTwoLines))
+        #expect(await second.value == .synced(LrclibReplies.syncedLines))
         #expect(client.requests.count == 2)
     }
 
@@ -622,7 +724,7 @@ import Testing
         await settle { service.queuedCount > 0 }
         #expect(service.queuedCount == 0)
         scheduler.advance(by: .seconds(1))
-        #expect(await again.value == .synced(LrclibReplies.firstTwoLines))
+        #expect(await again.value == .synced(LrclibReplies.syncedLines))
         #expect(client.requests.count == 1)
     }
 
@@ -642,7 +744,7 @@ import Testing
         #expect(client.requests.compactMap { queryItems(of: $0).first?.value } == ["A", "C"])
         // Only so that a regression ends in a failed expectation rather than a call that waits for ever.
         scheduler.advance(by: .seconds(1))
-        #expect(await next.value == .synced(LrclibReplies.firstTwoLines))
+        #expect(await next.value == .synced(LrclibReplies.syncedLines))
     }
 
     @Test func cancellingLeavesTheQueueAtOnce() async {
