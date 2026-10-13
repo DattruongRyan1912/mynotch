@@ -4,14 +4,16 @@ import SwiftUI
 
 /// Owns one screen's panel, view model and pointer hit-testing.
 final class NotchWindowController {
-    let displayID: CGDirectDisplayID
+    private(set) var displayID: CGDirectDisplayID
     let model: NotchViewModel
     private(set) var geometry: NotchGeometry
+    private(set) var isVisible = false
     private var screenFrame: CGRect
     private let panel: NotchPanel
+    private let hosting: FirstMouseHostingView<NotchRootView>
     private let registry: ModuleRegistry
     private let activities: ActivityCenter
-    private var isVisible = false
+    private var observation: Task<Void, Never>?
 
     init(
         displayID: CGDirectDisplayID,
@@ -29,23 +31,32 @@ final class NotchWindowController {
         geometry = NotchGeometry(screen: screen, config: config)
         model = NotchViewModel(scheduler: scheduler, availableTabs: { [weak registry] in registry?.tabs.map(\.id) ?? [] }, delays: delays)
         panel = NotchPanel(frame: geometry.panelFrame(in: screen.frame))
-        installContent()
-        observeActivities()
+        hosting = FirstMouseHostingView(rootView: NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry))
+        hosting.frame = CGRect(origin: .zero, size: geometry.panelSize)
+        panel.contentView = hosting
+        observe()
     }
 
-    func update(screen: ScreenDescriptor, config: NotchLayoutConfig) {
+    /// Applies new screen facts or settings. Does nothing when nothing changed, and never replaces the
+    /// hosting view, so SwiftUI state inside module tabs survives display and settings changes.
+    func update(displayID: CGDirectDisplayID, screen: ScreenDescriptor, config: NotchLayoutConfig) {
+        self.displayID = displayID
+        let newGeometry = NotchGeometry(screen: screen, config: config)
+        guard newGeometry != geometry || screen.frame != screenFrame else { return }
         screenFrame = screen.frame
-        geometry = NotchGeometry(screen: screen, config: config)
+        geometry = newGeometry
         panel.setFrame(geometry.panelFrame(in: screen.frame), display: true)
-        installContent()
+        hosting.frame = CGRect(origin: .zero, size: geometry.panelSize)
+        hosting.rootView = NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry)
+        refreshHitTesting()
     }
 
     func setVisible(_ visible: Bool) {
         guard visible != isVisible else { return }
         isVisible = visible
         if visible {
-            panel.alphaValue = 1
             panel.orderFrontRegardless()
+            refreshHitTesting()
         } else {
             if model.isPointerInside { model.pointerExited() }
             model.close()
@@ -58,7 +69,7 @@ final class NotchWindowController {
     func pointerMoved(to point: CGPoint) {
         guard isVisible else { return }
         let inside = currentHitRect().contains(point)
-        panel.ignoresMouseEvents = !inside
+        if panel.ignoresMouseEvents == inside { panel.ignoresMouseEvents = !inside }
         if inside, !model.isPointerInside {
             model.pointerEntered()
         } else if !inside, model.isPointerInside {
@@ -67,8 +78,15 @@ final class NotchWindowController {
     }
 
     func close() {
+        observation?.cancel()
+        observation = nil
         panel.orderOut(nil)
         panel.close()
+    }
+
+    /// The shape can change while the mouse is still (hotkey, toast, activity), so re-check the pointer.
+    private func refreshHitTesting() {
+        pointerMoved(to: NSEvent.mouseLocation)
     }
 
     private func currentHitRect() -> CGRect {
@@ -76,17 +94,14 @@ final class NotchWindowController {
         return geometry.hitRect(for: state, contentHeight: registry.contentHeight(for: state), in: screenFrame)
     }
 
-    private func installContent() {
-        let root = NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry)
-        let hosting = FirstMouseHostingView(rootView: root)
-        hosting.frame = CGRect(origin: .zero, size: geometry.panelSize)
-        panel.contentView = hosting
-    }
-
-    private func observeActivities() {
-        Task { [weak self, activities] in
-            for await hasActivity in Observations({ activities.current != nil }) {
-                self?.model.hasActivity = hasActivity
+    private func observe() {
+        observation = Task { [weak self, activities, registry, model] in
+            for await (hasActivity, _, _) in Observations({
+                (activities.current != nil, model.displayState, registry.contentHeight(for: model.displayState))
+            }) {
+                guard let self else { return }
+                self.model.hasActivity = hasActivity
+                self.refreshHitTesting()
             }
         }
     }

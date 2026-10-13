@@ -29,7 +29,9 @@ public final class ScreenManager {
         self.scheduler = scheduler
     }
 
+    /// Starts observing displays, pointer and settings. Call once; later calls are ignored.
     public func start() {
+        guard observers.isEmpty else { return }
         let app = NotificationCenter.default
         observers.append(app.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.syncScreens() }
@@ -37,17 +39,23 @@ public final class ScreenManager {
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.syncScreens() }
         })
+        cursorDisplay = NSScreen.screens.first { $0.frame.containsMouseLocation(NSEvent.mouseLocation) }?.displayID
         syncScreens()
         hoverTracker.start()
         fullscreenDetector.start()
         observeSettings()
     }
 
-    /// Controller for the screen under the pointer, falling back to the main screen.
+    /// Visible controller for the screen under the pointer, else the visible one on the main screen, else any visible one.
     func activeController() -> NotchWindowController? {
         let point = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.containsMouseLocation(point) } ?? NSScreen.main
-        return screen?.displayUUID.flatMap { controllers[$0] }
+        if let uuid = NSScreen.screens.first(where: { $0.frame.containsMouseLocation(point) })?.displayUUID,
+           let controller = controllers[uuid], controller.isVisible {
+            return controller
+        }
+        let mainID = NSScreen.screens.first?.displayID
+        let visible = controllers.values.filter(\.isVisible)
+        return visible.first { $0.displayID == mainID } ?? visible.first
     }
 
     func allControllers() -> [NotchWindowController] { Array(controllers.values) }
@@ -60,7 +68,7 @@ public final class ScreenManager {
             seen.insert(uuid)
             let descriptor = ScreenDescriptor(screen)
             if let controller = controllers[uuid] {
-                controller.update(screen: descriptor, config: config)
+                controller.update(displayID: displayID, screen: descriptor, config: config)
             } else {
                 controllers[uuid] = NotchWindowController(
                     displayID: displayID, screen: descriptor, config: config, scheduler: scheduler,
