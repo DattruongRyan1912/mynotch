@@ -35,6 +35,7 @@ final class SettingsWindowController: NSObject {
         // Switch the policy first, so the app comes forward as a regular app with its menu bar.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
+        if window?.isMiniaturized == true { window?.deminiaturize(nil) }
         window?.makeKeyAndOrderFront(nil)
     }
 }

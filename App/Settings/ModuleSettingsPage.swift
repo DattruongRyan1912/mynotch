@@ -19,7 +19,7 @@ struct ModuleSettingsPage: View {
                         get: { registry.isEnabled(id) },
                         set: { enabled in Task { await registry.setEnabled(enabled, for: id) } }
                     ))
-                    LabeledContent("Trạng thái") { StateBadge(state: registry.state(of: id)) }
+                    LabeledContent("Trạng thái") { StateBadge(state: registry.state(of: id), isPaused: registry.isPaused && registry.isEnabled(id)) }
                     if case .failed = registry.state(of: id) { retryButton }
                     if case .unavailable = registry.state(of: id) { retryButton }
                 }
@@ -81,6 +81,7 @@ private struct PermissionRow: View {
                             }
                         }
                         .disabled(isGranting)
+                        .accessibilityLabel("Cấp quyền \(permission.displayName)")
                     }
                 }
             }
@@ -90,11 +91,13 @@ private struct PermissionRow: View {
 
 private struct StateBadge: View {
     let state: ModuleState
+    /// Pausing stops every enabled module without turning its switch off.
+    let isPaused: Bool
 
     var body: some View {
         switch state {
         case .running: Text("Đang chạy").foregroundStyle(.green)
-        case .disabled: Text("Đã tắt").foregroundStyle(.secondary)
+        case .disabled: Text(isPaused ? "Tạm dừng" : "Đã tắt").foregroundStyle(.secondary)
         case .starting: Text("Đang khởi động…")
         case .stopping: Text("Đang dừng…")
         case .needsPermission(let permission): Text("Thiếu quyền \(permission.displayName)").foregroundStyle(.orange)

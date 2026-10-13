@@ -2,7 +2,8 @@ import ServiceManagement
 
 /// Thin wrapper over `SMAppService.mainApp`.
 enum LaunchAtLogin {
-    static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
+    /// True also while macOS waits for approval: the item is registered then, so the toggle must show on and be able to switch it off.
+    static var isEnabled: Bool { SMAppService.mainApp.status == .enabled || needsApproval }
 
     /// Registered, but macOS waits for the user to allow it in System Settings → Login Items.
     static var needsApproval: Bool { SMAppService.mainApp.status == .requiresApproval }

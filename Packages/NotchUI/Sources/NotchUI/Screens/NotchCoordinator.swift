@@ -1,7 +1,7 @@
 import MyNotchCore
 import SwiftUI
 
-/// `NotchPresenter` used by modules and the app; routes requests to the active screen's notch.
+/// `NotchPresenter` used by modules and the app; opens and toasts on the active screen's notch, and closes every screen's.
 public final class NotchCoordinator: NotchPresenter {
     public weak var screens: ScreenManager?
 

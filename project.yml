@@ -161,6 +161,8 @@ targets:
         HEADER_SEARCH_PATHS: ["$(SRCROOT)/Vendor/mediaremote-adapter/src", "$(SRCROOT)/Vendor/mediaremote-adapter/include"]
         # Upstream declares its C functions as `void f();`, which floods the build log with one warning per use.
         CLANG_WARN_STRICT_PROTOTYPES: NO
+        # get.m has an unused variable; the vendored sources stay as upstream wrote them.
+        GCC_WARN_UNUSED_VARIABLE: NO
         DEFINES_MODULE: NO
         SKIP_INSTALL: YES
         ENABLE_HARDENED_RUNTIME: YES
