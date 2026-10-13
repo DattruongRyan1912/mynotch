@@ -48,6 +48,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    /// Modules save their data in `stop`, so quitting waits for them, but never longer than three seconds.
+    /// The deadline ends early once shutdown finishes, and only its end replies, so the reply comes exactly once.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let deadline = Task { try? await Task.sleep(for: .seconds(3)) }
+        Task { await registry.shutdown(); deadline.cancel() }
+        Task { await deadline.value; NSApp.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
+    }
+
     @objc private func showSettings() { settingsWindow.show() }
 
     private func refreshPermissions() {

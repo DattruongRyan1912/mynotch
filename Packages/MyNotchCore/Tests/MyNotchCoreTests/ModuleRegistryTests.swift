@@ -143,6 +143,57 @@ import MyNotchTestSupport
         #expect(harness.registry.state(of: "m") == .running)
     }
 
+    @Test func shutdownStopsEveryModuleWithoutChangingEnabledSettings() async {
+        let on = FakeModule("on", order: 1)
+        let off = FakeModule("off", order: 2, defaultEnabled: false)
+        let needy = FakeModule("needy", order: 3, permissions: [.accessibility])
+        let harness = Harness([on, off, needy])
+        await harness.registry.bootstrap()
+        #expect(harness.registry.state(of: "needy") == .needsPermission(.accessibility))
+        await harness.registry.shutdown()
+        #expect(on.stopCount == 1)
+        #expect(off.stopCount == 0)
+        #expect(needy.stopCount == 0)
+        for id: ModuleID in ["on", "off", "needy"] { #expect(harness.registry.state(of: id) == .disabled) }
+        #expect(harness.registry.isEnabled("on"))
+        #expect(!harness.registry.isEnabled("off"))
+        #expect(harness.registry.isEnabled("needy"))
+        #expect(harness.registry.tabs.isEmpty)
+        #expect(!harness.registry.needsPermissionPolling)
+    }
+
+    @Test func nothingStartsAfterShutdown() async {
+        let on = FakeModule("on", order: 1)
+        let off = FakeModule("off", order: 2, defaultEnabled: false)
+        let harness = Harness([on, off])
+        await harness.registry.bootstrap()
+        await harness.registry.shutdown()
+
+        await harness.registry.setEnabled(true, for: "off")
+        #expect(harness.registry.isEnabled("off"))
+        await harness.registry.bootstrap()
+        await harness.registry.retry("on")
+        await harness.registry.resumeAll()
+        await harness.registry.refreshPermissions()
+        #expect(on.startCount == 1)
+        #expect(off.startCount == 0)
+        #expect(harness.registry.state(of: "on") == .disabled)
+        #expect(harness.registry.state(of: "off") == .disabled)
+        #expect(harness.registry.tabs.isEmpty)
+    }
+
+    @Test func grantAfterShutdownDoesNotStartTheModule() async {
+        let needy = FakeModule("needy", permissions: [.calendars])
+        let harness = Harness([needy])
+        harness.permissions.statuses[.calendars] = .notDetermined
+        await harness.registry.bootstrap()
+        await harness.registry.shutdown()
+        await harness.registry.grant(.calendars)
+        #expect(harness.permissions.requested == [.calendars])
+        #expect(needy.startCount == 0)
+        #expect(harness.registry.state(of: "needy") == .disabled)
+    }
+
     @Test func retryOfFailedModuleDoesNotCallStop() async {
         let module = FakeModule("m")
         module.startError = .failed(reason: "boom")

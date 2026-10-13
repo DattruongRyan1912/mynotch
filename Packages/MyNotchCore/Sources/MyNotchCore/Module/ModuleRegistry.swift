@@ -22,6 +22,8 @@ public final class ModuleRegistry {
     @ObservationIgnored private var tabCache: [ModuleID: NotchTab] = [:]
     /// Last queued lifecycle change per module; the next one waits for it, so start and stop never overlap.
     @ObservationIgnored private var transitions: [ModuleID: Task<Void, Never>] = [:]
+    /// Set once by `shutdown()`; from then on nothing starts, whatever the settings say.
+    @ObservationIgnored private var isShuttingDown = false
 
     public init(
         modules: [any FeatureModule],
@@ -73,7 +75,7 @@ public final class ModuleRegistry {
 
     /// Stops then starts a module again, e.g. after a failure.
     public func retry(_ id: ModuleID) async {
-        guard let module = module(id), isEnabled(id), !isPaused else { return }
+        guard let module = module(id), wantsRunning(module) else { return }
         await serialized(module) {
             await self.stop(module)
             if self.wantsRunning(module) { await self.start(module) }
@@ -114,6 +116,13 @@ public final class ModuleRegistry {
         await bootstrap()
     }
 
+    /// Stops every module so it can save its data before the app quits. Enabled settings stay as they are,
+    /// so the next launch starts the same modules.
+    public func shutdown() async {
+        isShuttingDown = true
+        await reconcile(modules)
+    }
+
     /// Built whether or not the module runs, so it can be configured while disabled.
     public func settingsView(for id: ModuleID) -> AnyView? {
         guard let module = module(id), let environment = settingsEnvironment(for: id) else { return nil }
@@ -140,7 +149,7 @@ public final class ModuleRegistry {
     }
 
     private func wantsRunning(_ module: any FeatureModule) -> Bool {
-        isEnabled(module.descriptor.id) && !isPaused
+        isEnabled(module.descriptor.id) && !isPaused && !isShuttingDown
     }
 
     /// Moves each module toward its wanted state. Modules proceed concurrently, so a slow one never holds up the others;

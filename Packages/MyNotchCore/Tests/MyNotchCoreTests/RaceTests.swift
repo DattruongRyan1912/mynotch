@@ -117,6 +117,39 @@ final class GatedModule: FeatureModule {
         #expect(h.activities.entries.count == 1)
     }
 
+    @Test func shutdownWhileStarting() async {
+        let m = GatedModule("m"); m.gateStart = true
+        let h = RegistryHarness([m])
+        let boot = Task { await h.registry.bootstrap() }
+        await m.startGate.untilWaiting()
+        let shutdown = Task { await h.registry.shutdown() }
+        for _ in 0..<20 { await Task.yield() }
+        m.startGate.open()
+        await boot.value; await shutdown.value
+        #expect(h.registry.state(of: "m") == .disabled)
+        #expect(m.stopCount == 1)
+        #expect(!m.internallyRunning)
+        #expect(m.maxInFlight == 1)
+        #expect(h.activities.entries.isEmpty)
+        #expect(h.registry.isEnabled("m"))
+    }
+
+    @Test func reenableDuringShutdownDoesNotRestart() async {
+        let m = GatedModule("m")
+        let h = RegistryHarness([m])
+        await h.registry.bootstrap()
+        m.gateStop = true
+        let shutdown = Task { await h.registry.shutdown() }
+        await m.stopGate.untilWaiting()
+        let on = Task { await h.registry.setEnabled(true, for: "m") }
+        for _ in 0..<20 { await Task.yield() }
+        m.stopGate.open()
+        await shutdown.value; await on.value
+        #expect(h.registry.state(of: "m") == .disabled)
+        #expect(m.startCount == 1)
+        #expect(h.activities.entries.isEmpty)
+    }
+
     @Test func resumeWhilePausing() async {
         let m = GatedModule("m")
         let h = RegistryHarness([m])
