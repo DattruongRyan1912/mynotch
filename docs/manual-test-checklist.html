@@ -20,47 +20,62 @@ th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-ali
 th{background:var(--card)}
 @media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
 </style></head><body><div class="layout"><nav><a class="h2" href="#khởi-động-và-menu-bar">Khởi động và menu bar</a><a class="h2" href="#notch-và-chuột">Notch và chuột</a><a class="h2" href="#fullscreen-và-màn-hình">Fullscreen và màn hình</a><a class="h2" href="#battery-và-settings">Battery và Settings</a></nav><main><h1 id="checklist-kiểm-thử-tay-nền-tảng">Checklist kiểm thử tay — Nền tảng</h1>
-<p>Điền <strong>Đạt / Không đạt / Không kiểm được (lý do)</strong> và ngày kiểm. Thoát OneNotch trước khi kiểm (hai app cùng chiếm vùng notch).</p>
+<ul>
+<li><strong>Ngày kiểm:</strong></li>
+<li><strong>Commit / bản build:</strong> (<code>git log -1 --format=%h</code>; Debug hay Release)</li>
+<li><strong>Máy:</strong> MacBook có notch + màn ngoài (ghi model và độ phân giải)</li>
+</ul>
+<p>Điền <strong>Đạt / Không đạt / Không kiểm được (lý do)</strong> vào cột Kết quả.</p>
+<p>Trước khi kiểm:</p>
+<ul>
+<li>Thoát OneNotch và các app notch khác (hai app cùng chiếm vùng notch).</li>
+<li>Chỉ chạy <strong>một</strong> bản MyNotch. Bản Debug (DerivedData) và bản Release (<code>/Applications</code>) nằm ở hai đường dẫn khác nhau; mở cả hai sẽ thành hai notch chồng nhau. Thoát bản cũ (menu bar → Quit MyNotch) trước khi mở bản kia.</li>
+</ul>
 <h2 id="khởi-động-và-menu-bar">Khởi động và menu bar</h2>
 <table><thead><tr><th>#</th><th>Kịch bản</th><th>Kết quả</th><th>Ghi chú</th></tr></thead><tbody>
-<tr><td>1</td><td>Chạy app: không có icon Dock, có icon menu bar, menu hiện đủ các mục</td><td></td><td></td></tr>
-<tr><td>2</td><td>Menu bar → Hide Notch / Show Notch; Pause All Modules có dấu tích và dừng Battery</td><td></td><td></td></tr>
-<tr><td>3</td><td>Settings: ⌘W đóng cửa sổ, ⌘, mở lại, ⌘Q thoát app</td><td></td><td></td></tr>
-<tr><td>4</td><td>Settings → General → Hiện icon trên menu bar: tắt thì icon biến mất; mở lại MyNotch từ Finder thì Settings hiện</td><td></td><td></td></tr>
-<tr><td>5</td><td>Khởi động cùng máy: dùng bản <strong>Release copy vào /Applications</strong> (bản Debug trong DerivedData đổi chữ ký mỗi lần build). Bật → app có trong Login Items, tự chạy sau khi đăng nhập lại; nếu macOS cần duyệt thì hiện nút "Mở Login Items"</td><td></td><td></td></tr>
+<tr><td>1</td><td>Chạy app: không có icon Dock; có icon menu bar; menu có Open Settings…, Hide Notch, Pause All Modules, Quit MyNotch</td><td></td><td></td></tr>
+<tr><td>2</td><td>Menu bar → Hide Notch: notch biến mất, mục đổi thành Show Notch; bấm lại thì hiện. Pause All Modules: có dấu tích, tab Battery biến mất; bấm lại thì bỏ tích và Battery chạy lại</td><td></td><td></td></tr>
+<tr><td>3</td><td>Khi cửa sổ Settings đang focus: ⌘W đóng cửa sổ; mở lại bằng menu bar → Open Settings…; ⌘, (khi MyNotch đang là app active) mở Settings; ⌘Q thoát app</td><td></td><td></td></tr>
+<tr><td>4</td><td>Settings → General → Hiện icon trên menu bar: tắt thì icon biến mất; mở lại MyNotch từ Finder (cùng bản đang chạy) thì Settings hiện; bật lại thì icon quay về</td><td></td><td></td></tr>
+<tr><td>5</td><td>Khởi động cùng máy: dùng bản <strong>Release cài vào /Applications</strong> theo README (bản Debug đổi chữ ký mỗi lần build). Bật → app có trong System Settings → General → Login Items và tự chạy sau khi đăng xuất/đăng nhập lại; nếu macOS cần duyệt thì Settings hiện nút "Mở Login Items"</td><td></td><td></td></tr>
+<tr><td>6</td><td>Thoát app rồi mở lại: mọi cài đặt đã đổi (Interface, Battery, phím tắt) vẫn giữ nguyên</td><td></td><td></td></tr>
 </tbody></table>
 <h2 id="notch-và-chuột">Notch và chuột</h2>
 <table><thead><tr><th>#</th><th>Kịch bản</th><th>Kết quả</th><th>Ghi chú</th></tr></thead><tbody>
-<tr><td>6</td><td>Notch thật trên MacBook: notch đen trùng khít notch phần cứng, không lệch</td><td></td><td></td></tr>
-<tr><td>7</td><td>Màn ngoài: notch ảo ở giữa cạnh trên; đổi chiều rộng/chiều cao trong Interface thì cập nhật ngay</td><td></td><td></td></tr>
-<tr><td>8</td><td>Interface → Màn hình = Màn hình chính / Có con trỏ / Tất cả: notch hiện đúng màn</td><td></td><td></td></tr>
-<tr><td>9</td><td>Rê chuột vào notch ~150ms thì mở; rời ra ~300ms thì đóng</td><td></td><td></td></tr>
-<tr><td>10</td><td>Rê chuột ở mép dưới màn 4K (đặt phía trên MacBook) <strong>không</strong> làm notch MacBook mở</td><td></td><td></td></tr>
-<tr><td>11</td><td>Click vào notch thì mở ngay; ⌃⌥N mở/đóng notch trên màn đang có con trỏ</td><td></td><td></td></tr>
-<tr><td>12</td><td>Khi notch đóng: click menu bar và cửa sổ ngay dưới vùng notch vẫn hoạt động</td><td></td><td></td></tr>
-<tr><td>13</td><td>Từ notch đang mở, kéo chuột thẳng xuống vùng trong suốt bên dưới: notch đóng, click ở đó tới được cửa sổ bên dưới</td><td></td><td></td></tr>
-<tr><td>14</td><td>Cửa sổ phóng to (zoom/Fill) trên màn MacBook: thanh tab/tiêu đề ngay dưới notch vẫn click được (vùng đệm 8pt quanh notch nhận chuột — chấp nhận nếu chỉ mất vài pt)</td><td></td><td></td></tr>
-<tr><td>15</td><td>Control Center, Wi-Fi, Spotlight và menu hệ thống không bị notch che</td><td></td><td></td></tr>
-<tr><td>16</td><td>Hover activity: một activity xuất hiện ngay dưới con trỏ đang đứng yên thì notch mở sau ~150ms (đúng thiết kế) — ghi lại cảm nhận</td><td></td><td></td></tr>
+<tr><td>7</td><td>Notch thật trên MacBook: notch đen trùng khít notch phần cứng, không lệch</td><td></td><td></td></tr>
+<tr><td>8</td><td>Màn ngoài: notch ảo ở giữa cạnh trên. Interface → Notch ảo: đổi Chiều rộng thì cập nhật ngay; tắt "Cao bằng menu bar" rồi kéo Chiều cao thì cập nhật ngay (slider bị khoá khi toggle đang bật)</td><td></td><td></td></tr>
+<tr><td>9</td><td>Interface → Màn hình: "Tất cả" → notch ở mọi màn; "Màn hình có con trỏ" → notch theo màn có con trỏ; "Màn hình chính" → chỉ màn được đặt làm màn chính trong System Settings → Displays (nếu màn 4K là màn chính thì notch MacBook biến mất — đúng thiết kế)</td><td></td><td></td></tr>
+<tr><td>10</td><td>Rê chuột vào notch ~150ms thì mở; rời ra ~300ms thì đóng. Đổi "Trễ khi mở/đóng" trong Interface thì độ trễ đổi theo; đổi Chiều rộng khi mở rộng thì notch mở rộng theo</td><td></td><td></td></tr>
+<tr><td>11</td><td>Rê chuột ở mép dưới màn 4K (đặt phía trên MacBook) <strong>không</strong> làm notch MacBook mở</td><td></td><td></td></tr>
+<tr><td>12</td><td>Click vào notch thì mở ngay; ⌃⌥N mở/đóng notch trên màn đang có con trỏ</td><td></td><td></td></tr>
+<tr><td>13</td><td>Settings → General → đổi phím tắt "Mở/đóng notch" bằng ô ghi phím: phím mới hoạt động, ⌃⌥N cũ thôi hoạt động</td><td></td><td></td></tr>
+<tr><td>14</td><td>Khi notch đóng: click menu bar và cửa sổ ngay dưới vùng notch (ngoài vùng đệm 8pt quanh notch) vẫn hoạt động</td><td></td><td></td></tr>
+<tr><td>15</td><td>Từ notch đang mở, rê chuột thẳng xuống vùng trong suốt bên dưới: notch đóng, click ở đó tới được cửa sổ bên dưới</td><td></td><td></td></tr>
+<tr><td>16</td><td>Cửa sổ phóng to (zoom/Fill) trên màn MacBook: thanh tab/tiêu đề ngay dưới notch vẫn click được, trừ vùng đệm 8pt quanh notch (chấp nhận)</td><td></td><td></td></tr>
+<tr><td>17</td><td>Control Center, Wi-Fi, Spotlight và menu hệ thống không bị notch che</td><td></td><td></td></tr>
+<tr><td>18</td><td>Để con trỏ đứng yên ngay cạnh notch (trong vùng activity), cắm sạc: activity hiện dưới con trỏ và notch mở sau ~150ms (đúng thiết kế) — ghi lại cảm nhận</td><td></td><td></td></tr>
 </tbody></table>
 <h2 id="fullscreen-và-màn-hình">Fullscreen và màn hình</h2>
 <table><thead><tr><th>#</th><th>Kịch bản</th><th>Kết quả</th><th>Ghi chú</th></tr></thead><tbody>
-<tr><td>17</td><td>Video fullscreen Safari <strong>trên màn MacBook</strong>: notch ẩn; thoát fullscreen: hiện lại</td><td></td><td></td></tr>
-<tr><td>18</td><td>Video fullscreen trên <strong>màn 4K</strong>, rồi click sang một app ở màn MacBook: notch màn 4K vẫn ẩn</td><td></td><td></td></tr>
-<tr><td>19</td><td>Cửa sổ phóng to (zoom/Fill, không phải fullscreen) trên màn MacBook: notch <strong>không</strong> ẩn</td><td></td><td></td></tr>
-<tr><td>20</td><td>Keynote khi trình chiếu: ghi lại notch có ẩn không (layer khác 0 — rủi ro đã biết)</td><td></td><td></td></tr>
-<tr><td>21</td><td>Chuyển sang Space fullscreen của app khác: notch vẫn hiện/ẩn đúng theo cài đặt</td><td></td><td></td></tr>
-<tr><td>22</td><td>Cho máy ngủ rồi đánh thức: notch vẫn đúng vị trí</td><td></td><td></td></tr>
-<tr><td>23</td><td>Rút rồi cắm lại màn ngoài: notch biến mất rồi xuất hiện lại đúng chỗ</td><td></td><td></td></tr>
-<tr><td>24</td><td>Màn ngoài với menu bar tự ẩn: notch ảo không che nội dung bất thường</td><td></td><td></td></tr>
+<tr><td>19</td><td>Video fullscreen Safari <strong>trên màn MacBook</strong>: notch ẩn; thoát fullscreen: hiện lại</td><td></td><td></td></tr>
+<tr><td>20</td><td>Video fullscreen trên <strong>màn 4K</strong>, rồi click sang một app ở màn MacBook: notch màn 4K vẫn ẩn</td><td></td><td></td></tr>
+<tr><td>21</td><td>Cửa sổ phóng to (zoom/Fill, không phải fullscreen) trên màn MacBook: notch <strong>không</strong> ẩn</td><td></td><td></td></tr>
+<tr><td>22</td><td>Tắt "Ẩn khi app đang fullscreen" rồi vào fullscreen: notch vẫn hiện; bật lại: notch ẩn</td><td></td><td></td></tr>
+<tr><td>23</td><td>Keynote khi trình chiếu: ghi lại notch có ẩn không (layer cửa sổ khác 0 — rủi ro đã biết)</td><td></td><td></td></tr>
+<tr><td>24</td><td>Vuốt sang Space fullscreen của app khác rồi quay lại desktop: notch ẩn/hiện đúng theo cài đặt</td><td></td><td></td></tr>
+<tr><td>25</td><td>Cho máy ngủ rồi đánh thức: notch vẫn đúng vị trí</td><td></td><td></td></tr>
+<tr><td>26</td><td>Rút rồi cắm lại màn ngoài: notch biến mất rồi xuất hiện lại đúng chỗ</td><td></td><td></td></tr>
+<tr><td>27</td><td>Màn ngoài với menu bar tự ẩn (System Settings → Control Center → Tự động ẩn menu bar): notch ảo vẫn ở cạnh trên, không lệch xuống, không chặn click ngoài vùng notch</td><td></td><td></td></tr>
 </tbody></table>
 <h2 id="battery-và-settings">Battery và Settings</h2>
 <table><thead><tr><th>#</th><th>Kịch bản</th><th>Kết quả</th><th>Ghi chú</th></tr></thead><tbody>
-<tr><td>25</td><td>Tab Battery hiển thị %, trạng thái, nguồn điện; ở giới hạn sạc 80% hiện "Đã cắm sạc · không sạc"</td><td></td><td></td></tr>
-<tr><td>26</td><td>Cắm sạc: activity tia sét + % hiện khoảng 4 giây; rút sạc trong 4 giây thì activity tắt ngay</td><td></td><td></td></tr>
-<tr><td>27</td><td>Settings → Battery: các dòng cài đặt không bị lồng hộp trong hộp; hạ ngưỡng pin yếu thì cảnh báo cập nhật ngay</td><td></td><td></td></tr>
-<tr><td>28</td><td>Settings → Battery: tắt thì tab/activity biến mất; bật lại thì xuất hiện</td><td></td><td></td></tr>
-<tr><td>29</td><td>Activity Monitor: CPU của MyNotch khi rê chuột liên tục 30 giây</td><td></td><td></td></tr>
+<tr><td>28</td><td>Tab Battery hiển thị %, trạng thái, nguồn điện; khi đã cắm sạc mà máy đang giữ giới hạn sạc (ví dụ 80%) thì hiện "Đã cắm sạc · không sạc"</td><td></td><td></td></tr>
+<tr><td>29</td><td>Cắm sạc: activity tia sét + % hiện khoảng 4 giây; rút sạc trong 4 giây thì activity tắt ngay</td><td></td><td></td></tr>
+<tr><td>30</td><td>Settings → Battery → tắt "Thông báo khi cắm sạc": cắm sạc thì không còn activity tia sét</td><td></td><td></td></tr>
+<tr><td>31</td><td>Pin yếu (rút sạc, pin ≤ 50%): Settings → Battery tăng ngưỡng lên trên % hiện tại → activity pin yếu (đỏ) hiện; hạ ngưỡng xuống dưới % hiện tại → tắt ngay. Các dòng cài đặt không bị lồng hộp trong hộp</td><td></td><td></td></tr>
+<tr><td>32</td><td>Settings → Modules → Battery: tắt thì tab và activity biến mất; bật lại thì tab quay lại (activity sạc chỉ hiện ở lần cắm sạc tiếp theo; activity pin yếu chỉ hiện nếu pin vẫn dưới ngưỡng)</td><td></td><td></td></tr>
+<tr><td>33</td><td>Trang About: Phiên bản <code>0.1.0 (1)</code>, Bundle ID <code>io.lucasvu.mynotch</code>, mục Thư viện bên thứ ba có KeyboardShortcuts (MIT, link mở được)</td><td></td><td></td></tr>
+<tr><td>34</td><td>Activity Monitor: CPU của MyNotch khi rê chuột liên tục 30 giây — đạt nếu trung bình dưới ~5% (ghi con số)</td><td></td><td></td></tr>
 </tbody></table></main></div><script>
 document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
 b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});

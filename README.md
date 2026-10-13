@@ -35,27 +35,37 @@ Kiểm tra toàn bộ (test mọi package rồi build app):
 
 ## Thêm một module
 
-1. Tạo package trong `Packages/Modules/<Tên>/`, viết một class theo `FeatureModule`.
+1. Tạo package trong `Packages/Modules/<Tên>/`; chép `Packages/Modules/Battery/Package.swift` làm mẫu (macOS 26, phụ thuộc đường dẫn tới MyNotchCore/NotchUI, `.defaultIsolation(MainActor.self)`, test dùng `MyNotchTestSupport`). Viết một class theo `FeatureModule`.
 2. Khai báo package trong `project.yml` (mục `packages` và `dependencies` của target MyNotch).
 3. Thêm một dòng vào `App/ModuleList.swift`.
-4. `xcodegen generate`.
+4. `xcodegen generate`. `scripts/verify.sh` tự chạy test của mọi package trong `Packages/Modules/`.
 
 ## Bản Release
 
-Khởi động cùng máy cần một bản app ổn định (bản Debug đổi chữ ký mỗi lần build):
+Khởi động cùng máy cần một bản app ổn định (bản Debug đổi chữ ký mỗi lần build). Thoát MyNotch đang chạy
+(menu bar → Quit MyNotch) rồi:
 
 ```bash
 xcodebuild -project MyNotch.xcodeproj -scheme MyNotch -configuration Release \
-    -destination 'platform=macOS' -derivedDataPath .build/xcode build -quiet
-cp -R .build/xcode/Build/Products/Release/MyNotch.app /Applications/
+    -destination "platform=macOS,arch=$(uname -m)" -derivedDataPath .build/xcode build -quiet
+rm -rf /Applications/MyNotch.app
+ditto .build/xcode/Build/Products/Release/MyNotch.app /Applications/MyNotch.app
 ```
+
+Không dùng `cp -R` đè lên bản cũ: macOS sẽ giết app khi mở vì chữ ký không còn khớp.
 
 ## Ký app
 
 Mặc định app được ký ad-hoc ("Sign to Run Locally"), đủ cho các module không cần quyền hệ thống.
-Khi làm module cần quyền (Accessibility, Screen Recording…), trong `project.yml` đặt `DEVELOPMENT_TEAM`
-bằng Team ID của Apple ID (Xcode → Settings → Accounts) và đổi `CODE_SIGN_IDENTITY` từ `"-"` thành
-`"Apple Development"` để macOS nhớ quyền giữa các lần build.
+Với ký ad-hoc, macOS quên các quyền đã cấp (Accessibility, Screen Recording…) mỗi lần build lại.
+Để macOS nhớ quyền giữa các lần build:
+
+1. Xcode → Settings → Accounts: thêm Apple ID, rồi Manage Certificates → tạo chứng chỉ **Apple Development**.
+2. Trong `project.yml` đặt `DEVELOPMENT_TEAM` bằng Team ID của Apple ID và đổi `CODE_SIGN_IDENTITY` từ `"-"` thành `"Apple Development"`.
+3. Chạy lại `xcodegen generate`.
+
+Chứng chỉ Apple Development của Apple ID miễn phí có hạn (thường 1 năm); hết hạn thì macOS không mở app nữa —
+tạo chứng chỉ mới trong Xcode rồi build lại.
 
 ## Xử lý sự cố
 
