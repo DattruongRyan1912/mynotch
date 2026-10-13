@@ -7,13 +7,19 @@ import Testing
 @Suite struct ClipboardClassifierTests {
     let classifier = ClipboardClassifier(ignoreSensitive: true, colorsWithoutHash: true)
 
-    /// A 2×3 RGBA bitmap built in code, so tests never depend on the system pasteboard.
-    static let bitmap = NSBitmapImageRep(
-        bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 3, bitsPerSample: 8, samplesPerPixel: 4,
-        hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
-    )!
-    static let png = bitmap.representation(using: .png, properties: [:])!
-    static let tiff = bitmap.tiffRepresentation!
+    /// RGBA bitmap built in code, so tests never depend on the system pasteboard. Its point size is half
+    /// its pixel size (a Retina screenshot), so reading points instead of pixels fails the tests.
+    static func bitmap(pixelsWide: Int, pixelsHigh: Int) -> NSBitmapImageRep {
+        let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: pixelsWide, pixelsHigh: pixelsHigh, bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        )!
+        bitmap.size = NSSize(width: Double(pixelsWide) / 2, height: Double(pixelsHigh) / 2)
+        return bitmap
+    }
+
+    static let png = bitmap(pixelsWide: 2, pixelsHigh: 3).representation(using: .png, properties: [:])!
+    static let tiff = bitmap(pixelsWide: 2, pixelsHigh: 3).tiffRepresentation!
 
     static func sha256(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
@@ -91,9 +97,18 @@ import Testing
         #expect(image == ClipboardImage(fileName: Self.sha256(imageData) + ".png", pixelWidth: 2, pixelHeight: 3, byteCount: imageData.count))
     }
 
+    @Test func pngIsPreferredOverTIFF() {
+        let tiff = Self.bitmap(pixelsWide: 4, pixelsHigh: 5).tiffRepresentation!
+        let snapshot = PasteboardSnapshot(types: ["public.png", "public.tiff"], png: Self.png, tiff: tiff)
+        let image = ClipboardImage(fileName: Self.sha256(Self.png) + ".png", pixelWidth: 2, pixelHeight: 3, byteCount: Self.png.count)
+        #expect(classifier.classify(snapshot) == .content(.image(image), imageData: Self.png))
+    }
+
     @Test func undecodableImageIsUnsupported() {
         let snapshot = PasteboardSnapshot(types: ["public.png"], png: Data("not an image".utf8))
         #expect(classifier.classify(snapshot) == .skipped(.unsupported))
+        let blank = PasteboardSnapshot(types: ["public.png", "public.utf8-plain-text"], string: " \n", png: Data("not an image".utf8))
+        #expect(classifier.classify(blank) == .skipped(.empty))
     }
 
     @Test func undecodableImageFallsThroughToText() {
@@ -111,7 +126,10 @@ import Testing
         #expect(classifier.classify(text(input)) == .content(.link(URL(string: expected)!), imageData: nil))
     }
 
-    @Test(arguments: ["ftp://example.com", "example.com", "https://example.com and more", "see https://example.com"])
+    @Test(arguments: [
+        "ftp://example.com", "example.com", "https://example.com and more", "see https://example.com",
+        "https://example.com/a b", "http://", "https:", "http:foo", "mailto:",
+    ])
     func otherStringsAreNotLinks(input: String) {
         #expect(classifier.classify(text(input)) == .content(.text(input), imageData: nil))
     }
@@ -126,8 +144,11 @@ import Testing
         ("#FF880080", "#FF880080"),
         (" #fff ", "#FFFFFF"),
         ("#a1B", "#AA11BB"),
+        ("#deadbeef", "#DEADBEEF"),
+        ("#123456", "#123456"),
         ("ff8800", "#FF8800"),
-        ("ff880080", "#FF880080"),
+        ("1e3a5f", "#1E3A5F"),
+        ("FF880080", "#FF880080"),
     ])
     func colorsAreNormalized(input: String, hex: String) {
         #expect(classifier.classify(text(input)) == .content(.color(hex: hex), imageData: nil))
@@ -139,7 +160,10 @@ import Testing
         #expect(classifier.classify(text("#ff8800")) == .content(.color(hex: "#FF8800"), imageData: nil))
     }
 
-    @Test(arguments: ["#ff88", "#gggggg", "fff", "#ff88000", "ff88 00", "＃ff8800", "ｆｆ8800"])
+    @Test(arguments: [
+        "#ff88", "#gggggg", "fff", "#ff88000", "ff88 00", "＃ff8800", "ｆｆ8800",
+        "123456", "20251013", "facade", "deadbeef",
+    ])
     func otherStringsAreNotColors(input: String) {
         #expect(classifier.classify(text(input)) == .content(.text(input), imageData: nil))
     }
@@ -147,6 +171,11 @@ import Testing
     @Test func textWithRTFIsRichText() {
         let rtf = Data("{\\rtf1 Hello}".utf8)
         #expect(classifier.classify(text("Hello", rtf: rtf)) == .content(.richText(plain: "Hello", rtf: rtf), imageData: nil))
+    }
+
+    @Test func rtfOverTheLimitIsKeptAsPlainText() {
+        let rtf = Data(count: ClipboardClassifier.maxTextBytes + 1)
+        #expect(classifier.classify(text("Hello", rtf: rtf)) == .content(.text("Hello"), imageData: nil))
     }
 
     @Test func linksAndColorsBeatRichText() {

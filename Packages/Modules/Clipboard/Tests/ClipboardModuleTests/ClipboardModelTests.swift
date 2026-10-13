@@ -38,6 +38,22 @@ final class ClipboardIDModule: FeatureModule {
         #expect(decoded == item)
     }
 
+    /// Pins the stored shape of every case: renaming a case or a label must not silently orphan saved history.
+    @Test func decodesTheStoredJSONOfEveryContent() throws {
+        let rtf = Self.rtf.base64EncodedString()
+        let json = """
+        [
+            {"text": {"_0": "Xin chào"}},
+            {"richText": {"plain": "Bold", "rtf": "\(rtf)"}},
+            {"link": {"_0": "https://example.com/path?q=1"}},
+            {"color": {"hex": "#FF8800"}},
+            {"image": {"_0": {"fileName": "abc.png", "pixelWidth": 2, "pixelHeight": 3, "byteCount": 120}}},
+            {"files": {"_0": ["file:///tmp/a.txt", "file:///tmp/b%20c.pdf"]}}
+        ]
+        """
+        #expect(try JSONDecoder().decode([ClipboardContent].self, from: Data(json.utf8)) == Self.contents)
+    }
+
     @Test func boardsRoundTripThroughJSON() throws {
         let board = ClipboardBoard(id: UUID(), name: "Công việc", systemImage: "tray.full", itemIDs: [UUID(), UUID()])
         #expect(try JSONDecoder().decode(ClipboardBoard.self, from: JSONEncoder().encode(board)) == board)
