@@ -22,6 +22,8 @@ packages:
     path: Packages/MyNotchCore
   NotchUI:
     path: Packages/NotchUI
+  AIAgentsModule:
+    path: Packages/Modules/AIAgents
   BatteryModule:
     path: Packages/Modules/Battery
   CalendarModule:
@@ -30,6 +32,8 @@ packages:
     path: Packages/Modules/Clipboard
   MediaModule:
     path: Packages/Modules/Media
+  ScreenshotModule:
+    path: Packages/Modules/Screenshot
   TranslationModule:
     path: Packages/Modules/Translation
   KeyboardShortcuts:
@@ -47,10 +51,12 @@ targets:
     dependencies:
       - package: MyNotchCore
       - package: NotchUI
+      - package: AIAgentsModule
       - package: BatteryModule
       - package: CalendarModule
       - package: ClipboardModule
       - package: MediaModule
+      - package: ScreenshotModule
       - package: TranslationModule
       - package: KeyboardShortcuts
       # Copied into Contents/Frameworks for perl to load; the app binary never links it.
