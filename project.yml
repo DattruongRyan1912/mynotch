@@ -24,6 +24,8 @@ packages:
     path: Packages/NotchUI
   BatteryModule:
     path: Packages/Modules/Battery
+  ClipboardModule:
+    path: Packages/Modules/Clipboard
   KeyboardShortcuts:
     url: https://github.com/sindresorhus/KeyboardShortcuts
     exactVersion: 3.1.0
@@ -40,6 +42,7 @@ targets:
       - package: MyNotchCore
       - package: NotchUI
       - package: BatteryModule
+      - package: ClipboardModule
       - package: KeyboardShortcuts
       # Copied into Contents/Frameworks for perl to load; the app binary never links it.
       - target: MediaRemoteAdapter
