@@ -36,7 +36,7 @@ Trước khi kiểm:
 | 15 | Từ notch đang mở, rê chuột thẳng xuống vùng trong suốt bên dưới: notch đóng, click ở đó tới được cửa sổ bên dưới | | |
 | 16 | Cửa sổ phóng to (zoom/Fill) trên màn MacBook: thanh tab/tiêu đề ngay dưới notch vẫn click được, trừ vùng đệm 8pt quanh notch (chấp nhận) | | |
 | 17 | Control Center, Wi-Fi, Spotlight và menu hệ thống không bị notch che | | |
-| 18 | Để con trỏ đứng yên ngay cạnh notch (trong vùng activity), cắm sạc: activity hiện dưới con trỏ và notch mở sau ~150ms (đúng thiết kế) — ghi lại cảm nhận | | |
+| 18 | Để con trỏ đứng yên cạnh notch, cách mép notch khoảng 20–60pt (ngoài vùng đệm 8pt nhưng trong vùng activity), cắm sạc: activity hiện dưới con trỏ và notch mở sau ~150ms (đúng thiết kế) — ghi lại cảm nhận | | |
 
 ## Fullscreen và màn hình
 
@@ -50,7 +50,7 @@ Trước khi kiểm:
 | 24 | Vuốt sang Space fullscreen của app khác rồi quay lại desktop: notch ẩn/hiện đúng theo cài đặt | | |
 | 25 | Cho máy ngủ rồi đánh thức: notch vẫn đúng vị trí | | |
 | 26 | Rút rồi cắm lại màn ngoài: notch biến mất rồi xuất hiện lại đúng chỗ | | |
-| 27 | Màn ngoài với menu bar tự ẩn (System Settings → Control Center → Tự động ẩn menu bar): notch ảo vẫn ở cạnh trên, không lệch xuống, không chặn click ngoài vùng notch | | |
+| 27 | Màn ngoài với menu bar tự ẩn (System Settings → Thanh menu → "Tự động ẩn và hiển thị thanh menu"): notch ảo vẫn ở cạnh trên, không lệch xuống, không chặn click ngoài vùng notch | | |
 
 ## Battery và Settings
 
