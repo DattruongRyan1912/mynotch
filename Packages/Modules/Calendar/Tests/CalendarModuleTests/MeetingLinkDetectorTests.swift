@@ -16,7 +16,11 @@ import Testing
         ("https://meet.google.com/abc-defg-hij", .googleMeet),
         ("https://teams.microsoft.com/l/meetup-join/19%3ameeting_NjQ%40thread.v2/0?context=%7b%22Tid%22%3a%22x%22%7d", .teams),
         ("https://teams.live.com/meet/9876543210", .teams),
+        ("https://acme.zoom.us/j/81234567890?pwd=ab%2Bcd", .zoom),
+        ("https://acme.zoom.us/j/81234567890?pwd=ab+cd", .zoom),
+        ("https://acme.eu.zoom.us/j/81234567890", .zoom),
         ("https://acme.webex.com/acme/j.php?MTID=m1234abcd", .webex),
+        ("https://acme.my.webex.com/meet/ryan", .webex),
         ("https://facetime.apple.com/join#v=1&p=AbCdEf123&k=XyZ", .faceTime),
     ])
     func detectsEachProvider(url: String, provider: MeetingProvider) {

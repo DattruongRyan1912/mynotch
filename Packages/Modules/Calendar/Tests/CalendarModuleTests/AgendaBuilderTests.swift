@@ -42,6 +42,16 @@ import Testing
         #expect(agenda.today.map(\.id) == ["Birthday", "Holiday", "standup", "sync", "lunch"])
     }
 
+    @Test func allDayEventsStayFirstBeforeATimedEventThatStartedYesterday() {
+        let overnight = event("overnight", calendar.on(13, at: 23), calendar.on(14, at: 1))
+        let holiday = allDayEvent("Holiday", on: 14, in: calendar)
+        let lunch = event("lunch", calendar.on(14, at: 12), calendar.on(14, at: 13))
+
+        let agenda = build([lunch, overnight, holiday])
+
+        #expect(agenda.today.map(\.id) == ["Holiday", "overnight", "lunch"])
+    }
+
     @Test func theOrderOfTheInputDoesNotMatter() {
         let events = [
             event("b", calendar.on(14, at: 12), calendar.on(14, at: 13)),
@@ -116,6 +126,17 @@ import Testing
         #expect(build([tenDays, sixDays]).next?.id == "six days")
         #expect(build([tenDays]).next == nil)
         #expect(build([tenDays]).today.isEmpty)
+    }
+
+    @Test func nextLookAheadEndsExactlyAWeekFromNow() {
+        // `now` is 10:30 on the 14th, so the week ends at 10:30 on the 21st.
+        let justInside = event("just inside", calendar.on(21, at: 10, 29), calendar.on(21, at: 11))
+        let atTheEdge = event("at the edge", calendar.on(21, at: 10, 30), calendar.on(21, at: 11))
+        let justOutside = event("just outside", calendar.on(21, at: 10, 31), calendar.on(21, at: 11))
+
+        #expect(build([justOutside, atTheEdge, justInside]).next?.id == "just inside")
+        #expect(build([justOutside, atTheEdge]).next == nil)
+        #expect(build([justOutside]).next == nil)
     }
 
     @Test func nextIgnoresAllDayCanceledAndDeclinedEventsOnLaterDays() {

@@ -7,6 +7,8 @@ nonisolated protocol CalendarDataSource: Sendable {
     func events(from start: Date, to end: Date) async -> [AgendaEvent]
     /// Incomplete reminders due by `end`, overdue ones included. Empty without Reminders access.
     func reminders(dueBy end: Date) async -> [AgendaReminder]
+    /// The calendars events can come from, for the "hidden calendars" setting. Empty without Calendars access.
+    func calendars() async -> [CalendarInfo]
     func complete(reminderID: String) async throws
     /// Signals that events or reminders changed, with bursts coalesced. Every access starts a new stream.
     var changes: AsyncStream<Void> { get }

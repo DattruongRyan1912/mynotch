@@ -9,7 +9,11 @@ nonisolated final class FakeCalendarDataSource: CalendarDataSource {
         var events: [AgendaEvent]
         var reminders: [AgendaReminder]
         var statuses: [Permission: PermissionStatus] = [.calendars: .granted, .reminders: .granted]
+        var calendars: [CalendarInfo] = []
         var completedIDs: [String] = []
+        var completionFailure: (any Error)?
+        var eventRanges: [DateInterval] = []
+        var reminderFetchCount = 0
         var observers: [AsyncStream<Void>.Continuation] = []
     }
 
@@ -29,7 +33,23 @@ nonisolated final class FakeCalendarDataSource: CalendarDataSource {
         set { state.withLock { $0.reminders = newValue } }
     }
 
+    var calendars: [CalendarInfo] {
+        get { state.withLock { $0.calendars } }
+        set { state.withLock { $0.calendars = newValue } }
+    }
+
     var completedIDs: [String] { state.withLock { $0.completedIDs } }
+
+    /// Makes `complete(reminderID:)` throw, like EventKit refusing the save.
+    var completionFailure: (any Error)? {
+        get { state.withLock { $0.completionFailure } }
+        set { state.withLock { $0.completionFailure = newValue } }
+    }
+
+    /// The range of every events request, in order.
+    var eventRanges: [DateInterval] { state.withLock { $0.eventRanges } }
+    var eventFetchCount: Int { eventRanges.count }
+    var reminderFetchCount: Int { state.withLock { $0.reminderFetchCount } }
 
     func setAuthorization(_ status: PermissionStatus, for permission: Permission) {
         state.withLock { $0.statuses[permission] = status }
@@ -47,15 +67,26 @@ nonisolated final class FakeCalendarDataSource: CalendarDataSource {
 
     /// Like EventKit's predicate, every event overlapping the range.
     func events(from start: Date, to end: Date) async -> [AgendaEvent] {
-        state.withLock { $0.events.filter { $0.start < end && $0.end > start } }
+        state.withLock {
+            $0.eventRanges.append(DateInterval(start: start, end: end))
+            return $0.events.filter { $0.start < end && $0.end > start }
+        }
     }
 
     func reminders(dueBy end: Date) async -> [AgendaReminder] {
-        state.withLock { $0.reminders }
+        state.withLock {
+            $0.reminderFetchCount += 1
+            return $0.reminders
+        }
+    }
+
+    func calendars() async -> [CalendarInfo] {
+        state.withLock { $0.calendars }
     }
 
     func complete(reminderID: String) async throws {
-        state.withLock {
+        try state.withLock {
+            if let failure = $0.completionFailure { throw failure }
             $0.completedIDs.append(reminderID)
             $0.reminders.removeAll { $0.id == reminderID }
         }

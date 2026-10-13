@@ -34,4 +34,11 @@ import Testing
         let agenda = AgendaBuilder.build(events: await source.events(from: range.start, to: range.end), now: now, calendar: calendar)
         #expect(agenda == Agenda())
     }
+
+    @Test func theCalendarListComesFromTheSource() async {
+        let source = FakeCalendarDataSource()
+        #expect(await source.calendars().isEmpty)
+        source.calendars = [CalendarInfo(id: "work", title: "Work", color: .gray)]
+        #expect(await source.calendars().map(\.title) == ["Work"])
+    }
 }

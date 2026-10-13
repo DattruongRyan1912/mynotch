@@ -15,13 +15,14 @@ nonisolated enum MeetingLinkDetector {
     /// A link ends at whitespace or at a character that marks the end of an HTML attribute or tag.
     private static let rest = #"[^\s"<>]"#
 
-    /// Hosts match in any case, since people type and paste them that way. ZoomGov also lives on `zoomgov.com`.
+    /// Hosts match in any case, since people type and paste them that way. ZoomGov also lives on `zoomgov.com`, and
+    /// Zoom and Webex hosts can have several labels in front (`acme.my.webex.com`). A Zoom passcode can carry `%` and `+`.
     private static let patterns: [(provider: MeetingProvider, regex: NSRegularExpression)] = {
         let table: [(MeetingProvider, String)] = [
-            (.zoom, #"https://([\w-]+\.)?zoom(\.us|gov\.(us|com))/(j|my|w)/[\w?=&.\-]+"#),
+            (.zoom, #"https://([\w-]+\.)*zoom(\.us|gov\.(us|com))/(j|my|w)/[\w?=&.%+\-]+"#),
             (.googleMeet, #"https://meet\.google\.com/[a-z]{3}-[a-z]{4}-[a-z]{3}"#),
             (.teams, #"https://teams\.(microsoft|live)\.com/(l/meetup-join|meet)/\#(rest)+"#),
-            (.webex, #"https://[\w-]+\.webex\.com/\#(rest)+"#),
+            (.webex, #"https://([\w-]+\.)+webex\.com/\#(rest)+"#),
             (.faceTime, #"https://facetime\.apple\.com/join\#(rest)+"#),
         ]
         return table.map { (provider: $0.0, regex: try! NSRegularExpression(pattern: $0.1, options: .caseInsensitive)) }

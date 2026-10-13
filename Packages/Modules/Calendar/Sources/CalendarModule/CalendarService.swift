@@ -3,7 +3,15 @@ import Foundation
 import MyNotchCore
 
 nonisolated enum CalendarServiceError: Error, Equatable {
+    /// Reminders access is missing, so nothing can be read or changed.
+    case accessDenied
     case reminderNotFound
+}
+
+/// Carries EventKit's reminders out of its callback thread unchanged: they aren't `Sendable`, and reading them is
+/// left to the actor so every EventKit object is only touched there.
+private nonisolated struct FetchedReminders: @unchecked Sendable {
+    let reminders: [EKReminder]
 }
 
 /// The real data source: one `EKEventStore` behind an actor. EventKit's objects aren't `Sendable`, so each is
@@ -15,13 +23,15 @@ actor CalendarService: CalendarDataSource {
     /// Created on first use, which only happens once access is granted: a store made before that can keep
     /// showing nothing after the user allows it.
     private lazy var store = EKEventStore()
+    private let authorizationStatus: @Sendable (Permission) -> PermissionStatus
+
+    /// Tests pass `authorizationStatus` so no check reaches EventKit.
+    init(authorizationStatus: @escaping @Sendable (Permission) -> PermissionStatus = CalendarService.systemStatus(of:)) {
+        self.authorizationStatus = authorizationStatus
+    }
 
     nonisolated func authorization(for permission: Permission) -> PermissionStatus {
-        switch permission {
-        case .calendars: Self.status(of: .event)
-        case .reminders: Self.status(of: .reminder)
-        default: .denied
-        }
+        authorizationStatus(permission)
     }
 
     func events(from start: Date, to end: Date) async -> [AgendaEvent] {
@@ -33,16 +43,21 @@ actor CalendarService: CalendarDataSource {
     func reminders(dueBy end: Date) async -> [AgendaReminder] {
         guard authorization(for: .reminders) == .granted else { return [] }
         let predicate = store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: end, calendars: nil)
+        let fetched = await withCheckedContinuation { continuation in
+            store.fetchReminders(matching: predicate) { continuation.resume(returning: FetchedReminders(reminders: $0 ?? [])) }
+        }
         let now = Date.now
         let calendar = Calendar.current
-        return await withCheckedContinuation { continuation in
-            store.fetchReminders(matching: predicate) { reminders in
-                continuation.resume(returning: (reminders ?? []).map { AgendaReminder($0, now: now, calendar: calendar) })
-            }
-        }
+        return fetched.reminders.map { AgendaReminder($0, now: now, calendar: calendar) }
+    }
+
+    func calendars() async -> [CalendarInfo] {
+        guard authorization(for: .calendars) == .granted else { return [] }
+        return store.calendars(for: .event).map(CalendarInfo.init)
     }
 
     func complete(reminderID: String) async throws {
+        guard authorization(for: .reminders) == .granted else { throw CalendarServiceError.accessDenied }
         guard let reminder = store.calendarItem(withIdentifier: reminderID) as? EKReminder else {
             throw CalendarServiceError.reminderNotFound
         }
@@ -59,6 +74,15 @@ actor CalendarService: CalendarDataSource {
         }
         input.onTermination = { _ in listener.cancel() }
         return ChangeCoalescer.coalescing(raw, quietPeriod: Self.changeQuietPeriod)
+    }
+
+    /// What the app reads from the system. Only `.calendars` and `.reminders` have an answer.
+    nonisolated static func systemStatus(of permission: Permission) -> PermissionStatus {
+        switch permission {
+        case .calendars: status(of: .event)
+        case .reminders: status(of: .reminder)
+        default: .denied
+        }
     }
 
     /// Write-only access can't read events, so it counts as denied.

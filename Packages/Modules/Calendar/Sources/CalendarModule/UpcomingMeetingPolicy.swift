@@ -36,4 +36,15 @@ nonisolated struct UpcomingMeetingPolicy: Equatable, Sendable {
         }
         return -untilStart < Self.inProgressDuration ? .inProgress : .hidden
     }
+
+    /// The event the activity is about: the first of `events`, in the order given (by start), that hasn't started or
+    /// started less than `inProgressDuration` ago. Taking the first of the agenda's `next` instead would let a
+    /// workshop that began at nine hide the meeting at two. The dismissed event steps aside for the next one, so
+    /// dismissing a meeting doesn't hide another that starts a few minutes later; `includingDismissed` keeps it.
+    func nextMeeting(in events: [AgendaEvent], now: Date, includingDismissed: Bool = false) -> AgendaEvent? {
+        events.first { event in
+            (includingDismissed || event.id != dismissedEventID)
+                && (event.start > now || now.timeIntervalSince(event.start) < Self.inProgressDuration)
+        }
+    }
 }

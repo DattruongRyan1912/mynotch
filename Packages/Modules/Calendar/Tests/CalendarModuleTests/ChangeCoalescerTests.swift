@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import CalendarModule
 
@@ -65,6 +66,55 @@ import Testing
 
         consumer.cancel()
         await consumer.value
+
+        var iterator = released.makeAsyncIterator()
+        #expect(await iterator.next() != nil)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func aContinuousStreamStillSignalsOnceTheMaxWaitPasses() async {
+        let (source, input) = AsyncStream<Void>.makeStream()
+        let output = ChangeCoalescer.coalescing(source, quietPeriod: quiet, maxWait: quiet * 3)
+        let start = ContinuousClock.now
+        // A change every 100 ms is never quiet for 300 ms, so only the max wait can end the burst.
+        let feeder = Task {
+            while !Task.isCancelled {
+                input.yield()
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+        defer { feeder.cancel() }
+
+        var iterator = output.makeAsyncIterator()
+        #expect(await iterator.next() != nil)
+        let waited = start.duration(to: .now)
+
+        #expect(waited >= quiet * 3 - .milliseconds(50))
+        #expect(waited < .seconds(3))
+    }
+
+    @Test func aNewBurstAfterASignalWaitsForQuietAgain() async {
+        let (source, input) = AsyncStream<Void>.makeStream()
+        var iterator = ChangeCoalescer.coalescing(source, quietPeriod: quiet, maxWait: quiet * 3).makeAsyncIterator()
+
+        input.yield()
+        #expect(await iterator.next() != nil)
+        // A new burst gets a new window: it waits for quiet again instead of signaling at once.
+        let start = ContinuousClock.now
+        input.yield()
+        #expect(await iterator.next() != nil)
+        #expect(start.duration(to: .now) >= quiet - .milliseconds(50))
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func aStreamNobodyIteratesReleasesItsSourceWhenDropped() async {
+        let (source, input) = AsyncStream<Void>.makeStream()
+        let (released, markReleased) = AsyncStream<Void>.makeStream()
+        input.onTermination = { _ in markReleased.yield() }
+
+        var output: AsyncStream<Void>? = ChangeCoalescer.coalescing(source, quietPeriod: quiet)
+        #expect(output != nil)
+        output = nil
 
         var iterator = released.makeAsyncIterator()
         #expect(await iterator.next() != nil)

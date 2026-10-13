@@ -9,9 +9,9 @@ func fixedCalendar(_ timeZone: String = "Asia/Ho_Chi_Minh") -> Calendar {
 }
 
 extension Calendar {
-    /// October `day`, 2026 at `hour:minute` in this calendar's time zone.
-    func on(_ day: Int, at hour: Int, _ minute: Int = 0) -> Date {
-        date(from: DateComponents(year: 2026, month: 10, day: day, hour: hour, minute: minute))!
+    /// October `day`, 2026 at `hour:minute:second` in this calendar's time zone.
+    func on(_ day: Int, at hour: Int, _ minute: Int = 0, _ second: Int = 0) -> Date {
+        date(from: DateComponents(year: 2026, month: 10, day: day, hour: hour, minute: minute, second: second))!
     }
 }
 
@@ -20,14 +20,18 @@ func event(
     _ id: String,
     _ start: Date,
     _ end: Date,
+    title: String? = nil,
     allDay: Bool = false,
+    calendarID: String = "work",
+    location: String? = nil,
+    meetingURL: URL? = nil,
     status: AgendaEvent.Status = .confirmed,
     participation: AgendaEvent.Participation = .accepted
 ) -> AgendaEvent {
     AgendaEvent(
-        id: id, calendarItemIdentifier: id, title: id, start: start, end: end, isAllDay: allDay,
-        calendarID: "work", calendarTitle: "Work", calendarColor: .gray,
-        status: status, myParticipation: participation
+        id: id, calendarItemIdentifier: id, title: title ?? id, start: start, end: end, isAllDay: allDay,
+        calendarID: calendarID, calendarTitle: calendarID.capitalized, calendarColor: .gray,
+        location: location, meetingURL: meetingURL, status: status, myParticipation: participation
     )
 }
 

@@ -73,3 +73,58 @@ import Testing
         #expect(state(dismissed, at: calendar.on(14, at: 10, 27), for: moved) == .upcoming(minutesLeft: 3))
     }
 }
+
+@Suite struct NextMeetingTests {
+    let calendar = fixedCalendar()
+    let policy = UpcomingMeetingPolicy(leadMinutes: 5)
+    /// Wednesday 14 October 2026, 13:56.
+    var now: Date { calendar.on(14, at: 13, 56) }
+
+    func next(_ events: [AgendaEvent], at now: Date? = nil, policy: UpcomingMeetingPolicy? = nil, includingDismissed: Bool = false) -> String? {
+        (policy ?? self.policy).nextMeeting(in: events, now: now ?? self.now, includingDismissed: includingDismissed)?.id
+    }
+
+    @Test func noEventsGiveNoMeeting() {
+        #expect(next([]) == nil)
+    }
+
+    @Test func aLongRunningEventDoesNotHideALaterMeeting() {
+        let workshop = event("workshop", calendar.on(14, at: 9), calendar.on(14, at: 17))
+        let review = event("review", calendar.on(14, at: 14), calendar.on(14, at: 15))
+        #expect(next([workshop, review]) == "review")
+    }
+
+    @Test func aMeetingThatJustStartedStillCounts() {
+        let started = event("started", calendar.on(14, at: 13, 52), calendar.on(14, at: 14, 30))
+        let later = event("later", calendar.on(14, at: 15), calendar.on(14, at: 16))
+        #expect(next([started, later]) == "started")
+        #expect(next([started, later], at: calendar.on(14, at: 13, 56, 59)) == "started")
+        #expect(next([started, later], at: calendar.on(14, at: 13, 57)) == "later")
+    }
+
+    @Test func aMeetingStartingNowCounts() {
+        let now = event("now", calendar.on(14, at: 13, 56), calendar.on(14, at: 14, 30))
+        #expect(next([now]) == "now")
+    }
+
+    @Test func aFinishedOrLongRunningEventAloneGivesNothing() {
+        let workshop = event("workshop", calendar.on(14, at: 9), calendar.on(14, at: 17))
+        let over = event("over", calendar.on(14, at: 8), calendar.on(14, at: 9))
+        #expect(next([over, workshop]) == nil)
+    }
+
+    @Test func theFirstOneInTheOrderGivenWins() {
+        let early = event("early", calendar.on(14, at: 14), calendar.on(14, at: 15))
+        let late = event("late", calendar.on(14, at: 16), calendar.on(14, at: 17))
+        #expect(next([early, late]) == "early")
+    }
+
+    @Test func aDismissedMeetingStepsAsideForTheNextOne() {
+        let early = event("early", calendar.on(14, at: 14), calendar.on(14, at: 15))
+        let overlapping = event("overlapping", calendar.on(14, at: 14, 2), calendar.on(14, at: 15))
+        let dismissed = policy.dismissed(eventID: "early")
+        #expect(next([early, overlapping], policy: dismissed) == "overlapping")
+        #expect(next([early, overlapping], policy: dismissed, includingDismissed: true) == "early")
+        #expect(next([early], policy: dismissed) == nil)
+    }
+}

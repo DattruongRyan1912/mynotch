@@ -81,6 +81,15 @@ import Testing
         #expect(euros?.contains("\u{FFFD}") == false)
     }
 
+    @Test func notesAreNotCutInsideACharacterMadeOfSeveralScalars() {
+        // A family emoji is five scalars and 18 bytes: it fits whole or not at all.
+        let family = "👨‍👩‍👧"
+        let notes = String(repeating: "a", count: 2_040) + family
+        let kept = mapped(notes: notes).notes
+        #expect(kept == String(repeating: "a", count: 2_040))
+        #expect(mapped(notes: String(repeating: "a", count: 2_000) + family).notes == String(repeating: "a", count: 2_000) + family)
+    }
+
     @Test func aMeetingLinkPastTheNotesLimitIsStillFound() {
         let link = "https://meet.google.com/abc-defg-hij"
         let notes = String(repeating: "x", count: 3_000) + " " + link

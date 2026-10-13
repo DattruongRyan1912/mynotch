@@ -73,16 +73,16 @@ nonisolated extension AgendaEvent {
         )
     }
 
-    /// Cuts on a character boundary, so a multi-byte character is dropped whole rather than left half there.
+    /// Cuts between characters as the user sees them, so an emoji built from several scalars is dropped whole.
     private static func limitedNotes(_ notes: String) -> String {
         guard notes.utf8.count > notesLimit else { return notes }
         var bytes = 0
-        var kept = String.UnicodeScalarView()
-        for scalar in notes.unicodeScalars {
-            bytes += UTF8.width(scalar)
+        var kept = ""
+        for character in notes {
+            bytes += character.utf8.count
             if bytes > notesLimit { break }
-            kept.append(scalar)
+            kept.append(character)
         }
-        return String(kept)
+        return kept
     }
 }
