@@ -17,6 +17,10 @@ struct NotchRootView: View {
 
     private var contentHeight: CGFloat { registry.contentHeight(for: state) }
 
+    private var isOpen: Bool {
+        if case .open = state { true } else { false }
+    }
+
     var body: some View {
         let size = geometry.shapeSize(for: state, contentHeight: contentHeight)
         let radii = geometry.cornerRadii(for: state)
@@ -27,7 +31,8 @@ struct NotchRootView: View {
             .clipShape(shape)
             .frame(width: size.width, height: size.height)
             .contentShape(shape)
-            .onTapGesture { model.click() }
+            // Once open, taps belong to the tab content; the root tap only opens the notch.
+            .gesture(TapGesture().onEnded { model.click() }, including: isOpen ? .subviews : .all)
             .animation(NotchTokens.spring, value: state)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }

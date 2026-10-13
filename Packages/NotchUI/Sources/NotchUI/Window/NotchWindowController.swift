@@ -77,6 +77,12 @@ final class NotchWindowController {
         }
     }
 
+    /// Called for every mouse-button press, inside this app or not; a press outside the notch closes it.
+    func mouseDown(at point: CGPoint) {
+        guard isVisible, !currentHitRect().contains(point) else { return }
+        model.clickedOutside()
+    }
+
     func close() {
         observation?.cancel()
         observation = nil

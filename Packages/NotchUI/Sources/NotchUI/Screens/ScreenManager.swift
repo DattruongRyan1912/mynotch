@@ -10,8 +10,13 @@ public final class ScreenManager {
     private var controllers: [String: NotchWindowController] = [:]
     private var fullscreenDisplays: Set<CGDirectDisplayID> = []
     private var cursorDisplay: CGDirectDisplayID?
+    /// Refreshed on every screen sync so pointer routing never queries `NSScreen.screens` per event.
+    private var screenFrames: [(displayID: CGDirectDisplayID, frame: CGRect)] = []
     private var observers: [NSObjectProtocol] = []
-    private lazy var hoverTracker = NotchHoverTracker { [weak self] point in self?.pointerMoved(to: point) }
+    private lazy var hoverTracker = NotchHoverTracker(
+        onMove: { [weak self] point in self?.pointerMoved(to: point) },
+        onMouseDown: { [weak self] point in self?.mouseDown(at: point) }
+    )
     private lazy var fullscreenDetector = FullscreenDetector { [weak self] displays in
         self?.fullscreenDisplays = displays
         self?.applyVisibility()
@@ -63,9 +68,11 @@ public final class ScreenManager {
     private func syncScreens() {
         let config = NotchLayoutConfig(settings: settings)
         var seen: Set<String> = []
+        screenFrames = []
         for screen in NSScreen.screens {
             guard let uuid = screen.displayUUID, let displayID = screen.displayID else { continue }
             seen.insert(uuid)
+            screenFrames.append((displayID, screen.frame))
             let descriptor = ScreenDescriptor(screen)
             if let controller = controllers[uuid] {
                 controller.update(displayID: displayID, screen: descriptor, config: config)
@@ -100,12 +107,16 @@ public final class ScreenManager {
     }
 
     private func pointerMoved(to point: CGPoint) {
-        let display = NSScreen.screens.first { $0.frame.containsMouseLocation(point) }?.displayID
+        let display = screenFrames.first { $0.frame.containsMouseLocation(point) }?.displayID
         if display != cursorDisplay {
             cursorDisplay = display
             if settings.value(InterfaceSettings.displayMode) == .cursor { applyVisibility() }
         }
         controllers.values.forEach { $0.pointerMoved(to: point) }
+    }
+
+    private func mouseDown(at point: CGPoint) {
+        controllers.values.forEach { $0.mouseDown(at: point) }
     }
 
     private func observeSettings() {

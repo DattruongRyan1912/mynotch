@@ -33,6 +33,8 @@ public final class NotchViewModel {
     @ObservationIgnored private var toastTimer: ScheduledAction?
     /// A toast is shown for at least its duration; only after that may a pointer exit close it.
     @ObservationIgnored private var toastExpired = true
+    /// The open tab a toast covers; the toast returns to it instead of closing the notch.
+    @ObservationIgnored private var stateUnderToast: NotchState?
 
     public init(
         scheduler: any Scheduler,
@@ -78,6 +80,7 @@ public final class NotchViewModel {
         pendingClose?.cancel()
         toastTimer?.cancel()
         toastExpired = true
+        stateUnderToast = nil
         let tabs = availableTabs()
         let resolved = [tab, lastTab].compactMap { $0 }.first(where: tabs.contains) ?? tabs.first
         lastTab = resolved ?? lastTab
@@ -85,20 +88,28 @@ public final class NotchViewModel {
         state = .open(resolved)
     }
 
+    /// Shows `content` for at least `duration`. Over an open tab the notch then returns to that tab
+    /// instead of closing, so a toast never throws the user out of what they were doing.
     public func showToast(_ content: AnyView, duration: Duration) {
         pendingOpen?.cancel()
         pendingOpen = nil
         pendingClose?.cancel()
         toastTimer?.cancel()
+        // A toast replacing another toast keeps the tab the first one covered.
+        if case .open = state { stateUnderToast = state }
         toastContent = content
         toastExpired = false
         state = .toast
         toastTimer = scheduler.schedule(after: duration) { [weak self] in
-            guard let self else { return }
-            self.toastExpired = true
-            guard !self.isPointerInside, !self.isPinned, !self.isDragging else { return }
-            self.close()
+            self?.toastDidExpire()
         }
+    }
+
+    /// Closes the expanded notch for a click anywhere else. Pinned notches stay open because
+    /// a module's menu or popover lives outside the notch; so do notches with a drag in progress.
+    public func clickedOutside() {
+        guard state.isExpanded, !isPinned, !isDragging else { return }
+        close()
     }
 
     public func close() {
@@ -107,6 +118,7 @@ public final class NotchViewModel {
         pendingClose?.cancel()
         toastTimer?.cancel()
         toastExpired = true
+        stateUnderToast = nil
         toastContent = nil
         state = .closed
         isPinned = false
@@ -116,6 +128,18 @@ public final class NotchViewModel {
         guard dragging != isDragging else { return }
         isDragging = dragging
         dragging ? pendingClose?.cancel() : scheduleCloseIfPointerOutside()
+    }
+
+    private func toastDidExpire() {
+        toastExpired = true
+        if let covered = stateUnderToast {
+            stateUnderToast = nil
+            toastContent = nil
+            state = covered
+            scheduleCloseIfPointerOutside()
+        } else if !isPointerInside, !isPinned, !isDragging {
+            close()
+        }
     }
 
     private func scheduleCloseIfPointerOutside() {

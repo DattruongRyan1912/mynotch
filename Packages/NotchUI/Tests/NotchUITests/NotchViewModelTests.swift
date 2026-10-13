@@ -169,6 +169,101 @@ import Testing
         #expect(model.state == .open(nil))
     }
 
+    @Test func clickingOutsideClosesAnOpenNotchOrAToast() {
+        let model = makeModel()
+        model.click()
+        model.clickedOutside()
+        #expect(model.state == .closed)
+
+        model.showToast(AnyView(EmptyView()), duration: .seconds(5))
+        model.clickedOutside()
+        #expect(model.state == .closed)
+        #expect(model.toastContent == nil)
+    }
+
+    @Test func clickingOutsideKeepsAPinnedOrDraggingNotchOpen() {
+        let pinned = makeModel()
+        pinned.click()
+        pinned.isPinned = true
+        pinned.clickedOutside()
+        #expect(pinned.state == .open("battery"))
+
+        let dragging = makeModel()
+        dragging.click()
+        dragging.setDragging(true)
+        dragging.clickedOutside()
+        #expect(dragging.state == .open("battery"))
+    }
+
+    @Test func clickingOutsideIgnoresAClosedNotch() {
+        let model = makeModel()
+        model.hasActivity = true
+        model.pointerEntered()
+        model.clickedOutside()
+        #expect(model.displayState == .compact)
+        scheduler.advance(by: .milliseconds(150))
+        #expect(model.state == .open("battery"))
+    }
+
+    @Test func toastOverAnOpenTabReturnsToItThenClosesWhenPointerIsOutside() {
+        let model = makeModel()
+        model.open(tab: "clipboard")
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        #expect(model.state == .toast)
+        scheduler.advance(by: .seconds(2))
+        #expect(model.state == .open("clipboard"))
+        #expect(model.toastContent == nil)
+        scheduler.advance(by: .milliseconds(299))
+        #expect(model.state == .open("clipboard"))
+        scheduler.advance(by: .milliseconds(1))
+        #expect(model.state == .closed)
+    }
+
+    @Test func toastOverAnOpenTabReturnsToItAndStaysWhilePointerIsInside() {
+        let model = makeModel()
+        model.pointerEntered()
+        scheduler.advance(by: .milliseconds(150))
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        scheduler.advance(by: .seconds(5))
+        #expect(model.state == .open("battery"))
+        #expect(model.toastContent == nil)
+    }
+
+    @Test func toastOverAClosedNotchStillClosesAfterItsDuration() {
+        let model = makeModel()
+        model.open(tab: "clipboard")
+        model.close()
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        scheduler.advance(by: .seconds(2))
+        #expect(model.state == .closed)
+        #expect(model.toastContent == nil)
+    }
+
+    @Test func secondToastOverATabStillReturnsToTheTab() {
+        let model = makeModel()
+        model.open(tab: "clipboard")
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        scheduler.advance(by: .seconds(1))
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        scheduler.advance(by: .seconds(1))
+        #expect(model.state == .toast)
+        scheduler.advance(by: .seconds(1))
+        #expect(model.state == .open("clipboard"))
+    }
+
+    @Test func closingDuringAToastOverATabForgetsTheTab() {
+        let model = makeModel()
+        model.open(tab: "clipboard")
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        model.close()
+        scheduler.advance(by: .seconds(5))
+        #expect(model.state == .closed)
+
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        scheduler.advance(by: .seconds(2))
+        #expect(model.state == .closed)
+    }
+
     @Test func closeClearsPinAndToggleClosesAToast() {
         let model = makeModel()
         model.click()
