@@ -33,6 +33,15 @@ public final class HotkeyRegistry {
         registrations.append(Registration(name: name, title: title, owner: owner))
     }
 
+    /// Removes one shortcut: its handler goes and its row disappears from the registry. Nothing happens for a name
+    /// that is not registered. The key combination the user recorded stays stored, so registering again restores it.
+    public func unregister(_ localName: String, owner: ModuleID?) {
+        let qualified = Self.qualifiedName(localName, owner: owner)
+        for registration in registrations where registration.name.rawValue == qualified {
+            unregister(registration.name)
+        }
+    }
+
     public func unregisterAll(owner: ModuleID) {
         for registration in registrations where registration.owner == owner {
             unregister(registration.name)
@@ -81,6 +90,12 @@ public final class ModuleHotkeys {
     ) {
         guard isActive else { return }
         registry.register(localName, title: title, owner: module, initial: initial, action: action)
+    }
+
+    /// Removes one of this module's shortcuts, e.g. for something the user took away. No-op once the module stopped.
+    public func unregister(_ localName: String) {
+        guard isActive else { return }
+        registry.unregister(localName, owner: module)
     }
 
     /// Called by `ModuleContext.cancelAll()` when the module stops; removes the module's shortcuts and makes this facade inert.

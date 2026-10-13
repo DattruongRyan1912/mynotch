@@ -78,6 +78,69 @@ import MyNotchTestSupport
         #expect(presses == 0)
     }
 
+    @Test func unregisteringByNameRemovesTheRegistrationAndTheHandler() {
+        var presses = 0
+        registry.register("openTab", title: "Open", owner: "battery") { presses += 1 }
+        registry.register("other", title: "Other", owner: "battery") { presses += 10 }
+        registry.unregister("openTab", owner: "battery")
+        #expect(registry.registrations.map(\.id) == ["battery_other"])
+        #expect(!backend.trigger("battery_openTab"))
+        #expect(presses == 0)
+        #expect(backend.trigger("battery_other"))
+        #expect(presses == 10)
+    }
+
+    @Test func unregisteringOneNameLeavesTheSameNameOfOtherOwnersAlone() {
+        var log: [String] = []
+        registry.register("open", title: "Battery", owner: "battery") { log.append("battery") }
+        registry.register("open", title: "Clipboard", owner: "clipboard") { log.append("clipboard") }
+        registry.register("open", title: "App", owner: nil) { log.append("app") }
+        registry.unregister("open", owner: "battery")
+        #expect(Set(registry.registrations.map(\.id)) == ["clipboard_open", "app_open"])
+        #expect(!backend.trigger("battery_open"))
+        backend.trigger("clipboard_open")
+        backend.trigger("app_open")
+        #expect(log == ["clipboard", "app"])
+        registry.unregister("open", owner: nil)
+        #expect(registry.registrations.map(\.id) == ["clipboard_open"])
+    }
+
+    @Test func unregisteringANameThatWasNeverRegisteredDoesNothing() {
+        registry.register("openTab", title: "Open", owner: "battery") {}
+        registry.unregister("missing", owner: "battery")
+        registry.unregister("openTab", owner: "clipboard")
+        #expect(registry.registrations.map(\.id) == ["battery_openTab"])
+        #expect(backend.trigger("battery_openTab"))
+    }
+
+    @Test func aModuleUnregistersOneOfItsHotkeysAndCanRegisterItAgain() {
+        var presses = 0
+        let hotkeys = ModuleHotkeys(registry: registry, module: "battery")
+        let other = ModuleHotkeys(registry: registry, module: "clipboard")
+        hotkeys.register("openTab", title: "Open") { presses += 1 }
+        hotkeys.register("keep", title: "Keep") { presses += 10 }
+        other.register("openTab", title: "Other module") { presses += 100 }
+        hotkeys.unregister("openTab")
+        #expect(Set(registry.registrations.map(\.id)) == ["battery_keep", "clipboard_openTab"])
+        #expect(!backend.trigger("battery_openTab"))
+        #expect(presses == 0)
+        hotkeys.register("openTab", title: "Open") { presses += 1 }
+        #expect(backend.trigger("battery_openTab"))
+        #expect(presses == 1)
+    }
+
+    @Test func unregisteringByNameIsInertOnceTheModuleStopped() {
+        let hotkeys = ModuleHotkeys(registry: registry, module: "battery")
+        hotkeys.register("openTab", title: "Open") {}
+        hotkeys.invalidate()
+        // The same name now belongs to a module that started again; the stopped facade must not touch it.
+        let restarted = ModuleHotkeys(registry: registry, module: "battery")
+        restarted.register("openTab", title: "Open") {}
+        hotkeys.unregister("openTab")
+        #expect(registry.registrations.map(\.id) == ["battery_openTab"])
+        #expect(backend.trigger("battery_openTab"))
+    }
+
     @Test func harnessShortcutsNeverReachKeyboardShortcuts() throws {
         let harness = RegistryHarness([])
         let localName = "probe\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
