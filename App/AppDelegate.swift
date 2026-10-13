@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: StatusItemController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.mainMenu = MainMenu.make(settingsTarget: self, settingsAction: #selector(showSettings))
         coordinator.screens = screens
         hotkeys.register(
             "toggleNotch", title: "Mở/đóng notch", owner: nil,
@@ -43,6 +44,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow.show()
         return true
     }
+
+    @objc private func showSettings() { settingsWindow.show() }
 
     private func refreshPermissions() {
         Task { await registry.refreshPermissions() }

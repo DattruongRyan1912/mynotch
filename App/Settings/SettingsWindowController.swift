@@ -24,6 +24,7 @@ final class SettingsWindowController {
             window.title = "MyNotch Settings"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
             window.setContentSize(NSSize(width: 760, height: 520))
+            window.contentMinSize = NSSize(width: 600, height: 400)
             window.isReleasedWhenClosed = false
             window.center()
             self.window = window

@@ -9,6 +9,8 @@ final class StatusItemController: NSObject {
     private let screens: ScreenManager
     private let openSettings: () -> Void
     private var item: NSStatusItem?
+    private var visibilityItem: NSMenuItem?
+    private var pauseItem: NSMenuItem?
 
     init(settings: SettingsStore, registry: ModuleRegistry, screens: ScreenManager, openSettings: @escaping () -> Void) {
         self.settings = settings
@@ -43,8 +45,12 @@ final class StatusItemController: NSObject {
         let menu = NSMenu()
         menu.delegate = self
         menu.addItem(withTitle: "Open Settings…", action: #selector(openSettingsAction), keyEquivalent: ",").target = self
-        menu.addItem(withTitle: "Hide Notch", action: #selector(toggleNotchVisibility), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Pause All Modules", action: #selector(togglePause), keyEquivalent: "").target = self
+        let visibilityItem = menu.addItem(withTitle: "Hide Notch", action: #selector(toggleNotchVisibility), keyEquivalent: "")
+        visibilityItem.target = self
+        self.visibilityItem = visibilityItem
+        let pauseItem = menu.addItem(withTitle: "Pause All Modules", action: #selector(togglePause), keyEquivalent: "")
+        pauseItem.target = self
+        self.pauseItem = pauseItem
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit MyNotch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         return menu
@@ -61,7 +67,7 @@ final class StatusItemController: NSObject {
 
 extension StatusItemController: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.item(at: 1)?.title = screens.isHiddenByUser ? "Show Notch" : "Hide Notch"
-        menu.item(at: 2)?.state = registry.isPaused ? .on : .off
+        visibilityItem?.title = screens.isHiddenByUser ? "Show Notch" : "Hide Notch"
+        pauseItem?.state = registry.isPaused ? .on : .off
     }
 }

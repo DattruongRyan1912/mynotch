@@ -4,6 +4,11 @@ import ServiceManagement
 enum LaunchAtLogin {
     static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
 
+    /// Registered, but macOS waits for the user to allow it in System Settings → Login Items.
+    static var needsApproval: Bool { SMAppService.mainApp.status == .requiresApproval }
+
+    static func openLoginItemsSettings() { SMAppService.openSystemSettingsLoginItems() }
+
     /// Returns an error message when macOS refuses the change.
     static func set(_ enabled: Bool) -> String? {
         do {

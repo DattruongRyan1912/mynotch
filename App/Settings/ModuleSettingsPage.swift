@@ -1,3 +1,5 @@
+import AppKit
+import Combine
 import MyNotchCore
 import SwiftUI
 
@@ -5,6 +7,7 @@ struct ModuleSettingsPage: View {
     let id: ModuleID
     let registry: ModuleRegistry
     let permissions: any PermissionCenter
+    @State private var permissionRevision = 0
 
     private var module: (any FeatureModule)? { registry.modules.first { $0.descriptor.id == id } }
 
@@ -32,6 +35,7 @@ struct ModuleSettingsPage: View {
                             }
                         }
                     }
+                    .id(permissionRevision)
                 }
                 if let settingsView = registry.settingsView(for: id) {
                     Section("Cài đặt") { settingsView }
@@ -39,6 +43,9 @@ struct ModuleSettingsPage: View {
             }
             .formStyle(.grouped)
             .navigationTitle(descriptor.displayName)
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                permissionRevision += 1
+            }
         }
     }
 

@@ -32,7 +32,7 @@ struct SettingsRootView: View {
             switch selection ?? .general {
             case .general: GeneralSettingsPage(settings: settings, hotkeys: hotkeys)
             case .interface: InterfaceSettingsPage(settings: settings)
-            case .module(let id): ModuleSettingsPage(id: id, registry: registry, permissions: permissions)
+            case .module(let id): ModuleSettingsPage(id: id, registry: registry, permissions: permissions).id(id)
             case .about: AboutPage()
             }
         }
