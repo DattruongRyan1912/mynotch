@@ -1,0 +1,30 @@
+import Foundation
+import MyNotchCore
+
+/// The two languages the user translates between most; the flip rule turns text in one into the other.
+/// Stored as language identifiers ("vi", "en-GB"), so the setting stays readable.
+nonisolated struct PreferredPair: Codable, Equatable, Sendable {
+    var first: String
+    var second: String
+
+    var languages: (Locale.Language, Locale.Language) {
+        (Locale.Language(identifier: first), Locale.Language(identifier: second))
+    }
+}
+
+/// Setting names and defaults in one place, shared by the running module and the Settings rows.
+struct TranslationKeys {
+    let preferredPair: SettingKey<PreferredPair>
+    /// Identifier of the language the tab translates into, unless the flip rule picks the pair's other one.
+    let targetLanguage: SettingKey<String>
+    /// Translate text from the shortcut or Services as soon as the tab opens.
+    let autoTranslateOnOpen: SettingKey<Bool>
+    let useChromiumAccessibility: SettingKey<Bool>
+
+    init(_ settings: ModuleSettings) {
+        preferredPair = settings.key("preferredPair", default: PreferredPair(first: "vi", second: "en"))
+        targetLanguage = settings.key("targetLanguage", default: "vi")
+        autoTranslateOnOpen = settings.key("autoTranslateOnOpen", default: true)
+        useChromiumAccessibility = settings.key("useChromiumAccessibility", default: true)
+    }
+}
