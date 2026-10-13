@@ -106,8 +106,8 @@ private struct UpcomingCard: View {
     /// "● Work · Phòng họp 4B": the calendar's colour dot, then its name and the place.
     private func calendarLine(of event: AgendaEvent) -> Text {
         let dot = Text("● ").foregroundStyle(Color(event.calendarColor))
-        guard let location = event.location, !location.isEmpty else { return dot + Text(event.calendarTitle) }
-        return dot + Text("\(event.calendarTitle) · \(location)")
+        guard let location = event.location, !location.isEmpty else { return Text("\(dot)\(event.calendarTitle)") }
+        return Text("\(dot)\(event.calendarTitle) · \(location)")
     }
 
     /// "10:00 – 11:00", with the day in front when it isn't today.

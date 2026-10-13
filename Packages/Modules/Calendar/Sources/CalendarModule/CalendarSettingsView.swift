@@ -1,3 +1,4 @@
+import AppKit
 import MyNotchCore
 import SwiftUI
 
@@ -11,7 +12,8 @@ struct CalendarSettingsView: View {
     let remindersAccessAnswered: () -> Void
 
     @State private var calendars: [CalendarInfo]?
-    /// Bumped after the prompt, so the "no access" note is checked again.
+    /// Bumped when access may have changed (after the prompt, or on coming back from System Settings), so the
+    /// rows that depend on it are checked and the calendars read again.
     @State private var accessRevision = 0
 
     var body: some View {
@@ -32,6 +34,10 @@ struct CalendarSettingsView: View {
             )
             Toggle("Hiện sự kiện cả ngày", isOn: settings.binding(keys.showAllDay))
             calendarRows
+        }
+        .task(id: accessRevision) { calendars = await loadCalendars() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            accessRevision += 1
         }
     }
 
@@ -84,7 +90,6 @@ struct CalendarSettingsView: View {
             Text("Đang tải…")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .task { calendars = await loadCalendars() }
         }
     }
 

@@ -6,8 +6,9 @@ nonisolated struct Agenda: Equatable, Sendable {
     var today: [AgendaEvent] = []
     /// The first timed event that hasn't ended yet, today or within the next week.
     var next: AgendaEvent?
-    /// Today's timed events that haven't ended yet (the one running now included).
-    var upcomingToday: [AgendaEvent] = []
+    /// The timed events that haven't ended yet within the look-ahead week (the one running now included), so a
+    /// meeting just after midnight is there before the day changes.
+    var upcoming: [AgendaEvent] = []
 }
 
 nonisolated enum AgendaBuilder {
@@ -30,12 +31,8 @@ nonisolated enum AgendaBuilder {
             .filter { $0.status != .canceled && $0.myParticipation != .declined }
             .sorted(by: isDisplayedBefore)
         let today = shown.filter { overlaps($0, from: startOfToday, to: startOfTomorrow) }
-        let timed = shown.filter { !$0.isAllDay && $0.end > now }
-        return Agenda(
-            today: today,
-            next: timed.first { $0.start < horizon },
-            upcomingToday: today.filter { !$0.isAllDay && $0.end > now }
-        )
+        let upcoming = shown.filter { !$0.isAllDay && $0.end > now && $0.start < horizon }
+        return Agenda(today: today, next: upcoming.first, upcoming: upcoming)
     }
 
     private static func lookAheadEnd(now: Date, calendar: Calendar) -> Date {

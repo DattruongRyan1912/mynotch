@@ -3,55 +3,74 @@ import Synchronization
 import Testing
 @testable import CalendarModule
 
+/// Time here is a `ManualClock`: a change is fed, the test waits until the coalescer has taken it (its wait is
+/// registered on the clock), then moves time by hand. Nothing depends on how long a real sleep takes.
 @Suite struct ChangeCoalescerTests {
-    /// Long enough that a burst fed in one go never straddles it, even on a loaded machine.
     let quiet = Duration.milliseconds(300)
+    let clock = ManualClock()
+
+    /// Counts the signals on `output` as they arrive.
+    private func count(_ output: AsyncStream<Void>) -> (signals: Counter, consumer: Task<Void, Never>) {
+        let signals = Counter()
+        return (signals, Task { for await _ in output { signals.increment() } })
+    }
+
+    /// Feeds a change and waits until the coalescer has taken it, so the next step of time is deterministic.
+    private func change(_ input: AsyncStream<Void>.Continuation, takenCalls: Int) async {
+        input.yield()
+        await settle { clock.sleepCalls == takenCalls }
+    }
 
     @Test func aBurstBecomesOneSignal() async {
         let (source, input) = AsyncStream<Void>.makeStream()
-        let output = ChangeCoalescer.coalescing(source, quietPeriod: quiet)
-        for _ in 0..<5 { input.yield() }
+        let (signals, consumer) = count(ChangeCoalescer.coalescing(source, quietPeriod: quiet, clock: clock))
+        for call in 1...5 { await change(input, takenCalls: call) }
         input.finish()
 
-        var signals = 0
-        for await _ in output { signals += 1 }
+        clock.advance(by: quiet)
+        await consumer.value
 
-        #expect(signals == 1)
+        #expect(signals.value == 1)
     }
 
     @Test func noSignalWithoutChanges() async {
         let (source, input) = AsyncStream<Void>.makeStream()
-        let output = ChangeCoalescer.coalescing(source, quietPeriod: quiet)
+        let (signals, consumer) = count(ChangeCoalescer.coalescing(source, quietPeriod: quiet, clock: clock))
         input.finish()
+        await consumer.value
 
-        var signals = 0
-        for await _ in output { signals += 1 }
-
-        #expect(signals == 0)
+        #expect(signals.value == 0)
     }
 
-    @Test func theSignalWaitsForQuietAfterTheLastChange() async throws {
+    @Test func theSignalWaitsForQuietAfterTheLastChange() async {
         let (source, input) = AsyncStream<Void>.makeStream()
-        var iterator = ChangeCoalescer.coalescing(source, quietPeriod: quiet).makeAsyncIterator()
+        let (signals, consumer) = count(ChangeCoalescer.coalescing(source, quietPeriod: quiet, clock: clock))
+        defer { consumer.cancel() }
 
-        input.yield()
-        try await Task.sleep(for: quiet / 2)
-        let lastChange = ContinuousClock.now
-        input.yield()
-        await iterator.next()
-        let waited = lastChange.duration(to: .now)
+        await change(input, takenCalls: 1)
+        clock.advance(by: quiet / 2)
+        await change(input, takenCalls: 2)
 
-        #expect(waited >= quiet)
+        // The first change's quiet period is over, but the second one started a new one.
+        clock.advance(by: quiet - .milliseconds(1))
+        await letAnythingPending()
+        #expect(signals.value == 0)
+
+        clock.advance(by: .milliseconds(1))
+        await settle { signals.value == 1 }
+        #expect(signals.value == 1)
     }
 
     @Test func changesAfterTheQuietPeriodSignalAgain() async {
         let (source, input) = AsyncStream<Void>.makeStream()
-        var iterator = ChangeCoalescer.coalescing(source, quietPeriod: quiet).makeAsyncIterator()
+        var iterator = ChangeCoalescer.coalescing(source, quietPeriod: quiet, clock: clock).makeAsyncIterator()
 
-        input.yield()
+        await change(input, takenCalls: 1)
+        clock.advance(by: quiet)
         #expect(await iterator.next() != nil)
         input.yield()
-        input.yield()
+        await change(input, takenCalls: 3)
+        clock.advance(by: quiet)
         #expect(await iterator.next() != nil)
         input.finish()
         #expect(await iterator.next() == nil)
@@ -71,39 +90,45 @@ import Testing
         #expect(await iterator.next() != nil)
     }
 
-    @Test(.timeLimit(.minutes(1)))
-    func aContinuousStreamStillSignalsOnceTheMaxWaitPasses() async {
+    @Test func aContinuousStreamStillSignalsOnceTheMaxWaitPasses() async {
         let (source, input) = AsyncStream<Void>.makeStream()
-        let output = ChangeCoalescer.coalescing(source, quietPeriod: quiet, maxWait: quiet * 3)
-        let start = ContinuousClock.now
-        // A change every 100 ms is never quiet for 300 ms, so only the max wait can end the burst.
-        let feeder = Task {
-            while !Task.isCancelled {
-                input.yield()
-                try? await Task.sleep(for: .milliseconds(100))
-            }
+        let maxWait = Duration.milliseconds(800)
+        let (signals, consumer) = count(ChangeCoalescer.coalescing(source, quietPeriod: quiet, maxWait: maxWait, clock: clock))
+        defer { consumer.cancel() }
+
+        // A change every 100 ms is never quiet for 300 ms, so only the max wait can end the burst. The last
+        // change comes at 600 ms: its quiet period would end at 900 ms, after the max wait.
+        for call in 1...7 {
+            await change(input, takenCalls: call)
+            if call < 7 { clock.advance(by: .milliseconds(100)) }
         }
-        defer { feeder.cancel() }
+        clock.advance(by: .milliseconds(199))
+        await letAnythingPending()
+        #expect(signals.value == 0)
 
-        var iterator = output.makeAsyncIterator()
-        #expect(await iterator.next() != nil)
-        let waited = start.duration(to: .now)
-
-        #expect(waited >= quiet * 3 - .milliseconds(50))
-        #expect(waited < .seconds(3))
+        clock.advance(by: .milliseconds(1))
+        await settle { signals.value == 1 }
+        #expect(signals.value == 1)
     }
 
     @Test func aNewBurstAfterASignalWaitsForQuietAgain() async {
         let (source, input) = AsyncStream<Void>.makeStream()
-        var iterator = ChangeCoalescer.coalescing(source, quietPeriod: quiet, maxWait: quiet * 3).makeAsyncIterator()
+        let (signals, consumer) = count(ChangeCoalescer.coalescing(source, quietPeriod: quiet, maxWait: quiet * 3, clock: clock))
+        defer { consumer.cancel() }
 
-        input.yield()
-        #expect(await iterator.next() != nil)
+        await change(input, takenCalls: 1)
+        clock.advance(by: quiet)
+        await settle { signals.value == 1 }
+
         // A new burst gets a new window: it waits for quiet again instead of signaling at once.
-        let start = ContinuousClock.now
-        input.yield()
-        #expect(await iterator.next() != nil)
-        #expect(start.duration(to: .now) >= quiet - .milliseconds(50))
+        await change(input, takenCalls: 2)
+        clock.advance(by: quiet - .milliseconds(1))
+        await letAnythingPending()
+        #expect(signals.value == 1)
+
+        clock.advance(by: .milliseconds(1))
+        await settle { signals.value == 2 }
+        #expect(signals.value == 2)
     }
 
     @Test(.timeLimit(.minutes(1)))
@@ -119,4 +144,11 @@ import Testing
         var iterator = released.makeAsyncIterator()
         #expect(await iterator.next() != nil)
     }
+}
+
+private nonisolated final class Counter: Sendable {
+    private let count = Mutex(0)
+
+    var value: Int { count.withLock { $0 } }
+    func increment() { count.withLock { $0 += 1 } }
 }

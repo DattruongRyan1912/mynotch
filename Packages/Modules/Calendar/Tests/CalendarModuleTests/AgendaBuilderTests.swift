@@ -12,7 +12,7 @@ import Testing
     }
 
     @Test func noEventsGivesAnEmptyAgenda() {
-        #expect(build([]) == Agenda(today: [], next: nil, upcomingToday: []))
+        #expect(build([]) == Agenda(today: [], next: nil, upcoming: []))
     }
 
     @Test func canceledAndDeclinedEventsAreDropped() {
@@ -27,7 +27,7 @@ import Testing
 
         #expect(agenda.today.map(\.id) == ["tentative", "pending", "unknown"])
         #expect(agenda.next?.id == "tentative")
-        #expect(agenda.upcomingToday.map(\.id) == ["tentative", "pending", "unknown"])
+        #expect(agenda.upcoming.map(\.id) == ["tentative", "pending", "unknown"])
     }
 
     @Test func allDayEventsComeFirstThenTimedEventsByStart() {
@@ -148,16 +148,17 @@ import Testing
         #expect(build([allDay, canceled, declined, kept]).next?.id == "kept")
     }
 
-    @Test func upcomingTodayIsTheTimedEventsOfTodayThatHaveNotEnded() {
+    @Test func upcomingIsTheTimedEventsThatHaveNotEndedWithinTheLookAhead() {
         let over = event("over", calendar.on(14, at: 8), calendar.on(14, at: 9))
         let running = event("running", calendar.on(14, at: 10), calendar.on(14, at: 11))
         let later = event("later", calendar.on(14, at: 14), calendar.on(14, at: 15))
         let allDay = allDayEvent("all-day", on: 14, in: calendar)
         let tomorrow = event("tomorrow", calendar.on(15, at: 9), calendar.on(15, at: 10))
+        let tooFar = event("too far", calendar.on(25, at: 9), calendar.on(25, at: 10))
 
-        let agenda = build([over, running, later, allDay, tomorrow])
+        let agenda = build([over, running, later, allDay, tomorrow, tooFar])
 
-        #expect(agenda.upcomingToday.map(\.id) == ["running", "later"])
+        #expect(agenda.upcoming.map(\.id) == ["running", "later", "tomorrow"])
         #expect(agenda.today.map(\.id) == ["all-day", "over", "running", "later"])
     }
 

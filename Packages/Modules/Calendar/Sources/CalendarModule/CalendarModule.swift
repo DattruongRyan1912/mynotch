@@ -30,9 +30,10 @@ public final class CalendarModule: FeatureModule {
     )
 
     static let activityID = "meeting"
-    /// Also the countdown's refresh rate: the minutes left only change once a minute.
-    static let refreshInterval = Duration.seconds(60)
-    /// Waits for a burst of changes, a wake and a new day to settle before reading the calendar again.
+    /// Past the minute boundary, so a timer that fires a hair early still reads the new minute.
+    static let minuteMargin = Duration.milliseconds(100)
+    /// Waits for a burst of wakes and day changes to settle before reading the calendar again. Changes in the
+    /// calendar need no wait here: the data source has already let them settle.
     static let refreshDebounce = Duration.seconds(1)
 
     let state: CalendarState
@@ -57,6 +58,8 @@ public final class CalendarModule: FeatureModule {
     private(set) var refreshRequests = 0
     /// What the activity shows now; nil while none is published.
     private(set) var publishedMeeting: MeetingActivityContent?
+    /// How long the pending minute timer was set for; tests move the clock by it.
+    private(set) var minuteTimerDelay = Duration.zero
 
     public convenience init() {
         self.init(dataSource: CalendarService())
@@ -87,9 +90,9 @@ public final class CalendarModule: FeatureModule {
         policy = UpcomingMeetingPolicy(leadMinutes: settings.meetingLeadMinutes)
         // Each source is asked for its stream here, not in the loop that reads it, so nothing that happens
         // from now on is missed while that loop is still getting started.
-        refreshOn(dataSource.changes)
-        refreshOn(Self.signals(named: .NSCalendarDayChanged, in: dayChangeCenter))
-        refreshOn(Self.signals(named: NSWorkspace.didWakeNotification, in: wakeCenter))
+        refreshOn(dataSource.changes, debounced: false)
+        refreshOn(Self.signals(named: .NSCalendarDayChanged, in: dayChangeCenter), debounced: true)
+        refreshOn(Self.signals(named: NSWorkspace.didWakeNotification, in: wakeCenter), debounced: true)
         let moduleSettings = context.settings
         context.run { [weak self] in
             for await _ in Observations({ CalendarSettings(moduleSettings) }) { self?.settingsChanged() }
@@ -231,10 +234,11 @@ public final class CalendarModule: FeatureModule {
         return .items(AgendaReminder.sortedByDue(open, calendar: calendar))
     }
 
-    /// Reads the calendar again after a quiet second, however many triggers came in.
-    private func requestRefresh() {
+    /// Reads the calendar again, after a quiet second if the trigger can come in bursts.
+    private func requestRefresh(debounced: Bool) {
         guard let context else { return }
         refreshRequests += 1
+        guard debounced else { return startRefresh() }
         debounce?.cancel()
         debounce = context.scheduler.schedule(after: Self.refreshDebounce) { [weak self] in
             self?.debounce = nil
@@ -246,15 +250,18 @@ public final class CalendarModule: FeatureModule {
         context?.run { [weak self] in await self?.refresh() }
     }
 
-    private func refreshOn(_ stream: AsyncStream<Void>) {
+    private func refreshOn(_ stream: AsyncStream<Void>, debounced: Bool) {
         context?.run { [weak self] in
-            for await _ in stream { self?.requestRefresh() }
+            for await _ in stream { self?.requestRefresh(debounced: debounced) }
         }
     }
 
-    /// The countdown is only right if the agenda is read again every minute.
+    /// The countdown is only right if the agenda is read again every minute, so the timer aims for the next minute
+    /// boundary: the activity changes as the clock does, and a late timer doesn't push every later one off.
     private func scheduleMinuteTimer() {
-        minuteTimer = context?.scheduler.schedule(after: Self.refreshInterval) { [weak self] in
+        let intoMinute = clock().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 60)
+        minuteTimerDelay = .milliseconds(Int(((60 - intoMinute) * 1000).rounded())) + Self.minuteMargin
+        minuteTimer = context?.scheduler.schedule(after: minuteTimerDelay) { [weak self] in
             self?.scheduleMinuteTimer()
             self?.startRefresh()
         }
@@ -278,9 +285,12 @@ public final class CalendarModule: FeatureModule {
     /// Sets the activity when its content changes and clears it when it hides, so it is updated at most once a minute.
     private func updateMeeting(now: Date) {
         guard let context else { return }
-        let upcoming = state.agenda.upcomingToday
+        // The activity looks past midnight: a meeting at 00:10 shows at 23:40. The card prefers what's left of today.
+        let upcoming = state.agenda.upcoming
         let content = MeetingActivityContent(event: policy.nextMeeting(in: upcoming, now: now), policy: policy, now: now)
-        let featured = policy.nextMeeting(in: upcoming, now: now, includingDismissed: true) ?? state.agenda.next
+        let endOfToday = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
+        let featured = policy.nextMeeting(in: upcoming.filter { $0.start < endOfToday }, now: now, includingDismissed: true)
+            ?? state.agenda.next
         if state.featured != featured { state.featured = featured }
         let canDismiss = content != nil && content?.eventID == featured?.id
         if state.canDismissFeatured != canDismiss { state.canDismissFeatured = canDismiss }

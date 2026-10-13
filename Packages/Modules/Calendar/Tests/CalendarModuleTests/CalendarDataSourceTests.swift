@@ -25,7 +25,7 @@ import Testing
         #expect(fetched.map(\.id) == ["standup", "workshop", "review", "tomorrow", "next week"])
         #expect(agenda.today.map(\.id) == ["standup", "workshop", "review"])
         #expect(agenda.next?.id == "workshop")
-        #expect(agenda.upcomingToday.map(\.id) == ["workshop", "review"])
+        #expect(agenda.upcoming.map(\.id) == ["workshop", "review", "tomorrow", "next week"])
     }
 
     @Test func aWeekWithoutEventsGivesAnEmptyAgenda() async {

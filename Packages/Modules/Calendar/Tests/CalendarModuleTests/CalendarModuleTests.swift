@@ -43,7 +43,7 @@ import Testing
     func tick(to now: Date) async {
         clock.now = now
         let applied = module.appliedRefreshes
-        harness.scheduler.advance(by: .seconds(60))
+        harness.scheduler.advance(by: module.minuteTimerDelay)
         await settle { module.appliedRefreshes > applied }
     }
 
@@ -133,24 +133,23 @@ import Testing
 
     // MARK: Refresh triggers
 
-    @Test func aChangeRefreshesAfterTheDebounce() async {
+    /// The data source already waits for its changes to settle, so the module doesn't wait a second time.
+    @Test func aChangeRefreshesAtOnce() async {
         await start()
         source.events = [standup()]
 
         await trigger { source.emitChange() }
-        harness.scheduler.advance(by: .milliseconds(999))
-        await letAnythingPending()
-        #expect(module.appliedRefreshes == 1)
-
-        harness.scheduler.advance(by: .milliseconds(1))
         await settle { module.appliedRefreshes == 2 }
+
         #expect(module.state.agenda.today.map(\.id) == ["standup"])
+        // Only the minute timer is waiting: no debounce was scheduled.
+        #expect(harness.scheduler.pendingCount == 1)
     }
 
-    @Test func aBurstOfChangesIsOneRefresh() async {
+    @Test func aBurstOfWakesIsOneRefresh() async {
         await start()
         for _ in 0..<5 {
-            await trigger { source.emitChange() }
+            await trigger { wakeCenter.post(name: NSWorkspace.didWakeNotification, object: nil) }
             harness.scheduler.advance(by: .milliseconds(400))
         }
         #expect(module.appliedRefreshes == 1)
@@ -188,17 +187,35 @@ import Testing
         #expect(module.state.agenda.today.map(\.id) == ["standup"])
     }
 
-    @Test func refreshesEveryMinute() async {
+    /// The timer waits for the next minute boundary plus a short margin, so the countdown changes as the minute does.
+    @Test func refreshesOnTheMinuteBoundary() async {
+        clock.now = calendar.on(14, at: 9, 0, 30)
         await start()
-        harness.scheduler.advance(by: .milliseconds(59_900))
+        harness.scheduler.advance(by: .milliseconds(30_099))
         await letAnythingPending()
         #expect(module.appliedRefreshes == 1)
 
-        harness.scheduler.advance(by: .milliseconds(100))
+        clock.now = calendar.on(14, at: 9, 1).addingTimeInterval(0.1)
+        harness.scheduler.advance(by: .milliseconds(1))
         await settle { module.appliedRefreshes == 2 }
-        harness.scheduler.advance(by: .seconds(60))
+
+        // Fired right on time, the next one is a full minute away.
+        harness.scheduler.advance(by: .milliseconds(59_999))
+        await letAnythingPending()
+        #expect(module.appliedRefreshes == 2)
+        harness.scheduler.advance(by: .milliseconds(1))
         await settle { module.appliedRefreshes == 3 }
         #expect(source.eventFetchCount == 3)
+    }
+
+    @Test func aTimerThatFiresLateAimsForTheNextBoundary() async {
+        await start()
+        // Fires 20 s late, at 9:01:20: the next boundary is 40 s away.
+        clock.now = calendar.on(14, at: 9, 1, 20)
+        harness.scheduler.advance(by: module.minuteTimerDelay)
+        await settle { module.appliedRefreshes == 2 }
+
+        #expect(module.minuteTimerDelay == .milliseconds(40_100))
     }
 
     @Test func aStoppedModuleIgnoresEveryTrigger() async {
@@ -256,9 +273,8 @@ import Testing
         #expect(first != nil)
 
         // A refresh inside the same minute changes nothing, so the entry is not touched.
-        await trigger { source.emitChange() }
         clock.now = calendar.on(14, at: 9, 55, 30)
-        harness.scheduler.advance(by: .seconds(1))
+        await trigger { source.emitChange() }
         await settle { module.appliedRefreshes == 2 }
         #expect(meetingEntry == first)
 
@@ -269,7 +285,6 @@ import Testing
 
         let fourMinutes = meetingEntry
         await trigger { source.emitChange() }
-        harness.scheduler.advance(by: .seconds(1))
         await settle { module.appliedRefreshes == 4 }
         #expect(meetingEntry == fourMinutes)
     }
@@ -402,6 +417,23 @@ import Testing
         #expect(meetingEntry != nil)
         #expect(module.publishedMeeting?.eventID == "review")
         #expect(module.state.featured?.id == "review")
+    }
+
+    @Test func aMeetingAfterMidnightShowsWithinTheLead() async {
+        let settings = harness.settingsEnvironment(for: "calendar")!.settings
+        settings.set(30, for: keys.meetingLeadMinutes)
+        source.events = [event("early", calendar.on(15, at: 0, 10), calendar.on(15, at: 0, 40))]
+        clock.now = calendar.on(14, at: 23, 39)
+        await start()
+        #expect(meetingEntry == nil)
+
+        await tick(to: calendar.on(14, at: 23, 40))
+
+        #expect(meetingEntry != nil)
+        #expect(module.publishedMeeting?.eventID == "early")
+        #expect(module.publishedMeeting?.state == .upcoming(minutesLeft: 30))
+        #expect(module.state.featured?.id == "early")
+        #expect(module.state.canDismissFeatured)
     }
 
     @Test func theFeaturedEventFallsBackToTheNextOne() async {
