@@ -8,8 +8,14 @@ final class ClipboardState {
     var history = ClipboardHistory() {
         didSet { historyChanged() }
     }
+    /// A real change starts the keyboard selection from the first card again; writing the same value (the search field
+    /// re-sends its text after a pause) keeps it.
     var query = ClipboardQuery() {
-        didSet { if query != oldValue { refreshVisibleItems() } }
+        didSet {
+            guard query != oldValue else { return }
+            selectedID = nil
+            refreshVisibleItems()
+        }
     }
     var selectedID: UUID?
     /// Pasteboard access is set to "always deny", so the tab explains how to allow it instead of showing an empty history.

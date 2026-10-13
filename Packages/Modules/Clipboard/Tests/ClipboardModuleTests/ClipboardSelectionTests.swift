@@ -41,4 +41,40 @@ import Testing
         #expect(ClipboardSelection.next(in: only, current: ids[0]) == ids[0])
         #expect(ClipboardSelection.previous(in: only, current: ids[0]) == ids[0])
     }
+
+    // MARK: Selection in the tab's state
+
+    func state() -> (ClipboardState, [UUID]) {
+        var history = ClipboardHistory()
+        let ids = ["một", "hai", "ba"].enumerated().map { index, text in
+            history.add(.text(text), hash: text, source: (nil, nil), at: Date(timeIntervalSinceReferenceDate: Double(index))).id
+        }
+        let state = ClipboardState()
+        state.history = history
+        return (state, ids)
+    }
+
+    /// The search field sends its text again after a pause; that must not move the keyboard selection back.
+    @Test func writingTheSameQueryKeepsTheSelection() {
+        let (state, ids) = state()
+        state.selectedID = ids[1]
+        state.query.text = ""
+        state.query = ClipboardQuery()
+        #expect(state.selectedID == ids[1])
+    }
+
+    @Test func aRealQueryChangeStartsFromTheFirstCardAgain() {
+        let (state, ids) = state()
+        let changes: [(inout ClipboardQuery) -> Void] = [
+            { $0.text = "h" },
+            { $0.kind = .link },
+            { $0.boardID = UUID() },
+        ]
+        for change in changes {
+            state.query = ClipboardQuery()
+            state.selectedID = ids[1]
+            change(&state.query)
+            #expect(state.selectedID == nil)
+        }
+    }
 }

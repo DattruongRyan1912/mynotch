@@ -168,7 +168,7 @@ public final class ClipboardModule: FeatureModule {
 
     /// A short message over the open tab, where activities stay hidden until the notch closes.
     func showToast(_ text: String, systemImage: String) {
-        context?.presenter.showToast(AnyView(ClipboardToast(text: text, systemImage: systemImage)), duration: .seconds(2))
+        context?.presenter.showToast(AnyView(ClipboardToast(text: text, systemImage: systemImage)), duration: .milliseconds(1200))
     }
 
     /// Re-read when the tab or Settings appear, since the user changes it in System Settings.

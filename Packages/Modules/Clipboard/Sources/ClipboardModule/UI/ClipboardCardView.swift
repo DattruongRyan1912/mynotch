@@ -35,6 +35,8 @@ struct ClipboardCardView: View {
         }
         .contentShape(shape)
         .onHover { isHovered = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(ClipboardCardText.accessibilityLabel(for: item, isPinned: isPinned, now: now))
     }
 
     @ViewBuilder private var preview: some View {
@@ -108,6 +110,7 @@ struct ClipboardCardView: View {
                 Image(systemName: "pin.fill")
                     .font(.system(size: 9))
                     .foregroundStyle(NotchTokens.accent)
+                    .accessibilityLabel("Đã ghim")
             }
         }
         .frame(height: 12)

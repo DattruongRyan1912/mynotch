@@ -48,4 +48,28 @@ enum ClipboardCardText {
         func channel(_ shift: UInt64) -> Double { Double((rgba >> shift) & 0xFF) / 255 }
         return (channel(24), channel(16), channel(8), channel(0))
     }
+
+    /// What VoiceOver reads for a card: kind, content, time and whether it is pinned.
+    static func accessibilityLabel(for item: ClipboardItem, isPinned: Bool, now: Date) -> String {
+        var parts = [item.content.kind.title, summary(of: item.content), relativeTime(item.copiedAt, now: now)]
+        if isPinned { parts.append("đã ghim") }
+        return parts.joined(separator: ", ")
+    }
+
+    private static func summary(of content: ClipboardContent) -> String {
+        switch content {
+        case .text(let text), .richText(let text, _):
+            return preview(of: text).prefix(200).split(whereSeparator: \.isNewline).joined(separator: " ")
+        case .link(let url):
+            let link = Self.link(url)
+            return [link.title, link.detail].compactMap(\.self).joined(separator: " ")
+        case .color(let hex):
+            return hex
+        case .image(let image):
+            return "\(image.pixelWidth) × \(image.pixelHeight)"
+        case .files(let urls):
+            let files = Self.files(urls)
+            return [files.title, files.detail].compactMap(\.self).joined(separator: ", ")
+        }
+    }
 }

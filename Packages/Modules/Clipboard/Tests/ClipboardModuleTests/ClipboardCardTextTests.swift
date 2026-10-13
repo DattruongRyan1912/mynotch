@@ -51,4 +51,20 @@ import Testing
         #expect(ClipboardCardText.preview(of: long).count == ClipboardCardText.previewCharacters)
         #expect(ClipboardCardText.preview(of: "\n\n  Xin chào\nthế giới") == "Xin chào\nthế giới")
     }
+
+    @Test func cardsReadAsKindContentTimeAndPin() {
+        func item(_ content: ClipboardContent) -> ClipboardItem {
+            ClipboardItem(
+                id: UUID(), content: content, contentHash: "", copiedAt: now.addingTimeInterval(-120),
+                sourceBundleID: nil, sourceAppName: nil
+            )
+        }
+        #expect(ClipboardCardText.accessibilityLabel(for: item(.text("\n  Xin chào\nthế giới")), isPinned: true, now: now)
+            == "Văn bản, Xin chào thế giới, 2 phút trước, đã ghim")
+        let image = ClipboardImage(fileName: "a.png", pixelWidth: 1920, pixelHeight: 1080, byteCount: 1)
+        #expect(ClipboardCardText.accessibilityLabel(for: item(.image(image)), isPinned: false, now: now)
+            == "Ảnh, 1920 × 1080, 2 phút trước")
+        #expect(ClipboardCardText.accessibilityLabel(for: item(.link(URL(string: "https://example.com/a")!)), isPinned: false, now: now)
+            == "Link, example.com /a, 2 phút trước")
+    }
 }

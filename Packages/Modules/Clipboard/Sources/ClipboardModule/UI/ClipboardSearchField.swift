@@ -78,12 +78,17 @@ struct ClipboardSearchField: NSViewRepresentable {
             focusIfKey()
         }
 
+        /// Also sent after a typing pause with unchanged text, so only a change is written.
         @objc func searchChanged(_ sender: NSSearchField) {
-            parent.text = sender.stringValue
+            write(sender.stringValue)
         }
 
         func controlTextDidChange(_ notification: Notification) {
-            if let field { parent.text = field.stringValue }
+            if let field { write(field.stringValue) }
+        }
+
+        private func write(_ text: String) {
+            if parent.text != text { parent.text = text }
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {

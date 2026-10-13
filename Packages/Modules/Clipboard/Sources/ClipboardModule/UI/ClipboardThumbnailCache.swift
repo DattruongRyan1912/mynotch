@@ -9,13 +9,15 @@ final class ClipboardThumbnailCache {
     /// About two rows of cards.
     private static let recentLimit = 12
 
-    /// Lets the system reclaim thumbnails under memory pressure, which it may do at any moment.
+    /// Decoded bytes kept at most; the system may reclaim thumbnails sooner, at any moment, under memory pressure.
+    private static let costLimit = 32 * 1024 * 1024
+
     private let cache = NSCache<NSString, NSImage>()
     /// The latest thumbnails, held strongly so the cards in view are never decoded twice, even right after a purge.
     private var recent: [(key: NSString, image: NSImage)] = []
 
     init() {
-        cache.countLimit = 300
+        cache.totalCostLimit = Self.costLimit
     }
 
     /// Lets a card show a thumbnail decoded earlier in its first frame instead of a placeholder.
@@ -32,7 +34,7 @@ final class ClipboardThumbnailCache {
         if let cached = cachedThumbnail(for: url) { return cached }
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         let key = Self.key(url)
-        cache.setObject(image, forKey: key)
+        cache.setObject(image, forKey: key, cost: cgImage.bytesPerRow * cgImage.height)
         recent.append((key, image))
         if recent.count > Self.recentLimit { recent.removeFirst() }
         return image

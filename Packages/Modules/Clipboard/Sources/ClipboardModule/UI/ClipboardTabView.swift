@@ -42,6 +42,8 @@ struct ClipboardTabView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.orange)
                         .help(Self.deniedHint)
+                        .accessibilityLabel("Bị chặn đọc clipboard")
+                        .accessibilityHint(Self.deniedHint)
                 }
             }
             .frame(height: 22)
@@ -98,7 +100,9 @@ struct ClipboardTabView: View {
                     .scrollIndicators(.never)
                 }
                 .frame(height: ClipboardCardView.size.height)
-                .onChange(of: selected) { _, id in
+                // Only a selection the user made scrolls. A new copy changes the implicit first card without moving the
+                // row: from the start it shows up in place, elsewhere the user keeps their place.
+                .onChange(of: state.selectedID) { _, id in
                     guard let id else { return }
                     withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) }
                 }
@@ -140,13 +144,12 @@ struct ClipboardTabView: View {
 
     // MARK: Actions
 
-    /// A new search or filter starts again from the first card.
-    private func queryBinding<Value>(_ keyPath: WritableKeyPath<ClipboardQuery, Value>) -> Binding<Value> {
+    /// Writes only a change; `ClipboardState` then starts the selection from the first card again.
+    private func queryBinding<Value: Equatable>(_ keyPath: WritableKeyPath<ClipboardQuery, Value>) -> Binding<Value> {
         Binding(
             get: { state.query[keyPath: keyPath] },
             set: { value in
-                state.query[keyPath: keyPath] = value
-                state.selectedID = nil
+                if state.query[keyPath: keyPath] != value { state.query[keyPath: keyPath] = value }
             }
         )
     }
@@ -184,7 +187,14 @@ struct ClipboardTabView: View {
             } while NSEvent.pressedMouseButtons & 1 != 0
             notch.setDragging(false)
         }
-        return ClipboardDragProvider.make(for: item.content, fileURLs: module.fileURLs(of: item))
+        return ClipboardDragProvider.make(for: item.content, fileURLs: dragFileURLs(of: item))
+    }
+
+    /// A stored image is dragged as a copy, or not at all when copying fails: a drop must never move or rename it.
+    private func dragFileURLs(of item: ClipboardItem) -> [URL] {
+        let urls = module.fileURLs(of: item)
+        guard case .image = item.content else { return urls }
+        return urls.prefix(1).compactMap { try? ClipboardDragProvider.copyImage(at: $0, copiedAt: item.copiedAt) }
     }
 
     // MARK: Boards
