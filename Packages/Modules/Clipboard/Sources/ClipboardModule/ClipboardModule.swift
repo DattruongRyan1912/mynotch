@@ -16,6 +16,8 @@ public final class ClipboardModule: FeatureModule {
     )
 
     let state = ClipboardState()
+    /// Kept by the module so image cards do not decode their thumbnails again each time the notch opens.
+    let thumbnails = ClipboardThumbnailCache()
     /// Set while running; tests wait for its writes.
     private(set) var store: ClipboardStore?
     private let pasteboard: any PasteboardAccess
@@ -162,6 +164,11 @@ public final class ClipboardModule: FeatureModule {
     /// The ⌃⌥V shortcut.
     func openTab() {
         context?.presenter.open(tab: descriptor.id)
+    }
+
+    /// A short message over the open tab, where activities stay hidden until the notch closes.
+    func showToast(_ text: String, systemImage: String) {
+        context?.presenter.showToast(AnyView(ClipboardToast(text: text, systemImage: systemImage)), duration: .seconds(2))
     }
 
     /// Re-read when the tab or Settings appear, since the user changes it in System Settings.

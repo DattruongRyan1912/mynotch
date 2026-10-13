@@ -1,0 +1,63 @@
+import AppKit
+import ImageIO
+
+/// Small previews of stored images, decoded off the main thread and kept by file name (a content hash, so a name
+/// never changes meaning). Owned by the module so thumbnails survive closing the notch.
+final class ClipboardThumbnailCache {
+    /// Twice the card width, so previews stay sharp on Retina screens.
+    nonisolated static let maxPixelSize = 240
+    /// About two rows of cards.
+    private static let recentLimit = 12
+
+    /// Lets the system reclaim thumbnails under memory pressure, which it may do at any moment.
+    private let cache = NSCache<NSString, NSImage>()
+    /// The latest thumbnails, held strongly so the cards in view are never decoded twice, even right after a purge.
+    private var recent: [(key: NSString, image: NSImage)] = []
+
+    init() {
+        cache.countLimit = 300
+    }
+
+    /// Lets a card show a thumbnail decoded earlier in its first frame instead of a placeholder.
+    func cachedThumbnail(for url: URL) -> NSImage? {
+        let key = Self.key(url)
+        return cache.object(forKey: key) ?? recent.first { $0.key == key }?.image
+    }
+
+    /// nil when the file is missing or not an image. Its size in points equals its pixel size.
+    func thumbnail(for url: URL) async -> NSImage? {
+        if let cached = cachedThumbnail(for: url) { return cached }
+        guard let cgImage = await Self.decode(url) else { return nil }
+        // Another card may have decoded the same file meanwhile; both get the first image.
+        if let cached = cachedThumbnail(for: url) { return cached }
+        let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        let key = Self.key(url)
+        cache.setObject(image, forKey: key)
+        recent.append((key, image))
+        if recent.count > Self.recentLimit { recent.removeFirst() }
+        return image
+    }
+
+    /// Stands in for the system emptying the cache, for tests.
+    func simulateMemoryPressurePurge() {
+        cache.removeAllObjects()
+    }
+
+    private static func key(_ url: URL) -> NSString {
+        url.lastPathComponent as NSString
+    }
+
+    /// Reads only what the thumbnail needs, so a large screenshot is never decoded at full size.
+    @concurrent private nonisolated static func decode(_ url: URL) async -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else {
+            return nil
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+}
