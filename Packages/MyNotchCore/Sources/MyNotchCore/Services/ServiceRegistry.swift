@@ -2,8 +2,8 @@
 /// each request here, so modules handle Services without touching AppKit.
 ///
 /// A request can arrive before its module runs: choosing a service launches MyNotch, and the system sends the request
-/// while the modules are still starting. So the latest unhandled request per name waits up to `pendingLifetime` for
-/// a handler.
+/// while the modules are still starting. So until `finishStartup()`, the latest unhandled request per name waits up to
+/// `pendingLifetime` for a handler. After it, a request nobody handles is refused so the Services menu can say so.
 public final class ServiceRegistry {
     /// Long enough for launch and a module start, short enough that a request the user gave up on doesn't pop up later.
     static let pendingLifetime: Duration = .seconds(10)
@@ -23,6 +23,7 @@ public final class ServiceRegistry {
     private var registrations: [String: Registration] = [:]
     private var pending: [String: PendingRequest] = [:]
     private var nextRequestID = 0
+    private var isStarting = true
 
     public init(scheduler: any Scheduler) {
         self.scheduler = scheduler
@@ -41,15 +42,27 @@ public final class ServiceRegistry {
         registrations = registrations.filter { $0.value.owner != owner }
     }
 
-    /// Hands `text` to the handler of `name`, or keeps it for the next handler registered within `pendingLifetime`,
-    /// replacing any request already waiting. Both count as handled, so this returns true and the Services menu shows
-    /// no error while a module is still starting; a request no handler claims in time is dropped silently.
+    /// Ends the launch window: a request no handler claims is refused from now on instead of queued, and one still
+    /// waiting for a module that never registered (disabled, or failed to start) is dropped.
+    public func finishStartup() {
+        isStarting = false
+        for (name, request) in pending where registrations[name] == nil {
+            request.expiry.cancel()
+            pending[name] = nil
+        }
+    }
+
+    /// Hands `text` to the handler of `name`. While modules are still starting, a request without a handler is kept
+    /// for the next one registered within `pendingLifetime` (replacing any request already waiting) and counts as
+    /// handled. Returns false for a request nobody can handle once startup is over, e.g. its module is turned off.
     public func handle(name: String, text: String) -> Bool {
         if let registration = registrations[name] {
             pending.removeValue(forKey: name)?.expiry.cancel()
             registration.handler(text)
-        } else {
+        } else if isStarting {
             queue(text, for: name)
+        } else {
+            return false
         }
         return true
     }

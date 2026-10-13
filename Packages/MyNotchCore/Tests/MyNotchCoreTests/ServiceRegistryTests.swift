@@ -121,6 +121,42 @@ import MyNotchTestSupport
         #expect(received == ["new"])
     }
 
+    @Test func afterStartupARequestNoHandlerClaimsIsRefusedNotQueued() {
+        var received: [String] = []
+        registry.finishStartup()
+        #expect(!registry.handle(name: "translate", text: "late"))
+        #expect(scheduler.pendingCount == 0)
+        registry.register("translate", owner: "translation") { received.append($0) }
+        scheduler.advance(by: .seconds(10))
+        #expect(received.isEmpty)
+    }
+
+    @Test func afterStartupARequestStillReachesARegisteredHandlerAndAStoppedModuleRefuses() {
+        var received: [String] = []
+        registry.finishStartup()
+        registry.register("translate", owner: "translation") { received.append($0) }
+        #expect(registry.handle(name: "translate", text: "a"))
+        #expect(received == ["a"])
+        registry.unregisterAll(owner: "translation")
+        #expect(!registry.handle(name: "translate", text: "b"))
+        #expect(received == ["a"])
+    }
+
+    @Test func finishingStartupDropsARequestNoModuleClaimedButKeepsOneAlreadyBeingDelivered() {
+        var received: [String] = []
+        #expect(registry.handle(name: "translate", text: "unclaimed"))
+        #expect(registry.handle(name: "define", text: "claimed"))
+        registry.register("define", owner: "dictionary") { received.append("define \($0)") }
+        registry.finishStartup()
+        #expect(scheduler.pendingCount == 2)
+        scheduler.advance(by: .zero)
+        #expect(received == ["define claimed"])
+        registry.register("translate", owner: "translation") { received.append("translate \($0)") }
+        scheduler.advance(by: .seconds(10))
+        #expect(received == ["define claimed"])
+        #expect(scheduler.pendingCount == 0)
+    }
+
     @Test func aQueuedRequestWaitsForTheNextHandlerWhenItsHandlerLeavesBeforeDelivery() {
         var received: [String] = []
         #expect(registry.handle(name: "translate", text: "early"))

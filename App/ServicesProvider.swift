@@ -17,7 +17,7 @@ final class ServicesProvider: NSObject {
             return
         }
         if !registry.handle(name: "translate", text: text) {
-            error.pointee = "Mô-đun Dịch của MyNotch chưa chạy."
+            error.pointee = "Mô-đun Dịch của MyNotch chưa chạy. Hãy bật mô-đun Dịch trong Cài đặt MyNotch."
         }
     }
 }

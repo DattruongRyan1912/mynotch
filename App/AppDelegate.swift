@@ -42,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openSettings: { [weak self] in self?.settingsWindow.show() }
         )
         screens.start()
-        Task { await registry.bootstrap() }
+        Task { await registry.bootstrap(); services.finishStartup() }
         observePermissionPolling()
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshPermissions() }
