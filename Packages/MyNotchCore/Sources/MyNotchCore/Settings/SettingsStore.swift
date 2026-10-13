@@ -19,7 +19,7 @@ public final class SettingsStore {
         return encoder
     }()
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults) {
         self.defaults = defaults
     }
 

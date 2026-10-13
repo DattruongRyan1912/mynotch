@@ -15,7 +15,7 @@ public final class HotkeyRegistry {
     public private(set) var registrations: [Registration] = []
     @ObservationIgnored private let backend: any HotkeyBackend
 
-    public init(backend: any HotkeyBackend = KeyboardShortcutsBackend()) {
+    public init(backend: any HotkeyBackend) {
         self.backend = backend
     }
 

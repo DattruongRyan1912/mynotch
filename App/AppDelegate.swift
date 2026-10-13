@@ -5,10 +5,10 @@ import NotchUI
 
 /// Composition root: builds the shared services and wires them together.
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let settings = SettingsStore()
+    private let settings = SettingsStore(defaults: .standard)
     private let scheduler = TaskScheduler()
     private let permissions = SystemPermissionCenter()
-    private let hotkeys = HotkeyRegistry()
+    private let hotkeys = HotkeyRegistry(backend: KeyboardShortcutsBackend())
     private lazy var services = ServiceRegistry(scheduler: scheduler)
     private let coordinator = NotchCoordinator()
     private lazy var activities = ActivityCenter(scheduler: scheduler)
