@@ -83,7 +83,7 @@ nonisolated struct AgentTabState: Equatable, Sendable {
         var id: AgentSource { source }
         var source: AgentSource
         var tokens: String
-        /// A dash when no model used has a price.
+        /// A dash when no model used has a price; "≥" first when only some have.
         var cost: String
         /// The cost comes from the price table, not from the agent: it must be labelled `UsageCalculator.estimateLabel`.
         var isEstimated: Bool
@@ -109,7 +109,7 @@ nonisolated struct AgentTabState: Equatable, Sendable {
             guard let day = dayUsage[source], !day.tokens.isEmpty else { return nil }
             return UsageLine(
                 source: source, tokens: AgentFormat.tokens(day.tokens.allTokens),
-                cost: AgentFormat.cost(day.estimatedCostUSD), isEstimated: day.estimatedCostUSD != nil
+                cost: (day.isCostPartial ? "≥ " : "") + AgentFormat.cost(day.estimatedCostUSD), isEstimated: day.estimatedCostUSD != nil
             )
         }
         limits = Self.limits(of: sessions, now: now, calendar: calendar)

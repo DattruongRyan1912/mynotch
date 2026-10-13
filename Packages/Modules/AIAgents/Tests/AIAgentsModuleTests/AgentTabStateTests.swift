@@ -125,6 +125,23 @@ import Testing
         #expect(line?.isEstimated == false)
     }
 
+    @Test func aDayMixingPricedAndUnpricedModelsShowsALowerBoundCost() {
+        let usage: [AgentSource: AgentDayUsage] = [.codex: AgentDayUsage(tokens: UsageTotals(input: 4_000), estimatedCostUSD: 1.234, isCostPartial: true)]
+        #expect(state(usage: usage).usage.first?.cost == "≥ $1.23")
+    }
+
+    @Test func theLedgerMarksTheCostPartialOnlyWhenAnUnpricedModelHadUsage() {
+        var ledger = DayUsageLedger()
+        let noon = utc("2026-10-14T05:00:00Z")
+        func record(_ model: String, _ id: String) {
+            ledger.record(AgentUsage(output: 1_000, model: model, messageID: id), source: .claude, sessionID: "s", at: noon, now: noon, calendar: calendar)
+        }
+        record("claude-opus-4-1", "a")
+        #expect(ledger.usage(now: noon, calendar: calendar)[.claude]?.isCostPartial == false)
+        record("mystery-model", "b")
+        #expect(ledger.usage(now: noon, calendar: calendar)[.claude]?.isCostPartial == true)
+    }
+
     @Test func anAgentWithoutUsageTodayHasNoLine() {
         let usage: [AgentSource: AgentDayUsage] = [.claude: AgentDayUsage(tokens: UsageTotals(), estimatedCostUSD: nil)]
         #expect(state(usage: usage).usage.isEmpty)

@@ -67,6 +67,34 @@ import Testing
         #expect(ledger.usage(now: thisMorning, calendar: calendar)[.claude]?.tokens.output == 1)
     }
 
+    @Test func aMessageWhoseRecordsStraddleMidnightCountsOnlyWhatCameAfter() {
+        var ledger = DayUsageLedger()
+        let lastNight = utc("2026-10-14T16:50:00Z")
+        let thisMorning = utc("2026-10-14T17:10:00Z")
+        record(&ledger, message("m", output: 30), now: lastNight)
+        record(&ledger, message("m", output: 50), now: thisMorning)
+        #expect(ledger.usage(now: thisMorning, calendar: calendar)[.claude]?.tokens.output == 20)
+    }
+
+    @Test func aRecordFromBeforeMidnightReadAfterItIsABaselineNotUsage() {
+        var ledger = DayUsageLedger()
+        let lastNight = utc("2026-10-14T16:50:00Z")
+        let thisMorning = utc("2026-10-14T17:10:00Z")
+        record(&ledger, message("m", output: 30), at: lastNight, now: thisMorning)
+        #expect(ledger.usage(now: thisMorning, calendar: calendar).isEmpty)
+        record(&ledger, message("m", output: 50), at: thisMorning, now: thisMorning)
+        #expect(ledger.usage(now: thisMorning, calendar: calendar)[.claude]?.tokens.output == 20)
+    }
+
+    @Test func aMessageUnknownBeforeMidnightCountsInFull() {
+        var ledger = DayUsageLedger()
+        let lastNight = utc("2026-10-14T16:50:00Z")
+        let thisMorning = utc("2026-10-14T17:10:00Z")
+        record(&ledger, message("old", output: 30), now: lastNight)
+        record(&ledger, message("new", output: 50), now: thisMorning)
+        #expect(ledger.usage(now: thisMorning, calendar: calendar)[.claude]?.tokens.output == 50)
+    }
+
     @Test func aRunningTotalIsRememberedPerSessionAcrossDays() {
         var ledger = DayUsageLedger()
         let lastNight = utc("2026-10-14T16:50:00Z")

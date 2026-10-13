@@ -5,6 +5,8 @@ nonisolated struct AgentDayUsage: Equatable, Sendable {
     var tokens: UsageTotals
     /// From the price table (see `UsageCalculator.estimateLabel`); nil when no model used has a price.
     var estimatedCostUSD: Double?
+    /// Some tokens are of a model without a price, so a cost that exists is a lower bound.
+    var isCostPartial = false
 }
 
 /// Usage per agent for the current local day. It lives outside the sessions and does its own deduplication,
@@ -34,8 +36,11 @@ nonisolated struct DayUsageLedger: Equatable, Sendable {
     private var days: [AgentSource: Day] = [:]
     private var messages: [MessageKey: UsageTotals] = [:]
     private var messageOrder: [MessageKey] = []
-    /// The day `messages` belongs to; a new day forgets them.
+    /// The day `messages` belongs to; a new day moves them to `earlier`.
     private var messagesDay: Date?
+    /// What was seen of messages before the current day began, so a message whose records straddle midnight
+    /// counts only what came after. Replaced at each new day.
+    private var earlier: [MessageKey: UsageTotals] = [:]
     /// The latest running total of each session that reports totals (Codex). It is a baseline, not a day's
     /// usage, so it is kept across midnight: what a session adds after midnight is the difference from it.
     private var runningTotals: [SessionKey: UsageTotals] = [:]
@@ -45,7 +50,9 @@ nonisolated struct DayUsageLedger: Equatable, Sendable {
     var rememberedTotalCount: Int { runningTotals.count }
 
     /// Counts what `usage` adds to the day: a message's usage once however many records repeat it, a running
-    /// total as its difference from the one before. Usage that happened before the current day began is not counted.
+    /// total as its difference from the one before. Usage from before the current day began is not counted; of a
+    /// message that straddles midnight only what its later records add is. A running total is split only as
+    /// finely as its records: one that spans midnight counts in the day it is stamped.
     mutating func record(_ usage: AgentUsage, source: AgentSource, sessionID: String, at date: Date, now: Date, calendar: Calendar) {
         let dayStart = calendar.startOfDay(for: now)
         let totals = UsageTotals(usage)
@@ -58,15 +65,20 @@ nonisolated struct DayUsageLedger: Equatable, Sendable {
             // is a starting point unless the whole session was read, since it may hold work from before anything was watched.
             added = previous.map { totals.isAtLeast($0) ? totals - $0 : totals } ?? (usage.startsFromZero ? totals : UsageTotals())
         } else if let id = usage.messageID {
-            guard date >= dayStart else { return }
             if messagesDay != dayStart {
+                earlier = messages
                 messages = [:]
                 messageOrder = []
                 messagesDay = dayStart
             }
             let key = MessageKey(source: source, messageID: id)
+            guard date >= dayStart else {
+                if earlier.count < Self.messageMemory { earlier[key] = totals }
+                return
+            }
             if messages[key] == nil { remember(key) }
-            added = totals - (messages.updateValue(totals, forKey: key) ?? UsageTotals())
+            let before = earlier[key].flatMap { totals.isAtLeast($0) ? $0 : nil } ?? UsageTotals()
+            added = totals - (messages.updateValue(totals, forKey: key) ?? before)
         } else {
             added = totals
         }
@@ -78,10 +90,9 @@ nonisolated struct DayUsageLedger: Equatable, Sendable {
         let dayStart = calendar.startOfDay(for: now)
         return days.compactMapValues { day in
             guard day.start == dayStart else { return nil }
-            return AgentDayUsage(
-                tokens: day.byModel.values.reduce(UsageTotals(), +),
-                estimatedCostUSD: UsageCalculator.estimatedCost(of: day.byModel)
-            )
+            let cost = UsageCalculator.estimatedCost(of: day.byModel)
+            let hasUnpriced = day.byModel.contains { !$0.value.isEmpty && UsageCalculator.estimatedCost(of: $0.value, model: $0.key) == nil }
+            return AgentDayUsage(tokens: day.byModel.values.reduce(UsageTotals(), +), estimatedCostUSD: cost, isCostPartial: cost != nil && hasUnpriced)
         }
     }
 
