@@ -2,13 +2,15 @@
 
 Ứng dụng notch cá nhân cho macOS 26+, viết mới từ đầu, chia thành các module bật/tắt độc lập.
 
+> **Clean-room:** MyNotch lấy hành vi của OneNotch làm tham chiếu nhưng **không chứa mã nguồn của OneNotch**. boring.notch (GPL) chỉ được đọc để hiểu kiến trúc, không chép mã. Bên thứ ba: KeyboardShortcuts (MIT) và `mediaremote-adapter` v0.7.7 (BSD-3, trong `Vendor/`); cả hai có trong trang About của app.
+
 ## Yêu cầu
 
 - macOS 26.0 trở lên
 - Xcode 26.6 (`xcode-select -p` phải trỏ vào Xcode, không phải Command Line Tools)
 - XcodeGen: `brew install xcodegen`
 
-## Build và chạy
+## Build, chạy và kiểm tra
 
 ```bash
 xcodegen generate
@@ -17,38 +19,67 @@ open MyNotch.xcodeproj
 
 Chọn scheme **MyNotch** rồi Run (⌘R). App chạy trên menu bar; icon Dock chỉ hiện khi cửa sổ Settings đang mở.
 
-Kiểm tra toàn bộ (test mọi package rồi build app):
-
 ```bash
-./scripts/verify.sh
+./scripts/verify.sh                     # xcodegen, test mọi package, build Debug; phải kết thúc bằng "All checks passed."
+cd Packages/Modules/Clipboard && swift test   # test riêng một package
 ```
 
-## Cấu trúc
+Đừng chạy `verify.sh` song song trong cùng một thư mục làm việc: nó xoá `.build` của lần chạy kia.
+
+## Module
+
+Mỗi tính năng là một package trong `Packages/Modules/`, bật/tắt trong Settings → Modules. Cột "Mặc định" là giá trị `defaultEnabled`.
+
+| Module | Id | Mặc định | Làm gì |
+|---|---|---|---|
+| Clipboard | `clipboard` | Bật | Lịch sử clipboard (text, ảnh, file, màu), tìm kiếm, board, dán trực tiếp. ⌃⌥V |
+| Media | `media` | Bật | Bài đang phát của mọi app, điều khiển, cột sóng. Phổ âm thật và lời bài hát (lrclib.net) tắt sẵn |
+| Dịch | `translation` | Bật | Dịch trên máy bằng framework Translation: tab, mục Services, ⌃⌥T |
+| Ảnh chụp | `screenshot` | Bật, cần Screen Recording | Chụp vùng, cửa sổ, màn hình, OCR, sửa ảnh. ⌃⌥S, ⌃⌥O |
+| AI agents | `aiagents` | Bật | Trạng thái, token và chi phí của Claude Code và Codex; hook "trạng thái chính xác" tuỳ chọn |
+| Lịch | `calendar` | Bật, cần quyền Lịch | Sự kiện hôm nay, thông báo họp kèm nút Tham gia, lời nhắc |
+| Hệ thống | `system` | Bật | Activity Bluetooth, mạng, Caps Lock, tải xong, âm lượng |
+| Battery | `battery` | Bật | Pin và sạc (module mẫu) |
+| Shortcuts | `shortcuts` | Bật | Chạy Apple Shortcuts ưa thích từ notch |
+| Hẹn giờ | `timer` | Bật | Đếm ngược và bấm giờ |
+| Khay | `shelf` | Bật | Thả file, link, văn bản lên notch; AirDrop, chia sẻ |
+| Màn hình khoá | `lockscreen` | **Tắt**, thử nghiệm | Widget media, hẹn giờ, pin trên màn hình khoá (API riêng SkyLight, chưa kiểm chứng) |
+
+Phím tắt chung: ⌃⌥N mở/đóng notch. Dữ liệu của module nằm ở `~/Library/Application Support/io.lucasvu.mynotch/Modules/<id>/`. Mặc định app không gửi dữ liệu ra ngoài; chỉ lời bài hát (đang tắt) gửi tên bài tới lrclib.net.
+
+## Cấu trúc và cách ghép module
 
 | Thư mục | Vai trò |
 |---|---|
-| `App/` | Target app: khởi động, ghép module (`ModuleList.swift`), menu bar, Settings |
-| `Packages/MyNotchCore` | Hợp đồng module, registry, settings, quyền, phím tắt, live activity |
-| `Packages/NotchUI` | Cửa sổ notch, hình học, state machine, đa màn hình |
-| `Packages/Modules/*` | Mỗi tính năng một package; chỉ phụ thuộc MyNotchCore + NotchUI |
-| `docs/superpowers/` | Spec và kế hoạch triển khai |
+| `App/` | Target app: khởi động, menu bar, Settings. `ModuleList.swift` là nơi **duy nhất** ghép module vào app |
+| `Packages/MyNotchCore` | Hợp đồng module, registry, settings, quyền, phím tắt, live activity, Services |
+| `Packages/NotchUI` | Cửa sổ notch, hình học, state machine, đa màn hình, thả file, SkyLight shim |
+| `Packages/Modules/*` | Mỗi tính năng một package; chỉ phụ thuộc MyNotchCore và NotchUI, không module nào import module khác |
+| `Tools/mynotch-hook` | Helper CLI của AI agents, được nhúng vào `Contents/MacOS` |
+| `Vendor/` | `mediaremote-adapter` (không sửa file vendor) |
+| `docs/` | Spec, ghi chú triển khai, checklist kiểm thử tay |
+
+Ghép một module cần hai chỗ: `project.yml` (mục `packages` và `dependencies` của target MyNotch) và một dòng trong `App/ModuleList.swift`.
 
 ## Thêm một module
 
-1. Tạo package trong `Packages/Modules/<Tên>/`; chép `Packages/Modules/Battery/Package.swift` làm mẫu (macOS 26, phụ thuộc đường dẫn tới MyNotchCore/NotchUI, `.defaultIsolation(MainActor.self)`, test dùng `MyNotchTestSupport`). Viết một class theo `FeatureModule`.
-2. Khai báo package trong `project.yml` (mục `packages` và `dependencies` của target MyNotch).
+1. Tạo package `Packages/Modules/<Tên>/`; chép `Packages/Modules/Battery/Package.swift` làm mẫu (macOS 26, phụ thuộc đường dẫn tới MyNotchCore và NotchUI, `.defaultIsolation(MainActor.self)`, test dùng `MyNotchTestSupport`). Viết một class theo `FeatureModule`.
+2. Khai báo package trong `project.yml`.
 3. Module cần quyền mới: thêm usage description và entitlement tương ứng vào `project.yml`.
-4. Thêm một dòng vào `App/ModuleList.swift`.
-5. `xcodegen generate`. `scripts/verify.sh` tự chạy test của mọi package trong `Packages/Modules/`.
+4. Thêm một dòng vào `App/ModuleList.swift`, rồi `xcodegen generate`. `verify.sh` tự test mọi package trong `Packages/Modules/`.
 
-Module dùng được: `context.storage` (thư mục dữ liệu riêng), `context.scheduler` (việc đã hẹn tự huỷ khi module dừng), `NotchTab(acceptsKeyboard:)` (tab nhận bàn phím),
-`@Environment(\.notch)` (ghim/đóng notch từ view), `optionalPermissions` trong `ModuleDescriptor` (quyền không bắt buộc)
-và `context.lockScreen` (view nhỏ, không nhạy cảm, hiện trên màn hình khoá khi module Màn hình khoá được bật).
+Module dùng được: `context.storage`, `context.scheduler` (việc đã hẹn tự huỷ khi module dừng), `context.services` (macOS Services), `context.lockScreen` (view nhỏ không nhạy cảm cho màn hình khoá), `NotchTab(acceptsKeyboard:dropTypes:onDrop:)`, `@Environment(\.notch)` (ghim, báo đang kéo, đóng notch), `optionalPermissions` trong `ModuleDescriptor`.
+
+## Tài liệu
+
+- **Spec:** `docs/superpowers/specs/2026-10-13-*-design.html` (bản `.md` đi kèm). Kế hoạch nền tảng: `docs/superpowers/plans/`.
+- **Ghi chú triển khai** (sai khác so với spec, giới hạn đã chấp nhận, mục sửa lại spec): `docs/superpowers/notes/2026-10-14-<module>-implementation.html`, mỗi module một file cùng một file cho nền tảng.
+- **Kiểm thử tay:** `docs/manual-test-checklist-all.html` (gộp theo module, chọn kết quả và copy ra văn bản). `docs/manual-test-checklist.html` là checklist cũ, chỉ phần nền tảng.
+- Tạo HTML từ Markdown: `python3 scripts/md2html.py <file.md>`.
 
 ## Bản Release
 
-Khởi động cùng máy cần một bản app ổn định (bản Debug đổi chữ ký mỗi lần build). Thoát MyNotch đang chạy
-(menu bar → Quit MyNotch) rồi:
+Khởi động cùng máy cần một bản app ổn định (bản Debug đổi chữ ký mỗi lần build). Thoát MyNotch đang chạy (menu bar → Quit MyNotch) rồi:
 
 ```bash
 xcodebuild -project MyNotch.xcodeproj -scheme MyNotch -configuration Release \
@@ -61,18 +92,18 @@ Không dùng `cp -R` đè lên bản cũ: macOS sẽ giết app khi mở vì ch�
 
 ## Ký app
 
-Mặc định app được ký ad-hoc ("Sign to Run Locally"), đủ cho các module không cần quyền hệ thống.
-Với ký ad-hoc, macOS quên các quyền đã cấp (Accessibility, Screen Recording…) mỗi lần build lại.
-Để macOS nhớ quyền giữa các lần build:
+Hiện app được ký **ad-hoc** ("Sign to Run Locally"): `CODE_SIGN_IDENTITY: "-"` trong `project.yml`. Với ký ad-hoc, macOS quên các quyền đã cấp (Accessibility, Screen Recording, Lịch…) mỗi lần build lại.
 
-1. Xcode → Settings → Accounts: thêm Apple ID, rồi Manage Certificates → tạo chứng chỉ **Apple Development**.
-2. Trong `project.yml` đặt `DEVELOPMENT_TEAM` bằng Team ID của Apple ID và đổi `CODE_SIGN_IDENTITY` từ `"-"` thành `"Apple Development"`.
-3. Chạy lại `xcodegen generate`.
+Để macOS nhớ quyền, chuyển sang chứng chỉ **Apple Development**. Máy này đã có chứng chỉ nhưng còn thiếu chứng chỉ trung gian WWDR G3 (`AppleWWDRCAG3.cer`), nên chưa dùng được:
 
-Chứng chỉ Apple Development của Apple ID miễn phí có hạn (thường 1 năm); hết hạn thì macOS không mở app nữa —
-tạo chứng chỉ mới trong Xcode rồi build lại.
+1. Tải `AppleWWDRCAG3.cer` từ trang chứng chỉ của Apple và cài vào keychain (người dùng tự làm, không qua script).
+2. Kiểm tra: `security find-identity -v -p codesigning` phải liệt kê một danh tính "Apple Development".
+3. Trong `project.yml` đặt `CODE_SIGN_IDENTITY: "Apple Development"` và `DEVELOPMENT_TEAM: B394MAY4QN` (Team ID), rồi `xcodegen generate`.
+
+Chứng chỉ Apple Development của Apple ID miễn phí có hạn (thường 1 năm); hết hạn thì macOS không mở app nữa: tạo chứng chỉ mới trong Xcode rồi build lại.
 
 ## Xử lý sự cố
 
 - `cannot find '<Tên>' in scope` cho symbol nằm ở một package local khác: xoá thư mục `.build` của package đang build rồi chạy lại.
-- Notch chồng nhau hoặc không nhận chuột: thoát các app notch khác (OneNotch, boring.notch…) đang chạy.
+- Notch chồng nhau hoặc không nhận chuột: thoát các app notch khác (OneNotch, boring.notch…) đang chạy, và chỉ chạy một bản MyNotch.
+- Quyền bị quên sau khi build: xem mục "Ký app". Muốn thử lại hộp thoại quyền từ đầu: `tccutil reset All io.lucasvu.mynotch`.

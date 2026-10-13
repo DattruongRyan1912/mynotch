@@ -1,0 +1,96 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ghi chú triển khai: Nền tảng và điểm nối nền tảng</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</a><a class="h2" href="#2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</a><a class="h2" href="#3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</a><a class="h2" href="#4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</a><a class="h2" href="#5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</a><a class="h2" href="#6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</a></nav><main><h1 id="ghi-chú-triển-khai-nền-tảng-và-điểm-nối-nền-tảng">Ghi chú triển khai: Nền tảng và điểm nối nền tảng</h1>
+<ul>
+<li><strong>Ngày:</strong> 2026-10-14</li>
+<li><strong>Spec:</strong> <a href="../specs/2026-10-13-foundation-design.html">Nền tảng (dự án con 0)</a> và <a href="../specs/2026-10-13-platform-seams-design.html">Điểm nối nền tảng (dự án con 0.5)</a> (spec 0.5 đã có mục "Ghi chú triển khai" riêng, §6; tài liệu này không lặp lại toàn bộ). Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".</li>
+<li><strong>Package:</strong> <code>Packages/MyNotchCore</code> (kèm target <code>MyNotchTestSupport</code>), <code>Packages/NotchUI</code>, <code>Packages/Modules/Battery</code> (module mẫu, id <code>battery</code>, order 900), thư mục <code>App/</code>, <code>project.yml</code>, <code>scripts/</code>.</li>
+<li><strong>Commit chính:</strong> nền tảng từ <code>04c5d16</code> (spec) tới <code>80225c0</code>; điểm nối 0.5: <code>ee6f4fa</code> (B1), <code>95eb95b</code> và <code>c134e8a</code> (B2, B5), <code>6884c77</code> (B3), <code>b3b861a</code> và <code>cf94688</code> (B4), <code>241bd5f</code> (B6), <code>5a54158</code> (A1, A3), <code>1c10ef5</code> và <code>8d01bf0</code> (A2, A4), <code>15dbd8b</code> và <code>50d4924</code> (Settings và Dock), <code>8b20c03</code> (review cuối), <code>3fc9482</code> (hàng đợi Services và phím giả), <code>fcfea3c</code> (dọn plist test), <code>bf5549f</code> (re-export <code>KeyboardShortcuts</code>).</li>
+<li><strong>Test tự động:</strong> MyNotchCore 105, NotchUI 77, Battery 23 theo báo cáo L1 (<code>verify.sh</code> qua ở <code>8a2b842</code>). Chưa chạy lại khi viết tài liệu này.</li>
+<li><strong>Kiểm thử tay:</strong> <a href="../../manual-test-checklist-all.html#nen-tang">Nền tảng</a> (34 mục, nguyên văn từ checklist cũ) và <a href="../../manual-test-checklist-all.html#seams">Điểm nối nền tảng</a></li>
+</ul>
+<h2 id="1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</h2>
+<p><strong>Nền tảng (spec 0):</strong></p>
+<ul>
+<li><strong>MyNotchCore:</strong> <code>FeatureModule</code>, <code>ModuleContext</code>, <code>ModuleRegistry</code> (vòng đời <code>disabled</code>, <code>starting</code>, <code>running</code>, <code>needsPermission</code>, <code>unavailable</code>, <code>failed</code>, cách ly lỗi giữa các module), <code>SettingsStore</code> và <code>ModuleSettings</code> (khoá <code>module.&lt;id&gt;.*</code>), <code>ActivityCenter</code> (ưu tiên và hết hạn), <code>HotkeyRegistry</code> bọc KeyboardShortcuts 3.1.0, <code>PermissionCenter</code>, <code>Scheduler</code> với <code>TaskScheduler</code> và <code>ManualScheduler</code>.</li>
+<li><strong>NotchUI:</strong> <code>NotchGeometry</code> (notch thật và ảo), <code>NotchViewModel</code> (state machine <code>closed</code>, <code>compact</code>, <code>open</code>, ghim, kéo, toast), <code>FullscreenDetector</code>, <code>NotchPanel</code> mỗi màn một cái, <code>ScreenManager</code>, <code>NotchRootView</code>.</li>
+<li><strong>App:</strong> menu bar (Open Settings…, Hide Notch, Pause All Modules, Quit MyNotch), Settings (General, Interface, Modules, About), khởi động cùng máy, phím tắt ⌃⌥N, <code>ModuleList.swift</code> là nơi duy nhất ghép module.</li>
+<li><strong>Battery:</strong> module mẫu (activity sạc và pin yếu, tab, ngưỡng 5 đến 50%).</li>
+<li><strong>Công cụ:</strong> <code>scripts/verify.sh</code> (<code>xcodegen generate</code>, <code>swift test</code> mọi package, <code>xcodebuild</code> Debug), <code>scripts/md2html.py</code>.</li>
+</ul>
+<p><strong>Điểm nối 0.5 (A1 đến A4, B1 đến B6, đã triển khai đủ):</strong> đóng notch khi click ngoài, tab nhận bàn phím (<code>acceptsKeyboard</code>), toast không phá tab đang mở, <code>NotchHandle</code> (<code>@Environment(\.notch)</code>), live activity cập nhật tại chỗ cộng <code>raise(id:)</code>, <code>ModuleStorage</code> và <code>StorageRoot</code>, <code>makeSettingsView(_:)</code> dùng được khi module tắt, <code>PermissionCenter.request</code> cùng <code>optionalPermissions</code>, <code>Scheduler</code> riêng cho module, <code>ModuleRegistry.shutdown()</code> khi thoát app. Cửa sổ Settings làm app hiện icon Dock khi mở.</p>
+<p><strong>Điểm nối bổ sung sau spec 0.5 (mô tả ở ghi chú của module dùng nó):</strong></p>
+<ul>
+<li><code>ServiceRegistry</code> và <code>ModuleServices</code> cho macOS Services, hàng đợi 10 giây (<a href="2026-10-14-translation-implementation.html">Dịch</a>).</li>
+<li>Điểm nối thả file: <code>NotchTab.dropTypes</code> và <code>onDrop</code>, <code>DropRouting</code>, <code>NotchGeometry.dragHitRect</code> (<a href="2026-10-14-shelf-implementation.html">Khay</a>).</li>
+<li><code>LockScreenContentCenter</code>, <code>ModuleContext.lockScreen</code>, <code>SkyLightShim</code> (<a href="2026-10-14-lock-screen-implementation.html">Màn hình khoá</a>).</li>
+<li>Nhúng <code>MediaRemoteAdapter.framework</code> và script perl, <code>App/MediaAdapterLocation.swift</code> (<a href="2026-10-14-media-implementation.html">Media</a>); target <code>mynotch-hook</code> (<a href="2026-10-14-ai-agents-implementation.html">AI agents</a>).</li>
+<li><code>HotkeyBackend</code> tiêm được: <code>RegistryHarness</code> dùng bản giả trong bộ nhớ nên test module không đăng ký phím Carbon thật hay ghi mặc định KeyboardShortcuts; có <code>harness.hotkeyBackend.trigger(...)</code>.</li>
+</ul>
+<h2 id="2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</h2>
+<p>Chi tiết A1 đến B6 đã nằm ở §6 của spec 0.5. Tóm tắt:</p>
+<ul>
+<li><strong>A1:</strong> click vào bất kỳ cửa sổ nào khác của MyNotch (Settings, alert, menu) cũng tính là "ngoài notch"; module phải ghim notch khi mở UI phụ.</li>
+<li><strong>A2:</strong> notch chỉ chiếm bàn phím khi được mở có chủ ý (click, phím tắt, module gọi <code>open(tab:)</code>), không khi mở do rê chuột. Toast che tab nhận bàn phím vẫn giữ bàn phím và chiều cao tab. Mất key window thì đóng như click ngoài (trừ khi ghim hoặc đang kéo). Esc đóng qua cả <code>cancelOperation</code> và <code>.onExitCommand</code>.</li>
+<li><strong>A3:</strong> toast hết hạn quay lại tab qua cùng logic chọn tab như <code>open(tab:)</code>; tab bị che vẫn nằm trong cây view (ẩn) để giữ trạng thái.</li>
+<li><strong>B1:</strong> <code>set</code> với id đã có giữ thứ tự (<code>sequence</code>); <code>Entry.revision</code> bảo vệ hết hạn khỏi hẹn giờ cũ.</li>
+<li><strong>B2, B5:</strong> <code>context.scheduler</code> là scheduler riêng của module, huỷ mọi việc đã hẹn khi dừng (kể cả khi <code>start</code> lỗi).</li>
+<li><strong>B3:</strong> <code>ModuleSettingsEnvironment</code> không có init public; test lấy qua <code>RegistryHarness.settingsEnvironment(for:)</code>.</li>
+<li><strong>B4:</strong> <code>Permission.isSettingsOnly</code> (Accessibility, Screen Recording): <code>grant</code> luôn gọi <code>request</code> trước (để app có trong danh sách System Settings) rồi mới mở Settings nếu vẫn chưa có quyền; nút "Cấp quyền" bị khoá khi đang xin.</li>
+<li><strong>B6:</strong> sau <code>shutdown()</code> mọi đường khởi động module (<code>bootstrap</code>, <code>setEnabled</code>, retry, <code>resumeAll</code>, <code>refreshPermissions</code>, <code>grant</code>) đều bị chặn.</li>
+<li><strong>Công cụ:</strong> <code>verify.sh</code> dọn thư mục tạm <code>MyNotchTests-*</code> và plist <code>MyNotchTests.*</code> cũ hơn 15 phút, và tự xoá <code>.build</code> của package phụ thuộc khi danh sách file của MyNotchCore hoặc NotchUI đổi.</li>
+<li><strong>P10 (<code>fcfea3c</code>):</strong> <code>makeIsolatedDefaults()</code> trả về <code>IsolatedUserDefaults</code>, tự xoá domain khi được giải phóng. Vì cfprefsd ghi lại plist rỗng sau khoảng 5 đến 8 giây, mỗi tiến trình test có một handler <code>atexit</code> chạy <code>sh -c &#x27;sleep 20; rm -f &lt;plist MyNotchTests&gt;&#x27;</code> tách rời. <code>CaptureStore</code> nhận thumbnail <code>NSCache</code> tiêm được (sửa test chập chờn).</li>
+</ul>
+<h2 id="3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</h2>
+<p>Ledger không có dòng <code>Ruling:</code> riêng cho nền tảng (mục "Rulings" của nó còn ghi "none yet"). Các điểm sau đến từ ledger, handoff và báo cáo:</p>
+<ul>
+<li><strong>Ký ad-hoc.</strong> App ký ad-hoc ("Sign to Run Locally"), nên macOS quên các quyền đã cấp mỗi lần build lại. Người dùng có chứng chỉ Apple Development nhưng thiếu chứng chỉ trung gian WWDR G3; xem README mục "Ký app" để chuyển. Chi phí: phải cấp lại quyền sau mỗi lần build.</li>
+<li><strong>Bản Debug ký ad-hoc không có cờ Hardened Runtime</strong> (<code>runtime</code>) cho cả app lẫn helper (W1). Chưa kiểm bản Release.</li>
+<li><strong>Bộ quét plist của P10 chưa được review</strong> và khá lạ (tiến trình <code>sh</code> tách rời chạy 20 giây). Gợi ý của ghi chú P10: cân nhắc xem chỉ <code>verify.sh</code> dọn có đủ không. Còn khoảng 921 plist cũ lúc ghi handoff; <code>verify.sh</code> xoá dần.</li>
+<li><strong><code>RegistryHarness</code> để lại thư mục <code>MyNotchTests-&lt;uuid&gt;</code></strong> khi module tạo thư mục lưu trữ; bỏ qua ở vòng sửa H1/H3/H4, <code>verify.sh</code> dọn bù.</li>
+<li><strong>Info.plist khai báo sẵn nhưng chưa module nào dùng:</strong> <code>NSAppleEventsUsageDescription</code>, <code>NSMicrophoneUsageDescription</code> (và entitlement tương ứng); và các case <code>Permission.automation</code> và <code>.microphone</code>. Thiếu usage description thì app crash khi xin quyền, nên khai báo trước; chưa có đường kích hoạt từ giao diện nên chưa kiểm được.</li>
+</ul>
+<h2 id="4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</h2>
+<ul>
+<li>Danh sách 34 mục kiểm thử tay của nền tảng chưa được người dùng điền kết quả (HANDOFF mục 3).</li>
+<li>A2 và A4 phụ thuộc AppKit key window nên chỉ kiểm bằng tay (các mục Clipboard trong checklist gộp).</li>
+<li>Nút "Cấp quyền" cho Automation và Microphone không có đường kích hoạt từ module nào; các luồng <code>request</code> còn lại (Accessibility, Screen Recording, Lịch, Lời nhắc, Bluetooth) chỉ chạy với module thật.</li>
+<li><code>AgentSocket</code> ghi cứng bundle id <code>io.lucasvu.mynotch</code>; đổi bundle id của app phải đổi cả ở đó.</li>
+<li>Hộp thoại thật của macOS cho mọi quyền chưa được thử.</li>
+</ul>
+<h2 id="5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</h2>
+<p>Spec 0 (<code>foundation-design</code>):</p>
+<ul>
+<li><strong>Dòng trạng thái</strong> "Đã duyệt thiết kế, chờ review spec": đã triển khai.</li>
+<li><strong>§4.3, <code>FeatureModule</code></strong>: <code>makeSettingsView()</code> thành <code>makeSettingsView(_ environment: ModuleSettingsEnvironment) -&gt; AnyView?</code>. <code>ModuleContext</code> có thêm <code>storage</code>, <code>scheduler</code>, <code>services</code>, <code>lockScreen</code>. <code>ModuleDescriptor</code> có thêm <code>optionalPermissions</code>. <code>NotchTab</code> có thêm <code>acceptsKeyboard</code>, <code>dropTypes</code>, <code>onDrop</code>. <code>ModuleRegistry.init</code> nhận thêm <code>lockScreen</code>, <code>scheduler</code>, <code>storageRoot</code>, <code>services</code>.</li>
+<li><strong>§5.4, ưu tiên activity</strong>: hoà thì "activity được thêm hoặc <code>raise</code> gần nhất thắng" (không còn "<code>set</code> gần nhất"); <code>set</code> lại một id giữ nguyên thứ tự.</li>
+<li><strong>§5.4, toast</strong>: toast che tab đang mở thì quay lại đúng tab đó khi hết hạn.</li>
+<li><strong>§6.5, quyền</strong>: <code>PermissionCenter</code> có <code>request(_:)</code>; Accessibility và Screen Recording là <code>isSettingsOnly</code>; câu "hiện là không có quyền nào" đã lỗi thời (Screenshot cần Screen Recording, Lịch cần Lịch, nhiều module có quyền tuỳ chọn).</li>
+<li><strong>§4.1, cây thư mục</strong>: thêm <code>Tools/mynotch-hook</code>, <code>Vendor/mediaremote-adapter</code>, các package module khác.</li>
+<li><strong>§11, lộ trình</strong>: tất cả dự án con 1 đến 9 đã triển khai; chụp cuộn (3c) không làm, và OCR chạy trong chính tiến trình app, không trong XPC helper.</li>
+</ul>
+<p>Spec 0.5 (<code>platform-seams-design</code>): §6 của nó đã có ghi chú triển khai; thêm <code>Permission.isSettingsOnly</code> đã nằm ở §6 (B4). Thêm <code>HotkeyBackend</code> tiêm được và <code>ServiceRegistry</code> vào danh sách điểm nối.</p>
+<h2 id="6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</h2>
+<p>Xem <a href="../../manual-test-checklist-all.html#nen-tang">Nền tảng</a> và <a href="../../manual-test-checklist-all.html#seams">Điểm nối nền tảng</a>. Các mục đụng quyền: hộp thoại cấp quyền cho Accessibility, Screen Recording, Lịch, Bluetooth khi bấm "Cấp quyền" trong Settings.</p></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>

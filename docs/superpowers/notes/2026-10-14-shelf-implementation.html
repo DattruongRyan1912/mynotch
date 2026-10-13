@@ -1,0 +1,81 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ghi chú triển khai: Khay file và điểm nối thả file lên notch</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</a><a class="h2" href="#2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</a><a class="h2" href="#3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</a><a class="h2" href="#4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</a><a class="h2" href="#5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</a><a class="h2" href="#6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</a></nav><main><h1 id="ghi-chú-triển-khai-khay-file-và-điểm-nối-thả-file-lên-notch">Ghi chú triển khai: Khay file và điểm nối thả file lên notch</h1>
+<ul>
+<li><strong>Ngày:</strong> 2026-10-14</li>
+<li><strong>Spec:</strong> <a href="../specs/2026-10-13-shelf-shortcuts-timer-design.html">Khay file, Shortcuts, Hẹn giờ (dự án con 8), §1 và §2</a>. Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".</li>
+<li><strong>Package:</strong> <code>Packages/Modules/Shelf</code>, product <code>ShelfModule</code>. Module id <code>shelf</code> ("Khay", order 800), tab "Khay" (cao 170 pt), bật mặc định, không có quyền. Điểm nối thả file nằm trong <code>Packages/NotchUI</code> và <code>NotchTab</code> của <code>Packages/MyNotchCore</code>.</li>
+<li><strong>Commit chính:</strong> <code>09a2548</code> điểm nối thả file (H1), <code>378c5d5</code> sửa H1, <code>48430fc</code> Khay (H2), <code>e2d8575</code> sửa Khay, <code>4097fe8</code> sửa NotchUI (kết thúc kéo khi ẩn), <code>e2b0586</code> gắn vào app.</li>
+<li><strong>Test tự động:</strong> Shelf 38 test, NotchUI 77 test theo báo cáo L1 (<code>verify.sh</code> qua ở <code>8a2b842</code>). Chưa chạy lại khi viết tài liệu này.</li>
+<li><strong>Kiểm thử tay:</strong> <a href="../../manual-test-checklist-all.html#shelf">mục Khay trong checklist gộp</a></li>
+</ul>
+<h2 id="1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</h2>
+<p><strong>Điểm nối thả file (spec §1, NotchUI):</strong></p>
+<ul>
+<li><code>NotchTab</code> có thêm <code>dropTypes: [UTType]</code> và <code>onDrop: (([NSItemProvider]) -&gt; Bool)?</code>.</li>
+<li><code>NotchHoverTracker</code> theo dõi <code>leftMouseDragged</code> và <code>leftMouseUp</code>, và so <code>changeCount</code> của pasteboard kéo (<code>NSPasteboard(name: .drag)</code>) để biết phiên kéo có dữ liệu. Khi đang kéo, panel nhận chuột trong vùng rộng hơn (<code>NotchGeometry.dragHitRect</code>: notch cộng 40 pt mỗi bên và phía dưới). Khi con trỏ vào vùng đó, notch mở tab đầu tiên có <code>dropTypes</code> khớp (ưu tiên tab đang hiện) và gọi <code>setDragging(true)</code>; rời đi hoặc nhả chuột thì kết thúc.</li>
+<li><code>NotchRootView</code> gắn <code>.onDrop(of:isTargeted:)</code> ở mọi trạng thái và chuyển dữ liệu cho tab đang mở.</li>
+<li>Phần thuần có test: <code>DropRouting.tab(for:tabs:preferring:)</code> và <code>DropRouting.dragAction</code> (phân biệt di chuyển thật với làm mới giao diện), hình học vùng kéo.</li>
+</ul>
+<p><strong>Khay (spec §2):</strong></p>
+<ul>
+<li><code>ShelfStore</code> lưu <code>shelf.json</code> (ghi nguyên tử, giải mã từng mục, giới hạn <code>maxItems</code>, bỏ mục có bookmark hỏng khi tải). File: <code>url.bookmarkData()</code> (app không sandbox). File được hứa (Photos, Mail): chép vào <code>storage.directory/promised/&lt;uuid&gt;/</code>. Văn bản và link lưu trực tiếp.</li>
+<li>Tab: lưới thẻ (biểu tượng, tên). Menu ngữ cảnh: Mở, Hiện trong Finder, AirDrop (<code>NSSharingService(named: .sendViaAirDrop)</code>, app kích hoạt tạm thời), Chia sẻ… (<code>NSSharingServicePicker</code>, ghim notch khi hiện), Xoá khỏi khay; nút "Xoá tất cả"; kéo thẻ ra ngoài (<code>setDragging</code>). Double-click mở mục (ngoài yêu cầu).</li>
+<li>Cài đặt <code>module.shelf.*</code>: <code>clearOnQuit</code> (false), <code>maxItems</code> (50; từ 10 đến 200), <code>removeAfterDragOut</code> (false).</li>
+</ul>
+<h2 id="2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</h2>
+<ul>
+<li><strong>Không dùng <code>NSFilePromiseReceiver</code>:</strong> spec §2 nêu nó, nhưng <code>.onDrop</code> của SwiftUI chỉ cho <code>NSItemProvider</code>; file được hứa đọc bằng <code>loadFileRepresentation</code> rồi chép trong handler (đúng vòng đời file tạm). Chưa thử với Photos hay Mail thật.</li>
+<li><strong><code>clearOnQuit</code> chạy khi thoát app, không phải mỗi lần module dừng.</strong> Brief gốc nói "xoá khi stop", nhưng <code>stop()</code> cũng chạy khi Pause từ menu bar, khi tắt module và khi Retry, nên Pause sẽ xoá khay (và có thể là bản sao duy nhất của một ảnh Photos). Nay một observer <code>NSApplication.willTerminateNotification</code> xoá khay khi thoát; registry dừng module trước khi AppKit gửi thông báo này nên observer làm việc từ file trên đĩa. Hệ quả tốt kèm theo: thoát app lúc đang Pause cũng xoá.</li>
+<li><strong>Thả lại thẻ lên khay không nhân đôi:</strong> <code>ShelfStore.add</code> chuyển file đã có (cùng URL) lên đầu thay vì chèn bản thứ hai, nên hai thẻ không chung một thư mục <code>promised/&lt;uuid&gt;/</code>.</li>
+<li><strong>Bản sao file được hứa không bao giờ bị xoá ngay khi kéo ra</strong> (nơi nhận có thể còn đang đọc); lần tải kế tiếp quét thư mục <code>promised/</code> và xoá mọi thứ không thuộc mục nào còn giữ.</li>
+<li>Thả đang dở khi module dừng bị loại bỏ kèm bản sao vừa chép; thả hoàn tất sau khi khởi động lại không ghi đè khay mới.</li>
+<li>Văn bản chỉ có khoảng trắng bị từ chối. Thứ tự thả nhiều mục được giữ. <code>deleteStoredCopy</code> chỉ xoá <code>promised/&lt;thư mục&gt;/&lt;file&gt;</code>. Biểu tượng AirDrop là <code>airdrop</code>.</li>
+<li><strong>Hành vi NotchUI đã đổi (<code>4097fe8</code>):</strong> <code>NotchViewModel.close()</code> giờ cũng đặt <code>isDragging = false</code>. Hệ quả: một lần đóng chủ động (phím tắt, Esc, <code>NotchHandle.close()</code>) giữa lúc kéo làm kết thúc chế độ kéo; nếu con trỏ vẫn trên vùng thả thì sự kiện kéo kế tiếp mở lại tab. <code>mouseDown</code> đặt lại <code>dragStartedInside</code> trước khi kiểm tra visible.</li>
+<li>Kéo bắt đầu từ trong notch (kéo một mục ra khỏi khay) không mở lại hay ghim notch.</li>
+</ul>
+<h2 id="3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</h2>
+<ul>
+<li><strong>I4 (<code>removeAfterDragOut</code>) giữ ở mức một phần.</strong> Khi bật tuỳ chọn, kéo bị huỷ (Esc) hoặc nơi nhận từ chối thì thẻ vẫn bị xoá, và bản sao file được hứa được dọn ở lần tải kế tiếp thay vì lúc kéo ra. Cách sửa thật cần một <code>NSDraggingSource</code> của AppKit (Clipboard và Screenshot dùng chung mẫu <code>.onDrag</code>, nên đáng làm một helper chung sau). Tuỳ chọn mặc định tắt nên mức phơi nhiễm nhỏ. <strong>Chi phí nếu sai:</strong> người dùng bật tuỳ chọn có thể mất một thẻ khi huỷ kéo (file thật không bị đụng, nhưng thẻ văn bản và link mất hẳn). Đã đưa vào checklist.</li>
+<li>Khác: crash hoặc force-quit bỏ qua <code>clearOnQuit</code>; module bị tắt suốt phiên chạy không được xoá khi thoát (chưa có observer).</li>
+<li>Đã bỏ qua trong vòng sửa Khay: <code>.withoutMounting</code> và cache URL theo từng mục (M2), chấp nhận vì đo được 0,09 ms mỗi lần; heuristic loader (URL trước, loại <code>.data</code> đầu tiên); giới hạn kích thước văn bản (quyết định sản phẩm); hạ <code>maxItems</code> không cắt ngay (cần observer cài đặt); dọn thư mục tạm của test.</li>
+<li>Đã bỏ qua trong vòng sửa NotchUI: chi phí đọc pasteboard cho mỗi sự kiện kéo, và <code>isTargeted</code> chập chờn (reviewer nói vô hại).</li>
+</ul>
+<h2 id="4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</h2>
+<ul>
+<li><strong>Brief H2-fix.md ghi bắt buộc "không resolve bookmark trong <code>body</code>", nhưng code vẫn resolve:</strong> <code>ShelfCardView.body</code> gọi <code>state.store?.url(of:)</code> hai lần mỗi thẻ (<code>shareItems(for:)</code> và biểu tượng). Báo cáo sửa xếp mục này là Minor M2 và bỏ qua. Volume mạng không với tới được có thể làm notch khựng.</li>
+<li>Chưa có kết quả kiểm thử tay với dữ liệu thật: kéo từ Photos hoặc Mail, ảnh kéo từ trình duyệt (heuristic có thể coi ảnh là link), sheet AirDrop, picker chia sẻ (<code>NSSharingService</code> không có delegate nên không có phản hồi lỗi; <code>sharingID</code> có thể làm picker bật lại khi notch bị đóng cưỡng bức).</li>
+<li>Giới hạn <code>maxItems</code> thấp hơn số mục hiện có chỉ cắt ở lần thêm hoặc khởi động kế tiếp.</li>
+</ul>
+<h2 id="5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</h2>
+<ul>
+<li><strong>§1</strong>: <code>DropRouting.tab(for:tabs:preferring:)</code> ưu tiên tab đang hiện; kéo bắt đầu trong notch bị bỏ qua; <code>NotchViewModel.close()</code> kết thúc chế độ kéo; làm mới giao diện không bao giờ vào lại chế độ kéo.</li>
+<li><strong>§2, lời hứa file</strong>: dùng <code>loadFileRepresentation</code>, không phải <code>NSFilePromiseReceiver</code>.</li>
+<li><strong>§2, cài đặt <code>clearOnQuit</code></strong>: chạy khi thoát app qua <code>willTerminateNotification</code>, không phải mỗi lần module dừng.</li>
+<li><strong>§2, thẻ</strong>: thả lại một file đã có chuyển nó lên đầu; <code>removeAfterDragOut</code> xoá cả khi kéo bị huỷ (xem Ruling).</li>
+<li><strong>Dòng trạng thái</strong> "Thiết kế" đã lỗi thời: module đã triển khai và gắn vào app.</li>
+</ul>
+<h2 id="6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</h2>
+<p>Xem <a href="../../manual-test-checklist-all.html#shelf">mục Khay trong checklist gộp</a>. Không có quyền hệ thống; AirDrop và chia sẻ cần thao tác thật.</p></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>

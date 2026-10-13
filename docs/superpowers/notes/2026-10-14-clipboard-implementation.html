@@ -1,0 +1,80 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ghi chú triển khai: Clipboard</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</a><a class="h2" href="#2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</a><a class="h2" href="#3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</a><a class="h2" href="#4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</a><a class="h2" href="#5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</a><a class="h2" href="#6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</a></nav><main><h1 id="ghi-chú-triển-khai-clipboard">Ghi chú triển khai: Clipboard</h1>
+<ul>
+<li><strong>Ngày:</strong> 2026-10-14</li>
+<li><strong>Spec:</strong> <a href="../specs/2026-10-13-clipboard-design.html">Clipboard (dự án con 1)</a>. Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".</li>
+<li><strong>Package:</strong> <code>Packages/Modules/Clipboard</code>, product <code>ClipboardModule</code>. Module id <code>clipboard</code>, tab "Clipboard" (order 100, cao 230 pt, nhận bàn phím), bật mặc định.</li>
+<li><strong>Commit chính:</strong> <code>4aa8577</code> model và classifier, <code>6146cf6</code> lịch sử và tìm kiếm, <code>8ebf5af</code> lưu trữ, <code>ea56f9e</code> pasteboard và dán, <code>d80c169</code> module, <code>54dda24</code> tab, <code>c37957c</code> gắn vào app, <code>1798f76</code> sửa chọn thẻ khi tìm.</li>
+<li><strong>Test tự động:</strong> 196 test theo báo cáo L1 (<code>verify.sh</code> qua ở <code>8a2b842</code>). Chưa chạy lại khi viết tài liệu này.</li>
+<li><strong>Kiểm thử tay:</strong> <a href="../../manual-test-checklist-all.html#clipboard">mục Clipboard trong checklist gộp</a></li>
+</ul>
+<h2 id="1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</h2>
+<ul>
+<li>Đủ phạm vi spec §1: ghi text, rich text (RTF), link, mã màu, ảnh, file; bỏ qua dữ liệu nhạy cảm, app bị loại trừ và trạng thái tạm dừng; lưu JSON cùng ảnh PNG riêng.</li>
+<li>Tab có ô tìm kiếm, lọc theo loại, board, băng chuyền thẻ, điều khiển bàn phím, menu ngữ cảnh, kéo thẻ ra app khác. 12 phép biến đổi văn bản. ⌃⌥V mở tab. Dán trực tiếp bằng ⌘V giả (cần Accessibility, tuỳ chọn).</li>
+<li>Khớp spec: poll 0,3 s qua <code>context.scheduler</code>, chỉ đọc nội dung khi <code>changeCount</code> đổi, băm SHA-256 để khử trùng, 500 mục, giữ 1 tháng, ảnh 250 MB, mười khoá cài đặt <code>module.clipboard.*</code> đúng mặc định.</li>
+<li>Tìm kiếm dùng chỉ mục đã gấp dấu (<code>ClipboardSearchIndex</code>), nên gõ không chậm với 5000 mục. Đ và đ được gấp thành d.</li>
+<li>Không cần khoá Info.plist mới. Quyền tuỳ chọn duy nhất là <code>.accessibility</code>.</li>
+</ul>
+<h2 id="2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</h2>
+<p>Nguồn: <code>mntasks/clipboard/deviations.md</code> và các lần review.</p>
+<ul>
+<li>Mã màu không có <code>#</code> phải có ít nhất một chữ số và một chữ A-F, để không nhận nhầm OTP <code>123456</code>, ngày <code>20251013</code> hay từ <code>facade</code>.</li>
+<li>Link <code>http/https</code> phải có host, <code>mailto:</code> phải có địa chỉ. Chuỗi <code>http://</code> trống là văn bản.</li>
+<li>RTF lớn hơn 2 MB được lưu thành văn bản thuần.</li>
+<li>Copy trùng nội dung thì giữ bản mới nhất (rich text và văn bản thuần cùng hash).</li>
+<li>Giới hạn số mục và dung lượng ảnh chỉ tính mục chưa ghim. Mục đã ghim không bị dọn và không chiếm hạn mức (spec nói mục trong board không bị dọn, nhưng không nói về hạn mức).</li>
+<li>Đọc lịch sử từng mục một: một mục lỗi chỉ làm mất riêng mục đó.</li>
+<li>Biến đổi JSON giữ nguyên số (Decimal) và sắp xếp khoá. "Bỏ khoảng trắng thừa" giữ thụt đầu dòng. Base64 giải mã chấp nhận base64url.</li>
+<li>Tìm kiếm: chỉ mục cache theo id và hash, tối đa 20 000 ký tự mỗi mục. File chỉ tìm theo tên file.</li>
+<li>Chưa có quyền Accessibility mà chọn "dán": mục được chép, notch đóng ngay và hiện activity <code>pasteHint</code> trong 3 giây (biểu tượng clipboard bên trái, bàn phím kèm "⌘V" bên phải, vừa khung 64 pt), không phải dòng chữ "Đã chép — nhấn ⌘V để dán" của spec. Ghi pasteboard lỗi thì notch giữ mở và hiện toast "Không chép được mục này".</li>
+<li>Lưu: trễ 1 giây sau thay đổi cuối nhưng không quá 5 giây kể từ thay đổi đầu tiên. Mã hoá và ghi file chạy ngoài main thread. <code>boards.json</code> ghi trước <code>history.json</code>.</li>
+<li>File lịch sử hỏng được đổi tên cùng thư mục ảnh (<code>images.corrupt-&lt;thời điểm&gt;/</code>) để khôi phục được. Tên file ảnh chỉ chấp nhận dạng <code>&lt;sha256&gt;.png</code>.</li>
+</ul>
+<h2 id="3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</h2>
+<p>Ledger không có dòng <code>Ruling:</code> nào riêng cho Clipboard. Các điểm sau là quyết định thiết kế đã ghi trong brief:</p>
+<ul>
+<li>Chỉ đọc item đầu tiên trên pasteboard (cộng mọi file URL), như phần lớn app quản lý clipboard.</li>
+<li>Phân loại chạy đồng bộ trên main actor, kể cả đổi TIFF sang PNG (chỉ khi không có PNG). Comment trong <code>ClipboardMonitor</code> ghi đã đo 0,17 s cho TIFF 96 MB. Chưa có số đo trên ảnh lớn hơn.</li>
+</ul>
+<h2 id="4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</h2>
+<ul>
+<li>Mẫu kéo thẻ <code>.onDrag</code> kèm dò nút chuột (poll) để báo hết kéo vẫn đang dùng, chưa có <code>NSDraggingSource</code>. Ledger ghi việc này là "shared helper, later" chung với Screenshot và Shelf.</li>
+<li>Brief C7 yêu cầu thêm mục "Ghi chú triển khai" vào spec và mục Clipboard vào checklist. Việc đó chưa bao giờ được làm; tài liệu này và checklist gộp thay thế.</li>
+<li>Phần giao diện chưa có kết quả kiểm thử tay nào được ghi lại: phím, focus, menu ngữ cảnh ghim notch, kéo thả. Toàn bộ nằm trong checklist.</li>
+</ul>
+<h2 id="5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</h2>
+<ul>
+<li>§3.7 nói thêm <code>Permission.pasteboard</code> vào MyNotchCore. Không có case này trong code. Module tự đọc <code>NSPasteboard.general.accessBehavior</code> (không đọc nội dung): Settings hiện hướng dẫn chọn "Luôn cho phép" và tab hiện hướng dẫn khi bị từ chối (<code>pasteboardDenied</code>).</li>
+<li>§3.1: quy tắc mã màu không <code>#</code>, link và RTF quá lớn như mục 2 ở trên.</li>
+<li>§3.2: giới hạn số mục và ảnh chỉ tính mục chưa ghim.</li>
+<li>§3.3: lưu "trễ 1 giây" nhưng không quá 5 giây kể từ thay đổi đầu; file hỏng đổi tên cả thư mục ảnh.</li>
+<li>§3.4: nhãn menu ngữ cảnh là "Chép", "Chép dạng văn bản thuần", "Biến đổi", "Ghim vào board", "Bỏ ghim" (spec ghi "Copy" và "Copy dạng văn bản thuần").</li>
+<li>§3.4: gợi ý khi thiếu Accessibility là activity <code>pasteHint</code> ("⌘V") 3 giây, không phải dòng chữ đầy đủ; thêm toast "Không chép được mục này" khi ghi pasteboard lỗi.</li>
+<li>§3.5: tìm kiếm qua <code>ClipboardSearchIndex</code>, không qua <code>ClipboardSearch.filter</code> trực tiếp.</li>
+</ul>
+<h2 id="6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</h2>
+<p>Xem <a href="../../manual-test-checklist-all.html#clipboard">mục Clipboard trong checklist gộp</a>. Các mục đụng quyền: hộp thoại "Dán từ app khác" của macOS, dán trực tiếp cần Accessibility.</p></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>

@@ -1,0 +1,73 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ghi chú triển khai: Dịch</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</a><a class="h2" href="#2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</a><a class="h2" href="#3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</a><a class="h2" href="#4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</a><a class="h2" href="#5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</a><a class="h2" href="#6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</a></nav><main><h1 id="ghi-chú-triển-khai-dịch">Ghi chú triển khai: Dịch</h1>
+<ul>
+<li><strong>Ngày:</strong> 2026-10-14</li>
+<li><strong>Spec:</strong> <a href="../specs/2026-10-13-translation-design.html">Dịch (dự án con 4)</a>. Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".</li>
+<li><strong>Package:</strong> <code>Packages/Modules/Translation</code>, product <code>TranslationModule</code>. Module id <code>translation</code>, tab "Dịch" (order 400, cao 220 pt, nhận bàn phím), bật mặc định. Không có quyền bắt buộc; <code>optionalPermissions: [.accessibility]</code>.</li>
+<li><strong>Điểm nối Core và app:</strong> <code>ServiceRegistry</code> và <code>ModuleServices</code> trong MyNotchCore, <code>App/ServicesProvider.swift</code>, mục <code>NSServices</code> trong <code>project.yml</code> ("Dịch bằng MyNotch").</li>
+<li><strong>Commit chính:</strong> <code>41a6f5d</code> và <code>a75ea22</code> engine, detector, selection reader; <code>af75ff2</code> Services trong Core và app; <code>57d1a85</code> và <code>2bd557a</code> module; <code>3fc9482</code> hàng đợi Services 10 giây; <code>2655167</code> gắn vào app (cùng Media).</li>
+<li><strong>Test tự động:</strong> 82 test theo báo cáo L1 (<code>verify.sh</code> qua ở <code>8a2b842</code>). Test không gọi framework Translation thật. Chưa chạy lại khi viết tài liệu này.</li>
+<li><strong>Kiểm thử tay:</strong> <a href="../../manual-test-checklist-all.html#translation">mục Dịch trong checklist gộp</a></li>
+</ul>
+<h2 id="1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</h2>
+<ul>
+<li>Chỉ dùng framework Translation của Apple, dịch trên máy. <code>AppleTranslationEngine</code> giữ một <code>TranslationSession(installedSource:target:)</code> cho mỗi cặp đã cài, trên main actor; lỗi có kiểu <code>notInstalled</code>, <code>unsupported</code>, <code>failed</code>, không nuốt lỗi.</li>
+<li><code>LanguageDetector</code> dùng <code>NLLanguageRecognizer</code> giới hạn trong các ngôn ngữ hỗ trợ; độ tin cậy từ 0,5 trở lên mới ghi đè ngôn ngữ nguồn đã chọn gần nhất; quy tắc đảo: nếu nguồn trùng đích thì đích đổi sang ngôn ngữ còn lại của cặp ưa thích (mặc định vi và en).</li>
+<li><code>SelectionReader</code> đọc vùng chọn qua Accessibility (timeout 0,25 s), và với app Chromium/Electron đã biết (Chrome, Edge, Brave, Arc, Vivaldi, Opera, Slack, Discord, VS Code, Cursor, Notion, Obsidian, Figma...) bật <code>AXManualAccessibility</code> hoặc <code>AXEnhancedUserInterface</code> rồi thử lại tối đa 600 ms khi <code>useChromiumAccessibility</code> bật.</li>
+<li>Tab: ô nhập nhiều dòng (Return dịch, ⇧Return xuống dòng), menu ngôn ngữ nguồn (kèm "Tự nhận diện") và đích, nút đảo, kết quả có nút copy, băng rôn trạng thái gói ngôn ngữ. Phím tắt ⌃⌥T (<code>translateSelection</code>).</li>
+<li><code>LanguageInstallerWindow</code>: cửa sổ nhỏ chứa <code>.translationTask { try await $0.prepareTranslation() }</code>; app chuyển <code>.regular</code> khi mở và về <code>.accessory</code> chỉ khi không còn cửa sổ titled nào khác; có nút mở System Settings và kiểm lại trạng thái mỗi 2 giây.</li>
+<li>Cài đặt <code>module.translation.*</code>: <code>preferredPair</code> (vi và en), <code>targetLanguage</code> (vi), <code>autoTranslateOnOpen</code> (true), <code>useChromiumAccessibility</code> (true); danh sách trạng thái từng cặp kèm nút cài.</li>
+<li>Services: module đăng ký handler dịch vụ <code>translate</code> qua <code>context.services</code>; app là <code>NSApp.servicesProvider</code> và chuyển tiếp. Handler tự huỷ khi module dừng.</li>
+</ul>
+<h2 id="2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</h2>
+<ul>
+<li><strong>Dịch khi gõ:</strong> ngoài Return, tab còn dịch sau 600 ms ngừng gõ (<code>typingDelay</code>, qua <code>context.scheduler</code>). Spec chỉ nêu Return. Thêm theo brief T3.</li>
+<li><strong>Hàng đợi Services (P9, <code>3fc9482</code>):</strong> chọn dịch vụ làm MyNotch khởi động, hệ thống gửi yêu cầu trong lúc module chưa chạy. <code>ServiceRegistry</code> giữ yêu cầu mới nhất của mỗi tên trong 10 giây và giao cho handler đầu tiên đăng ký. Spec §2.1 không có hàng đợi.</li>
+<li>Dịch tuần tự và báo huỷ rõ ràng (<code>a75ea22</code>); nhận diện ngôn ngữ trên toàn bộ danh sách hỗ trợ, cặp ưa thích luôn đứng đầu danh sách ứng viên để "en" không thành "en-AU".</li>
+</ul>
+<h2 id="3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</h2>
+<p>Ledger không có dòng <code>Ruling:</code> nào riêng cho Dịch. Điểm đã biết từ <code>HANDOFF.md</code> mục 5:</p>
+<ul>
+<li>Ở commit <code>8a2b842</code>, khi module Dịch đang tắt, yêu cầu từ menu Services bị giữ 10 giây rồi bỏ im lặng, người dùng không thấy lỗi. Chi phí: bấm "Dịch bằng MyNotch" khi module tắt thì không có phản hồi nào. Một bản sửa đang được làm riêng và <strong>chưa commit</strong> khi viết tài liệu này: <code>ServiceRegistry.finishStartup()</code> kết thúc giai đoạn khởi động, sau đó yêu cầu không ai xử lý bị từ chối và menu Services hiện "Mô-đun Dịch của MyNotch chưa chạy. Hãy bật mô-đun Dịch trong Cài đặt MyNotch." Nếu bản sửa đó vào, mục này và mục 5 cần cập nhật.</li>
+</ul>
+<h2 id="4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</h2>
+<ul>
+<li>Ở <code>8a2b842</code>, <code>App/ServicesProvider.swift</code> có nhánh báo lỗi "Mô-đun Dịch của MyNotch chưa chạy." khi <code>registry.handle</code> trả <code>false</code>, nhưng <code>ServiceRegistry.handle</code> luôn trả <code>true</code> (đưa vào hàng đợi), nên nhánh này không bao giờ chạy: mâu thuẫn giữa code app và Core. Bản sửa chưa commit ở mục 3 làm nhánh này chạy được sau giai đoạn khởi động.</li>
+<li>Fallback ⌘C để đọc vùng chọn không làm, vì nó phải sửa clipboard của người dùng và cần cổng chặn trong Core để Clipboard bỏ qua lần copy giả.</li>
+<li>Chromium: bật AX có thể thất bại với <code>kAXErrorAttributeUnsupported</code>, và editor kiểu Monaco vẫn thường không trả gì (research). Bật AX cho Chromium có tác dụng phụ (Chrome chuyển chế độ trình đọc màn hình); có tuỳ chọn tắt.</li>
+<li>Sheet tải gói ngôn ngữ có thể không hiện khi app ở dạng accessory; lối dự phòng là System Settings.</li>
+<li>Chưa có kết quả kiểm thử tay được ghi lại cho: gói vi và en, Services trong Safari, Notes và Chrome, phím tắt có Accessibility, thiếu gói ngôn ngữ.</li>
+</ul>
+<h2 id="5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</h2>
+<ul>
+<li><strong>§2, hàng "Tab"</strong>: thêm dịch khi gõ sau 600 ms ngừng gõ.</li>
+<li><strong>§2.1, <code>ServiceRegistry</code></strong>: thêm hàng đợi một yêu cầu mới nhất cho mỗi tên trong 10 giây; ở <code>8a2b842</code> <code>handle</code> luôn trả <code>true</code> (bản sửa chưa commit: chỉ trả <code>true</code> trong giai đoạn khởi động, sau <code>finishStartup()</code> trả <code>false</code> cho yêu cầu không ai xử lý).</li>
+<li><strong>§2, hàng <code>LanguageInstaller</code></strong>: là cửa sổ regular chứa <code>.translationTask</code>; trả về <code>.accessory</code> chỉ khi không còn cửa sổ titled nào khác.</li>
+<li><strong>§2.2</strong>: cài đặt có thêm danh sách trạng thái gói theo cặp trong Settings.</li>
+<li><strong>Dòng trạng thái</strong> "Thiết kế, triển khai sau Screenshot" đã lỗi thời: module đã triển khai và gắn vào app.</li>
+</ul>
+<h2 id="6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</h2>
+<p>Xem <a href="../../manual-test-checklist-all.html#translation">mục Dịch trong checklist gộp</a>. Các mục đụng quyền: phím tắt ⌃⌥T cần Accessibility; Services không cần quyền.</p></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>

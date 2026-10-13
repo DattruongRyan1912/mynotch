@@ -1,0 +1,78 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ghi chú triển khai: Widget trên màn hình khoá (thử nghiệm)</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</a><a class="h2" href="#2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</a><a class="h2" href="#3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</a><a class="h2" href="#4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</a><a class="h2" href="#5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</a><a class="h2" href="#6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</a></nav><main><h1 id="ghi-chú-triển-khai-widget-trên-màn-hình-khoá-thử-nghiệm">Ghi chú triển khai: Widget trên màn hình khoá (thử nghiệm)</h1>
+<ul>
+<li><strong>Ngày:</strong> 2026-10-14</li>
+<li><strong>Trạng thái:</strong> <strong>thử nghiệm, dùng API riêng của macOS (SkyLight), chưa được kiểm chứng trên màn hình khoá thật.</strong> Module tắt mặc định. Vòng sửa L1 đã vào code (<code>8a2b842</code>) và review lại phạm vi hẹp (<code>re-review-L1-r1.md</code>, xuất hiện trong lúc viết tài liệu này) kết luận <strong>Approved</strong>, không có Critical hay Important; mô tả dưới đây dựa trên báo cáo <code>L1-report.md</code> (kể cả "Fix round 1"). Review đó đọc mã và chạy test, không chạy trên màn hình khoá thật.</li>
+<li><strong>Spec:</strong> <a href="../specs/2026-10-13-lock-screen-design.html">Widget trên màn hình khoá (dự án con 9)</a>. Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".</li>
+<li><strong>Package:</strong> <code>Packages/Modules/LockScreen</code>, product <code>LockScreenModule</code>. Module id <code>lockscreen</code> ("Màn hình khoá", order 990), không có tab, <strong>tắt mặc định</strong>, không có quyền. Chạm cả <code>Packages/MyNotchCore</code>, <code>Packages/NotchUI</code>, và thêm view cho Media, Timer, Battery.</li>
+<li><strong>Commit chính:</strong> <code>5a1362a</code> triển khai, <code>8a2b842</code> sửa sau review.</li>
+<li><strong>Test tự động:</strong> MyNotchCore 105, NotchUI 77 (trong đó 10 test shim), LockScreen 41, Timer 36, Battery 23, Media 300 theo báo cáo L1 (<code>verify.sh</code> qua ở <code>8a2b842</code>). Không test nào khoá màn hình thật, cho màn hình ngủ, gửi thông báo hệ thống thật, tạo space SkyLight, gọi <code>CGSessionCopyCurrentDictionary</code> hay gọi hàm SLS thật. Chưa chạy lại khi viết tài liệu này.</li>
+<li><strong>Kiểm thử tay:</strong> <a href="../../manual-test-checklist-all.html#lock-screen">mục Màn hình khoá trong checklist gộp</a></li>
+</ul>
+<h2 id="1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</h2>
+<ul>
+<li><strong>MyNotchCore:</strong> <code>LockScreenContentCenter</code> (<code>@Observable</code>; mỗi module một mục; <code>current</code> là mục có ưu tiên cao nhất, hoà thì mục thêm gần nhất; <code>current(allowing:)</code> lọc theo danh sách module được phép) và <code>LockScreenPublisher</code> (<code>context.lockScreen</code>: <code>set(_:priority:)</code>, <code>clear()</code>; vô hiệu sau khi module dừng và dọn mục của module). <code>ModuleContext</code> và <code>ModuleRegistry.init</code> có thêm tham số <code>lockScreen</code> bắt buộc.</li>
+<li><strong>NotchUI:</strong> <code>SkyLightShim</code> (protocol) và <code>SystemSkyLightShim</code>: <code>dlopen</code> SkyLight cùng <code>dlsym</code> sáu symbol (<code>SLSMainConnectionID</code>, <code>SLSSpaceCreate</code>, <code>SLSSpaceSetAbsoluteLevel</code>, <code>SLSShowSpaces</code>, <code>SLSSpaceAddWindowsAndRemoveFromSpaces</code>, <code>SLSRemoveWindowsFromSpaces</code>), không link. <code>isAvailable</code> là false nếu thiếu thư viện hoặc bất kỳ symbol nào, khi đó mọi hàm là no-op. <code>makeLockScreenSpace()</code> (idempotent) tạo space level tuyệt đối 400 rồi hiện nó; <code>attach</code> và <code>detach</code> chuyển cửa sổ vào và ra. Không đọc mã trả về nào.</li>
+<li><strong>Module:</strong> <code>start</code> ném <code>.unavailable</code> ("macOS này không có hàm SkyLight cần thiết") nếu shim không khả dụng. <code>LockStateObserver</code> nghe thông báo phân tán <code>com.apple.screenIsLocked</code> và <code>screenIsUnlocked</code>, thông báo workspace <code>screensDidSleep</code>, <code>screensDidWake</code> và <code>sessionDidBecomeActive</code>; trạng thái ban đầu từ <code>CGSessionCopyCurrentDictionary()[&quot;CGSSessionScreenIsLocked&quot;]</code>. Khi khoá và có nội dung được phép, dựng panel (không activating, không bao giờ key, bỏ qua chuột, level <code>.screenSaver</code>, 300 x 80, giữa cạnh trên màn hình chính ngay dưới notch), tạo space, hiện và gắn panel. Khi mở khoá hoặc màn hình ngủ, gỡ sau 300 ms (huỷ nếu trạng thái đảo lại), đóng panel; <code>stop()</code> gỡ ngay.</li>
+<li><strong>Cài đặt <code>module.lockscreen.*</code>:</strong> <code>showMedia</code> (true), <code>showTimer</code> (true), <code>showBattery</code> (false), kèm dòng cảnh báo "Thử nghiệm — dùng API riêng của macOS". Lọc theo id module; module lạ không bao giờ được hiện.</li>
+<li><strong>Nội dung (chỉ thông tin không nhạy cảm):</strong> Battery (biểu tượng và phần trăm, <code>.low</code>), Timer (đếm ngược, <code>.high</code>), Media (ảnh bìa, tên bài, nghệ sĩ, biểu tượng phát hoặc dừng, <code>.normal</code>; theo <code>ActivityPolicy</code> nên giữ thời gian chờ khi tạm dừng, không phụ thuộc <code>showActivity</code>). Lịch, nội dung AI và clipboard không bao giờ lên màn hình khoá.</li>
+</ul>
+<h2 id="2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</h2>
+<ul>
+<li><strong>Điều kiện hiện (sau vòng sửa):</strong> <code>isLocked &amp;&amp; !isDisplayAsleep</code>. Bản đầu còn đòi <code>isSessionActive</code>; review chỉ ra nếu macOS 26 gửi <code>sessionDidResignActive</code> ngay khi khoá thì widget không bao giờ hiện và không test nào bắt được. <code>sessionDidResignActive</code> không còn được quan sát.</li>
+<li><strong>Đối chiếu khi thức dậy:</strong> khi <code>screensDidWake</code> hoặc <code>sessionDidBecomeActive</code>, <code>isLocked</code> được đặt lại theo <code>isScreenLocked()</code>, để thiếu một thông báo mở khoá không để panel kẹt trong space level 400 trên màn hình làm việc.</li>
+<li><strong>Một shim, một space cho mỗi module:</strong> shim được tạo ở lần <code>start</code> đầu và giữ qua <code>stop</code>, nên space SkyLight được tạo tối đa một lần cho mỗi tiến trình. Không có <code>SLSSpaceDestroy</code> trong danh sách symbol, nên space sống tới khi thoát app.</li>
+<li><strong>Id space 64 bit:</strong> typedef con trỏ hàm dùng <code>UInt64</code>; không còn cắt 32 bit. Tham số cờ vẫn rộng bằng con trỏ.</li>
+<li><strong>Timer chỉ đưa đếm ngược lên màn hình khoá</strong> (brief: "thời gian còn lại"); bấm giờ không được đưa lên.</li>
+<li>Sửa Timer đi kèm theo review H4 (tạm dừng một đếm ngược vừa hết giờ thì kết thúc nó; ghi log <code>timer.json</code> hỏng; cận dưới ổn định của <code>Text(timerInterval:)</code>), xem <a href="2026-10-14-timer-implementation.html">ghi chú Hẹn giờ</a>.</li>
+</ul>
+<h2 id="3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</h2>
+<ul>
+<li><strong>Ruling (sau review L1):</strong> điều kiện hiện = <code>isLocked &amp;&amp; !isDisplayAsleep</code> (bỏ gating theo session, chấp nhận chuyển đổi người dùng nhanh); một shim và một space cho mỗi module; đối chiếu với <code>isScreenLocked()</code> khi màn hình thức dậy hoặc session active; id space giữ 64 bit; view Timer chỉ hiện đếm ngược. <strong>Chi phí nếu sai:</strong> khi chuyển đổi người dùng nhanh, panel có thể nằm ở session khác (vô hình ở đó); mọi thứ về hành vi thật trên màn hình khoá (Spaces, level 400, thông báo có đến app accessory không) vẫn cần người kiểm tra.</li>
+<li><strong>Ruling:</strong> đối chiếu ghi đè <code>isLocked</code> từ <code>isScreenLocked()</code> khi thức dậy hoặc session active được chấp nhận. <strong>Chi phí nếu sai:</strong> nếu từ điển session chậm hơn thông báo khoá thì widget ẩn tới lần khoá kế tiếp (ít xảy ra).</li>
+<li><strong>Ruling:</strong> L1 bắt đầu trước khi các sửa review M7 vào main; chỉnh sửa Media giới hạn ở việc đăng ký view màn hình khoá. <strong>Chi phí nếu sai:</strong> một xung đột merge nhỏ ở <code>MediaModule.swift</code>. Sau đó các commit lời bài hát (<code>e8a9b20</code>, <code>ba6695c</code>, <code>ff26aae</code>) đã được cherry-pick lên trên <code>5a1362a</code> mà không có báo cáo xung đột.</li>
+</ul>
+<h2 id="4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</h2>
+<ul>
+<li><strong>Chữ ký các hàm SkyLight chưa được xác minh bằng cách gọi thật.</strong> Chỉ có mặt của symbol được xác nhận (kiểm tên bằng <code>dlopen</code> và <code>dlsym</code> trên macOS 26.5.2, không gọi). Độ rộng đối số, giá trị cờ <code>7</code> của <code>SLSSpaceAddWindowsAndRemoveFromSpaces</code> và <code>SLSSpaceCreate(cid, 1, nil)</code> viết từ hiểu biết về ABI C, không từ header. Sai chữ ký nhiều khả năng cho kết quả "không thấy widget". Không có hàm SLS nào chạy nếu màn hình chưa từng khoá khi có nội dung.</li>
+<li>Có báo cáo cộng đồng cách này hỏng trên bản beta macOS 27; vì vậy module tắt mặc định và mọi symbol nạp bằng <code>dlsym</code>.</li>
+<li>Panel chỉ dựng lúc khoá. Nhạc bắt đầu phát khi đã khoá và chưa có panel thì không hiện tới lần khoá kế tiếp (panel đã có thì theo nội dung trực tiếp). Chỉ phủ màn hình chính (<code>NSScreen.screens.first</code>).</li>
+<li>Thông báo phân tán <code>screenIsLocked/Unlocked</code> có tới được app <code>LSUIElement</code> (không bao giờ là app active) hay không: chưa biết. Nếu không, cách sửa là <code>DistributedNotificationCenter.default().suspended = false</code> hoặc người quan sát dùng <code>.deliverImmediately</code> (cần một <code>NSObject</code> làm observer).</li>
+<li>Trong 300 ms debounce khi đổi bài, dòng tên bài của view Media trống (ảnh bìa và biểu tượng dùng ảnh chụp activity).</li>
+<li>Chuyển đổi người dùng nhanh: panel có thể nằm ở session khác.</li>
+<li>Việc đối chiếu với <code>isScreenLocked()</code> có hai sai lệch có giới hạn (re-review): nếu từ điển session chậm hơn thông báo, lần đối chiếu có thể cho "chưa khoá" và widget ẩn tới lần khoá kế tiếp, hoặc cho "còn khoá" sau khi mở khoá và panel (click xuyên qua) còn đó tới lần khoá, mở khoá hoặc thức dậy kế tiếp. Cả hai tự lành, ít xảy ra, module tắt mặc định. Nếu thấy trễ, đọc lại <code>isScreenLocked()</code> một lần sau <code>hideDelay</code>.</li>
+<li>Sau ngủ rồi thức khi màn hình khoá đang hiện, việc widget có hiện hay không giờ phụ thuộc <code>CGSSessionScreenIsLocked</code> được macOS 26 đặt đúng: cần người kiểm.</li>
+</ul>
+<h2 id="5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</h2>
+<ul>
+<li><strong>§2, hàng <code>LockStateObserver</code></strong>: không quan sát <code>sessionDidResignActive</code>; điều kiện hiện là <code>isLocked &amp;&amp; !isDisplayAsleep</code>; đối chiếu với <code>isScreenLocked()</code> khi <code>screensDidWake</code> và <code>sessionDidBecomeActive</code>.</li>
+<li><strong>§2, hàng <code>LockScreenPanel</code></strong>: 300 x 80, giữa cạnh trên màn hình chính, level <code>.screenSaver</code> bên trong space level 400.</li>
+<li><strong>§2, hàng <code>LockScreenModule</code></strong>: gỡ có trễ 300 ms; shim và space tạo một lần mỗi module; space không bị huỷ tới khi thoát app.</li>
+<li><strong>§2, "Nội dung lấy từ đâu"</strong>: ba contributor và ưu tiên (Timer <code>.high</code>, Media <code>.normal</code>, Battery <code>.low</code>); Timer chỉ đếm ngược; lọc theo <code>showMedia</code>, <code>showTimer</code>, <code>showBattery</code> và id module.</li>
+<li><strong>Dòng trạng thái</strong> "Thiết kế, thử nghiệm": đã triển khai ở dạng thử nghiệm, chưa kiểm chứng trên màn hình khoá thật.</li>
+</ul>
+<h2 id="6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</h2>
+<p>Xem <a href="../../manual-test-checklist-all.html#lock-screen">mục Màn hình khoá trong checklist gộp</a>. Mọi mục ở đó đụng API riêng SkyLight. Mục "macOS có gửi <code>sessionDidResignActive</code> khi chỉ khoá màn hình không" không còn quan trọng sau vòng sửa 1.</p></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>

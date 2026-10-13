@@ -1,0 +1,72 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ghi chú triển khai: Lịch và Lời nhắc</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</a><a class="h2" href="#2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</a><a class="h2" href="#3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</a><a class="h2" href="#4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</a><a class="h2" href="#5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</a><a class="h2" href="#6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</a></nav><main><h1 id="ghi-chú-triển-khai-lịch-và-lời-nhắc">Ghi chú triển khai: Lịch và Lời nhắc</h1>
+<ul>
+<li><strong>Ngày:</strong> 2026-10-14</li>
+<li><strong>Spec:</strong> <a href="../specs/2026-10-13-calendar-design.html">Lịch và Lời nhắc (dự án con 6)</a>. Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".</li>
+<li><strong>Package:</strong> <code>Packages/Modules/Calendar</code>, product <code>CalendarModule</code>. Module id <code>calendar</code> ("Lịch", order 600), tab "Lịch" (cao 220 pt), live activity <code>meeting</code>, bật mặc định. Quyền bắt buộc <code>.calendars</code>, quyền tuỳ chọn <code>.reminders</code>.</li>
+<li><strong>Commit chính:</strong> <code>77a535c</code> agenda và nhận link họp, <code>fc35c95</code> module, <code>d35eb2a</code> sửa sau review, <code>f14dad6</code> gắn vào app.</li>
+<li><strong>Test tự động:</strong> 151 test theo báo cáo L1 (<code>verify.sh</code> qua ở <code>8a2b842</code>). Không dùng EventKit thật trong test. Chưa chạy lại khi viết tài liệu này.</li>
+<li><strong>Kiểm thử tay:</strong> <a href="../../manual-test-checklist-all.html#calendar">mục Lịch trong checklist gộp</a></li>
+</ul>
+<h2 id="1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</h2>
+<ul>
+<li><code>CalendarService</code> (actor) giữ một <code>EKEventStore</code>, ánh xạ sang các struct <code>Sendable</code> (<code>AgendaEvent</code>, <code>AgendaReminder</code>, <code>CalendarInfo</code>), đứng sau protocol <code>CalendarDataSource</code> để test bằng nguồn giả. <code>events(matching:)</code> đồng bộ nên chạy ngoài main.</li>
+<li><code>AgendaBuilder</code> thuần (lọc sự kiện huỷ hoặc đã từ chối, tách sự kiện cả ngày, xử lý sự kiện qua nửa đêm), <code>MeetingLinkDetector</code> thuần (Zoom, Google Meet, Teams, Webex, FaceTime; thứ tự <code>URL</code>, <code>location</code>, <code>notes</code>), <code>UpcomingMeetingPolicy</code> thuần (từ trước giờ bắt đầu tới 5 phút sau; có "Bỏ qua").</li>
+<li>Module làm mới khi có <code>EKEventStoreChanged</code> (qua <code>ChangeCoalescer</code> gom 1 giây), khi qua ngày mới, khi máy thức dậy, và theo nhịp phút cho đếm ngược.</li>
+<li>Activity <code>meeting</code>: chấm màu lịch kèm biểu tượng đồng hồ bên trái, "N phút" hoặc "Đang diễn ra" bên phải; ưu tiên <code>.high</code> trong 1 phút trước giờ bắt đầu, <code>.normal</code> còn lại; cập nhật tại chỗ.</li>
+<li>Tab "Lịch": ngày hôm nay kiểu Việt, thẻ "Sắp tới" (nút "Tham gia" khi có link họp, nút "Bỏ qua"), danh sách sự kiện hôm nay (cả ngày trước, sự kiện đã qua mờ đi), lời nhắc đến hạn hôm nay và quá hạn có ô tích hoàn thành khi <code>showReminders</code> bật và đã cấp quyền. Click sự kiện mở <code>ical://ekevent/&lt;calendarItemIdentifier&gt;</code>, không mở được thì mở Calendar.app.</li>
+<li>Cài đặt <code>module.calendar.*</code>: <code>showReminders</code> (false; bật thì xin quyền Reminders), <code>meetingLeadMinutes</code> (5, từ 1 đến 30), <code>hiddenCalendarIDs</code> (rỗng), <code>showAllDay</code> (true).</li>
+</ul>
+<h2 id="2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</h2>
+<ul>
+<li><strong>Activity họp không dùng <code>next</code> của <code>AgendaBuilder</code>.</strong> Spec chọn "kế tiếp" là sự kiện không cả ngày đầu tiên có <code>endDate &gt; now</code>. Một sự kiện dài đã bắt đầu từ trước (workshop 9 đến 17 giờ) sẽ giữ vai trò <code>next</code> và che mất một cuộc họp bắt đầu sau đó. Activity họp nay lấy từ các sự kiện sắp diễn ra trong cửa sổ <code>meetingLeadMinutes</code>, <strong>không phân biệt ngày</strong> (cuộc họp 00:10 ngày mai với lead 30 phút hiện lúc 23:40), hoặc đang diễn ra và bắt đầu cách đây không quá 5 phút.</li>
+<li><strong>Bộ hẹn giờ căn theo đầu phút</strong> (spec chỉ nói "mỗi phút một lần"). Trước đây tính 60 giây từ lúc module khởi động nên đếm ngược có thể trễ tới 59 giây.</li>
+<li><strong>Không debounce hai lần:</strong> <code>ChangeCoalescer</code> đã gom thay đổi của nguồn dữ liệu 1 giây (có thêm hạn tối đa), nên module chỉ debounce 1 giây cho các thông báo còn lại (ngày mới, thức dậy).</li>
+<li><code>CalendarDataSource</code> có thêm <code>calendars()</code> (danh sách lịch cho các công tắc <code>hiddenCalendarIDs</code>). <code>AgendaEvent</code> có <code>calendarItemIdentifier</code> và <code>calendarID</code>.</li>
+<li><strong>Làm mới ngay sau khi cấp quyền:</strong> <code>CalendarService</code> chỉ tạo store sau khi có quyền, và không có thông báo thay đổi nào đến trước đó, nên module tự làm mới ngay khi quyền được cấp, dù cấp từ registry hay từ dòng trong Settings. Trang Settings tải lại danh sách lịch khi hiện và sau khi cấp quyền (<code>accessRevision</code>).</li>
+<li>Test của <code>ChangeCoalescer</code> dùng đồng hồ tiêm vào (không phụ thuộc độ chính xác của <code>Task.sleep</code>), sau khi hai test cũ chập chờn khi máy bận.</li>
+</ul>
+<h2 id="3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</h2>
+<p>Ledger không có dòng <code>Ruling:</code> nào cho Lịch; K2 và K3-fix được review và duyệt (HANDOFF mục 8). Điểm cần biết:</p>
+<ul>
+<li>Reminders chỉ được xin khi người dùng bật <code>showReminders</code>, để tránh hai hộp thoại liên tiếp.</li>
+</ul>
+<h2 id="4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</h2>
+<ul>
+<li><code>ical://ekevent/...</code> là đường dẫn không được công bố; không mở được thì mở Calendar.app (dự phòng theo thiết kế). Chưa kiểm xem nó có mở đúng sự kiện không.</li>
+<li>Danh sách lịch trong Settings chỉ tải được khi đã cấp quyền; chưa cấp thì hiện gợi ý.</li>
+<li>Ngoài phạm vi: tạo hoặc sửa sự kiện, danh sách người tham dự, lịch bên thứ ba ngoài EventKit.</li>
+<li>Chưa có kết quả kiểm thử tay được ghi lại cho: hộp thoại quyền Lịch và Lời nhắc, sự kiện thật có link Meet hoặc Zoom, nút "Tham gia", hoàn thành lời nhắc, đổi lịch trong Calendar.app thì tab cập nhật, giao diện trang Settings.</li>
+</ul>
+<h2 id="5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</h2>
+<ul>
+<li><strong>§2, hàng <code>AgendaBuilder</code></strong>: <code>next</code> vẫn có trong <code>Agenda</code> nhưng không còn nuôi activity họp; activity lấy từ sự kiện trong cửa sổ lead, không phân biệt ngày.</li>
+<li><strong>§2, hàng <code>CalendarModule</code></strong>: bộ đếm theo nhịp phút căn đầu phút; thay đổi từ nguồn dữ liệu đi qua <code>ChangeCoalescer</code>, không debounce thêm.</li>
+<li><strong>§2, hàng <code>CalendarService</code></strong>: giao diện nguồn dữ liệu có thêm <code>calendars()</code>; store chỉ được tạo sau khi có quyền.</li>
+<li><strong>Dòng trạng thái</strong> "Thiết kế" đã lỗi thời: module đã triển khai và gắn vào app.</li>
+</ul>
+<h2 id="6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</h2>
+<p>Xem <a href="../../manual-test-checklist-all.html#calendar">mục Lịch trong checklist gộp</a>. Các mục đụng quyền: Lịch và Lời nhắc (reset TCC trước khi thử hộp thoại).</p></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>

@@ -1,0 +1,84 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ghi chú triển khai: Trạng thái AI agent (Claude Code, Codex)</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</a><a class="h2" href="#2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</a><a class="h2" href="#3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</a><a class="h2" href="#4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</a><a class="h2" href="#5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</a><a class="h2" href="#6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</a></nav><main><h1 id="ghi-chú-triển-khai-trạng-thái-ai-agent-claude-code-codex">Ghi chú triển khai: Trạng thái AI agent (Claude Code, Codex)</h1>
+<ul>
+<li><strong>Ngày:</strong> 2026-10-14</li>
+<li><strong>Spec:</strong> <a href="../specs/2026-10-13-ai-agents-design.html">Trạng thái AI agent (dự án con 5)</a>. Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".</li>
+<li><strong>Package:</strong> <code>Packages/Modules/AIAgents</code>, product <code>AIAgentsModule</code> và <code>AgentHookKit</code>. Module id <code>aiagents</code> ("AI agents", order 500), tab "AI" (cao 200 pt), live activity <code>agent</code>, bật mặc định, không có quyền. Helper CLI: target <code>mynotch-hook</code> (<code>Tools/mynotch-hook/main.swift</code>) trong <code>project.yml</code>.</li>
+<li><strong>Commit chính:</strong> <code>67ccc84</code> parser, <code>1b007f1</code> store và theo dõi file, <code>60c5a5a</code> module, <code>46eab02</code> hook kit, server, installer, <code>fc1443e</code> nối trạng thái chính xác, <code>33bbe96</code> gắn vào app, <code>e2b0586</code> nhúng helper, <code>806d2c3</code> sửa sau review.</li>
+<li><strong>Test tự động:</strong> 360 test theo báo cáo <code>A-fix-report</code> và báo cáo L1 (<code>verify.sh</code> qua ở <code>8a2b842</code>). Mọi fixture tự viết theo hình dạng record, không có hội thoại thật; test không bao giờ đọc hay ghi <code>~/.claude</code> hoặc <code>~/.codex</code> thật. Chưa chạy lại khi viết tài liệu này.</li>
+<li><strong>Kiểm thử tay:</strong> <a href="../../manual-test-checklist-all.html#ai-agents">mục AI agents trong checklist gộp</a></li>
+</ul>
+<h2 id="1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</h2>
+<ul>
+<li><strong>Mức 0 (mặc định, không sửa cấu hình):</strong> <code>JSONLTailer</code> đọc tiếp theo offset; <code>ClaudeTranscriptParser</code> và <code>CodexRolloutParser</code> thuần; <code>ClaudeSessionRegistry</code> đọc <code>~/.claude/sessions/*.json</code> và kiểm tra PID; <code>AgentWatcher</code> dùng FSEvents qua protocol <code>AgentFileSystem</code>. Mỗi agent một watcher. Khi khởi động, đọc 64 KB cuối file để dựng lại lượt hiện tại.</li>
+<li><strong><code>AgentSessionStore</code>:</strong> phiên theo (nguồn, sessionId), máy trạng thái working, waitingForInput, finished (5 giây rồi idle), idle, error; xoá phiên khi <code>SessionEnd</code>, khi PID chết hoặc sau 2 giờ không sự kiện; usage trong ngày khử trùng theo <code>message.id</code> (Claude) và theo tổng cộng dồn (Codex); chi phí lấy từ <code>cost-state</code> nếu có, không thì ước tính theo bảng giá đi kèm và ghi "ước tính".</li>
+<li><strong>Giao diện:</strong> activity <code>agent</code> cập nhật tại chỗ (đang làm: glyph xoay kèm thời gian chạy; chờ người dùng: "!" cam, ưu tiên <code>.high</code>; xong: ✓ trong <code>finishedSeconds</code>). Tab "AI": mỗi phiên một dòng (dự án, nhánh, trạng thái, tool, thời gian), cuối tab là token và chi phí hôm nay mỗi agent cùng rate limit của Codex. Click một phiên mở thư mục trong Terminal; menu ngữ cảnh "Mở thư mục" và "Copy đường dẫn".</li>
+<li><strong>Mức 1 (tuỳ chọn):</strong> <code>AgentHookKit</code> (allow-list trường, datagram tối đa 2 KB, luôn thoát mã 0, không in gì), <code>AgentEventServer</code> (socket datagram Unix, thư mục 0700, <code>SO_RCVBUF</code> 256 KB), <code>HookInstaller</code> (plugin cục bộ cho Claude Code, gộp và gỡ hook trong <code>settings.json</code> và <code>~/.codex/hooks.json</code> kèm sao lưu), nút cài trong Settings có hộp xác nhận xem trước.</li>
+<li><strong>Cài đặt <code>module.aiagents.*</code>:</strong> <code>claudeEnabled</code> (true), <code>codexEnabled</code> (true), <code>showWorkingActivity</code> (true), <code>finishedSeconds</code> (5, từ 2 đến 30), <code>preciseStatus</code> (false).</li>
+<li><strong>Helper:</strong> target <code>mynotch-hook</code> được nhúng vào <code>Contents/MacOS/mynotch-hook</code> và ký cùng app. Khi cài hook, nó được chép sang bản ổn định (mục 2).</li>
+</ul>
+<h2 id="2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</h2>
+<ul>
+<li><strong><code>preciseStatus</code> là công tắc của người dùng, không phải cờ chỉ đọc <code>preciseStatusInstalled</code>.</strong> Các nút cài bật công tắc này sau khi ghi thành công (kể cả khi "đã cài từ trước"), nhưng nút gỡ không tắt nó: gỡ hook Claude không được làm app thôi nghe Codex, và đường plugin được gỡ bằng <code>claude plugin uninstall</code> mà app không thấy.</li>
+<li><strong>Đường dẫn helper trong lệnh hook là bản chép ổn định</strong> <code>~/Library/Application Support/io.lucasvu.mynotch/Modules/aiagents/bin/mynotch-hook</code>, không phải <code>&lt;bundle id&gt;/bin/</code> như spec §2 (module chỉ biết thư mục lưu trữ của chính nó, cùng nơi đặt socket). Bản trong app (<code>Contents/MacOS/mynotch-hook</code>) chỉ là nguồn để chép; nút cài từ chối ghi gì nếu bản nhúng thiếu hoặc không chạy được.</li>
+<li><strong>Lệnh hook có guard và timeout:</strong> <code>P=&#x27;&lt;đường dẫn&gt;&#x27;; [ -x &quot;$P&quot; ] &amp;&amp; exec &quot;$P&quot; --source &lt;nguồn&gt;; exit 0</code>, <code>&quot;timeout&quot;: 5</code> ở mọi mục (settings.json, hooks.json, hooks.json của plugin). Helper thiếu hoặc bị xoá thì thoát mã 0 im lặng, không sinh "hook error" trong Claude Code hay Codex. Nút "Gỡ" vẫn nhận ra cả dạng lệnh cũ không guard.</li>
+<li><strong>Hook của nguồn đã tắt bị bỏ:</strong> <code>claudeEnabled</code> và <code>codexEnabled</code> chặn cả sự kiện hook, đọc ngay khi datagram đến.</li>
+<li><strong>Hook thắng suy luận từ transcript</strong> trong lúc hook còn đến cho cùng phiên.</li>
+<li><strong>Ngắt lượt không có <code>Stop</code>:</strong> quy tắc 90 giây của spec nay cũng áp cho <code>waitingForInput</code> của Claude khi registry báo idle (xem Ruling).</li>
+<li><strong>Bảng giá:</strong> khớp tiền tố tên model, ký tự sau tiền tố không được là chữ số, sau dấu gạch chỉ không có chữ số hoặc đúng 8 chữ số (ngày); model có đuôi lạ như <code>claude-opus-5-9</code> hay <code>claude-opus-4-11</code> không có ước tính. Giá Claude lấy từ skill claude-api (cache 2026-10-06). <strong>Giá Codex/OpenAI chưa được xác minh</strong> (có comment trong code). Haiku 5.5 với prompt trên 100K token tính 0,50 và 2,50 USD; code bỏ qua điều này.</li>
+<li><strong>Không yêu cầu nhưng có:</strong> nhãn "≥" khi chi phí chỉ một phần (ngày lẫn model có giá và không có giá); đường cơ sở qua nửa đêm trong <code>DayUsageLedger</code>; bấm một dòng phiên thì đóng notch.</li>
+<li><strong>Quyền riêng tư:</strong> chỉ giữ tên tool và tóm tắt tối đa 120 ký tự (đầu lệnh Bash hoặc tên file), không bao giờ lưu hay hiện nội dung prompt hoặc câu trả lời.</li>
+</ul>
+<h2 id="3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</h2>
+<ul>
+<li><strong>Dấu "!" chờ duyệt hết hạn sau 90 giây khi registry của Claude báo idle.</strong> Agent không kiểm chứng được (không được đọc <code>~/.claude</code>). Giữ nguyên, và <strong>người dùng phải kiểm tra</strong> (để một prompt xin quyền của Claude Code mở hơn 90 giây rồi xem "!" còn không). <strong>Chi phí nếu sai:</strong> "!" biến mất với prompt để quá 90 giây; cách sửa là bỏ hạn hoặc gắn vào sự kiện hook.</li>
+<li>Các giới hạn khác đã chấp nhận: "waiting" của Codex không bao giờ hết hạn; nút gỡ không tắt <code>preciseStatus</code>; bản chép helper chỉ được làm mới ở lần bấm cài kế tiếp (không tự làm mới sau khi cập nhật app).</li>
+<li>Tổng usage của Codex dùng mức cao nhất đã thấy làm đường cơ sở và cộng 0 cho tổng thấp hơn (sửa lỗi đếm trùng Critical). Đánh đổi: bộ đếm thật sự khởi động lại trong cùng một phiên sẽ không được đếm cho tới khi vượt mức cũ.</li>
+<li>Phiên Codex chạy một tool im lặng hơn 90 giây hiện là idle cho tới khi có output (chấp nhận từ brief A3, có comment trong code).</li>
+<li><strong>Bỏ qua trong vòng sửa:</strong> Minor 4 (<code>cwd</code> trong payload hook bị bỏ, nên phiên chỉ có hook chưa hiện dự án), Minor 5 (installer ghi lại cả file qua <code>JSONSerialization</code>: khoá sắp xếp lại, số thực đổi dạng, mảng rỗng <code>&quot;Stop&quot;: []</code> biến mất; chỉ tương đương về ngữ nghĩa), Minor 7 (lịch sử commit).</li>
+</ul>
+<h2 id="4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</h2>
+<ul>
+<li>Định dạng transcript và rollout không được công bố và có thể đổi; parser chịu lỗi theo từng trường.</li>
+<li>"!" của một tool đã duyệt chạy lâu giữ tới <code>PostToolUse</code> (không có tín hiệu duyệt, chỉ có hạn giờ mà hạn giờ cũng ẩn các lần chờ thật).</li>
+<li>Codex nhấn Esc ở prompt duyệt trong vòng 60 giây sau hook <code>PermissionRequest</code>: <code>turn_aborted</code> bị bỏ qua do ưu tiên hook, "!" ở lại tới lần dọn 2 giờ.</li>
+<li><code>AgentSocket</code> ghi cứng bundle id <code>io.lucasvu.mynotch</code>. Test chỉ so <code>defaultPath</code> với <code>path(inStorageDirectory:)</code>, không so với bundle id thật của app.</li>
+<li>Chưa có test ghim việc "CLI không in gì" (cần chạy target CLI, không nằm trong dự án test).</li>
+<li>Bản Debug ký ad-hoc không có cờ <code>runtime</code> (Hardened Runtime) cho cả app lẫn helper; cần kiểm bản Release.</li>
+<li>Mở thư mục bằng app khác (spec §4.1 nói "có tuỳ chọn") chưa làm; chỉ có Terminal.</li>
+<li>Chưa có kết quả kiểm thử tay được ghi lại cho: phiên Claude Code và Codex thật, hiệu ứng pulse, cài hook thật, chờ duyệt quyền.</li>
+</ul>
+<h2 id="5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</h2>
+<ul>
+<li><strong>§2 Mức 1, vị trí helper</strong>: bản chép nằm ở <code>~/Library/Application Support/io.lucasvu.mynotch/Modules/aiagents/bin/mynotch-hook</code>; bản trong app ở <code>Contents/MacOS/mynotch-hook</code>.</li>
+<li><strong>§2 Mức 1, lệnh hook</strong>: dạng có guard <code>[ -x ... ] &amp;&amp; exec ...; exit 0</code> và <code>timeout</code> 5 giây; socket ở <code>.../Modules/aiagents/agent.sock</code> (dự phòng <code>/tmp/mynotch-&lt;uid&gt;/agent.sock</code> khi đường dẫn dài hơn 103 byte).</li>
+<li><strong>§3</strong>: quy tắc 90 giây cũng áp cho <code>waitingForInput</code> của Claude khi registry idle; không áp cho Codex.</li>
+<li><strong>§4.2</strong>: <code>preciseStatusInstalled</code> chỉ đọc không tồn tại; thay bằng <code>preciseStatus</code> (công tắc, mặc định false). <code>finishedSeconds</code> nằm trong khoảng 2 đến 30.</li>
+<li><strong>§4, bảng thành phần</strong>: thêm <code>AgentHookKit</code> (library và product), <code>AgentSocket</code>, <code>HookHelper</code>, <code>HookSetup</code>, <code>DayUsageLedger</code>.</li>
+<li><strong>§4.1</strong>: click phiên chỉ mở Terminal; chưa có tuỳ chọn app khác.</li>
+</ul>
+<h2 id="6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</h2>
+<p>Xem <a href="../../manual-test-checklist-all.html#ai-agents">mục AI agents trong checklist gộp</a>. Cài hook thật <strong>sửa file cấu hình của bạn</strong> (<code>~/.claude/settings.json</code>, <code>~/.codex/hooks.json</code>, hoặc cài plugin Claude Code); app tạo bản sao lưu trước, nhưng hãy xem hộp xác nhận.</p></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>

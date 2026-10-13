@@ -1,0 +1,81 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ghi chú triển khai: Chụp màn hình, OCR và trình sửa ảnh</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</a><a class="h2" href="#2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</a><a class="h2" href="#3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</a><a class="h2" href="#4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</a><a class="h2" href="#5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</a><a class="h2" href="#6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</a></nav><main><h1 id="ghi-chú-triển-khai-chụp-màn-hình-ocr-và-trình-sửa-ảnh">Ghi chú triển khai: Chụp màn hình, OCR và trình sửa ảnh</h1>
+<ul>
+<li><strong>Ngày:</strong> 2026-10-14</li>
+<li><strong>Spec:</strong> <a href="../specs/2026-10-13-screenshot-design.html">Chụp màn hình + OCR (dự án con 3)</a>. Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".</li>
+<li><strong>Package:</strong> <code>Packages/Modules/Screenshot</code>, product <code>ScreenshotModule</code>. Module id <code>screenshot</code> ("Ảnh chụp", order 300), tab "Ảnh chụp" (cao 200 pt), bật mặc định, quyền bắt buộc <code>.screenRecording</code>.</li>
+<li><strong>Commit chính:</strong> <code>e0ce3a0</code> hình học, <code>31cc797</code> lưu trữ và OCR, <code>d6e8710</code> model và trình sửa, <code>c25a867</code> chụp, overlay, module, <code>611348c</code> sửa ảnh, <code>0bd2692</code> sửa lỗi lưu, <code>33bbe96</code> gắn vào app, <code>75ccd69</code> sửa thumbnail. Phụ: <code>b4f009a</code>, <code>d57cc9d</code>, <code>118d3d5</code> (chỉ mục ảnh an toàn hơn).</li>
+<li><strong>Test tự động:</strong> 217 test theo báo cáo <code>S-fix-report</code> và báo cáo L1 (<code>verify.sh</code> qua ở <code>8a2b842</code>). Có OCR thật trên ảnh tổng hợp (Vision, chạy cục bộ). Mọi thứ chạm hệ thống (ScreenCaptureKit, overlay, pasteboard, phím tắt, hộp thoại quyền) đều dùng bản giả. Chưa chạy lại khi viết tài liệu này.</li>
+<li><strong>Kiểm thử tay:</strong> <a href="../../manual-test-checklist-all.html#screenshot">mục Ảnh chụp trong checklist gộp</a></li>
+</ul>
+<h2 id="1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</h2>
+<ul>
+<li><code>CaptureService</code> (<code>ScreenCaptureKitService</code>) là nơi duy nhất gọi ScreenCaptureKit: chụp đóng băng từng màn (loại trừ MyNotch, SDR, không con trỏ, đúng pixel Retina) và chụp riêng một cửa sổ (tuỳ chọn bóng).</li>
+<li><code>GeometryMapper</code> và <code>WindowHitTester</code> thuần, có test nhiều màn và nhiều tỉ lệ. <code>OverlayInteraction</code> chứa mọi quyết định của overlay (phím, kéo, chế độ cửa sổ) với hơn 30 test.</li>
+<li><code>SelectionOverlayController</code>: mỗi màn một panel <code>.screenSaver</code>, không activating, nhận bàn phím. Esc huỷ, Space đổi vùng và cửa sổ, Return chụp cả màn. Vùng chọn được căn theo lưới pixel của màn, tối thiểu 4 x 4 pixel, bị kẹp trong màn bắt đầu kéo, và bị huỷ nếu bố cục màn hình đổi.</li>
+<li><code>CaptureStore</code>: PNG trong <code>captures/</code> cùng <code>captures.json</code>, giữ N ảnh gần nhất, thumbnail cache bộ nhớ và đĩa; chỉ mục hỏng thì dựng lại từ file và không bao giờ dọn ảnh khi chỉ mục không đọc được.</li>
+<li><code>OCRService</code>: Vision <code>RecognizeTextRequest</code>, <code>.accurate</code>, ngôn ngữ mặc định vi-VN và en-US (so khớp theo <code>languageCode</code>, bỏ ngôn ngữ không hỗ trợ), phóng 2 lần ảnh nhỏ, chạy ngoài main actor.</li>
+<li>Trình sửa: mũi tên, hình chữ nhật, chữ, bút dạ quang, che vùng (làm pixel thô, không còn pixel gốc), hoàn tác và làm lại. Lưu bản gốc vào <code>captures/originals/</code> và chú thích JSON vào <code>captures/markup/</code> để sửa lại. Cửa sổ thường: app chuyển <code>.regular</code> khi mở và quay về <code>.accessory</code> khi đóng, trừ khi Settings còn mở.</li>
+<li>Module: phím tắt ⌃⌥S (chụp) và ⌃⌥O (OCR nhanh), activity "Đã chụp" (3 giây) và "Đã chép N ký tự", tab với menu ngữ cảnh đủ mục, kéo ảnh ra ngoài, cài đặt <code>module.screenshot.*</code> (<code>copyToClipboard</code> true, <code>keepCount</code> 30, <code>saveLocation</code> desktop, <code>windowShadow</code> true, <code>ocrLanguages</code>, <code>showCapturedActivity</code> true).</li>
+<li>Info.plist: <code>NSDesktopFolderUsageDescription</code> và <code>NSDownloadsFolderUsageDescription</code> có từ <code>7cccd10</code>. Không cần entitlement mới.</li>
+</ul>
+<h2 id="2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</h2>
+<ul>
+<li><strong>Nhãn "Chép", không phải "Copy":</strong> tab dùng "Chép" và "OCR (chép chữ)"; thanh công cụ trình sửa đổi "Copy" thành "Chép" (quy ước chung của Clipboard, Shortcuts và toast "Đã chép ảnh").</li>
+<li><strong>Activity "Đã chụp" không bấm được:</strong> spec §2.1 bước 6 nói click activity mở tab, nhưng không có cách bắt cú click activity. Tab là nơi tìm ảnh.</li>
+<li><strong>OCR có thêm trạng thái:</strong> activity "Đang nhận chữ…" và có thể huỷ (Esc trên overlay hoặc chụp mới huỷ OCR trước), vì OCR vùng lớn mất vài giây.</li>
+<li><strong>API lưu trữ bất đồng bộ:</strong> <code>add</code>, <code>replaceImage</code>, <code>thumbnail</code> và <code>export</code> là <code>async</code> (mã hoá và sao chép ngoài main actor). <code>CaptureRecord</code> có thêm <code>editedAt</code> để thumbnail trên thẻ tải lại sau mỗi lần lưu.</li>
+<li><strong>Kéo ảnh ra ngoài</strong> dùng hard link vào thư mục tạm theo lượt kéo (dự phòng là copy), không copy toàn bộ PNG trên main khi bắt đầu kéo.</li>
+<li><strong>"Lưu thành…" đè file</strong> dùng <code>replaceItemAt</code> thay vì xoá rồi chép, nên chép lỗi thì giữ file cũ.</li>
+<li><strong>Lưu khi đóng cửa sổ:</strong> <code>EditorClosing.shouldCloseAfterSave</code> quyết định có đóng sau khi lưu không; sửa thêm trong lúc đang lưu thì giữ cửa sổ; bấm đóng trong lúc đang lưu thì bị bỏ qua (không hỏi) và cửa sổ tự đóng khi lưu xong.</li>
+</ul>
+<h2 id="3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</h2>
+<p>Ledger không gắn nhãn <code>Ruling:</code> cho Screenshot; bản ghi là "DONE_WITH_CONCERNS", mục nhỏ bị hoãn:</p>
+<ul>
+<li><strong>Minor 1 hoãn:</strong> copy ảnh vào clipboard mã hoá lại PNG và "Đã chụp" phải chờ. Đo được PNG 0,5 s và TIFF 0,23 s ở 3024 x 1964; PNG 0,85 s và TIFF 0,6 s ở 6016 x 3384, nên activity trễ 1,3 đến 2,3 giây. Dùng lại byte PNG đã lưu cần đổi API <code>PasteboardWriting</code>, và đưa activity lên trước clipboard sẽ đảo thứ tự bước 5 và 6 của spec. Cần quyết định thiết kế.</li>
+<li><strong>Minor 3 hoãn:</strong> việc chép vào <code>originals/</code> không nguyên tử (crash giữa chừng để lại bản gốc cụt, "Sửa" hỏng vĩnh viễn), và nếu JSON chú thích thiếu thì trình sửa mở bản gốc trần rồi Lưu ghi đè chú thích đang thấy. Cách sửa an toàn cần cờ "baseline là PNG đã lưu" trong <code>MarkupEditorSource</code>; nên là một task riêng.</li>
+<li><strong>Huy hiệu <code>hasMarkup</code></strong> (biểu tượng bút chì) có thể hiện lại sau khi chỉ mục hỏng được dựng lại, vì lúc đó nó suy từ "bản gốc còn tồn tại". Hoãn ở mức Minor, gộp vào review cuối.</li>
+<li><strong>Chú thích chưa lưu bị bỏ im lặng</strong> khi module dừng (<code>closeAll</code>) hoặc thoát app bằng ⌘Q: không có lúc nào để hỏi. Đã ghi chú trong code.</li>
+</ul>
+<h2 id="4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</h2>
+<ul>
+<li>Chưa kiểm chứng: phím và focus của overlay trên nhiều Space và nhiều màn, Space fullscreen và Stage Manager; kích thước ảnh chụp cửa sổ có bóng (<code>ScreenCaptureKitService</code> đặt kích thước theo vùng nội dung cửa sổ); focus hộp thoại lưu; luồng hộp thoại quyền Screen Recording trong app. <code>SelectionOverlayController</code> và controller cửa sổ trình sửa không có test tự động.</li>
+<li>macOS 15 trở lên hỏi lại quyền Screen Recording định kỳ (khoảng hàng tháng) với app chụp không qua picker hệ thống. Không tránh được; Settings có ghi chú.</li>
+<li>Ký ad-hoc làm macOS quên quyền sau mỗi lần build lại. Xem README mục "Ký app".</li>
+<li>Một reviewer thấy một lần process test Screenshot crash (signal 11) dưới tải nặng, chạy lại thì qua. Chưa tái hiện được nên chưa xác định nguyên nhân.</li>
+<li>Khung đóng băng màn 6K tốn khoảng 80 MB; chỉ giữ trong lúc overlay mở (<code>detachedCrop</code> để không giữ cả khung).</li>
+</ul>
+<h2 id="5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</h2>
+<ul>
+<li><strong>§2, hàng "Tab"</strong>: nhãn là "Chép", "Lưu vào &lt;vị trí của <code>saveLocation</code>&gt;" (Desktop, Downloads hoặc Pictures), "Lưu thành…", "OCR (chép chữ)", "Sửa", "Xoá"; double-click thẻ mở trình sửa.</li>
+<li><strong>§2, hàng <code>CaptureStore</code></strong>: thêm <code>originals/</code>, <code>markup/</code>, <code>editedAt</code>, API <code>async</code>, dựng lại chỉ mục từ file.</li>
+<li><strong>§2.1 bước 6</strong>: activity "Đã chụp" không mở tab khi click.</li>
+<li><strong>§2.1, OCR nhanh</strong>: thêm activity "Đang nhận chữ…", huỷ được.</li>
+<li><strong>§2.3</strong>: Info.plist <code>NSDesktopFolderUsageDescription</code> và <code>NSDownloadsFolderUsageDescription</code> đã có trong <code>project.yml</code>.</li>
+<li><strong>Dòng trạng thái</strong> "Thiết kế, triển khai sau Media" đã lỗi thời.</li>
+</ul>
+<h2 id="6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</h2>
+<p>Xem <a href="../../manual-test-checklist-all.html#screenshot">mục Ảnh chụp trong checklist gộp</a>. Các mục đụng quyền: Screen Recording (reset TCC trước khi thử), thư mục Desktop và Downloads khi lưu lần đầu.</p></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>
