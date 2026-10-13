@@ -537,6 +537,57 @@ import Testing
         _ = await next.value
     }
 
+    /// Cancels from another thread and returns once it has; a synchronous function, since waiting is not allowed in async code.
+    func cancelFromAnotherThread(_ task: Task<Void, Never>) {
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async { task.cancel(); done.signal() }
+        done.wait()
+    }
+
+    /// A call that was cancelled just as its spacing timer fired must leave the timer handing the turn over alone:
+    /// the next call still gets its turn one spacing later, instead of queueing until the service shuts down.
+    func expectTheNextCallToGetItsTurn(_ service: LyricsService, after first: Task<Void, Never>) async {
+        await settle { scheduler.pendingCount == 1 }
+        #expect(scheduler.pendingCount == 1)
+        let next = Task { await service.lyrics(for: key("B")) }
+        await settle { service.queuedCount == 1 }
+        scheduler.advance(by: .seconds(1))
+        await settle { client.requests.count == 2 }
+        #expect(client.requests.count == 2)
+        // Only so that a regression ends in failed expectations rather than calls that wait for ever.
+        next.cancel()
+        scheduler.advance(by: .seconds(5))
+        _ = await next.value
+        await first.value
+    }
+
+    @Test func aCancelArrivingFromAnotherThreadAfterTheTimerFiredLeavesTheHandoverTimerAlone() async {
+        route()
+        let service = makeService()
+        var result: LyricsResult?
+        let first = Task { result = await service.lyrics(for: key("A")) }
+        await settle { scheduler.pendingCount == 1 }
+        scheduler.advance(by: LyricsService.minimumSpacing)
+        // The main actor stays busy meanwhile, so the cancellation hop queues behind the resumed chain.
+        cancelFromAnotherThread(first)
+        await settle { result != nil }
+        await expectTheNextCallToGetItsTurn(service, after: first)
+    }
+
+    @Test func aCancelQueuedBeforeTheResumeLeavesTheHandoverTimerAlone() async {
+        route()
+        let service = makeService()
+        var result: LyricsResult?
+        let first = Task { result = await service.lyrics(for: key("A")) }
+        await settle { scheduler.pendingCount == 1 }
+        // Queued first on the main actor, e.g. a track change; the timer fires, and the chain resumes after it.
+        let canceller = Task { @MainActor in first.cancel() }
+        scheduler.advance(by: LyricsService.minimumSpacing)
+        await canceller.value
+        await settle { result != nil }
+        await expectTheNextCallToGetItsTurn(service, after: first)
+    }
+
     @Test func aLookupCancelledWhileARequestIsOutDoesNotWaitForTheNextStep() async {
         let gate = Gate()
         client.handler = { [gate] _ in

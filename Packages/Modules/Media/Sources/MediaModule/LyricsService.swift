@@ -205,11 +205,14 @@ final class LyricsService {
         }
     }
 
+    /// Ends the wait between two steps, if there is one. Without one it does nothing: a cancellation that arrives late
+    /// must not cancel the timer that has since been set to hand the turn over.
     private func endStepWait() {
+        guard let continuation = stepContinuation else { return }
+        stepContinuation = nil
         spacingTimer?.cancel()
         spacingTimer = nil
-        stepContinuation?.resume()
-        stepContinuation = nil
+        continuation.resume()
     }
 
     private func makeRequest(for step: Step) -> URLRequest {
