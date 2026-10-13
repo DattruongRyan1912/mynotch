@@ -24,6 +24,8 @@ packages:
     path: Packages/NotchUI
   BatteryModule:
     path: Packages/Modules/Battery
+  CalendarModule:
+    path: Packages/Modules/Calendar
   ClipboardModule:
     path: Packages/Modules/Clipboard
   MediaModule:
@@ -46,6 +48,7 @@ targets:
       - package: MyNotchCore
       - package: NotchUI
       - package: BatteryModule
+      - package: CalendarModule
       - package: ClipboardModule
       - package: MediaModule
       - package: TranslationModule
