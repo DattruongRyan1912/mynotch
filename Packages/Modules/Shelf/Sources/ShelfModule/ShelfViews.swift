@@ -66,7 +66,7 @@ struct ShelfCardView: View {
             if case .file = item.kind {
                 Button("Hiện trong Finder", systemImage: "folder") { module.revealInFinder(item) }
             }
-            Button("AirDrop", systemImage: "airplayaudio") { module.airDrop(item) }
+            Button("AirDrop", systemImage: "airdrop") { module.airDrop(item) }
             Button("Chia sẻ…", systemImage: "square.and.arrow.up") { state.sharingID = item.id }
             Divider()
             Button("Xoá khỏi khay", systemImage: "trash", role: .destructive) { module.remove(item) }

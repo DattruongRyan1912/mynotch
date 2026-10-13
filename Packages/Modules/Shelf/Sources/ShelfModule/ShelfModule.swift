@@ -29,7 +29,12 @@ public final class ShelfModule: FeatureModule {
     private var context: ModuleContext?
     private var keys: ShelfSettingKeys?
 
-    public init() {}
+    private let notifications: NotificationCenter
+    private var isObservingQuit = false
+
+    public init() { notifications = .default }
+
+    init(notifications: NotificationCenter) { self.notifications = notifications }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
         do {
@@ -41,16 +46,28 @@ public final class ShelfModule: FeatureModule {
         self.context = context
         self.keys = keys
         state.store = ShelfStore(directory: context.storage.directory, limit: context.settings.value(keys.maxItems), logger: context.logger)
+        clearOnQuit(settings: context.settings, keys: keys, directory: context.storage.directory)
     }
 
     public func stop() async {
-        if let context, let keys, context.settings.value(keys.clearOnQuit) {
-            state.store?.removeAll()
-        }
         state.store = nil
         state.sharingID = nil
         context = nil
         keys = nil
+    }
+
+    /// `stop` also runs for Pause, for disabling the module and for a retry, so only the app quitting clears the shelf.
+    /// The modules are stopped before AppKit announces the quit, so it is cleared from its files, and on the posting
+    /// thread: a block queued on the main queue could still be waiting when the process exits.
+    private func clearOnQuit(settings: ModuleSettings, keys: ShelfSettingKeys, directory: URL) {
+        guard !isObservingQuit else { return }
+        isObservingQuit = true
+        _ = notifications.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard settings.value(keys.clearOnQuit) else { return }
+                (self?.state.store ?? ShelfStore(directory: directory, limit: ShelfSettingKeys.maxItemsRange.upperBound)).removeAll()
+            }
+        }
     }
 
     public func makeTab() -> NotchTab? {
@@ -77,8 +94,15 @@ public final class ShelfModule: FeatureModule {
     func add(providers: [NSItemProvider]) async -> Int {
         guard let store = state.store, let keys, let context else { return 0 }
         var added = 0
-        for provider in providers {
-            guard let kind = await ShelfDropLoader.load(provider, promisedDirectory: store.promisedDirectory) else { continue }
+        // The newest item goes first on the shelf, so the last provider goes in first and the order of the drop is kept.
+        for provider in providers.reversed() {
+            let kind = await ShelfDropLoader.load(provider, promisedDirectory: store.promisedDirectory)
+            // The module may have stopped, or stopped and started again, while the file was arriving.
+            guard !Task.isCancelled, state.store === store else {
+                if let kind { store.deleteStoredCopy(of: kind) }
+                return added
+            }
+            guard let kind else { continue }
             store.add(kind, limit: context.settings.value(keys.maxItems))
             added += 1
         }
@@ -94,10 +118,12 @@ public final class ShelfModule: FeatureModule {
         }
     }
 
-    /// Called once the drag of a card has ended.
+    /// Called once the drag of a card has ended, with the card as it was when the drag began: one that was dropped
+    /// back on the shelf meanwhile was moved to the front, no longer matches and stays.
     func didDragOut(_ item: ShelfItem) {
-        guard let context, let keys, context.settings.value(keys.removeAfterDragOut) else { return }
-        state.store?.remove(id: item.id)
+        guard let context, let keys, context.settings.value(keys.removeAfterDragOut),
+              let store = state.store, store.items.contains(item) else { return }
+        store.remove(id: item.id, deletingCopy: false)
     }
 
     func remove(_ item: ShelfItem) { state.store?.remove(id: item.id) }

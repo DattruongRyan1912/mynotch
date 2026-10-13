@@ -10,8 +10,8 @@ enum ShelfDropLoader {
         if provider.canLoadObject(ofClass: URL.self), let url = await object(URL.self, from: provider) {
             return url.isFileURL ? try? .file(at: url) : .link(url)
         }
-        if provider.canLoadObject(ofClass: String.self), let text = await object(String.self, from: provider), !text.isEmpty {
-            return .text(text)
+        if provider.canLoadObject(ofClass: String.self), let text = await object(String.self, from: provider) {
+            return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : .text(text)
         }
         guard let type = provider.registeredContentTypes.first(where: { $0.conforms(to: .data) }) else { return nil }
         let folder = promisedDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)

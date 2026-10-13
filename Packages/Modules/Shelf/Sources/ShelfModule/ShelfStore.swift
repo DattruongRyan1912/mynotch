@@ -12,7 +12,8 @@ final class ShelfStore {
     private let fileURL: URL
     private let logger: Logger
 
-    /// Loads the shelf, leaving out entries that cannot be read and files that no longer exist.
+    /// Loads the shelf, leaving out entries that cannot be read and files that no longer exist, and deleting the
+    /// stored copies that no item points at any more.
     init(directory: URL, limit: Int, logger: Logger = Log.logger(category: "shelf")) {
         fileURL = directory.appending(path: "shelf.json")
         promisedDirectory = directory.appending(path: "promised", directoryHint: .isDirectory)
@@ -20,32 +21,45 @@ final class ShelfStore {
         items = []
         let saved = (try? JSONDecoder().decode([Lossy].self, from: Data(contentsOf: fileURL)))?.compactMap(\.item) ?? []
         items = Array(saved.compactMap(refreshed).prefix(limit))
+        removeOrphanedCopies()
         if items != saved { save() }
     }
 
+    /// A file that is already on the shelf moves to the front instead of appearing twice, so a card dropped back
+    /// onto the shelf cannot leave two cards sharing one stored copy.
     func add(_ kind: ShelfItem.Kind, limit: Int) {
+        if let file = url(of: kind), let index = items.firstIndex(where: { url(of: $0.kind) == file }) {
+            let existing = items.remove(at: index)
+            items.insert(ShelfItem(id: existing.id, kind: existing.kind, addedAt: .now), at: 0)
+            return save()
+        }
         items.insert(ShelfItem(kind: kind), at: 0)
         let overflow = items.dropFirst(limit)
-        overflow.forEach(deleteStoredCopy)
+        overflow.forEach { deleteStoredCopy(of: $0.kind) }
         items.removeLast(overflow.count)
         save()
     }
 
-    func remove(id: UUID) {
+    /// `deletingCopy: false` keeps the stored copy of a promised file whose item was dragged out, because the
+    /// destination may still be reading it; the next load sweeps it.
+    func remove(id: UUID, deletingCopy: Bool = true) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
-        deleteStoredCopy(of: items.remove(at: index))
+        let item = items.remove(at: index)
+        if deletingCopy { deleteStoredCopy(of: item.kind) }
         save()
     }
 
     func removeAll() {
-        items.forEach(deleteStoredCopy)
+        items.forEach { deleteStoredCopy(of: $0.kind) }
         items = []
         save()
     }
 
     /// Where a file item is now; nil for other items and for files that are gone.
-    func url(of item: ShelfItem) -> URL? {
-        guard case .file(let bookmark, _, _) = item.kind else { return nil }
+    func url(of item: ShelfItem) -> URL? { url(of: item.kind) }
+
+    private func url(of kind: ShelfItem.Kind) -> URL? {
+        guard case .file(let bookmark, _, _) = kind else { return nil }
         return resolve(bookmark)?.url
     }
 
@@ -56,19 +70,34 @@ final class ShelfStore {
         return (url, isStale)
     }
 
-    /// The item with a fresh bookmark when its file moved, or nil when the file is gone.
+    /// The item with a fresh bookmark and the file's current name when the file moved or was renamed, or nil when
+    /// the file is gone.
     private func refreshed(_ item: ShelfItem) -> ShelfItem? {
         guard case .file(let bookmark, let name, let type) = item.kind else { return item }
         guard let (url, isStale) = resolve(bookmark) else { return nil }
-        guard isStale, let fresh = try? url.bookmarkData() else { return item }
-        return ShelfItem(id: item.id, kind: .file(bookmark: fresh, name: name, utType: type), addedAt: item.addedAt)
+        guard isStale || url.lastPathComponent != name else { return item }
+        let fresh = isStale ? (try? url.bookmarkData()) ?? bookmark : bookmark
+        return ShelfItem(id: item.id, kind: .file(bookmark: fresh, name: url.lastPathComponent, utType: type), addedAt: item.addedAt)
     }
 
-    private func deleteStoredCopy(of item: ShelfItem) {
+    /// Deletes the folder of `promised/` that holds a promised file; files that live anywhere else are never touched.
+    func deleteStoredCopy(of kind: ShelfItem.Kind) {
         // Bookmarks resolve to the real path, so compare real paths (/var is /private/var).
-        guard let url = url(of: item),
-              url.resolvingSymlinksInPath().path.hasPrefix(promisedDirectory.resolvingSymlinksInPath().path + "/") else { return }
-        try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+        guard let folder = url(of: kind)?.deletingLastPathComponent(),
+              folder.deletingLastPathComponent().resolvingSymlinksInPath().path == promisedDirectory.resolvingSymlinksInPath().path
+        else { return }
+        try? FileManager.default.removeItem(at: folder)
+    }
+
+    /// What is left in `promised/` once no item points at it: the copies of items the limit trimmed, of drops that
+    /// failed halfway, of items dragged out.
+    private func removeOrphanedCopies() {
+        let folders = (try? FileManager.default.contentsOfDirectory(at: promisedDirectory, includingPropertiesForKeys: nil)) ?? []
+        guard !folders.isEmpty else { return }
+        let kept = Set(items.compactMap { url(of: $0)?.deletingLastPathComponent().resolvingSymlinksInPath().path })
+        for folder in folders where !kept.contains(folder.resolvingSymlinksInPath().path) {
+            try? FileManager.default.removeItem(at: folder)
+        }
     }
 
     private func save() {
