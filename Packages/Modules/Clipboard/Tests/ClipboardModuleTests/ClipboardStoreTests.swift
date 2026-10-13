@@ -13,8 +13,8 @@ import Testing
         try? FileManager.default.removeItem(at: directory)
     }
 
-    func makeStore() -> ClipboardStore {
-        ClipboardStore(directory: directory, scheduler: scheduler, logger: Log.logger(category: "ClipboardStoreTests"))
+    func makeStore(now: @escaping () -> Date = { .now }) -> ClipboardStore {
+        ClipboardStore(directory: directory, scheduler: scheduler, logger: Log.logger(category: "ClipboardStoreTests"), now: now)
     }
 
     static func item(_ content: ClipboardContent) -> ClipboardItem {
@@ -197,10 +197,57 @@ import Testing
         try store.saveImage(Data("first".utf8), fileName: "a.png")
         try store.saveImage(Data("second".utf8), fileName: "a.png")
         try store.saveImage(Data("other".utf8), fileName: "b.png")
-        #expect(try Data(contentsOf: store.imageURL(fileName: "a.png")) == Data("first".utf8))
+        #expect(try Data(contentsOf: #require(store.imageURL(fileName: "a.png"))) == Data("first".utf8))
 
         store.deleteImages(for: [Self.item(Self.image("a.png")), Self.item(.text("a.png")), Self.item(Self.image("missing.png"))])
 
         #expect(try contents(of: file("images")) == ["b.png"])
+    }
+
+    @Test func corruptFilesWithinTheSameSecondGetNumberedNames() throws {
+        let instant = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        _ = makeStore { instant }.load()
+        for index in 0..<3 {
+            try Data("broken \(index)".utf8).write(to: file("history.json"))
+            _ = makeStore { instant }.load()
+        }
+
+        let names = try contents(of: directory).filter { $0.hasPrefix("history.corrupt-") }
+        let stems = names.compactMap { $0.wholeMatch(of: /(history\.corrupt-\d{8}-\d{6})\.json/)?.1 }
+        let stem = try #require(stems.first)
+        #expect(Set(names) == ["\(stem).json", "\(stem)-1.json", "\(stem)-2.json"])
+        for (index, suffix) in ["", "-1", "-2"].enumerated() {
+            #expect(try String(contentsOf: file("\(stem)\(suffix).json"), encoding: .utf8) == "broken \(index)")
+        }
+    }
+
+    @Test func imagesAreKeptWhenTheHistoryFileIsMovedAside() throws {
+        let store = makeStore()
+        _ = store.load()
+        try store.saveImage(Data("kept".utf8), fileName: "kept.png")
+        try store.saveImage(Data("other".utf8), fileName: "other.png")
+        store.scheduleSave(Self.history())
+        store.flush()
+        try Data("not json".utf8).write(to: file("history.json"))
+
+        #expect(makeStore().load().items.isEmpty)
+        #expect(try contents(of: file("images")).sorted() == ["kept.png", "other.png"])
+    }
+
+    nonisolated static let unsafeFileNames = ["", ".", "..", ".hidden.png", "../victim.png", "sub/a.png", "/tmp/a.png"]
+
+    @Test(arguments: unsafeFileNames)
+    func unsafeImageFileNamesAreRejected(fileName: String) throws {
+        let store = makeStore()
+        _ = store.load()
+        let victim = file("victim.png")
+        try Data("keep".utf8).write(to: victim)
+
+        #expect(store.imageURL(fileName: fileName) == nil)
+        #expect(throws: CocoaError.self) { try store.saveImage(Data("x".utf8), fileName: fileName) }
+        store.deleteImages(for: [Self.item(Self.image(fileName))])
+
+        #expect(try Data(contentsOf: victim) == Data("keep".utf8))
+        #expect(try contents(of: file("images")).isEmpty)
     }
 }
