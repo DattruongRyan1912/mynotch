@@ -102,26 +102,33 @@ public final class ShelfModule: FeatureModule {
                 if let kind { store.deleteStoredCopy(of: kind) }
                 return added
             }
-            guard let kind else { continue }
+            guard let kind else {
+                let types = provider.registeredTypeIdentifiers.joined(separator: ", ")
+                context.logger.notice("A dropped item had nothing the shelf can keep (types: \(types, privacy: .public))")
+                continue
+            }
             store.add(kind, limit: context.settings.value(keys.maxItems))
             added += 1
         }
         return added
     }
 
-    /// What a card carries when dragged out of the notch.
-    func dragProvider(for item: ShelfItem) -> NSItemProvider {
+    /// What a card carries when dragged out of the notch; nil when its file is gone. A file is looked up again, since
+    /// it may have moved since the shelf was loaded.
+    func dragWriter(for item: ShelfItem) -> (any NSPasteboardWriting)? {
         switch item.kind {
-        case .text(let text): NSItemProvider(object: text as NSString)
-        case .link(let url): NSItemProvider(object: url as NSURL)
-        case .file: state.store?.url(of: item).map { NSItemProvider(object: $0 as NSURL) } ?? NSItemProvider()
+        case .text(let text): text as NSString
+        case .link(let url): url as NSURL
+        case .file: state.store?.refreshedURL(of: item).map { $0 as NSURL }
         }
     }
 
-    /// Called once the drag of a card has ended, with the card as it was when the drag began: one that was dropped
-    /// back on the shelf meanwhile was moved to the front, no longer matches and stays.
-    func didDragOut(_ item: ShelfItem) {
-        guard let context, let keys, context.settings.value(keys.removeAfterDragOut),
+    /// Called when the drag of a card has ended, with the card as it was when the drag began: one that was dropped
+    /// back on the shelf meanwhile was moved to the front, no longer matches and stays. A cancelled or refused drag
+    /// removes nothing, and a promised copy is left for the next load to sweep, so the destination can finish reading it.
+    func didDragEnd(_ item: ShelfItem, operation: NSDragOperation) {
+        guard let context, let keys,
+              ShelfDragOutcome.removesCard(operation: operation, removeAfterDragOut: context.settings.value(keys.removeAfterDragOut)),
               let store = state.store, store.items.contains(item) else { return }
         store.remove(id: item.id, deletingCopy: false)
     }
@@ -129,25 +136,25 @@ public final class ShelfModule: FeatureModule {
     func remove(_ item: ShelfItem) { state.store?.remove(id: item.id) }
     func removeAll() { state.store?.removeAll() }
 
-    /// What the system's sharing services take for this item.
+    /// What the system's sharing services take for this item. Called when sharing, not when drawing.
     func shareItems(for item: ShelfItem) -> [Any] {
         switch item.kind {
         case .text(let text): [text]
         case .link(let url): [url]
-        case .file: state.store?.url(of: item).map { [$0] } ?? []
+        case .file: state.store?.refreshedURL(of: item).map { [$0] } ?? []
         }
     }
 
     func open(_ item: ShelfItem) {
         switch item.kind {
         case .link(let url): NSWorkspace.shared.open(url)
-        case .file: state.store?.url(of: item).map { _ = NSWorkspace.shared.open($0) }
+        case .file: state.store?.refreshedURL(of: item).map { _ = NSWorkspace.shared.open($0) }
         case .text: break
         }
     }
 
     func revealInFinder(_ item: ShelfItem) {
-        guard let url = state.store?.url(of: item) else { return }
+        guard let url = state.store?.refreshedURL(of: item) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 

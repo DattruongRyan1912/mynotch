@@ -37,6 +37,7 @@ struct ShelfTabView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear { state.store?.refreshLocations() }
         .onChange(of: state.sharingID) { notch.setPinned(state.sharingID != nil) }
     }
 }
@@ -45,8 +46,6 @@ struct ShelfCardView: View {
     let item: ShelfItem
     let state: ShelfState
     let module: ShelfModule
-
-    @Environment(\.notch) private var notch
 
     var body: some View {
         VStack(spacing: 4) {
@@ -58,9 +57,8 @@ struct ShelfCardView: View {
         }
         .frame(width: 76, height: 78)
         .background(.white.opacity(0.08), in: .rect(cornerRadius: 8))
-        .background(ShelfShareAnchor(items: module.shareItems(for: item), isPresented: isSharing))
-        .onDrag { startDrag() }
-        .onTapGesture(count: 2) { module.open(item) }
+        .background(ShelfShareAnchor(items: { module.shareItems(for: item) }, isPresented: isSharing))
+        .overlay(ShelfCardDragSource(item: item, module: module, image: dragImage))
         .contextMenu {
             Button("Mở", systemImage: "arrow.up.forward.app") { module.open(item) }
             if case .file = item.kind {
@@ -100,24 +98,24 @@ struct ShelfCardView: View {
         }
     }
 
-    /// SwiftUI reports no end of a drag, so the notch hears it ended once the mouse button is up again.
-    private func startDrag() -> NSItemProvider {
-        let notch = notch, module = module, item = item
-        notch.setDragging(true)
-        Task {
-            repeat {
-                try? await Task.sleep(for: .milliseconds(100))
-            } while NSEvent.pressedMouseButtons & 1 != 0
-            notch.setDragging(false)
-            module.didDragOut(item)
+    /// The icon the card shows, at the size the drag preview uses.
+    private func dragImage() -> NSImage {
+        let source: NSImage = switch item.kind {
+        case .file: state.store?.url(of: item).map { NSWorkspace.shared.icon(forFile: $0.path) } ?? NSImage()
+        case .text: NSImage(systemSymbolName: "text.alignleft", accessibilityDescription: nil) ?? NSImage()
+        case .link: NSImage(systemSymbolName: "link", accessibilityDescription: nil) ?? NSImage()
         }
-        return module.dragProvider(for: item)
+        return NSImage(size: NSSize(width: 40, height: 40), flipped: false) { rect in
+            source.draw(in: rect)
+            return true
+        }
     }
 }
 
 /// An invisible view the share picker points at; SwiftUI has no picker of its own for arbitrary items.
 struct ShelfShareAnchor: NSViewRepresentable {
-    let items: [Any]
+    /// Built only when the picker is shown: a file's location is looked up again then.
+    let items: () -> [Any]
     @Binding var isPresented: Bool
 
     func makeNSView(context: Context) -> NSView { NSView() }
@@ -126,7 +124,7 @@ struct ShelfShareAnchor: NSViewRepresentable {
         context.coordinator.dismissed = { isPresented = false }
         guard isPresented, !context.coordinator.isShown else { return }
         context.coordinator.isShown = true
-        let picker = NSSharingServicePicker(items: items)
+        let picker = NSSharingServicePicker(items: items())
         picker.delegate = context.coordinator
         picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
     }

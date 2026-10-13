@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import MyNotchCore
+import Observation
 import MyNotchTestSupport
 import Testing
 import UniformTypeIdentifiers
@@ -11,15 +12,31 @@ nonisolated final class GatedProvider: @unchecked Sendable {
     let provider = NSItemProvider()
     private let lock = NSLock()
     private var completion: (@Sendable (Data?, (any Error)?) -> Void)?
+    private var waiter: CheckedContinuation<Void, Never>?
 
     init() {
         provider.registerDataRepresentation(forTypeIdentifier: UTType.png.identifier, visibility: .all) { [self] completion in
-            lock.withLock { self.completion = completion }
+            let waiting = lock.withLock {
+                self.completion = completion
+                defer { waiter = nil }
+                return waiter
+            }
+            waiting?.resume()
             return nil
         }
     }
 
-    var isLoading: Bool { lock.withLock { completion != nil } }
+    /// Returns once the drop has started loading the file, so the test never has to guess how long that takes.
+    func waitUntilLoading() async {
+        await withCheckedContinuation { continuation in
+            let isLoading = lock.withLock {
+                if completion != nil { return true }
+                waiter = continuation
+                return false
+            }
+            if isLoading { continuation.resume() }
+        }
+    }
 
     func release() { lock.withLock { completion }?(Data([0x89, 0x50, 0x4E, 0x47]), nil) }
 }
@@ -42,13 +59,21 @@ struct ShelfFixture {
     var promisedEntries: [String] { (try? FileManager.default.contentsOfDirectory(atPath: storage.directory.appending(path: "promised").path)) ?? [] }
 
     /// Starts a drop with a file that stays pending until the returned provider is released.
-    func startDropThatIsStillLoading() async throws -> (adding: Task<Int, Never>, gate: GatedProvider) {
+    func startDropThatIsStillLoading() async -> (adding: Task<Int, Never>, gate: GatedProvider) {
         let gate = GatedProvider()
         let provider = gate.provider
         let adding = Task { await module.add(providers: [provider]) }
-        for _ in 0..<500 where !gate.isLoading { try await Task.sleep(for: .milliseconds(10)) }
-        try #require(gate.isLoading)
+        await gate.waitUntilLoading()
         return (adding, gate)
+    }
+
+    /// Returns once the shelf holds an item, whenever the background drop gets there.
+    func waitForAnItem() async {
+        while items.isEmpty {
+            await withCheckedContinuation { continuation in
+                withObservationTracking { _ = items } onChange: { continuation.resume() }
+            }
+        }
     }
 
     func start() async { await harness.registry.bootstrap() }
@@ -133,7 +158,8 @@ struct ShelfFixture {
         await fixture.start()
         let onDrop = try #require(fixture.module.makeTab()?.onDrop)
         #expect(onDrop([NSItemProvider(object: "x" as NSString)]))
-        for _ in 0..<200 where fixture.items.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(fixture.items.isEmpty)
+        await fixture.waitForAnItem()
         #expect(fixture.items.map(\.kind) == [.text("x")])
     }
 
@@ -204,31 +230,31 @@ struct ShelfFixture {
         #expect(ShelfStore(directory: fixture.storage.directory, limit: 50).items.isEmpty)
     }
 
-    @Test func draggingOutRemovesTheItemOnlyWhenTheSettingIsOn() async {
+    @Test func aCompletedDragRemovesTheItemOnlyWhenTheSettingIsOn() async {
         let fixture = ShelfFixture()
         await fixture.start()
         _ = await fixture.module.add(providers: [NSItemProvider(object: "a" as NSString), NSItemProvider(object: "b" as NSString)])
         let first = fixture.items[0]
 
-        fixture.module.didDragOut(first)
+        fixture.module.didDragEnd(first, operation: .copy)
         #expect(fixture.items.count == 2)
 
         fixture.settings.set(true, for: fixture.keys.removeAfterDragOut)
-        fixture.module.didDragOut(first)
+        fixture.module.didDragEnd(first, operation: .copy)
         #expect(fixture.items.map(\.kind) == [.text("b")])
     }
 
-    @Test func draggingOutNeverDeletesAPromisedCopyTheDestinationMayStillBeReading() async throws {
+    @Test func aCompletedDragNeverDeletesAPromisedCopyTheDestinationMayStillBeReading() async throws {
         let fixture = ShelfFixture()
         await fixture.start()
         fixture.settings.set(true, for: fixture.keys.removeAfterDragOut)
-        let (adding, gate) = try await fixture.startDropThatIsStillLoading()
+        let (adding, gate) = await fixture.startDropThatIsStillLoading()
         gate.release()
         #expect(await adding.value == 1)
         let item = try #require(fixture.items.first)
         let copy = try #require(fixture.module.state.store?.url(of: item))
 
-        fixture.module.didDragOut(item)
+        fixture.module.didDragEnd(item, operation: .copy)
         #expect(fixture.items.isEmpty)
         #expect(FileManager.default.fileExists(atPath: copy.path))
     }
@@ -242,7 +268,7 @@ struct ShelfFixture {
         let dragged = try #require(fixture.items.first)   // what the card captured when the drag began
 
         _ = await fixture.module.add(providers: [NSItemProvider(object: file as NSURL)])   // dropped back on the shelf
-        fixture.module.didDragOut(dragged)
+        fixture.module.didDragEnd(dragged, operation: .copy)
         #expect(fixture.items.count == 1)
         #expect(fixture.items.first?.id == dragged.id)
     }
@@ -250,7 +276,7 @@ struct ShelfFixture {
     @Test func aDropStillLoadingWhenTheModuleStopsIsDiscardedWithItsCopy() async throws {
         let fixture = ShelfFixture()
         await fixture.start()
-        let (adding, gate) = try await fixture.startDropThatIsStillLoading()
+        let (adding, gate) = await fixture.startDropThatIsStillLoading()
 
         await fixture.harness.registry.setEnabled(false, for: "shelf")
         gate.release()
@@ -262,7 +288,7 @@ struct ShelfFixture {
     @Test func aCancelledDropIsDiscardedWithItsCopy() async throws {
         let fixture = ShelfFixture()
         await fixture.start()
-        let (adding, gate) = try await fixture.startDropThatIsStillLoading()
+        let (adding, gate) = await fixture.startDropThatIsStillLoading()
 
         adding.cancel()
         gate.release()
@@ -274,7 +300,7 @@ struct ShelfFixture {
     @Test func aDropFinishingAfterARestartDoesNotTouchTheNewShelf() async throws {
         let fixture = ShelfFixture()
         await fixture.start()
-        let (adding, gate) = try await fixture.startDropThatIsStillLoading()
+        let (adding, gate) = await fixture.startDropThatIsStillLoading()
 
         await fixture.harness.registry.setEnabled(false, for: "shelf")
         await fixture.harness.registry.setEnabled(true, for: "shelf")
@@ -323,38 +349,5 @@ struct ShelfFixture {
         #expect((shared[0].first as? URL)?.lastPathComponent == "note.txt")
         #expect(shared[1].first as? String == "t")
         #expect(shared[2].first as? URL == link)
-    }
-
-    @Test func dragProviderCarriesTheFileTheTextOrTheLink() async throws {
-        let fixture = ShelfFixture()
-        await fixture.start()
-        let file = try makeTempFile(in: try makeTempDirectory())
-        let link = try #require(URL(string: "https://example.com"))
-        _ = await fixture.module.add(providers: [
-            NSItemProvider(object: file as NSURL),
-            NSItemProvider(object: "t" as NSString),
-            NSItemProvider(object: link as NSURL),
-        ])
-        let providers = fixture.items.map { fixture.module.dragProvider(for: $0) }   // file, text, link
-        #expect(providers.count == 3)
-        let dragged = try #require(await providers[0].loadURL())
-        #expect(dragged.lastPathComponent == "note.txt")
-        #expect(dragged.isFileURL)
-        #expect(await providers[1].loadString() == "t")
-        #expect(await providers[2].loadURL() == link)
-    }
-}
-
-private extension NSItemProvider {
-    func loadURL() async -> URL? {
-        await withCheckedContinuation { continuation in
-            _ = loadObject(ofClass: URL.self) { url, _ in continuation.resume(returning: url) }
-        }
-    }
-
-    func loadString() async -> String? {
-        await withCheckedContinuation { continuation in
-            _ = loadObject(ofClass: String.self) { string, _ in continuation.resume(returning: string) }
-        }
     }
 }
