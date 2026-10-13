@@ -11,6 +11,8 @@ final class SelectionOverlayController: SelectionOverlay {
     /// What the views show now, so a pointer that only moves does not redraw them.
     private var shown: (highlight: OverlayInteraction.Highlight, hint: String)?
     private var continuation: CheckedContinuation<CaptureResult?, Never>?
+    /// Counts the runs, so a cancellation of an earlier one that arrives late cannot end a later one.
+    private var runNumber = 0
     private var screenChangeObserver: (any NSObjectProtocol)?
     /// The screens' frames when the overlay came up.
     private var screenFrames: [CGRect] = []
@@ -22,13 +24,17 @@ final class SelectionOverlayController: SelectionOverlay {
 
     func run(mode: SelectionMode, frozen: [FrozenDisplay], windows: [CapturableWindow]) async -> CaptureResult? {
         guard continuation == nil, !frozen.isEmpty else { return nil }
+        runNumber += 1
+        let number = runNumber
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 self.continuation = continuation
                 present(mode: mode, frozen: frozen, windows: windows)
             }
         } onCancel: {
-            Task { @MainActor in self.cancel() }
+            Task { @MainActor in
+                if self.runNumber == number { self.cancel() }
+            }
         }
     }
 

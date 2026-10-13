@@ -10,7 +10,7 @@ nonisolated enum MarkupTool: CaseIterable, Sendable {
         case .rectangle: "Hình chữ nhật"
         case .text: "Chữ"
         case .highlighter: "Bút dạ quang"
-        case .redact: "Che"
+        case .redact: "Che vùng"
         }
     }
 
@@ -40,7 +40,9 @@ nonisolated enum MarkupTool: CaseIterable, Sendable {
             return min(bounds.width, bounds.height) >= minimum ? .redact(bounds) : nil
         case .highlighter:
             let width = thickness.highlighterWidth * pixelsPerPoint
-            return max(bounds.width, bounds.height) >= minimum ? .highlighter(points: points, color: color, width: width) : nil
+            // Half transparent, so dark text under the multiply blend stays readable.
+            let ink = RGBAColor(r: color.r, g: color.g, b: color.b, a: color.a * 0.5)
+            return max(bounds.width, bounds.height) >= minimum ? .highlighter(points: points, color: ink, width: width) : nil
         case .text:
             return nil
         }

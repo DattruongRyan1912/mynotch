@@ -26,6 +26,10 @@ public final class ScreenshotModule: FeatureModule {
     let pasteboard: any PasteboardWriting
     let recognizer: any TextRecognizing
     let saveDirectory: (SaveLocation) -> URL?
+    /// Each drag of a capture gets its own folder here; `start` removes the folders of earlier runs.
+    let dragCopiesDirectory: URL
+    /// The markup editor's windows, made when the first one opens.
+    var editors: MarkupEditorWindowController?
     private(set) var context: ModuleContext?
     private(set) var keys: ScreenshotSettingKeys?
     private let service: any CaptureService
@@ -44,7 +48,8 @@ public final class ScreenshotModule: FeatureModule {
             onScreenWindows: {
                 CapturableWindow.parse(CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? [])
             },
-            saveDirectory: { $0.standardDirectory }
+            saveDirectory: { $0.standardDirectory },
+            dragCopiesDirectory: Self.defaultDragCopiesDirectory
         )
     }
 
@@ -56,7 +61,8 @@ public final class ScreenshotModule: FeatureModule {
         pasteboard: any PasteboardWriting,
         hasScreenAccess: @escaping () -> Bool,
         onScreenWindows: @escaping () -> [CapturableWindow],
-        saveDirectory: @escaping (SaveLocation) -> URL?
+        saveDirectory: @escaping (SaveLocation) -> URL?,
+        dragCopiesDirectory: URL
     ) {
         self.service = service
         self.overlay = overlay
@@ -65,6 +71,7 @@ public final class ScreenshotModule: FeatureModule {
         self.hasScreenAccess = hasScreenAccess
         self.onScreenWindows = onScreenWindows
         self.saveDirectory = saveDirectory
+        self.dragCopiesDirectory = dragCopiesDirectory
     }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
@@ -73,6 +80,7 @@ public final class ScreenshotModule: FeatureModule {
         } catch {
             throw .failed(reason: "Không tạo được thư mục lưu ảnh chụp")
         }
+        try? FileManager.default.removeItem(at: dragCopiesDirectory)
         let store = CaptureStore(directory: context.storage.directory, cachesDirectory: context.storage.cachesDirectory, logger: context.logger)
         state.records = store.load()
         self.store = store
@@ -88,6 +96,8 @@ public final class ScreenshotModule: FeatureModule {
 
     public func stop() async {
         overlay.cancel()
+        editors?.closeAll()
+        editors = nil
         ocrTask?.cancel()
         ocrTask = nil
         context = nil
@@ -123,11 +133,11 @@ public final class ScreenshotModule: FeatureModule {
     /// One capture from hotkey to tray, or to the clipboard for OCR. Ignored while an overlay is already up.
     func capture(mode: SelectionMode) async {
         guard let context, let keys, let store, !isSelecting else { return }
-        cancelOCR()
         guard hasScreenAccess() else {
             showPermissionHint()
             return
         }
+        cancelOCR()
         let selection: Selection?
         do {
             selection = try await select(mode)

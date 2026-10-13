@@ -144,12 +144,47 @@ import Testing
     }
 
     @Test func annotationsScaleWhenTheDocumentSizeDiffers() throws {
-        let output = try Self.flatten(.filled(width: 200, height: 150), [
+        let original = Bitmap(width: 200, height: 150) { x, y in Bitmap.Pixel(r: UInt8(x), g: UInt8(y), b: 255, a: 255) }
+        let output = try Self.flatten(original, [
             .rectangle(CGRect(x: 20, y: 10, width: 60, height: 30), style: .init(color: .red, width: 3)),
+            .redact(CGRect(x: 60, y: 50, width: 20, height: 20)),
         ], imageSize: CGSize(width: 100, height: 75))
+        // The redaction covers (120, 100) to (160, 140) in pixels.
+        #expect(output.pixel(120, 100) != original.pixel(120, 100))
+        #expect(output.pixel(159, 139) != original.pixel(159, 139))
+        #expect(output.pixel(119, 100) == original.pixel(119, 100))
+        #expect(output.pixel(160, 139) == original.pixel(160, 139))
         #expect(Self.isRed(output.pixel(40, 50)))
         #expect(Self.isRed(output.pixel(100, 20)))
-        #expect(output.pixel(100, 50) == .white)
-        #expect(output.pixel(25, 15) == .white)
+        #expect(output.pixel(100, 50) == original.pixel(100, 50))
+        #expect(output.pixel(25, 15) == original.pixel(25, 15))
+    }
+
+    @Test func redactMergesALeftoverStripNarrowerThanHalfABlockIntoThePreviousBlock() throws {
+        let original = Bitmap(width: 240, height: 180) { x, y in Bitmap.Pixel(r: UInt8(x), g: UInt8(y), b: 0, a: 255) }
+        // 12 px blocks: 25 = 2 × 12 + 1, so the last row and column are one pixel wide.
+        let output = try Self.flatten(original, [.redact(CGRect(x: 0, y: 0, width: 25, height: 25))])
+        for (x, y) in [(24, 24), (24, 0), (0, 24), (24, 11)] {
+            #expect(output.pixel(x, y) != original.pixel(x, y), "pixel (\(x), \(y)) kept its original value")
+        }
+        #expect(output.pixel(24, 24) == output.pixel(12, 12))
+        #expect(output.pixel(24, 5) == output.pixel(12, 5))
+        #expect(output.pixel(5, 24) == output.pixel(5, 12))
+        // The first block is still a block of its own.
+        #expect(output.pixel(5, 5) != output.pixel(12, 12))
+    }
+
+    @Test func redactKeepsALeftoverStripOfAtLeastHalfABlockAsItsOwnBlock() throws {
+        let original = Bitmap(width: 240, height: 180) { x, y in Bitmap.Pixel(r: UInt8(x), g: UInt8(y), b: 0, a: 255) }
+        // 30 = 2 × 12 + 6.
+        let output = try Self.flatten(original, [.redact(CGRect(x: 0, y: 0, width: 30, height: 12))])
+        #expect(output.pixel(24, 5) == output.pixel(29, 5))
+        #expect(output.pixel(24, 5) != output.pixel(23, 5))
+    }
+
+    @Test func aRedactionSmallerThanHalfABlockIsStillOneBlock() throws {
+        let original = Bitmap(width: 240, height: 180) { x, y in Bitmap.Pixel(r: UInt8(x), g: UInt8(y), b: 0, a: 255) }
+        let output = try Self.flatten(original, [.redact(CGRect(x: 50, y: 50, width: 4, height: 3))])
+        #expect(output.pixel(50, 50) == output.pixel(53, 52))
     }
 }

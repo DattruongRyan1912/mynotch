@@ -4,8 +4,7 @@ import UniformTypeIdentifiers
 
 /// What the tray's cards can do with a capture. Results show as toasts, since the notch is open.
 extension ScreenshotModule {
-    /// Each drag gets its own folder here; the system's cleanup of temporary files removes them later.
-    static let dragCopiesDirectory = FileManager.default.temporaryDirectory
+    static let defaultDragCopiesDirectory = FileManager.default.temporaryDirectory
         .appending(path: "MyNotch Screenshot Drags", directoryHint: .isDirectory)
 
     /// Where "Lưu vào" puts captures now, for the menu's title.
@@ -27,7 +26,7 @@ extension ScreenshotModule {
     }
 
     /// "Lưu vào <folder>": a copy in the folder chosen in Settings.
-    func save(_ record: CaptureRecord) {
+    func save(_ record: CaptureRecord) async {
         guard let store, let context, let keys else { return }
         let location = context.settings.value(keys.saveLocation)
         guard let directory = saveDirectory(location) else {
@@ -35,7 +34,7 @@ extension ScreenshotModule {
             return
         }
         do {
-            _ = try store.export(id: record.id, to: directory)
+            _ = try await store.export(id: record.id, to: directory)
             showToast("Đã lưu vào \(location.title)", systemImage: "checkmark.circle.fill")
         } catch {
             context.logger.error("Could not save a capture to \(location.rawValue, privacy: .public): \(error, privacy: .public)")
@@ -44,7 +43,7 @@ extension ScreenshotModule {
     }
 
     /// "Lưu thành…": asks where, in a panel that blocks until it is answered, so the caller pins the notch around it.
-    func saveAs(_ record: CaptureRecord) {
+    func saveAs(_ record: CaptureRecord) async {
         guard let context, let keys else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
@@ -55,22 +54,27 @@ extension ScreenshotModule {
         NSApp.activate()
         defer { previous?.activate() }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        export(record, to: url)
+        await export(record, to: url)
     }
 
     /// Copies the capture to `destination`, replacing a file the save panel already asked about.
-    func export(_ record: CaptureRecord, to destination: URL) {
+    func export(_ record: CaptureRecord, to destination: URL) async {
         guard let source = store?.url(for: record.id) else { return }
         do {
-            if FileManager.default.fileExists(atPath: destination.path(percentEncoded: false)) {
-                try FileManager.default.removeItem(at: destination)
-            }
-            try FileManager.default.copyItem(at: source, to: destination)
+            try await Self.copyReplacing(source, to: destination)
             showToast("Đã lưu \(destination.lastPathComponent)", systemImage: "checkmark.circle.fill")
         } catch {
             context?.logger.error("Could not save a capture: \(error, privacy: .public)")
             showToast("Không lưu được ảnh", systemImage: "exclamationmark.triangle.fill")
         }
+    }
+
+    @concurrent
+    private nonisolated static func copyReplacing(_ source: URL, to destination: URL) async throws {
+        if FileManager.default.fileExists(atPath: destination.path(percentEncoded: false)) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.copyItem(at: source, to: destination)
     }
 
     func delete(_ record: CaptureRecord) {
@@ -87,15 +91,21 @@ extension ScreenshotModule {
         startOCR(loaded.image, feedback: .toast)
     }
 
-    /// A copy of the capture under a readable name, for dragging out: the stored file is named by its ID, and a
-    /// drop must never move or rename it. nil when the copy fails.
+    /// A hard link to the capture under a readable name, for dragging out (a copy when linking is not possible):
+    /// the stored file is named by its ID, and a drop must never move or rename it. Linking costs no pixel copy on
+    /// the main actor, and the store replaces files rather than rewriting them, so the link keeps the dragged
+    /// version. nil when neither works.
     func dragFileURL(for record: CaptureRecord) -> URL? {
         guard let source = store?.url(for: record.id) else { return nil }
-        let folder = Self.dragCopiesDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let folder = dragCopiesDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
         let copy = folder.appending(path: "\(CaptureStore.exportBaseName(of: record)).png", directoryHint: .notDirectory)
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            try FileManager.default.copyItem(at: source, to: copy)
+            do {
+                try FileManager.default.linkItem(at: source, to: copy)
+            } catch {
+                try FileManager.default.copyItem(at: source, to: copy)
+            }
             return copy
         } catch {
             context?.logger.error("Could not prepare a dragged capture: \(error, privacy: .public)")
@@ -115,7 +125,7 @@ extension ScreenshotModule {
 
     /// The PNG decoded off the main actor, with its scale (pixels per point) from the DPI the store wrote into it.
     @concurrent
-    private nonisolated static func loadImage(at url: URL) async -> (image: CGImage, scale: CGFloat)? {
+    nonisolated static func loadImage(at url: URL) async -> (image: CGImage, scale: CGFloat)? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { return nil }
         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]

@@ -118,13 +118,14 @@ nonisolated enum MarkupRenderer {
         let region = rect.standardized.integral.intersection(CGRect(x: 0, y: 0, width: context.width, height: context.height))
         guard !region.isEmpty, let data = context.data else { return }
         context.flush()
-        let rowBytes = context.bytesPerRow, maxX = Int(region.maxX), maxY = Int(region.maxY)
-        for blockY in stride(from: Int(region.minY), to: maxY, by: blockSize) {
-            for blockX in stride(from: Int(region.minX), to: maxX, by: blockSize) {
-                let rows = blockY..<min(blockY + blockSize, maxY), rowLength = min(blockSize, maxX - blockX) * 4
+        let rowBytes = context.bytesPerRow
+        let columnBlocks = blockRanges(Int(region.minX)..<Int(region.maxX), blockSize: blockSize)
+        for rows in blockRanges(Int(region.minY)..<Int(region.maxY), blockSize: blockSize) {
+            for columns in columnBlocks {
+                let rowLength = columns.count * 4
                 var sums = (red: 0, green: 0, blue: 0, alpha: 0)
                 for y in rows {
-                    var pixel = (data + y * rowBytes + blockX * 4).assumingMemoryBound(to: UInt8.self)
+                    var pixel = (data + y * rowBytes + columns.lowerBound * 4).assumingMemoryBound(to: UInt8.self)
                     let rowEnd = pixel + rowLength
                     while pixel < rowEnd {
                         sums.red += Int(pixel[0])
@@ -134,12 +135,23 @@ nonisolated enum MarkupRenderer {
                         pixel += 4
                     }
                 }
-                let count = rows.count * rowLength / 4
+                let count = rows.count * columns.count
                 var average = [sums.red, sums.green, sums.blue, sums.alpha].map { UInt8(($0 + count / 2) / count) }
                 for y in rows {
-                    memset_pattern4(data + y * rowBytes + blockX * 4, &average, rowLength)
+                    memset_pattern4(data + y * rowBytes + columns.lowerBound * 4, &average, rowLength)
                 }
             }
         }
+    }
+
+    /// `range` cut into blocks of `blockSize` from its start. A leftover block narrower than half a block joins the
+    /// one before it, so no thin strip or lone corner pixel is left looking like the original.
+    private static func blockRanges(_ range: Range<Int>, blockSize: Int) -> [Range<Int>] {
+        var blocks = stride(from: range.lowerBound, to: range.upperBound, by: blockSize).map { $0..<min($0 + blockSize, range.upperBound) }
+        if blocks.count > 1, let last = blocks.last, last.count * 2 < blockSize {
+            blocks.removeLast()
+            blocks[blocks.count - 1] = blocks[blocks.count - 1].lowerBound..<last.upperBound
+        }
+        return blocks
     }
 }

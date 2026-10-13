@@ -2,27 +2,15 @@ import SwiftUI
 
 /// Draws markup on a capture. The host owns the window and decides what Lưu, Copy and Huỷ do; each callback receives
 /// the document including text still being typed, so the host can flatten it with `MarkupRenderer` or compare it
-/// with what was last saved. The model is created once per view, so host a new view for another capture.
+/// with what was last saved. The host builds the model once and keeps it, so the preview is not rendered again
+/// whenever SwiftUI recreates this view.
 struct MarkupEditorView: View {
-    @State private var model: MarkupEditorModel
+    let model: MarkupEditorModel
     @FocusState private var isTyping: Bool
-    private let onSave: (MarkupDocument) -> Void
-    private let onCopy: (MarkupDocument) -> Void
-    private let onCancel: (MarkupDocument) -> Void
-
-    /// `document` reopens earlier markup of the same image.
-    init(
-        image: CGImage,
-        document: MarkupDocument? = nil,
-        onSave: @escaping (MarkupDocument) -> Void,
-        onCopy: @escaping (MarkupDocument) -> Void,
-        onCancel: @escaping (MarkupDocument) -> Void
-    ) {
-        _model = State(initialValue: MarkupEditorModel(image: image, document: document))
-        self.onSave = onSave
-        self.onCopy = onCopy
-        self.onCancel = onCancel
-    }
+    @Environment(\.displayScale) private var displayScale
+    let onSave: (MarkupDocument) -> Void
+    let onCopy: (MarkupDocument) -> Void
+    let onCancel: (MarkupDocument) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,8 +22,8 @@ struct MarkupEditorView: View {
             )
             Divider()
             GeometryReader { proxy in
-                // At most one point per pixel, so small captures are not blown up into a blur.
-                canvas(fit: ImageFit(imageSize: model.document.imageSize, viewSize: proxy.size, maximumScale: 1))
+                // At most one device pixel per image pixel, so small captures are not blown up into a blur.
+                canvas(fit: ImageFit(imageSize: model.document.imageSize, viewSize: proxy.size, maximumScale: 1 / displayScale))
             }
             .background(Color(nsColor: .underPageBackgroundColor))
         }
@@ -61,6 +49,8 @@ struct MarkupEditorView: View {
             .contentShape(.rect)
             .gesture(drawingGesture(fit: fit))
             .pointerStyle(model.tool == .text ? .horizontalText : .rectSelection)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Ảnh chụp đang sửa")
             if let text = model.text {
                 textField(at: fit.viewPoint(fromImage: text.origin), fontSize: model.textFontSize * fit.scale)
             }
@@ -116,6 +106,8 @@ struct MarkupEditorView: View {
     /// pixels underneath, so it shows as a dashed box until the drag ends and the preview pixelates it.
     private static func draw(_ draft: Annotation?, in context: inout GraphicsContext, fit: ImageFit) {
         guard let draft else { return }
+        // A drag may leave the picture; what is drawn outside it would not be saved.
+        context.clip(to: Path(fit.frame))
         if case .redact(let rect) = draft {
             let path = Path(fit.viewRect(fromImage: rect))
             context.fill(path, with: .color(.black.opacity(0.35)))

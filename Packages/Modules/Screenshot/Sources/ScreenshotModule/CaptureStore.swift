@@ -130,11 +130,11 @@ final class CaptureStore {
     }
 
     /// Copies a capture into `directory` as "Ảnh chụp <yyyy-MM-dd HH.mm.ss>.png", adding " 2", " 3"… when taken.
-    func export(id: UUID, to directory: URL) throws -> URL {
+    /// The folder is not touched on the main actor: the first access to Desktop or Documents can wait for the user
+    /// to answer the system's permission prompt.
+    func export(id: UUID, to directory: URL) async throws -> URL {
         guard let record = record(id) else { throw StoreError.unknownCapture }
-        let destination = Self.freeURL(in: directory, baseName: Self.exportBaseName(of: record), separator: " ", pathExtension: "png")
-        try FileManager.default.copyItem(at: fileURL(of: record), to: destination)
-        return destination
+        return try await Self.copy(fileURL(of: record), into: directory, baseName: Self.exportBaseName(of: record))
     }
 
     /// "Ảnh chụp <yyyy-MM-dd HH.mm.ss>": the name a capture gets outside the store, from when it was taken.
@@ -274,7 +274,7 @@ final class CaptureStore {
     }
 
     /// `<baseName>.<pathExtension>` in `directory`, or the first free `<baseName><separator>2…` when taken.
-    private static func freeURL(in directory: URL, baseName: String, separator: String, pathExtension: String) -> URL {
+    private nonisolated static func freeURL(in directory: URL, baseName: String, separator: String, pathExtension: String) -> URL {
         var url = directory.appending(path: "\(baseName).\(pathExtension)")
         var number = 1
         while FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) {
@@ -282,6 +282,13 @@ final class CaptureStore {
             url = directory.appending(path: "\(baseName)\(separator)\(number).\(pathExtension)")
         }
         return url
+    }
+
+    @concurrent
+    private nonisolated static func copy(_ source: URL, into directory: URL, baseName: String) async throws -> URL {
+        let destination = freeURL(in: directory, baseName: baseName, separator: " ", pathExtension: "png")
+        try FileManager.default.copyItem(at: source, to: destination)
+        return destination
     }
 
     /// PNG bytes via ImageIO with a DPI of 72 × `scale`. Encoding a large capture takes a while, hence off the main actor.

@@ -1,4 +1,5 @@
 import CoreGraphics
+import MyNotchCore
 import Observation
 
 /// Text being typed in the editor before it becomes an annotation.
@@ -116,7 +117,16 @@ nonisolated struct TextDraft: Equatable, Sendable {
         preview = Self.flattened(image, history.document)
     }
 
+    /// The preview falls back to the plain capture when rendering fails; that is logged, since the annotations
+    /// would otherwise vanish from the screen without a word.
     private static func flattened(_ image: CGImage, _ document: MarkupDocument) -> CGImage {
-        document.annotations.isEmpty ? image : MarkupRenderer.flatten(image, document) ?? image
+        guard !document.annotations.isEmpty else { return image }
+        guard let flattened = MarkupRenderer.flatten(image, document) else {
+            logger.error("Could not render \(document.annotations.count) annotations onto a \(image.width)×\(image.height) capture")
+            return image
+        }
+        return flattened
     }
+
+    private static let logger = Log.logger(category: "MarkupEditor")
 }

@@ -429,7 +429,8 @@ import Testing
         formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
         let base = "Ảnh chụp \(formatter.string(from: record.createdAt))"
 
-        let exported = try (1...3).map { _ in try store.export(id: record.id, to: destination) }
+        var exported: [URL] = []
+        for _ in 1...3 { exported.append(try await store.export(id: record.id, to: destination)) }
 
         #expect(exported.map(\.lastPathComponent) == ["\(base).png", "\(base) 2.png", "\(base) 3.png"])
         let original = try Data(contentsOf: try #require(store.url(for: record.id)))
@@ -447,6 +448,6 @@ import Testing
         await #expect(throws: CaptureStore.StoreError.unknownCapture) {
             try await store.replaceImage(id: unknown, with: Self.image(width: 10, height: 10))
         }
-        #expect(throws: CaptureStore.StoreError.unknownCapture) { try store.export(id: unknown, to: self.root) }
+        await #expect(throws: CaptureStore.StoreError.unknownCapture) { try await store.export(id: unknown, to: self.root) }
     }
 }

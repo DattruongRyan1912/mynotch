@@ -69,7 +69,10 @@ import Testing
         model.color = .yellow
         drag(model, [CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 0), CGPoint(x: 5, y: 0), CGPoint(x: 6, y: 0), CGPoint(x: 10, y: 0), CGPoint(x: 11, y: 0)])
         #expect(model.document.annotations == [
-            .highlighter(points: [CGPoint(x: 0, y: 0), CGPoint(x: 5, y: 0), CGPoint(x: 10, y: 0), CGPoint(x: 11, y: 0)], color: .yellow, width: 32),
+            .highlighter(
+                points: [CGPoint(x: 0, y: 0), CGPoint(x: 5, y: 0), CGPoint(x: 10, y: 0), CGPoint(x: 11, y: 0)],
+                color: RGBAColor(r: RGBAColor.yellow.r, g: RGBAColor.yellow.g, b: RGBAColor.yellow.b, a: 0.5), width: 32
+            ),
         ])
     }
 
@@ -117,6 +120,8 @@ import Testing
         #expect(model.text?.origin == CGPoint(x: 20, y: 20))
         model.text?.string = "hai"
         model.select(.arrow)
+        #expect(model.text == nil)
+        #expect(model.document.annotations.compactMap(Self.textString) == ["một", "hai"])
         model.select(.text)
         drag(model, [CGPoint(x: 30, y: 30)])
         model.text?.string = "ba"
@@ -146,6 +151,10 @@ import Testing
         #expect(model.document == document)
         #expect(model.preview !== image)
         #expect(!model.canUndo)
+    }
+
+    @Test func theRedactToolSaysWhatItDoes() {
+        #expect(MarkupTool.redact.title == "Che vùng")
     }
 
     static func textString(_ annotation: Annotation) -> String? {

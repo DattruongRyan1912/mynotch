@@ -20,13 +20,18 @@ import Testing
     let harness: RegistryHarness
     /// The harness's temporary storage root, removed when the test ends.
     let temporaryRoot: URL
+    /// Where the module puts the copies it offers for dragging, so tests never share the real folder.
+    let dragsDirectory: URL
 
     init() throws {
         let system = system
+        let dragsDirectory = FileManager.default.temporaryDirectory.appending(path: "MyNotchTests-drags-\(UUID().uuidString)", directoryHint: .isDirectory)
+        self.dragsDirectory = dragsDirectory
         module = ScreenshotModule(
             service: service, overlay: overlay, recognizer: recognizer, pasteboard: pasteboard,
             hasScreenAccess: { system.hasScreenAccess }, onScreenWindows: { system.windows },
-            saveDirectory: { _ in system.saveDirectory }
+            saveDirectory: { _ in system.saveDirectory },
+            dragCopiesDirectory: dragsDirectory
         )
         harness = RegistryHarness([module])
         harness.permissions.statuses[.screenRecording] = .granted
@@ -35,7 +40,10 @@ import Testing
         overlay.result = Self.region
     }
 
-    deinit { try? FileManager.default.removeItem(at: temporaryRoot) }
+    deinit {
+        try? FileManager.default.removeItem(at: temporaryRoot)
+        try? FileManager.default.removeItem(at: dragsDirectory)
+    }
 
     static func gradient(width: Int, height: Int) throws -> CGImage {
         try Bitmap(width: width, height: height) { x, y in Bitmap.Pixel(r: UInt8(x), g: UInt8(y), b: 0, a: 255) }.image()
@@ -83,16 +91,30 @@ import Testing
         #expect(module.makeSettingsView(environment) != nil)
     }
 
-    @Test func startRegistersTheCaptureAndOCRHotkeys() async {
+    @Test func startRegistersTheCaptureAndOCRHotkeys() async throws {
         await start()
 
         #expect(harness.hotkeys.registrations.map(\.id) == ["screenshot_capture", "screenshot_ocr"])
         #expect(harness.hotkeys.registrations.map(\.title) == ["Chụp màn hình", "OCR vùng chọn"])
-        #expect(ScreenshotModule.captureShortcut == KeyboardShortcuts.Shortcut(.s, modifiers: [.control, .option]))
-        #expect(ScreenshotModule.ocrShortcut == KeyboardShortcuts.Shortcut(.o, modifiers: [.control, .option]))
+        let capture = try #require(harness.hotkeys.registrations.first)
+        let ocr = try #require(harness.hotkeys.registrations.last)
+        #expect(harness.hotkeyBackend.getShortcut(for: capture.name) == KeyboardShortcuts.Shortcut(.s, modifiers: [.control, .option]))
+        #expect(harness.hotkeyBackend.getShortcut(for: ocr.name) == KeyboardShortcuts.Shortcut(.o, modifiers: [.control, .option]))
 
         await harness.registry.setEnabled(false, for: "screenshot")
         #expect(harness.hotkeys.registrations.isEmpty)
+    }
+
+    @Test(.timeLimit(.minutes(1))) func theHotkeysStartTheirModes() async {
+        await start()
+        overlay.result = nil
+
+        #expect(harness.hotkeyBackend.trigger("screenshot_capture"))
+        await waitUntil { overlay.runs.count == 1 }
+        #expect(harness.hotkeyBackend.trigger("screenshot_ocr"))
+        await waitUntil { overlay.runs.count == 2 }
+
+        #expect(overlay.runs.map(\.mode) == [.regionOrWindow, .ocrRegion])
     }
 
     @Test func startLoadsTheCapturesOnDisk() async throws {
@@ -498,6 +520,23 @@ import Testing
         #expect(harness.presenter.toastCount == 1)
     }
 
+    @Test(.timeLimit(.minutes(1))) func aHotkeyWithoutPermissionLeavesARunningOCRAlone() async throws {
+        await start()
+        recognizer.isGated = true
+        await module.capture(mode: .ocrRegion)
+        await waitUntil { recognizer.calls.count == 1 }
+        let running = try #require(module.ocrTask)
+        system.hasScreenAccess = false
+
+        await module.capture(mode: .regionOrWindow)
+        #expect(!running.isCancelled)
+        #expect(activity?.id == "ocr")
+
+        recognizer.release()
+        await running.value
+        #expect(pasteboard.texts == ["Xin chào"])
+    }
+
     // MARK: Tray
 
     func capturedRecord() async throws -> CaptureRecord {
@@ -524,7 +563,7 @@ import Testing
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         system.saveDirectory = folder
 
-        module.save(record)
+        await module.save(record)
 
         let saved = try FileManager.default.contentsOfDirectory(atPath: folder.path(percentEncoded: false))
         #expect(saved.count == 1)
@@ -537,7 +576,7 @@ import Testing
         let record = try await capturedRecord()
         system.saveDirectory = nil
 
-        module.save(record)
+        await module.save(record)
 
         #expect(harness.presenter.toastCount == 1)
     }
@@ -547,7 +586,7 @@ import Testing
         let destination = temporaryRoot.appending(path: "chosen.png")
         try Data("old".utf8).write(to: destination)
 
-        module.export(record, to: destination)
+        await module.export(record, to: destination)
 
         let source = try #require(CGImageSourceCreateWithURL(destination as CFURL, nil))
         #expect(CGImageSourceGetCount(source) == 1)
@@ -586,15 +625,29 @@ import Testing
         #expect(max(thumbnail?.width ?? 0, thumbnail?.height ?? 0) == 20)
     }
 
-    @Test func draggingOffersAReadablyNamedCopy() async throws {
+    @Test func draggingOffersAReadablyNamedLinkOrCopy() async throws {
         let record = try await capturedRecord()
+        let stored = try #require(module.store?.url(for: record.id))
 
         let url = try #require(module.dragFileURL(for: record))
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
 
         #expect(url.lastPathComponent.hasPrefix("Ảnh chụp "))
         #expect(url.pathExtension == "png")
-        #expect(url != module.store?.url(for: record.id))
-        #expect(FileManager.default.contentsEqual(atPath: url.path(percentEncoded: false), andPath: try #require(module.store?.url(for: record.id)).path(percentEncoded: false)))
+        #expect(url != stored)
+        #expect(url.deletingLastPathComponent().deletingLastPathComponent().standardizedFileURL == dragsDirectory.standardizedFileURL)
+        #expect(FileManager.default.contentsEqual(atPath: url.path(percentEncoded: false), andPath: stored.path(percentEncoded: false)))
+        // Same volume, so no second copy of the pixels is written on the main actor.
+        let inodes = try [url, stored].map { try #require(FileManager.default.attributesOfItem(atPath: $0.path(percentEncoded: false))[.systemFileNumber] as? Int) }
+        #expect(inodes[0] == inodes[1])
+    }
+
+    @Test func startRemovesDragCopiesOfEarlierRuns() async throws {
+        let leftover = dragsDirectory.appending(path: "earlier", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: leftover, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: leftover.appending(path: "old.png"))
+
+        await start()
+
+        #expect(!FileManager.default.fileExists(atPath: leftover.path(percentEncoded: false)))
     }
 }

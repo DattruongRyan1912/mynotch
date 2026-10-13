@@ -44,6 +44,7 @@ struct ScreenshotTabView: View {
                 LazyHStack(alignment: .top, spacing: 10) {
                     ForEach(records) { record in
                         ScreenshotCardView(record: record, module: module)
+                            .onTapGesture(count: 2) { Task { await module.edit(record) } }
                             .onDrag { startDrag(record) }
                             .contextMenu { menu(for: record) }
                     }
@@ -55,12 +56,10 @@ struct ScreenshotTabView: View {
 
     @ViewBuilder private func menu(for record: CaptureRecord) -> some View {
         Button("Chép", systemImage: "doc.on.doc") { Task { await module.copy(record) } }
-        Button("Lưu vào \(module.saveLocation.title)", systemImage: "square.and.arrow.down") { module.save(record) }
+        Button("Lưu vào \(module.saveLocation.title)", systemImage: "square.and.arrow.down") { Task { await module.save(record) } }
         Button("Lưu thành…", systemImage: "square.and.arrow.down.on.square") { saveAs(record) }
         Button("OCR (chép chữ)", systemImage: "text.viewfinder") { Task { await module.recognizeText(in: record) } }
-        // The markup editor window comes with the editor's wiring.
-        Button("Sửa", systemImage: "pencil.and.scribble") {}
-            .disabled(true)
+        Button("Sửa", systemImage: "pencil.and.scribble") { Task { await module.edit(record) } }
         Divider()
         Button("Xoá", systemImage: "trash", role: .destructive) { module.delete(record) }
     }
@@ -68,9 +67,11 @@ struct ScreenshotTabView: View {
     private func saveAs(_ record: CaptureRecord) {
         isSaving = true
         notch.setPinned(true)
-        module.saveAs(record)
-        isSaving = false
-        notch.setPinned(isMenuOpen)
+        Task {
+            await module.saveAs(record)
+            isSaving = false
+            notch.setPinned(isMenuOpen)
+        }
     }
 
     /// SwiftUI reports no end of a drag, so the notch hears it ended once the mouse button is up again.
