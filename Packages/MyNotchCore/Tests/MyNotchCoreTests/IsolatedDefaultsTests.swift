@@ -21,6 +21,10 @@ import MyNotchTestSupport
         #expect(IsolatedUserDefaults(suiteName: "com.apple.finder") == nil)
     }
 
+    @Test func refusesNamesThatCouldPointOutsideThePreferencesFolder() {
+        #expect(IsolatedUserDefaults(suiteName: "MyNotchTests./../../Documents/x") == nil)
+    }
+
     @Test func makeIsolatedDefaultsReturnsFreshDefaults() {
         let first = makeIsolatedDefaults()
         let second = makeIsolatedDefaults()

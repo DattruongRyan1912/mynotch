@@ -4,7 +4,7 @@ import Testing
 @testable import MediaModule
 
 @Suite final class LyricsServiceTests {
-    let root = FileManager.default.temporaryDirectory.appending(path: "LyricsServiceTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+    let root = ScratchFolders.shared.reserve("LyricsService")
     let client = FakeHTTPClient()
     let scheduler = ManualScheduler()
 

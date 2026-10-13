@@ -4,9 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # makeIsolatedDefaults() removes its MyNotchTests.<uuid> suite when released, but a test process that ends within
-# seconds of that leaves the plist behind, and RegistryHarness storage leaves a MyNotchTests-<uuid> temporary folder
-# once a module creates its directories. cfprefsd writes the suites a few seconds after each test process exits,
-# so clean up at both ends.
+# seconds of that leaves the plist behind. Test folders are all MyNotchTests-<label>-<uuid> (ScratchFolders in
+# MyNotchTestSupport) and removed when the test process exits, so one only survives a run that crashed.
+# cfprefsd writes the suites a few seconds after each test process exits, so clean up at both ends.
 # Only items untouched for 15 minutes go, so test runs in other worktrees are never disturbed.
 cleanup_test_files() {
     # cfprefsd is asked to forget each domain first, otherwise `defaults domains` keeps listing it.

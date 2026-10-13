@@ -1,11 +1,12 @@
 import Foundation
+import MyNotchTestSupport
 import Testing
 import UniformTypeIdentifiers
 @testable import ShelfModule
 
-/// A unique temporary folder, removed by the caller's OS cleanup like the other packages' test folders.
+/// A unique temporary folder, removed when the test process exits.
 func makeTempDirectory() throws -> URL {
-    let url = FileManager.default.temporaryDirectory.appending(path: "MyNotchShelfTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+    let url = ScratchFolders.shared.reserve("Shelf")
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
 }

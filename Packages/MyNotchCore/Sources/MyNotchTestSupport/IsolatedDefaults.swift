@@ -14,9 +14,10 @@ public final class IsolatedUserDefaults: UserDefaults {
 
     public nonisolated let suite: String
 
-    /// Fails for a name without the `MyNotchTests.` prefix, so this class can never touch real preferences.
+    /// Fails for a name without the `MyNotchTests.` prefix, or with a `/` that could point the plist outside the
+    /// preferences folder, so this class can never touch real preferences.
     public nonisolated override init?(suiteName suite: String?) {
-        guard let suite, suite.hasPrefix(Self.prefix) else { return nil }
+        guard let suite, suite.hasPrefix(Self.prefix), !suite.contains("/") else { return nil }
         self.suite = suite
         super.init(suiteName: suite)
         Self.track(plist: URL.libraryDirectory.appending(path: "Preferences/\(suite).plist").path)

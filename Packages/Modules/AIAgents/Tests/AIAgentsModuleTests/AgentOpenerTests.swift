@@ -1,11 +1,12 @@
 import Foundation
+import MyNotchTestSupport
 import Testing
 @testable import AIAgentsModule
 
 /// Which working directories may be opened. The path comes from a transcript, so it is checked before it
 /// reaches Terminal: opening a file there would run it.
 @Suite struct AgentOpenerTests {
-    let sandbox = FileManager.default.temporaryDirectory.appending(path: "AgentOpenerTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+    let sandbox = ScratchFolders.shared.reserve("AgentOpener")
 
     init() throws {
         try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: true)
