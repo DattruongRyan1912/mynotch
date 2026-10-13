@@ -1,5 +1,5 @@
 /// System permissions a module can require.
-nonisolated public enum Permission: Hashable, Sendable, Codable {
+nonisolated public enum Permission: Hashable, Sendable {
     case accessibility
     case screenRecording
     case calendars
