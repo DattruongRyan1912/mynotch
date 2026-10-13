@@ -44,6 +44,8 @@ struct MediaTabView: View {
                 Spacer(minLength: 2)
                 TransportControls(isPlaying: store.state.isPlaying, send: actions.send)
                     .frame(maxWidth: .infinity)
+                    // An overlay, so the buttons stay centred under the progress bar.
+                    .overlay(alignment: .trailing) { NowPlayingBars(store: store) }
             }
             .frame(height: Self.artworkSize)
         }

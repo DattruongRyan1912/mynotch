@@ -19,6 +19,13 @@ final class NowPlayingStore {
     private(set) var activityAppIcon: NSImage?
     private(set) var activityIsPlaying = false
 
+    /// Levels from the system audio tap (0…1, low to high) while it runs; nil keeps the bars' made-up motion.
+    private(set) var spectrumBands: [Float]?
+    /// The tap has heard only silence while music played: the Settings rows explain how to grant the permission.
+    private(set) var spectrumPermissionLikelyDenied = false
+    /// Bars on screen right now (beside the notch, in the tab, one per screen); the tap only runs while there are some.
+    private(set) var spectrumViewCount = 0
+
     @ObservationIgnored private var reducer = NowPlayingReducer()
     @ObservationIgnored private let lookUpApp: @MainActor (String) -> PlayerApp?
     /// Revision of `artworkImage`'s bytes; the image is decoded only when it changes.
@@ -55,6 +62,24 @@ final class NowPlayingStore {
         update(.empty)
         showInActivity(artwork: nil, icon: nil, isPlaying: false)
         if failureMessage != nil { failureMessage = nil }
+    }
+
+    /// Assigns only real changes: the bars redraw for every assignment, about 30 times a second.
+    func showSpectrum(_ bands: [Float]?) {
+        if bands != spectrumBands { spectrumBands = bands }
+    }
+
+    func setSpectrumPermissionLikelyDenied(_ likelyDenied: Bool) {
+        if likelyDenied != spectrumPermissionLikelyDenied { spectrumPermissionLikelyDenied = likelyDenied }
+    }
+
+    /// Called by each bars view as it appears and disappears.
+    func spectrumViewAppeared() {
+        spectrumViewCount += 1
+    }
+
+    func spectrumViewDisappeared() {
+        spectrumViewCount = max(spectrumViewCount - 1, 0)
     }
 
     private func update(_ newState: NowPlayingState) {

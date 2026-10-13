@@ -12,11 +12,14 @@ struct MediaSettingsKeys {
     let pauseGraceSeconds: SettingKey<Int>
     /// Bundle IDs whose playback never shows the live activity.
     let hiddenApps: SettingKey<[String]>
+    /// Bars follow the music through a system audio tap, which needs the system audio recording permission.
+    let realSpectrum: SettingKey<Bool>
 
     init(_ settings: ModuleSettings) {
         showActivity = settings.key("showActivity", default: true)
         pauseGraceSeconds = settings.key("pauseGraceSeconds", default: 5, clampedTo: Self.pauseGraceRange)
         hiddenApps = settings.key("hiddenApps", default: [])
+        realSpectrum = settings.key("realSpectrum", default: false)
     }
 }
 
@@ -42,10 +45,13 @@ public final class MediaModule: FeatureModule {
     let store: NowPlayingStore
     /// nil when the app was built without the adapter; `start` then reports the module unavailable.
     private let makeSource: ((any Scheduler) -> any NowPlayingSource)?
+    private let spectrum: any SpectrumSource
     private var source: (any NowPlayingSource)?
+    private var spectrumFeed: SpectrumFeed?
     private var context: ModuleContext?
     private var policy = ActivityPolicy()
     private var showActivity = true
+    private var realSpectrum = false
     /// Track the published activity belongs to; nil while none is published. Compared so the activity is
     /// set once per track: everything that changes while a track plays is read by its views from `store`.
     private var publishedTrack: TrackIdentity?
@@ -54,23 +60,34 @@ public final class MediaModule: FeatureModule {
 
     /// The app passes the bundled mediaremote-adapter script and framework; nil when the build did not include them.
     public convenience init(adapterScript: URL?, adapterFramework: URL?) {
+        // Creating the tap object does nothing yet: it touches Core Audio only when it starts.
+        let spectrum = SystemAudioTap(bandCount: NowPlayingBars.barCount)
         if let adapterScript, let adapterFramework {
-            self.init { scheduler in AdapterProcess(script: adapterScript, framework: adapterFramework, scheduler: scheduler) }
+            self.init(
+                makeSource: { scheduler in AdapterProcess(script: adapterScript, framework: adapterFramework, scheduler: scheduler) },
+                spectrum: spectrum
+            )
         } else {
-            self.init(makeSource: nil)
+            self.init(makeSource: nil, spectrum: spectrum)
         }
     }
 
-    /// For tests: lines come from `source` instead of perl.
-    convenience init(source: any NowPlayingSource, lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed) {
-        self.init(makeSource: { _ in source }, lookUpApp: lookUpApp)
+    /// For tests: lines come from `source` instead of perl, levels from `spectrum` instead of a system audio tap.
+    convenience init(
+        source: any NowPlayingSource,
+        spectrum: any SpectrumSource,
+        lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed
+    ) {
+        self.init(makeSource: { _ in source }, spectrum: spectrum, lookUpApp: lookUpApp)
     }
 
     private init(
         makeSource: ((any Scheduler) -> any NowPlayingSource)?,
+        spectrum: any SpectrumSource,
         lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed
     ) {
         self.makeSource = makeSource
+        self.spectrum = spectrum
         store = NowPlayingStore(lookUpApp: lookUpApp)
     }
 
@@ -82,15 +99,23 @@ public final class MediaModule: FeatureModule {
         store.reset()
         policy = ActivityPolicy()
         publishedTrack = nil
+        spectrumFeed = SpectrumFeed(source: spectrum, store: store, scheduler: context.scheduler, logger: context.logger)
         applySettings(context.settings)
         registerHotkeys(context.hotkeys)
         let settings = context.settings
         let keys = MediaSettingsKeys(settings)
         context.run { [weak self] in
             let changes = Observations {
-                (settings.value(keys.showActivity), settings.value(keys.pauseGraceSeconds), settings.value(keys.hiddenApps))
+                (
+                    settings.value(keys.showActivity), settings.value(keys.pauseGraceSeconds),
+                    settings.value(keys.hiddenApps), settings.value(keys.realSpectrum)
+                )
             }
             for await _ in changes { self?.settingsChanged() }
+        }
+        let store = store
+        context.run { [weak self] in
+            for await _ in Observations({ store.spectrumViewCount }) { self?.updateSpectrum() }
         }
         let source = makeSource(context.scheduler)
         self.source = source
@@ -103,6 +128,8 @@ public final class MediaModule: FeatureModule {
     public func stop() async {
         source?.stop()
         source = nil
+        spectrumFeed?.shutDown()
+        spectrumFeed = nil
         context = nil
         cancelDeadline()
         policy = ActivityPolicy()
@@ -122,7 +149,9 @@ public final class MediaModule: FeatureModule {
         return AnyView(MediaSettingsView(
             showActivity: environment.settings.binding(keys.showActivity),
             pauseGraceSeconds: environment.settings.binding(keys.pauseGraceSeconds),
-            hiddenApps: environment.settings.binding(keys.hiddenApps)
+            hiddenApps: environment.settings.binding(keys.hiddenApps),
+            realSpectrum: environment.settings.binding(keys.realSpectrum),
+            store: store
         ))
     }
 
@@ -162,6 +191,7 @@ public final class MediaModule: FeatureModule {
         policy = ActivityPolicy(pauseGrace: policy.pauseGrace, hiddenBundleIDs: policy.hiddenBundleIDs)
         cancelDeadline()
         refreshActivity()
+        updateSpectrum()
     }
 
     private func settingsChanged() {
@@ -175,12 +205,19 @@ public final class MediaModule: FeatureModule {
         showActivity = settings.value(keys.showActivity)
         policy.pauseGrace = TimeInterval(settings.value(keys.pauseGraceSeconds))
         policy.hiddenBundleIDs = Set(settings.value(keys.hiddenApps))
+        realSpectrum = settings.value(keys.realSpectrum)
     }
 
     private func evaluate(at now: Date) {
         policy.update(store.state, at: now)
         scheduleDeadline(from: now)
         refreshActivity()
+        updateSpectrum()
+    }
+
+    /// The tap runs only while the setting is on, something plays and some bars are on screen.
+    private func updateSpectrum() {
+        spectrumFeed?.update(isEnabled: realSpectrum, isPlaying: store.state.isPlaying, isShown: store.spectrumViewCount > 0)
     }
 
     /// One timer for the policy's next deadline (end of the pause grace or of the track-change debounce).

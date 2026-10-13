@@ -4,9 +4,15 @@ import UniformTypeIdentifiers
 
 /// Plain rows: the Settings page provides the Form and the section.
 struct MediaSettingsView: View {
+    /// System Settings › Privacy & Security › Screen & System Audio Recording, where "System Audio Recording Only" is.
+    static let audioCaptureSettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")!
+
     @Binding var showActivity: Bool
     @Binding var pauseGraceSeconds: Int
     @Binding var hiddenApps: [String]
+    @Binding var realSpectrum: Bool
+    /// Only for the permission hint; the module keeps the store for its whole life, running or not.
+    let store: NowPlayingStore
 
     var body: some View {
         Group {
@@ -18,6 +24,18 @@ struct MediaSettingsView: View {
                 HiddenAppsRows(bundleIDs: $hiddenApps)
             }
             .disabled(!showActivity)
+            Toggle(isOn: $realSpectrum) {
+                Text("Cột sóng theo phổ âm thanh thật")
+                Text("Cần quyền ghi âm thanh hệ thống. Khi tắt, cột sóng chạy hiệu ứng giả.")
+            }
+            if realSpectrum && store.spectrumPermissionLikelyDenied {
+                LabeledContent {
+                    Link("Mở System Settings", destination: Self.audioCaptureSettingsURL)
+                } label: {
+                    Text("Không nhận được âm thanh hệ thống")
+                    Text("Có thể quyền đã bị từ chối. Bật MyNotch trong Quyền riêng tư & Bảo mật › Ghi màn hình & âm thanh hệ thống.")
+                }
+            }
         }
     }
 }

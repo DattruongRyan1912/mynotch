@@ -11,7 +11,7 @@ import Testing
     let harness: RegistryHarness
 
     init() {
-        module = MediaModule(source: source, lookUpApp: { _ in nil })
+        module = MediaModule(source: source, spectrum: FakeSpectrumSource(), lookUpApp: { _ in nil })
         harness = RegistryHarness([module])
     }
 
