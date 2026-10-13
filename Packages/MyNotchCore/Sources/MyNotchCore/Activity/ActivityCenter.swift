@@ -40,12 +40,14 @@ public final class ActivityCenter {
 
     public func clear(id: String, from module: ModuleID) {
         let key = "\(module.rawValue)/\(id)"
+        guard entries.contains(where: { $0.id == key }) else { return }
         expiries.removeValue(forKey: key)?.cancel()
         entries.removeAll { $0.id == key }
         recompute()
     }
 
     public func clearAll(from module: ModuleID) {
+        guard entries.contains(where: { $0.module == module }) else { return }
         for entry in entries where entry.module == module {
             expiries.removeValue(forKey: entry.id)?.cancel()
         }
@@ -58,17 +60,36 @@ public final class ActivityCenter {
     }
 }
 
-/// Module-scoped facade over `ActivityCenter`.
+/// Module-scoped facade over `ActivityCenter`. Inert after `invalidate()`, so a stopped
+/// module's in-flight work cannot bring its activities back.
 public final class ActivityPublisher {
     private let center: ActivityCenter
     private let module: ModuleID
+    private var isActive = true
 
     init(center: ActivityCenter, module: ModuleID) {
         self.center = center
         self.module = module
     }
 
-    public func set(_ activity: LiveActivity) { center.set(activity, from: module) }
-    public func clear(id: String) { center.clear(id: id, from: module) }
-    public func clearAll() { center.clearAll(from: module) }
+    public func set(_ activity: LiveActivity) {
+        guard isActive else { return }
+        center.set(activity, from: module)
+    }
+
+    public func clear(id: String) {
+        guard isActive else { return }
+        center.clear(id: id, from: module)
+    }
+
+    public func clearAll() {
+        guard isActive else { return }
+        center.clearAll(from: module)
+    }
+
+    /// Called by the registry when the module stops; also removes everything the module published.
+    func invalidate() {
+        center.clearAll(from: module)
+        isActive = false
+    }
 }

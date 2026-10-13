@@ -32,13 +32,39 @@ import MyNotchTestSupport
         center.set(activity("x", expiresAfter: .seconds(4)), from: "m")
         scheduler.advance(by: .seconds(3))
         #expect(center.current?.id == "m/x")
+        scheduler.advance(by: .seconds(1))
+        #expect(center.current == nil)
     }
 
     @Test func clearAllRemovesOnlyThatModule() {
-        let center = ActivityCenter(scheduler: ManualScheduler())
-        center.set(activity("a"), from: "one")
-        center.set(activity("b"), from: "two")
+        let scheduler = ManualScheduler()
+        let center = ActivityCenter(scheduler: scheduler)
+        center.set(activity("a", expiresAfter: .seconds(4)), from: "one")
+        center.set(activity("b", expiresAfter: .seconds(4)), from: "two")
         center.clearAll(from: "two")
         #expect(center.entries.map(\.id) == ["one/a"])
+        #expect(center.current?.id == "one/a")
+        #expect(scheduler.pendingCount == 1)
+        scheduler.advance(by: .seconds(4))
+        #expect(center.current == nil)
+    }
+
+    @Test func sameActivityIDInDifferentModulesIsIndependent() {
+        let scheduler = ManualScheduler()
+        let center = ActivityCenter(scheduler: scheduler)
+        center.set(activity("x", expiresAfter: .seconds(4)), from: "one")
+        center.set(activity("x"), from: "two")
+        scheduler.advance(by: .seconds(4))
+        #expect(center.entries.map(\.id) == ["two/x"])
+    }
+
+    @Test func invalidatedPublisherIsInert() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        let publisher = ActivityPublisher(center: center, module: "m")
+        publisher.set(activity("live"))
+        publisher.invalidate()
+        #expect(center.current == nil)
+        publisher.set(activity("late"))
+        #expect(center.current == nil)
     }
 }
