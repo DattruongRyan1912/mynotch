@@ -1,5 +1,7 @@
 import Foundation
-// `TranslationSession` isn't Sendable; it is created, cached and called from the main actor only.
+// `TranslationSession` and `LanguageAvailability` aren't Sendable. They are created and kept on the main actor, but
+// their async methods run off it; `AppleTranslationEngine` runs one translation at a time, so a session never
+// translates two texts at once.
 @preconcurrency import Translation
 
 /// The real Translation framework behind `AppleTranslationEngine`.
@@ -23,6 +25,8 @@ private final class SystemTranslatingSession: TranslatingSession {
     func translate(_ text: String) async throws -> String {
         try await session.translate(text).targetText
     }
+
+    func cancel() { session.cancel() }
 }
 
 extension PairStatus {

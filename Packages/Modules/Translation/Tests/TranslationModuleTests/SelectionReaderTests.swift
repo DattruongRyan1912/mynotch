@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import TranslationModule
 
@@ -6,17 +7,28 @@ final class FakeAccessibility: AccessibilityClient {
     var application: FocusedApplication? = FocusedApplication(processID: 42, bundleID: "com.apple.Safari")
     /// Returned by successive reads; reads past the end find no selection.
     var selections: [String?] = []
+    /// Indices of the reads the app doesn't answer in time.
+    var unresponsiveReads: Set<Int> = []
+    /// Attributes that are true on the app element, including the ones `enable` set.
+    var attributes: Set<String> = []
     private(set) var reads = 0
+    /// Attributes `enable` set, in order.
     private(set) var enabled: [String] = []
 
     func focusedApplication() -> FocusedApplication? { application }
 
-    func selectedText(in application: FocusedApplication) -> String? {
+    func readSelection(in application: FocusedApplication) -> SelectionRead {
         defer { reads += 1 }
-        return reads < selections.count ? selections[reads] : nil
+        if unresponsiveReads.contains(reads) { return .unresponsive }
+        return (reads < selections.count ? selections[reads] : nil).map(SelectionRead.text) ?? .empty
     }
 
-    func enable(_ attribute: String, in application: FocusedApplication) { enabled.append(attribute) }
+    func isEnabled(_ attribute: String, in application: FocusedApplication) -> Bool { attributes.contains(attribute) }
+
+    func enable(_ attribute: String, in application: FocusedApplication) {
+        enabled.append(attribute)
+        attributes.insert(attribute)
+    }
 }
 
 final class FakePauses {
@@ -59,6 +71,13 @@ final class FakePauses {
         #expect(accessibility.reads == 0)
     }
 
+    @Test func myNotchItselfIsNotRead() async {
+        accessibility.application = FocusedApplication(processID: getpid(), bundleID: "com.google.Chrome")
+        accessibility.selections = ["Xin chào"]
+        #expect(await makeReader().selectedText() == nil)
+        #expect(accessibility.reads == 0)
+    }
+
     @Test func emptySelectionIsNil() async {
         accessibility.selections = [""]
         #expect(await makeReader().selectedText() == nil)
@@ -90,6 +109,45 @@ final class FakePauses {
         #expect(accessibility.reads == 7)
     }
 
+    @Test func attributeAlreadyOnIsNotSetAgain() async {
+        focus("com.google.Chrome")
+        accessibility.attributes = ["AXEnhancedUserInterface"]
+        accessibility.selections = [nil, "Hello"]
+        #expect(await makeReader().selectedText() == "Hello")
+        #expect(accessibility.enabled.isEmpty)
+    }
+
+    @Test func anAppEnabledEarlierIsNotWaitedForAgain() async {
+        focus("com.google.Chrome")
+        let reader = makeReader()
+        #expect(await reader.selectedText() == nil)
+        #expect(accessibility.reads == 7)
+
+        #expect(await reader.selectedText() == nil)
+        #expect(accessibility.reads == 8)
+        #expect(pauses.durations.count == 6)
+        #expect(accessibility.enabled == ["AXEnhancedUserInterface"])
+    }
+
+    @Test func unresponsiveAppIsNotRetried() async {
+        focus("com.google.Chrome")
+        accessibility.unresponsiveReads = [0]
+        accessibility.selections = [nil, "Hello"]
+        #expect(await makeReader().selectedText() == nil)
+        #expect(accessibility.reads == 1)
+        #expect(accessibility.enabled.isEmpty)
+        #expect(pauses.durations.isEmpty)
+    }
+
+    @Test func appBecomingUnresponsiveStopsTheRetries() async {
+        focus("com.google.Chrome")
+        accessibility.unresponsiveReads = [1]
+        accessibility.selections = [nil, nil, "Hello"]
+        #expect(await makeReader().selectedText() == nil)
+        #expect(accessibility.reads == 2)
+        #expect(pauses.durations.count == 1)
+    }
+
     @Test(arguments: ["com.apple.Safari", nil] as [String?])
     func otherAppsAreNotRetried(bundleID: String?) async {
         focus(bundleID)
@@ -116,5 +174,6 @@ final class FakePauses {
         pauses.error = CancellationError()
         #expect(await makeReader().selectedText() == nil)
         #expect(accessibility.reads == 1)
+        #expect(pauses.durations.count == 1)
     }
 }

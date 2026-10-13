@@ -1,3 +1,5 @@
+import Foundation
+
 /// Reads the text selected in the frontmost app through Accessibility. Returns nil whenever it can't,
 /// so the caller opens the tab empty.
 final class SelectionReader {
@@ -23,13 +25,15 @@ final class SelectionReader {
             "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.todesktop.230313mzl4w4u92",
             "notion.id", "md.obsidian", "com.figma.Desktop", "com.linear", "com.postmanlabs.mac",
             "com.anthropic.claudefordesktop", "com.vng.zalo", "org.whispersystems.signal-desktop",
-            "com.github.GitHubClient", "com.1password.1password",
+            "com.github.GitHubClient",
         ]
         return Dictionary(uniqueKeysWithValues: chromium.map { ($0, "AXEnhancedUserInterface") } + electron.map { ($0, "AXManualAccessibility") })
     }()
 
     private let accessibility: any AccessibilityClient
     private let pause: @MainActor (Duration) async throws -> Void
+    /// Apps whose accessibility tree this reader already turned on: once built, waiting for it won't help.
+    private var enabledApplications: Set<FocusedApplication> = []
 
     init(
         accessibility: any AccessibilityClient = SystemAccessibilityClient(),
@@ -40,11 +44,21 @@ final class SelectionReader {
     }
 
     func selectedText() async -> String? {
-        guard accessibility.isTrusted, let application = accessibility.focusedApplication() else { return nil }
-        if let text = read(application) { return text }
+        // MyNotch's own text fields don't count: the selection belongs to another app.
+        guard accessibility.isTrusted, let application = accessibility.focusedApplication(),
+              application.processID != getpid() else { return nil }
+        switch read(application) {
+        case .text(let text): return text
+        case .unresponsive: return nil
+        case .empty: break
+        }
         guard useChromiumAccessibility,
-              let attribute = application.bundleID.flatMap({ Self.accessibilityAttributes[$0] }) else { return nil }
-        accessibility.enable(attribute, in: application)
+              let attribute = application.bundleID.flatMap({ Self.accessibilityAttributes[$0] }),
+              !enabledApplications.contains(application) else { return nil }
+        if !accessibility.isEnabled(attribute, in: application) {
+            accessibility.enable(attribute, in: application)
+        }
+        enabledApplications.insert(application)
         // The app builds its tree asynchronously after the attribute is set.
         for _ in 0..<Self.retries {
             do {
@@ -52,14 +66,18 @@ final class SelectionReader {
             } catch {
                 return nil   // cancelled
             }
-            if let text = read(application) { return text }
+            switch read(application) {
+            case .text(let text): return text
+            case .unresponsive: return nil
+            case .empty: continue
+            }
         }
         return nil
     }
 
-    private func read(_ application: FocusedApplication) -> String? {
-        guard let text = accessibility.selectedText(in: application),
-              !text.allSatisfy(\.isWhitespace) else { return nil }
-        return text
+    private func read(_ application: FocusedApplication) -> SelectionRead {
+        let read = accessibility.readSelection(in: application)
+        if case .text(let text) = read, text.allSatisfy(\.isWhitespace) { return .empty }
+        return read
     }
 }

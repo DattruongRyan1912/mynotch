@@ -23,14 +23,16 @@ nonisolated struct LanguageDetector: Sendable {
     /// Direction for `text`: the detected language, else the source used last, else the pair's other language.
     /// When the source is the target's language, the target flips to the other language of the preferred pair,
     /// so Vietnamese text with target Vietnamese translates to English.
+    /// - Parameter candidates: languages the text may be in, normally every supported one. The pair, the target
+    ///   and the last source are always included, first, so English text resolves to the pair's "en", not "en-AU".
     func resolveDirection(
         text: String,
+        candidates: [Locale.Language],
         preferredPair: (Locale.Language, Locale.Language),
         target: Locale.Language,
         lastSource: Locale.Language?
     ) -> (source: Locale.Language, target: Locale.Language) {
-        // Only the languages the user works with, so a short phrase isn't mistaken for an unrelated language.
-        let candidates = [preferredPair.0, preferredPair.1, target] + (lastSource.map { [$0] } ?? [])
+        let candidates = [preferredPair.0, preferredPair.1, target] + (lastSource.map { [$0] } ?? []) + candidates
         return Self.resolveDirection(detected: detect(text, among: candidates), preferredPair: preferredPair, target: target, lastSource: lastSource)
     }
 

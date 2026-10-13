@@ -20,6 +20,18 @@ final class LoadCounter {
         #expect(loads.count == 1)
     }
 
+    @Test func anEmptyListIsAskedForAgain() async {
+        let loads = LoadCounter()
+        let languages = SupportedLanguages {
+            loads.count += 1
+            return loads.count == 1 ? [] : [Locale.Language(identifier: "vi")]
+        }
+        #expect(await languages.all().isEmpty)
+        #expect(await languages.all() == [Locale.Language(identifier: "vi")])
+        #expect(await languages.all() == [Locale.Language(identifier: "vi")])
+        #expect(loads.count == 2)
+    }
+
     @Test func namesAreVietnamese() {
         #expect(SupportedLanguages.name(of: Locale.Language(identifier: "en-GB")) == "Tiếng Anh (Vương quốc Anh)")
         #expect(SupportedLanguages.name(of: Locale.Language(identifier: "vi")) == "Tiếng Việt")

@@ -7,6 +7,13 @@ import Testing
     let vi = Locale.Language(identifier: "vi")
     let en = Locale.Language(identifier: "en")
     let ja = Locale.Language(identifier: "ja")
+    let de = Locale.Language(identifier: "de")
+    /// `LanguageAvailability().supportedLanguages` on macOS 26.5.
+    let supported = [
+        "ar-AE", "da", "de", "de-CH", "en", "en-AU", "en-CA", "en-GB", "en-IE", "en-IN", "en-NZ", "en-SG", "en-ZA",
+        "es", "es-MX", "es-US", "fr", "fr-CA", "hi", "id", "it", "it-CH", "ja", "ko", "nb", "nl", "pl", "pt", "pt-PT",
+        "ru", "sv", "th", "tr", "uk", "vi", "zh", "zh-HK", "zh-TW",
+    ].map(Locale.Language.init(identifier:))
 
     @Test func detectsVietnameseAndEnglish() throws {
         let vietnamese = try #require(detector.detect("Xin chào, hôm nay trời đẹp quá", among: [vi, en]))
@@ -20,6 +27,13 @@ import Testing
     @Test func mixedTextFollowsTheDominantLanguage() {
         #expect(detector.detect("Meeting lúc 3 giờ chiều nhé", among: [vi, en])?.language == vi)
         #expect(detector.detect("OK thanks, see you", among: [vi, en])?.language == en)
+    }
+
+    @Test func onlyTheCandidatesAreConsidered() {
+        let german = "Guten Morgen, wie geht es dir heute?"
+        #expect(detector.detect(german, among: supported)?.language == de)
+        let constrained = detector.detect(german, among: [vi, en])?.language
+        #expect(constrained == nil || [vi, en].contains(constrained))
     }
 
     @Test func returnsTheCandidateThatWasPassedIn() {
@@ -43,31 +57,43 @@ import Testing
     }
 
     @Test func detectedLanguageBecomesTheSource() {
-        let direction = detector.resolveDirection(text: "Hello, how are you today?", preferredPair: (vi, en), target: vi, lastSource: ja)
-        #expect(direction.source == en)
-        #expect(direction.target == vi)
+        let english = direction("Hello, how are you today?", target: vi, lastSource: ja)
+        #expect(english.source == en)
+        #expect(english.target == vi)
+        let german = direction("Guten Morgen, wie geht es dir heute?", target: vi, lastSource: en)
+        #expect(german.source == de)
+        #expect(german.target == vi)
     }
 
     @Test func lowConfidenceFallsBackToTheLastSource() {
         let unsure = LanguageDetector.resolveDirection(detected: (en, 0.4), preferredPair: (vi, en), target: vi, lastSource: ja)
         #expect(unsure.source == ja)
         #expect(unsure.target == vi)
-        let undetectable = detector.resolveDirection(text: "42", preferredPair: (vi, en), target: vi, lastSource: en)
+        // Among every supported language "Hi" is only a weak guess.
+        let greeting = direction("Hi", target: vi, lastSource: en)
+        #expect(greeting.source == en)
+        #expect(greeting.target == vi)
+        let undetectable = direction("42", target: vi, lastSource: en)
         #expect(undetectable.source == en)
         #expect(undetectable.target == vi)
     }
 
+    @Test func confidenceOfOneHalfIsEnough() {
+        #expect(LanguageDetector.resolveDirection(detected: (en, 0.5), preferredPair: (vi, en), target: vi, lastSource: ja).source == en)
+        #expect(LanguageDetector.resolveDirection(detected: (en, 0.4999), preferredPair: (vi, en), target: vi, lastSource: ja).source == ja)
+    }
+
     @Test func withoutDetectionOrHistoryTheSourceIsThePairsOtherLanguage() {
-        let toVietnamese = detector.resolveDirection(text: "", preferredPair: (vi, en), target: vi, lastSource: nil)
+        let toVietnamese = direction("", target: vi, lastSource: nil)
         #expect(toVietnamese.source == en)
         #expect(toVietnamese.target == vi)
-        let toEnglish = detector.resolveDirection(text: "", preferredPair: (vi, en), target: en, lastSource: nil)
+        let toEnglish = direction("", target: en, lastSource: nil)
         #expect(toEnglish.source == vi)
         #expect(toEnglish.target == en)
     }
 
     @Test func sourceEqualToTheTargetFlipsTheTarget() {
-        let detected = detector.resolveDirection(text: "Xin chào, hôm nay trời đẹp quá", preferredPair: (vi, en), target: vi, lastSource: en)
+        let detected = direction("Xin chào, hôm nay trời đẹp quá", target: vi, lastSource: en)
         #expect(detected.source == vi)
         #expect(detected.target == en)
         let remembered = LanguageDetector.resolveDirection(detected: nil, preferredPair: (vi, en), target: en, lastSource: en)
@@ -76,15 +102,18 @@ import Testing
     }
 
     @Test func flipComparesTheWrittenLanguageNotTheRegion() {
-        let british = Locale.Language(identifier: "en-GB")
-        let direction = detector.resolveDirection(text: "Hello, how are you today?", preferredPair: (vi, en), target: british, lastSource: nil)
-        #expect(direction.source == en)
-        #expect(direction.target == vi)
+        let english = direction("Hello, how are you today?", target: Locale.Language(identifier: "en-GB"), lastSource: nil)
+        #expect(english.source == en)   // the pair's language, not one of the supported English variants
+        #expect(english.target == vi)
     }
 
     @Test func targetOutsideThePairFlipsToThePairsFirstLanguage() {
-        let direction = detector.resolveDirection(text: "こんにちは、元気ですか", preferredPair: (vi, en), target: ja, lastSource: nil)
-        #expect(direction.source == ja)
-        #expect(direction.target == vi)
+        let japanese = direction("こんにちは、元気ですか", target: ja, lastSource: nil)
+        #expect(japanese.source == ja)
+        #expect(japanese.target == vi)
+    }
+
+    private func direction(_ text: String, target: Locale.Language, lastSource: Locale.Language?) -> (source: Locale.Language, target: Locale.Language) {
+        detector.resolveDirection(text: text, candidates: supported, preferredPair: (vi, en), target: target, lastSource: lastSource)
     }
 }

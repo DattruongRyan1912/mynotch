@@ -1,9 +1,9 @@
 import Foundation
-// Translation predates Swift concurrency annotations; its types are only used on the main actor here.
+// `LanguageAvailability` isn't Sendable; each one is created for a single call and never shared.
 @preconcurrency import Translation
 
 /// Languages the Translation framework supports, sorted by Vietnamese name for the language menus.
-/// The list is loaded once: it only changes with an OS update.
+/// The list is loaded once, since it only changes with an OS update; an empty answer is asked for again.
 final class SupportedLanguages {
     private nonisolated static let vietnamese = Locale(identifier: "vi")
     private let load: @MainActor () async -> [Locale.Language]
@@ -14,11 +14,12 @@ final class SupportedLanguages {
     }
 
     func all() async -> [Locale.Language] {
-        if let loaded { return await loaded.value }
         let load = load
-        let task = Task { Self.sorted(await load()) }
+        let task = loaded ?? Task { Self.sorted(await load()) }
         loaded = task
-        return await task.value
+        let languages = await task.value
+        if languages.isEmpty, loaded == task { loaded = nil }
+        return languages
     }
 
     /// Menu title, e.g. "Tiếng Anh (Vương quốc Anh)".

@@ -1,6 +1,5 @@
 import Foundation
-// Translation predates Swift concurrency annotations; its types are only used on the main actor here.
-@preconcurrency import Translation
+import Translation
 
 /// Whether a language pair can be translated on this Mac.
 nonisolated enum PairStatus: Equatable, Sendable {
@@ -14,18 +13,25 @@ nonisolated enum PairStatus: Equatable, Sendable {
 nonisolated enum TranslationFailure: Error, Equatable, Sendable {
     case notInstalled
     case unsupported
+    /// A newer request superseded this one, or its caller was cancelled: there is nothing to show.
+    case cancelled
     case failed(String)
 }
 
 /// On-device translation; faked in module tests.
 protocol TranslationEngine: AnyObject {
     func status(from source: Locale.Language, to target: Locale.Language) async -> PairStatus
+    /// Blank text translates to "". A new request supersedes the one in flight, which fails with `.cancelled`.
     func translate(_ text: String, from source: Locale.Language, to target: Locale.Language) async throws(TranslationFailure) -> String
+    /// Cancels the running translation and releases the sessions; call when the module stops.
+    func invalidate()
 }
 
 /// One translation session for a fixed pair.
 protocol TranslatingSession: AnyObject {
     func translate(_ text: String) async throws -> String
+    /// Ends the session for good: every later `translate` fails with `TranslationError.alreadyCancelled`.
+    func cancel()
 }
 
 /// The Translation framework calls `AppleTranslationEngine` makes, so its caching and error mapping are
@@ -35,10 +41,13 @@ protocol TranslationSessionProviding {
     func makeSession(from source: Locale.Language, to target: Locale.Language) -> any TranslatingSession
 }
 
-/// Translates with Apple's on-device models. Keeps one session per pair, so a pair's model loads only once.
+/// Translates with Apple's on-device models. Keeps one session per pair, so a pair's model loads only once,
+/// and runs one translation at a time, so a session is never used concurrently.
 final class AppleTranslationEngine: TranslationEngine {
     private let sessions: any TranslationSessionProviding
     private var cache: [LanguagePair: any TranslatingSession] = [:]
+    /// The newest request; the next one waits for it to finish before touching a session.
+    private var latest: Task<String, any Error>?
 
     init(sessions: any TranslationSessionProviding = SystemTranslationSessions()) {
         self.sessions = sessions
@@ -49,29 +58,63 @@ final class AppleTranslationEngine: TranslationEngine {
     }
 
     func translate(_ text: String, from source: Locale.Language, to target: Locale.Language) async throws(TranslationFailure) -> String {
+        latest?.cancel()   // the latest request wins
+        guard !text.allSatisfy(\.isWhitespace) else { return "" }
         let pair = LanguagePair(source: source, target: target)
-        let session = cache[pair] ?? sessions.makeSession(from: source, to: target)
+        let previous = latest
+        let request = Task {
+            _ = await previous?.result
+            try Task.checkCancellation()
+            return try await self.run(text, pair)
+        }
+        latest = request
+        do {
+            // Cancelling the session would end it for every later request, so only this request is cancelled.
+            return try await withTaskCancellationHandler { try await request.value } onCancel: { request.cancel() }
+        } catch {
+            throw TranslationFailure(error)
+        }
+    }
+
+    func invalidate() {
+        latest?.cancel()
+        cache.values.forEach { $0.cancel() }
+        cache.removeAll()
+    }
+
+    private func run(_ text: String, _ pair: LanguagePair) async throws(TranslationFailure) -> String {
+        let session = cache[pair] ?? sessions.makeSession(from: pair.source, to: pair.target)
         cache[pair] = session
         do {
-            return try await session.translate(text)
+            let translation = try await session.translate(text)
+            try Task.checkCancellation()   // superseded while the session worked: the result is stale
+            return translation
         } catch {
-            let failure = TranslationFailure(error)
-            switch failure {
-            case .notInstalled, .unsupported:
-                // This session can't work, and may not notice a pack installed later: start afresh next time.
-                if cache[pair] === session { cache[pair] = nil }
-            case .failed:
-                break
-            }
-            throw failure
+            if Self.endsSession(error), cache[pair] === session { cache[pair] = nil }
+            throw TranslationFailure(error)
+        }
+    }
+
+    /// The session can't work any more, or (without a language pack) may not notice one installed later.
+    private static func endsSession(_ error: any Error) -> Bool {
+        switch error {
+        case TranslationError.notInstalled, TranslationError.alreadyCancelled, TranslationError.unsupportedSourceLanguage,
+             TranslationError.unsupportedTargetLanguage, TranslationError.unsupportedLanguagePairing:
+            true
+        default:
+            false
         }
     }
 }
 
 extension TranslationFailure {
-    /// Maps Translation framework errors to the cases the tab distinguishes.
+    /// Maps Translation framework and task errors to the cases the tab distinguishes.
     init(_ error: any Error) {
         switch error {
+        case let failure as TranslationFailure:
+            self = failure
+        case is CancellationError, TranslationError.alreadyCancelled:
+            self = .cancelled
         case TranslationError.notInstalled:
             self = .notInstalled
         case TranslationError.unsupportedSourceLanguage, TranslationError.unsupportedTargetLanguage,
