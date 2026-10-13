@@ -11,18 +11,24 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     public let kind: NotchKind
     /// Size of the physical (or virtual) notch body.
     public let notchSize: CGSize
+    /// Horizontal offset of the notch centre from the screen centre (hardware notches can be asymmetric).
+    public let centerOffset: CGFloat
     public let config: NotchLayoutConfig
 
     public init(screen: ScreenDescriptor, config: NotchLayoutConfig) {
         self.config = config
-        if screen.safeAreaTop > 0, let left = screen.auxiliaryTopLeftWidth, let right = screen.auxiliaryTopRightWidth {
+        if screen.safeAreaTop > 0, let left = screen.auxiliaryTopLeftWidth, let right = screen.auxiliaryTopRightWidth,
+           screen.frame.width - left - right > 0 {
             kind = .hardware
-            notchSize = CGSize(width: screen.frame.width - left - right, height: screen.safeAreaTop)
+            let width = screen.frame.width - left - right
+            notchSize = CGSize(width: width, height: screen.safeAreaTop)
+            centerOffset = left + width / 2 - screen.frame.width / 2
         } else {
             kind = .virtual
             let width = min(max(config.virtualNotchWidth, 120), 300)
             let height = min(max(config.virtualNotchHeight ?? screen.menuBarHeight, 24), 40)
             notchSize = CGSize(width: width, height: height)
+            centerOffset = 0
         }
     }
 
@@ -53,7 +59,7 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     /// Panel frame anchored to the top centre of `screenFrame` (AppKit coordinates).
     public func panelFrame(in screenFrame: CGRect) -> CGRect {
         CGRect(
-            x: screenFrame.midX - panelSize.width / 2,
+            x: screenFrame.midX + centerOffset - panelSize.width / 2,
             y: screenFrame.maxY - panelSize.height,
             width: panelSize.width,
             height: panelSize.height
@@ -63,11 +69,22 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     /// Area (screen coordinates) where the pointer counts as "inside" the notch.
     public func hitRect(for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, in screenFrame: CGRect) -> CGRect {
         let size = shapeSize(for: state, contentHeight: contentHeight)
-        return CGRect(
-            x: screenFrame.midX - size.width / 2,
+        let padded = CGRect(
+            x: screenFrame.midX + centerOffset - size.width / 2,
             y: screenFrame.maxY - size.height,
             width: size.width,
             height: size.height
         ).insetBy(dx: -Self.hitPadding, dy: -Self.hitPadding)
+        // AppKit reports the pointer at y == maxY on a screen's top row; y == maxY + 1 already belongs
+        // to a display arranged above, so the rect stops there (CGRect.contains excludes its top edge).
+        return CGRect(x: padded.minX, y: padded.minY, width: padded.width, height: screenFrame.maxY + 1 - padded.minY)
+    }
+}
+
+extension CGRect {
+    /// Screen membership for `NSEvent.mouseLocation`: AppKit reports a screen's top row at `y == maxY`,
+    /// so the top edge belongs to this screen and the bottom edge to the screen below.
+    nonisolated public func containsMouseLocation(_ point: CGPoint) -> Bool {
+        point.x >= minX && point.x < maxX && point.y > minY && point.y <= maxY
     }
 }

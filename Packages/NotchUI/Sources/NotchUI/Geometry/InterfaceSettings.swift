@@ -9,8 +9,9 @@ nonisolated public enum DisplayMode: String, Codable, Sendable, CaseIterable {
 public enum InterfaceSettings {
     public static let displayMode = SettingKey("interface.displayMode", default: DisplayMode.all)
     public static let virtualNotchWidth = SettingKey("interface.virtualNotchWidth", default: 185.0, clampedTo: 120...300)
-    /// 0 means "same as the menu bar".
-    public static let virtualNotchHeight = SettingKey("interface.virtualNotchHeight", default: 0.0, clampedTo: 0...40)
+    /// When true the virtual notch is as tall as the menu bar; otherwise `virtualNotchHeight` is used.
+    public static let virtualNotchMatchesMenuBar = SettingKey("interface.virtualNotchMatchesMenuBar", default: true)
+    public static let virtualNotchHeight = SettingKey("interface.virtualNotchHeight", default: 32.0, clampedTo: 24...40)
     public static let openWidth = SettingKey("interface.openWidth", default: 600.0, clampedTo: 480...720)
     public static let openDelayMs = SettingKey("interface.openDelayMs", default: 150, clampedTo: 0...1000)
     public static let closeDelayMs = SettingKey("interface.closeDelayMs", default: 300, clampedTo: 0...1000)
@@ -35,10 +36,10 @@ nonisolated public struct NotchLayoutConfig: Equatable, Sendable {
 
 extension NotchLayoutConfig {
     public init(settings: SettingsStore) {
-        let height = settings.value(InterfaceSettings.virtualNotchHeight)
         self.init(
             virtualNotchWidth: settings.value(InterfaceSettings.virtualNotchWidth),
-            virtualNotchHeight: height == 0 ? nil : max(height, 24),
+            virtualNotchHeight: settings.value(InterfaceSettings.virtualNotchMatchesMenuBar)
+                ? nil : settings.value(InterfaceSettings.virtualNotchHeight),
             openWidth: settings.value(InterfaceSettings.openWidth)
         )
     }
