@@ -2,7 +2,7 @@ import KeyboardShortcuts
 import Observation
 import SwiftUI
 
-/// All global shortcuts of the app and its modules, backed by KeyboardShortcuts.
+/// All global shortcuts of the app and its modules. The backend is KeyboardShortcuts in the app and a fake in tests.
 @Observable
 public final class HotkeyRegistry {
     public struct Registration: Identifiable {
@@ -13,8 +13,11 @@ public final class HotkeyRegistry {
     }
 
     public private(set) var registrations: [Registration] = []
+    @ObservationIgnored private let backend: any HotkeyBackend
 
-    public init() {}
+    public init(backend: any HotkeyBackend = KeyboardShortcutsBackend()) {
+        self.backend = backend
+    }
 
     /// Registers a shortcut. `localName` must not contain "." (a KeyboardShortcuts rule).
     public func register(
@@ -24,9 +27,9 @@ public final class HotkeyRegistry {
         initial: KeyboardShortcuts.Shortcut? = nil,
         action: @escaping @MainActor () -> Void
     ) {
-        let name = KeyboardShortcuts.Name(Self.qualifiedName(localName, owner: owner), initial: initial)
+        let name = backend.makeName(Self.qualifiedName(localName, owner: owner), initial: initial)
         unregister(name)
-        KeyboardShortcuts.onKeyUp(for: name) { MainActor.assumeIsolated { action() } }
+        backend.onKeyUp(for: name, action: action)
         registrations.append(Registration(name: name, title: title, owner: owner))
     }
 
@@ -39,7 +42,7 @@ public final class HotkeyRegistry {
     /// Groups of registrations that share the same key combination.
     public func conflicts() -> [[Registration]] {
         let assigned = registrations.compactMap { registration in
-            KeyboardShortcuts.getShortcut(for: registration.name).map { ($0, registration) }
+            backend.getShortcut(for: registration.name).map { ($0, registration) }
         }
         return Dictionary(grouping: assigned, by: \.0)
             .values
@@ -54,7 +57,7 @@ public final class HotkeyRegistry {
     }
 
     private func unregister(_ name: KeyboardShortcuts.Name) {
-        KeyboardShortcuts.removeHandler(for: name)
+        backend.removeHandler(for: name)
         registrations.removeAll { $0.name == name }
     }
 }

@@ -131,13 +131,14 @@ final class FakeSystem {
         #expect(harness.hotkeys.registrations.count == 1)
         #expect(registration.id == "clipboard_openClipboard")
         #expect(registration.title == "Mở lịch sử clipboard")
-        #expect(KeyboardShortcuts.getShortcut(for: registration.name) == KeyboardShortcuts.Shortcut(.v, modifiers: [.control, .option]))
+        #expect(harness.hotkeyBackend.getShortcut(for: registration.name) == KeyboardShortcuts.Shortcut(.v, modifiers: [.control, .option]))
 
-        module.openTab()
+        #expect(harness.hotkeyBackend.trigger("clipboard_openClipboard"))
         #expect(harness.presenter.openedTabs == ["clipboard"])
 
         await harness.registry.setEnabled(false, for: "clipboard")
         #expect(harness.hotkeys.registrations.isEmpty)
+        #expect(!harness.hotkeyBackend.trigger("clipboard_openClipboard"))
     }
 
     @Test func stopFlushesACaptureWithoutWaitingForTheSaveDelay() async {

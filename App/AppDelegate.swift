@@ -9,7 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let scheduler = TaskScheduler()
     private let permissions = SystemPermissionCenter()
     private let hotkeys = HotkeyRegistry()
-    private let services = ServiceRegistry()
+    private lazy var services = ServiceRegistry(scheduler: scheduler)
     private let coordinator = NotchCoordinator()
     private lazy var activities = ActivityCenter(scheduler: scheduler)
     private lazy var registry = ModuleRegistry(

@@ -32,14 +32,59 @@ public final class FakePresenter: NotchPresenter {
     public func close() { closeCount += 1 }
 }
 
+/// In-memory shortcuts: nothing reaches the system's hotkeys or the user's defaults. Tests press a shortcut with
+/// `trigger` and play the user changing it in Settings with `setShortcut`.
+public final class FakeHotkeyBackend: HotkeyBackend {
+    /// By raw name. A stored nil is a shortcut the user cleared, which registering again must not bring back.
+    private var shortcuts: [String: KeyboardShortcuts.Shortcut?] = [:]
+    private var handlers: [String: [@MainActor () -> Void]] = [:]
+
+    public init() {}
+
+    public func makeName(_ rawValue: String, initial: KeyboardShortcuts.Shortcut?) -> KeyboardShortcuts.Name {
+        if let initial, shortcuts.index(forKey: rawValue) == nil {
+            shortcuts.updateValue(initial, forKey: rawValue)
+        }
+        // `init(rawValue:)` is the one initializer that writes nothing to the user's defaults.
+        return KeyboardShortcuts.Name(rawValue: rawValue)!
+    }
+
+    public func onKeyUp(for name: KeyboardShortcuts.Name, action: @escaping @MainActor () -> Void) {
+        handlers[name.rawValue, default: []].append(action)
+    }
+
+    public func removeHandler(for name: KeyboardShortcuts.Name) {
+        handlers[name.rawValue] = nil
+    }
+
+    public func getShortcut(for name: KeyboardShortcuts.Name) -> KeyboardShortcuts.Shortcut? {
+        shortcuts[name.rawValue] ?? nil
+    }
+
+    public func setShortcut(_ shortcut: KeyboardShortcuts.Shortcut?, for name: KeyboardShortcuts.Name) {
+        shortcuts.updateValue(shortcut, forKey: name.rawValue)
+    }
+
+    /// Presses the shortcut registered as `rawValue` (e.g. "clipboard_openClipboard"), whether or not it has a key
+    /// combination. Returns false when nothing is registered under it.
+    @discardableResult
+    public func trigger(_ rawValue: String) -> Bool {
+        guard let actions = handlers[rawValue], !actions.isEmpty else { return false }
+        actions.forEach { $0() }
+        return true
+    }
+}
+
 /// Wires a `ModuleRegistry` with in-memory collaborators.
 public struct RegistryHarness {
     public let settings = SettingsStore(defaults: makeIsolatedDefaults())
     public let scheduler = ManualScheduler()
     public let permissions = FakePermissionCenter()
     public let presenter = FakePresenter()
-    public let hotkeys = HotkeyRegistry()
-    public let services = ServiceRegistry()
+    /// Where `hotkeys` keeps its shortcuts; `hotkeyBackend.trigger("clipboard_openClipboard")` presses one.
+    public let hotkeyBackend = FakeHotkeyBackend()
+    public let hotkeys: HotkeyRegistry
+    public let services: ServiceRegistry
     /// Unique per harness under the temporary directory; nothing exists on disk until a module calls `ensureDirectories()`.
     public let storageRoot: StorageRoot = {
         let base = FileManager.default.temporaryDirectory
@@ -50,6 +95,8 @@ public struct RegistryHarness {
     public let registry: ModuleRegistry
 
     public init(_ modules: [any FeatureModule]) {
+        hotkeys = HotkeyRegistry(backend: hotkeyBackend)
+        services = ServiceRegistry(scheduler: scheduler)
         activities = ActivityCenter(scheduler: scheduler)
         registry = ModuleRegistry(
             modules: modules, settings: settings, activities: activities,

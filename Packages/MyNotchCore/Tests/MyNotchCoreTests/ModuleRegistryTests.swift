@@ -273,10 +273,13 @@ import MyNotchTestSupport
 
         let context = try #require(module.context)
         await harness.registry.setEnabled(false, for: "m")
-        #expect(!harness.services.handle(name: "translate", text: "late"))
-        context.services.register("late") { _ in }
-        #expect(!harness.services.handle(name: "late", text: "late"))
+        #expect(harness.services.handle(name: "translate", text: "late"))
+        var lateTexts: [String] = []
+        context.services.register("late") { lateTexts.append($0) }
+        #expect(harness.services.handle(name: "late", text: "late"))
+        harness.scheduler.advance(by: .seconds(10))
         #expect(module.serviceTexts == ["xin chào"])
+        #expect(lateTexts.isEmpty)
     }
 
     @Test func serviceRegisteredByAFailedStartIsRemoved() async {
@@ -286,7 +289,22 @@ import MyNotchTestSupport
         let harness = Harness([module])
         await harness.registry.bootstrap()
         #expect(harness.registry.state(of: "m") == .failed(reason: "boom"))
-        #expect(!harness.services.handle(name: "translate", text: "x"))
+        #expect(harness.services.handle(name: "translate", text: "x"))
+        harness.scheduler.advance(by: .seconds(10))
+        #expect(module.serviceTexts.isEmpty)
+    }
+
+    @Test func aServicesRequestBeforeTheModuleStartsReachesItOnceItRuns() async {
+        let module = FakeModule("m")
+        module.serviceOnStart = "translate"
+        let harness = Harness([module])
+        #expect(harness.services.handle(name: "translate", text: "early"))
+        await harness.registry.bootstrap()
+        #expect(module.serviceTexts.isEmpty)
+        #expect(harness.registry.state(of: "m") == .running)
+        #expect(harness.registry.tabs.map(\.id) == ["m"])
+        harness.scheduler.advance(by: .zero)
+        #expect(module.serviceTexts == ["early"])
     }
 
     @Test func actionScheduledByAFailedStartNeverFires() async {

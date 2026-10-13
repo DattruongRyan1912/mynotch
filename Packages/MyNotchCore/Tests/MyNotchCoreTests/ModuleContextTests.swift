@@ -22,8 +22,8 @@ private final class StubPermissions: PermissionCenter {
             settings: ModuleSettings(store: SettingsStore(defaults: makeIsolatedDefaults()), module: "m"),
             activities: ActivityPublisher(center: activities, module: "m"),
             presenter: StubPresenter(),
-            hotkeys: ModuleHotkeys(registry: HotkeyRegistry(), module: "m"),
-            services: ModuleServices(registry: ServiceRegistry(), module: "m"),
+            hotkeys: ModuleHotkeys(registry: HotkeyRegistry(backend: FakeHotkeyBackend()), module: "m"),
+            services: ModuleServices(registry: ServiceRegistry(scheduler: scheduler), module: "m"),
             permissions: StubPermissions(),
             storage: ModuleStorage(directory: URL(filePath: "/support/m/"), cachesDirectory: URL(filePath: "/caches/m/")),
             scheduler: scheduler
