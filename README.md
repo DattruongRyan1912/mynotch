@@ -51,7 +51,7 @@ Phím tắt chung: ⌃⌥N mở/đóng notch. Dữ liệu của module nằm ở
 
 | Thư mục | Vai trò |
 |---|---|
-| `App/` | Target app: khởi động, menu bar, Settings. `ModuleList.swift` là nơi **duy nhất** ghép module vào app |
+| `App/` | Target app: khởi động, menu bar, Settings. `ModuleList.swift` là nơi **duy nhất** ghép module vào app. Icon app là `App/Icon/MyNotch.icon` (Icon Composer) |
 | `Packages/MyNotchCore` | Hợp đồng module, registry, settings, quyền, phím tắt, live activity, Services |
 | `Packages/NotchUI` | Cửa sổ notch, hình học, state machine, đa màn hình, thả file, SkyLight shim |
 | `Packages/Modules/*` | Mỗi tính năng một package; chỉ phụ thuộc MyNotchCore và NotchUI, không module nào import module khác |

@@ -146,6 +146,8 @@ targets:
         PRODUCT_NAME: MyNotch
         ENABLE_HARDENED_RUNTIME: YES
         COMBINE_HIDPI_IMAGES: YES
+        # App/Icon/MyNotch.icon (Icon Composer): XcodeGen adds it to Resources, actool emits Assets.car and MyNotch.icns.
+        ASSETCATALOG_COMPILER_APPICON_NAME: MyNotch
   # Vendored ungive/mediaremote-adapter (see Vendor/mediaremote-adapter/VENDORED.md); the test client is not built.
   MediaRemoteAdapter:
     type: framework

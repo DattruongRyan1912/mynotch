@@ -1,0 +1,67 @@
+{
+  "fill": {
+    "solid": "srgb:0.09412,0.09804,0.11373,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "glass": false,
+          "image-name": "layer2-notch.svg",
+          "name": "notch"
+        }
+      ],
+      "lighting": "individual",
+      "name": "notch",
+      "shadow": {
+        "kind": "none",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      }
+    },
+    {
+      "layers": [
+        {
+          "glass": false,
+          "image-name": "layer1-glow.svg",
+          "name": "glow"
+        }
+      ],
+      "lighting": "individual",
+      "name": "glow",
+      "shadow": {
+        "kind": "none",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      }
+    },
+    {
+      "layers": [
+        {
+          "glass": false,
+          "image-name": "layer0-background.svg",
+          "name": "background"
+        }
+      ],
+      "lighting": "individual",
+      "name": "background",
+      "shadow": {
+        "kind": "none",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}
