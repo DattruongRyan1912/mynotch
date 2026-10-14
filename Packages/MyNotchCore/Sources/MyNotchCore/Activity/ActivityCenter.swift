@@ -17,17 +17,28 @@ public final class ActivityCenter {
         }
     }
 
-    /// Highest priority entry; ties go to the most recently added or raised.
+    /// The primary activity: the highest priority entry. Ties go to the one that became live first, so a newcomer
+    /// at the same priority never takes the notch and an update never makes it flip; `raise` is the way to take it.
     public private(set) var current: Entry?
+    /// The activities after `current`, in the same order, at most `maxOthers`: what the notch shows as bubbles.
+    public private(set) var others: [Entry] = []
+    /// Every live activity in display order, `current` first, with no cap: what a list of all of them shows.
+    public private(set) var ordered: [Entry] = []
+    /// Every live activity in the order it was added.
     public private(set) var entries: [Entry] = []
 
     @ObservationIgnored private let scheduler: any Scheduler
+    @ObservationIgnored private let maxOthers: Int
     @ObservationIgnored private var expiries: [String: ScheduledAction] = [:]
+    /// Rises with each new entry; the lowest wins ties. `raise` hands out `raisedSequence`, which only falls and
+    /// so stays below every entry added before or after it.
     @ObservationIgnored private var sequence = 0
+    @ObservationIgnored private var raisedSequence = 0
     @ObservationIgnored private var revision = 0
 
-    public init(scheduler: any Scheduler) {
+    public init(scheduler: any Scheduler, maxOthers: Int = 3) {
         self.scheduler = scheduler
+        self.maxOthers = max(maxOthers, 0)
     }
 
     /// Adds the activity, or replaces an existing one with the same id in place so frequent
@@ -56,9 +67,9 @@ public final class ActivityCenter {
     public func raise(id: String, from module: ModuleID) {
         let key = Self.key(id, module)
         guard let index = entries.firstIndex(where: { $0.id == key }) else { return }
-        sequence += 1
+        raisedSequence -= 1
         let entry = entries[index]
-        entries[index] = Entry(module: entry.module, activity: entry.activity, sequence: sequence, revision: entry.revision)
+        entries[index] = Entry(module: entry.module, activity: entry.activity, sequence: raisedSequence, revision: entry.revision)
         recompute()
     }
 
@@ -81,10 +92,16 @@ public final class ActivityCenter {
 
     private static func key(_ id: String, _ module: ModuleID) -> String { "\(module.rawValue)/\(id)" }
 
-    /// Assigns only when the winner changes, so removing a non-current entry doesn't redraw the view.
+    /// Assigns each property only when it changes, so removing an entry nobody shows doesn't redraw a view.
     private func recompute() {
-        let winner = entries.max { ($0.activity.priority, $0.sequence) < ($1.activity.priority, $1.sequence) }
+        let sorted = entries.sorted {
+            $0.activity.priority == $1.activity.priority ? $0.sequence < $1.sequence : $0.activity.priority > $1.activity.priority
+        }
+        let winner = sorted.first
+        let bubbles = Array(sorted.dropFirst().prefix(maxOthers))
+        if sorted != ordered { ordered = sorted }
         if winner != current { current = winner }
+        if bubbles != others { others = bubbles }
     }
 }
 

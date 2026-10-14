@@ -4,15 +4,15 @@ import Testing
 import MyNotchTestSupport
 
 @Suite struct ActivityCenterTests {
-    @Test func highestPriorityWinsThenMostRecent() {
+    @Test func highestPriorityWinsThenTheOneLiveFirst() {
         let center = ActivityCenter(scheduler: ManualScheduler())
         center.set(activity("a", .normal), from: "one")
         center.set(activity("b", .high), from: "two")
         #expect(center.current?.id == "two/b")
         center.set(activity("c", .high), from: "one")
-        #expect(center.current?.id == "one/c")
-        center.clear(id: "c", from: "one")
         #expect(center.current?.id == "two/b")
+        center.clear(id: "b", from: "two")
+        #expect(center.current?.id == "one/c")
     }
 
     @Test func expiresAfterLifetime() {
@@ -51,8 +51,9 @@ import MyNotchTestSupport
     @Test func raiseKeepsAPendingExpiry() {
         let scheduler = ManualScheduler()
         let center = ActivityCenter(scheduler: scheduler)
-        center.set(activity("x", expiresAfter: .seconds(4)), from: "m")
         center.set(activity("y"), from: "m")
+        center.set(activity("x", expiresAfter: .seconds(4)), from: "m")
+        #expect(center.current?.id == "m/y")
         center.raise(id: "x", from: "m")
         #expect(center.current?.id == "m/x")
         scheduler.advance(by: .seconds(4))
@@ -76,11 +77,11 @@ import MyNotchTestSupport
         let center = ActivityCenter(scheduler: ManualScheduler())
         center.set(activity("a"), from: "m")
         center.set(activity("b"), from: "m")
-        center.set(activity("a"), from: "m")
-        #expect(center.current?.id == "m/b")
         center.set(activity("b"), from: "m")
+        #expect(center.current?.id == "m/a")
         center.set(activity("a"), from: "m")
-        #expect(center.current?.id == "m/b")
+        center.set(activity("b"), from: "m")
+        #expect(center.current?.id == "m/a")
         #expect(center.entries.map(\.id) == ["m/a", "m/b"])
     }
 
@@ -92,9 +93,9 @@ import MyNotchTestSupport
         nonisolated(unsafe) var changes = 0
         withObservationTracking { _ = center.current } onChange: { changes += 1 }
         // expiresAfter stands in for new content: AnyView leading/trailing can't be compared.
-        center.set(activity("b", expiresAfter: .seconds(10)), from: "m")
+        center.set(activity("a", expiresAfter: .seconds(10)), from: "m")
         #expect(changes == 1)
-        #expect(center.current?.id == "m/b")
+        #expect(center.current?.id == "m/a")
         #expect(center.current?.sequence == before?.sequence)
         #expect(center.current?.revision != before?.revision)
         #expect(center.current?.activity.expiresAfter == .seconds(10))
@@ -105,24 +106,25 @@ import MyNotchTestSupport
         let center = ActivityCenter(scheduler: ManualScheduler())
         center.set(activity("a"), from: "m")
         center.set(activity("b"), from: "m")
-        center.set(activity("a", .high), from: "m")
-        #expect(center.current?.id == "m/a")
-        center.set(activity("a"), from: "m")
+        center.set(activity("b", .high), from: "m")
         #expect(center.current?.id == "m/b")
+        center.set(activity("b"), from: "m")
+        #expect(center.current?.id == "m/a")
     }
 
     @Test func raiseWinsTiesAtItsPriority() {
         let center = ActivityCenter(scheduler: ManualScheduler())
         center.set(activity("a"), from: "m")
         center.set(activity("b"), from: "m")
-        center.raise(id: "a", from: "m")
         #expect(center.current?.id == "m/a")
+        center.raise(id: "b", from: "m")
+        #expect(center.current?.id == "m/b")
         center.raise(id: "missing", from: "m")
-        center.raise(id: "b", from: "other")
-        #expect(center.current?.id == "m/a")
+        center.raise(id: "a", from: "other")
+        #expect(center.current?.id == "m/b")
         #expect(center.entries.map(\.id) == ["m/a", "m/b"])
         center.set(activity("c", .high), from: "m")
-        center.raise(id: "b", from: "m")
+        center.raise(id: "a", from: "m")
         #expect(center.current?.id == "m/c")
     }
 
@@ -174,12 +176,12 @@ import MyNotchTestSupport
         let publisher = ActivityPublisher(center: center, module: "m")
         publisher.set(activity("a"))
         publisher.set(activity("b"))
-        publisher.raise(id: "a")
-        #expect(center.current?.id == "m/a")
+        publisher.raise(id: "b")
+        #expect(center.current?.id == "m/b")
         publisher.invalidate()
         center.set(activity("a"), from: "m")
         center.set(activity("b"), from: "m")
-        publisher.raise(id: "a")
-        #expect(center.current?.id == "m/b")
+        publisher.raise(id: "b")
+        #expect(center.current?.id == "m/a")
     }
 }
