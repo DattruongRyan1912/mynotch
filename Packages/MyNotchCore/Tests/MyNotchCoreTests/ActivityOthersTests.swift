@@ -8,6 +8,10 @@ import MyNotchTestSupport
 @Suite struct ActivityOthersTests {
     func ids(_ entries: [ActivityCenter.Entry]) -> [String] { entries.map(\.id) }
 
+    func described(_ id: String, summary: String) -> LiveActivity {
+        LiveActivity(id: id, leading: AnyView(EmptyView()), trailing: AnyView(EmptyView()), summary: summary)
+    }
+
     @Test func nothingLiveMeansNoPrimaryAndNoOthers() {
         let center = ActivityCenter(scheduler: ManualScheduler())
         #expect(center.current == nil && center.others.isEmpty && center.ordered.isEmpty)
@@ -100,6 +104,20 @@ import MyNotchTestSupport
         center.set(activity("music"), from: "media")
         center.set(activity("copied", expiresAfter: .seconds(2)), from: "clipboard")
         center.set(activity("timer"), from: "timer")
+        #expect(center.current?.id == "clipboard/copied")
+        #expect(ids(center.others) == ["media/music", "timer/timer"])
+        scheduler.advance(by: .seconds(2))
+        #expect(ids(center.others) == ["timer/timer"])
+        #expect(center.current?.id == "media/music")
+    }
+
+    @Test func theExpiryOfAnActivityBehindThePrimaryRemovesItsBubble() {
+        let scheduler = ManualScheduler()
+        let center = ActivityCenter(scheduler: scheduler)
+        center.set(activity("music", .high), from: "media")
+        center.set(activity("copied", expiresAfter: .seconds(2)), from: "clipboard")
+        center.set(activity("timer"), from: "timer")
+        #expect(center.current?.id == "media/music")
         #expect(ids(center.others) == ["clipboard/copied", "timer/timer"])
         scheduler.advance(by: .seconds(2))
         #expect(ids(center.others) == ["timer/timer"])
@@ -208,12 +226,12 @@ import MyNotchTestSupport
         center.clear(id: "a3", from: "m")
         #expect(changes == 1)
         watch()
-        // Content of a bubble changed: its view has to be redrawn.
-        center.set(activity("a2", expiresAfter: .seconds(60)), from: "m")
+        // Content of a bubble changed (the summary stands in for it: views can't be compared): its view has to be redrawn.
+        center.set(described("a2", summary: "new"), from: "m")
         #expect(changes == 2)
         watch()
         // Content of the primary changed: the bubbles stay as they are.
-        center.set(activity("a1", expiresAfter: .seconds(60)), from: "m")
+        center.set(described("a1", summary: "new"), from: "m")
         #expect(changes == 2)
     }
 
@@ -260,5 +278,186 @@ import MyNotchTestSupport
             bottom: AnyView(Text("under")), bottomHeight: 36, minimal: AnyView(EmptyView()), summary: "s"
         )
         #expect(both.hasBottom && both.minimal != nil && both.summary == "s")
+    }
+}
+
+/// A notice is an activity that expires (a volume change, "copied", a screenshot, a finished agent): it takes the notch
+/// for its few seconds, and whatever was primary steps back in as a bubble until it is gone.
+@Suite struct ActivityNoticeTests {
+    func ids(_ entries: [ActivityCenter.Entry]) -> [String] { entries.map(\.id) }
+
+    @Test func aNoticeTakesAPriorityTieAgainstAnOngoingActivity() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        center.set(activity("music"), from: "media")
+        center.set(activity("copied", expiresAfter: .seconds(2)), from: "clipboard")
+        #expect(center.current?.id == "clipboard/copied")
+        #expect(ids(center.others) == ["media/music"])
+        #expect(ids(center.ordered) == ["clipboard/copied", "media/music"])
+    }
+
+    @Test func theFormerPrimaryComesBackWhenTheNoticeExpires() {
+        let scheduler = ManualScheduler()
+        let center = ActivityCenter(scheduler: scheduler)
+        center.set(activity("music"), from: "media")
+        center.set(activity("timer"), from: "timer")
+        center.set(activity("volume", expiresAfter: .seconds(2)), from: "system")
+        #expect(center.current?.id == "system/volume")
+        #expect(ids(center.others) == ["media/music", "timer/timer"])
+        scheduler.advance(by: .seconds(1))
+        #expect(center.current?.id == "system/volume")
+        scheduler.advance(by: .seconds(1))
+        #expect(center.current?.id == "media/music")
+        #expect(ids(center.others) == ["timer/timer"])
+    }
+
+    @Test func aNoticeNeverBeatsAHigherPriority() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        center.set(activity("alert", .high), from: "ai")
+        center.set(activity("copied", expiresAfter: .seconds(2)), from: "clipboard")
+        #expect(center.current?.id == "ai/alert")
+        #expect(ids(center.others) == ["clipboard/copied"])
+    }
+
+    @Test func aLowerPriorityNoticeStaysBehindAnOngoingActivity() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        center.set(activity("music"), from: "media")
+        center.set(activity("quiet", .low, expiresAfter: .seconds(2)), from: "system")
+        #expect(center.current?.id == "media/music")
+        #expect(ids(center.others) == ["system/quiet"])
+    }
+
+    @Test func aHighPriorityNoticeBeatsAHighPriorityOngoingActivity() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        center.set(activity("h3", .high), from: "debug")
+        center.set(activity("high", .high, expiresAfter: .seconds(8)), from: "debug")
+        #expect(center.current?.id == "debug/high")
+        #expect(ids(center.others) == ["debug/h3"])
+    }
+
+    @Test func ongoingActivitiesKeepTheirOrderAroundANotice() {
+        let scheduler = ManualScheduler()
+        let center = ActivityCenter(scheduler: scheduler)
+        center.set(activity("a"), from: "m")
+        center.set(activity("b"), from: "m")
+        center.set(activity("c"), from: "m")
+        center.set(activity("notice", expiresAfter: .seconds(2)), from: "m")
+        #expect(ids(center.ordered) == ["m/notice", "m/a", "m/b", "m/c"])
+        scheduler.advance(by: .seconds(2))
+        #expect(ids(center.ordered) == ["m/a", "m/b", "m/c"])
+        // An update of an ongoing activity still reorders nothing.
+        center.set(activity("c"), from: "m")
+        center.set(activity("b"), from: "m")
+        #expect(ids(center.ordered) == ["m/a", "m/b", "m/c"])
+    }
+
+    @Test func theNewerOfTwoOverlappingNoticesTakesTheNotch() {
+        let scheduler = ManualScheduler()
+        let center = ActivityCenter(scheduler: scheduler)
+        center.set(activity("music"), from: "media")
+        center.set(activity("copied", expiresAfter: .seconds(3)), from: "clipboard")
+        scheduler.advance(by: .seconds(1))
+        center.set(activity("shot", expiresAfter: .seconds(3)), from: "screenshot")
+        #expect(center.current?.id == "screenshot/shot")
+        #expect(ids(center.others) == ["clipboard/copied", "media/music"])
+        // The older one runs out first: the newer one stays, the music is still a bubble.
+        scheduler.advance(by: .seconds(2))
+        #expect(center.current?.id == "screenshot/shot")
+        #expect(ids(center.others) == ["media/music"])
+        scheduler.advance(by: .seconds(1))
+        #expect(center.current?.id == "media/music")
+        #expect(center.others.isEmpty)
+    }
+
+    @Test func theOlderNoticeComesBackWhenTheNewerOneExpiresFirst() {
+        let scheduler = ManualScheduler()
+        let center = ActivityCenter(scheduler: scheduler)
+        center.set(activity("music"), from: "media")
+        center.set(activity("copied", expiresAfter: .seconds(5)), from: "clipboard")
+        scheduler.advance(by: .seconds(1))
+        center.set(activity("volume", expiresAfter: .seconds(2)), from: "system")
+        #expect(center.current?.id == "system/volume")
+        scheduler.advance(by: .seconds(2))
+        #expect(center.current?.id == "clipboard/copied")
+        #expect(ids(center.others) == ["media/music"])
+        scheduler.advance(by: .seconds(2))
+        #expect(center.current?.id == "media/music")
+    }
+
+    @Test func refreshingANoticeTakesTheNotchAgain() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        center.set(activity("volume", expiresAfter: .seconds(2)), from: "system")
+        center.set(activity("copied", expiresAfter: .seconds(2)), from: "clipboard")
+        #expect(center.current?.id == "clipboard/copied")
+        center.set(activity("volume", expiresAfter: .seconds(2)), from: "system")
+        #expect(center.current?.id == "system/volume")
+        #expect(ids(center.others) == ["clipboard/copied"])
+    }
+
+    @Test func anOngoingActivityThatTurnsIntoANoticeTakesTheNotchForItsLifetime() {
+        let scheduler = ManualScheduler()
+        let center = ActivityCenter(scheduler: scheduler)
+        center.set(activity("music"), from: "media")
+        center.set(activity("agent", .low), from: "ai")
+        center.set(activity("agent", .normal, expiresAfter: .seconds(4)), from: "ai")
+        #expect(center.current?.id == "ai/agent")
+        #expect(ids(center.others) == ["media/music"])
+        scheduler.advance(by: .seconds(4))
+        #expect(center.current?.id == "media/music")
+        #expect(center.others.isEmpty)
+    }
+
+    @Test func aNoticeThatTurnsIntoAnOngoingActivityJoinsBehindTheOlderOnes() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        center.set(activity("music"), from: "media")
+        center.set(activity("agent", expiresAfter: .seconds(4)), from: "ai")
+        #expect(center.current?.id == "ai/agent")
+        center.set(activity("agent"), from: "ai")
+        #expect(center.current?.id == "media/music")
+        #expect(ids(center.others) == ["ai/agent"])
+    }
+
+    @Test func raiseStillBeatsANotice() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        center.set(activity("music"), from: "media")
+        center.set(activity("copied", expiresAfter: .seconds(2)), from: "clipboard")
+        #expect(center.current?.id == "clipboard/copied")
+        center.raise(id: "music", from: "media")
+        #expect(center.current?.id == "media/music")
+        #expect(ids(center.others) == ["clipboard/copied"])
+        // A notice that arrives later does not take it back from the raised one.
+        center.set(activity("shot", expiresAfter: .seconds(2)), from: "screenshot")
+        #expect(center.current?.id == "media/music")
+        #expect(ids(center.others) == ["screenshot/shot", "clipboard/copied"])
+    }
+
+    @Test func aNoticeFromAStoppedModuleLeavesTheMusicInFront() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        let publisher = ActivityPublisher(center: center, module: "clipboard")
+        center.set(activity("music"), from: "media")
+        publisher.set(activity("copied", expiresAfter: .seconds(2)))
+        #expect(center.current?.id == "clipboard/copied")
+        publisher.invalidate()
+        #expect(center.current?.id == "media/music")
+        publisher.set(activity("late", expiresAfter: .seconds(2)))
+        #expect(center.current?.id == "media/music")
+    }
+
+    @Test func aNoticeComingAndGoingNotifiesCurrentAndOthers() {
+        let scheduler = ManualScheduler()
+        let center = ActivityCenter(scheduler: scheduler)
+        center.set(activity("music"), from: "media")
+        nonisolated(unsafe) var currentChanges = 0
+        nonisolated(unsafe) var othersChanges = 0
+        func watch() {
+            withObservationTracking { _ = center.current } onChange: { currentChanges += 1 }
+            withObservationTracking { _ = center.others } onChange: { othersChanges += 1 }
+        }
+        watch()
+        center.set(activity("copied", expiresAfter: .seconds(2)), from: "clipboard")
+        #expect(currentChanges == 1 && othersChanges == 1)
+        watch()
+        scheduler.advance(by: .seconds(2))
+        #expect(currentChanges == 2 && othersChanges == 2)
+        #expect(center.current?.id == "media/music" && center.others.isEmpty)
     }
 }

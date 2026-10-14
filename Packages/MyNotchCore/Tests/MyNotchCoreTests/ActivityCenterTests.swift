@@ -53,12 +53,13 @@ import MyNotchTestSupport
         let center = ActivityCenter(scheduler: scheduler)
         center.set(activity("y"), from: "m")
         center.set(activity("x", expiresAfter: .seconds(4)), from: "m")
-        #expect(center.current?.id == "m/y")
+        center.set(activity("z", expiresAfter: .seconds(10)), from: "m")
+        #expect(center.current?.id == "m/z")
         center.raise(id: "x", from: "m")
         #expect(center.current?.id == "m/x")
         scheduler.advance(by: .seconds(4))
-        #expect(center.entries.map(\.id) == ["m/y"])
-        #expect(center.current?.id == "m/y")
+        #expect(center.entries.map(\.id) == ["m/y", "m/z"])
+        #expect(center.current?.id == "m/z")
     }
 
     @Test func staleExpiryDoesNotRemoveAnUpdatedActivity() {

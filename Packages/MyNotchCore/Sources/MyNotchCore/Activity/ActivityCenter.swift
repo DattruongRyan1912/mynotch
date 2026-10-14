@@ -17,8 +17,10 @@ public final class ActivityCenter {
         }
     }
 
-    /// The primary activity: the highest priority entry. Ties go to the one that became live first, so a newcomer
-    /// at the same priority never takes the notch and an update never makes it flip; `raise` is the way to take it.
+    /// The primary activity: the highest priority entry. A tie goes to a notice (an activity with an expiry: a volume
+    /// change, "copied", a finished agent), the most recently set one first, so it holds the notch for its few seconds
+    /// and the former primary steps back in when it is gone. Among activities without an expiry it goes to the one that
+    /// became live first, so a newcomer never takes the notch and an update never makes it flip. `raise` beats both.
     public private(set) var current: Entry?
     /// The activities after `current`, in the same order, at most `maxOthers`: what the notch shows as bubbles.
     public private(set) var others: [Entry] = []
@@ -30,8 +32,8 @@ public final class ActivityCenter {
     @ObservationIgnored private let scheduler: any Scheduler
     @ObservationIgnored private let maxOthers: Int
     @ObservationIgnored private var expiries: [String: ScheduledAction] = [:]
-    /// Rises with each new entry; the lowest wins ties. `raise` hands out `raisedSequence`, which only falls and
-    /// so stays below every entry added before or after it.
+    /// Rises with each new entry; among activities without an expiry the lowest wins ties. `raise` hands out
+    /// `raisedSequence`, which only falls and so stays below every entry added before or after it.
     @ObservationIgnored private var sequence = 0
     @ObservationIgnored private var raisedSequence = 0
     @ObservationIgnored private var revision = 0
@@ -63,7 +65,7 @@ public final class ActivityCenter {
         recompute()
     }
 
-    /// Moves an existing entry above the others at its priority; `set` alone keeps its place.
+    /// Moves an existing entry above the others at its priority, notices included; `set` alone keeps its place.
     public func raise(id: String, from module: ModuleID) {
         let key = Self.key(id, module)
         guard let index = entries.firstIndex(where: { $0.id == key }) else { return }
@@ -92,11 +94,20 @@ public final class ActivityCenter {
 
     private static func key(_ id: String, _ module: ModuleID) -> String { "\(module.rawValue)/\(id)" }
 
+    /// Priority first; then a raised entry (the most recently raised first), then notices (the most recently set
+    /// first), then everything else in the order it became live.
+    private static func isShownBefore(_ lhs: Entry, _ rhs: Entry) -> Bool {
+        if lhs.activity.priority != rhs.activity.priority { return lhs.activity.priority > rhs.activity.priority }
+        let (lhsRaised, rhsRaised) = (lhs.sequence < 0, rhs.sequence < 0)
+        if lhsRaised || rhsRaised { return lhsRaised && (!rhsRaised || lhs.sequence < rhs.sequence) }
+        let (lhsNotice, rhsNotice) = (lhs.activity.expiresAfter != nil, rhs.activity.expiresAfter != nil)
+        if lhsNotice != rhsNotice { return lhsNotice }
+        return lhsNotice ? lhs.revision > rhs.revision : lhs.sequence < rhs.sequence
+    }
+
     /// Assigns each property only when it changes, so removing an entry nobody shows doesn't redraw a view.
     private func recompute() {
-        let sorted = entries.sorted {
-            $0.activity.priority == $1.activity.priority ? $0.sequence < $1.sequence : $0.activity.priority > $1.activity.priority
-        }
+        let sorted = entries.sorted(by: Self.isShownBefore)
         let winner = sorted.first
         let bubbles = Array(sorted.dropFirst().prefix(maxOthers))
         if sorted != ordered { ordered = sorted }
