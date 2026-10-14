@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Testing
 @testable import TranslationModule
@@ -14,25 +15,40 @@ final class FakeSynthesizer: SpeechSynthesizing {
         SpeechVoice(identifier: "voice.en", language: "en-US", quality: 1, isNovelty: false),
     ]
     var onFinish: (() -> Void)?
+    var onVoicesChanged: (() -> Void)?
     private(set) var spoken: [Utterance] = []
     private(set) var stops = 0
     private(set) var voiceLoads = 0
-    /// When true, listing the voices waits for `releaseVoices()`, like a slow system call.
+    /// When true, listing the voices waits for `releaseVoices()`, like a slow system call. The list is the one the
+    /// system had when the call started, as for the real one.
     var holdsVoices = false
-    private var heldVoices: CheckedContinuation<Void, Never>?
+    private var heldVoices: [(list: [SpeechVoice], resume: CheckedContinuation<[SpeechVoice], Never>)] = []
     /// Set when something was spoken while another utterance was still going.
     private(set) var overlapped = false
     private(set) var active: Utterance?
 
     func availableVoices() async -> [SpeechVoice] {
         voiceLoads += 1
-        if holdsVoices { await withCheckedContinuation { heldVoices = $0 } }
-        return voices
+        let listed = voices
+        guard holdsVoices else { return listed }
+        return await withCheckedContinuation { heldVoices.append((listed, $0)) }
     }
 
+    /// Lets the listing at `index` of those in flight finish.
+    func releaseVoices(at index: Int) {
+        let held = heldVoices.remove(at: index)
+        held.resume.resume(returning: held.list)
+    }
+
+    /// Lets every listing in flight finish, oldest first.
     func releaseVoices() {
-        heldVoices?.resume()
-        heldVoices = nil
+        while !heldVoices.isEmpty { releaseVoices(at: 0) }
+    }
+
+    /// The system installed or removed a voice.
+    func changeVoices(to list: [SpeechVoice]) {
+        voices = list
+        onVoicesChanged?()
     }
 
     func speak(_ text: String, voice: SpeechVoice) {
@@ -185,6 +201,53 @@ final class FakeSynthesizer: SpeechSynthesizing {
         #expect(player.canSpeak(.en))
         #expect(synthesizer.voiceLoads == 2)
     }
+
+    @Test func aVoiceInstalledWhileRunningIsPickedUp() async {
+        synthesizer.voices = [SpeechVoice(identifier: "voice.vi", language: "vi-VN", quality: 1, isNovelty: false)]
+        await ready()
+        #expect(!player.canSpeak(.en))
+        synthesizer.changeVoices(to: [
+            SpeechVoice(identifier: "voice.vi", language: "vi-VN", quality: 1, isNovelty: false),
+            SpeechVoice(identifier: "voice.en", language: "en-US", quality: 1, isNovelty: false),
+        ])
+        await ready()
+        #expect(player.canSpeak(.en))
+        #expect(synthesizer.voiceLoads == 2)
+    }
+
+    @Test func aVoiceRemovedWhileRunningStopsEnablingTheButton() async {
+        await ready()
+        #expect(player.canSpeak(.en))
+        synthesizer.changeVoices(to: [SpeechVoice(identifier: "voice.vi", language: "vi-VN", quality: 1, isNovelty: false)])
+        await ready()
+        #expect(!player.canSpeak(.en))
+        #expect(player.canSpeak(.vi))
+    }
+
+    @Test func voicesChangingBeforeAnyAppearanceListNothing() async {
+        synthesizer.changeVoices(to: [])
+        await settle()
+        #expect(synthesizer.voiceLoads == 0)
+    }
+
+    @Test func aListOvertakenByAChangeNeverReplacesTheNewerOne() async {
+        let vi = SpeechVoice(identifier: "voice.vi", language: "vi-VN", quality: 1, isNovelty: false)
+        let en = SpeechVoice(identifier: "voice.en", language: "en-US", quality: 1, isNovelty: false)
+        synthesizer.voices = [vi]
+        synthesizer.holdsVoices = true
+        let first = player.loadVoices()
+        await eventually { synthesizer.voiceLoads == 1 }
+        // An English voice is installed while the first listing, which started without it, is still going.
+        synthesizer.changeVoices(to: [vi, en])
+        await eventually { synthesizer.voiceLoads == 2 }
+        // The newer listing ends first, then the older one reports what it saw.
+        synthesizer.releaseVoices(at: 1)
+        await eventually { player.canSpeak(.en) }
+        synthesizer.releaseVoices(at: 0)
+        await first.value
+        await settle()
+        #expect(player.canSpeak(.en))
+    }
 }
 
 @Suite struct SpeechModuleTests {
@@ -205,5 +268,16 @@ final class FakeSynthesizer: SpeechSynthesizing {
     @Test func listsTheSystemVoicesWithoutSpeaking() async {
         let voices = await SystemSpeechSynthesizer().availableVoices()
         #expect(voices.allSatisfy { !$0.identifier.isEmpty && !$0.language.isEmpty && (1...3).contains($0.quality) })
+    }
+
+    @Test func reportsVoicesInstalledOrRemoved() {
+        let center = NotificationCenter()
+        let synthesizer = SystemSpeechSynthesizer(notifications: center)
+        nonisolated(unsafe) var changes = 0
+        synthesizer.onVoicesChanged = { changes += 1 }
+        center.post(name: .init("SomethingElse"), object: nil)
+        #expect(changes == 0)
+        center.post(name: AVSpeechSynthesizer.availableVoicesDidChangeNotification, object: nil)
+        #expect(changes == 1)
     }
 }

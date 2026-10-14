@@ -11,6 +11,8 @@ protocol SpeechSynthesizing: AnyObject {
     /// Called when the utterance last passed to `speak` ends on its own. Never for one that `stop` cut off, nor for an
     /// earlier one, so a late report cannot clear the state of the utterance that replaced it.
     var onFinish: (() -> Void)? { get set }
+    /// Called, on the main actor, when the system installed or removed a voice.
+    var onVoicesChanged: (() -> Void)? { get set }
     /// Listing the voices is slow (about 0.15 s), so it must not run on the caller's actor.
     func availableVoices() async -> [SpeechVoice]
     func speak(_ text: String, voice: SpeechVoice)
@@ -29,12 +31,15 @@ final class SpeechPlayer {
     /// takes a good tenth of a second.
     private var voices: [SpeechVoice] = []
     @ObservationIgnored private var loading: Task<Void, Never>?
+    /// Counts the listings started, so one that a voice change overtook cannot replace the newer one's answer.
+    @ObservationIgnored private var listings = 0
     /// The pick for each language asked about: the buttons ask on every redraw, and picking weighs every voice.
     @ObservationIgnored private var picks: [Locale.Language: SpeechVoice?] = [:]
 
     init(synthesizer: any SpeechSynthesizing) {
         self.synthesizer = synthesizer
         synthesizer.onFinish = { [weak self] in self?.speaking = nil }
+        synthesizer.onVoicesChanged = { [weak self] in self?.voicesChanged() }
     }
 
     /// Whether a voice of `language` is installed, for enabling the button. False until the voices are listed.
@@ -43,20 +48,29 @@ final class SpeechPlayer {
     }
 
     /// Starts listing the system's voices in the background, once, and returns at once: the buttons stay off until
-    /// the list arrives. Voices installed while MyNotch runs show up after it restarts. A list that came back empty
-    /// (the system may still have been starting) is asked for again next time.
+    /// the list arrives. A list that came back empty (the system may still have been starting) is asked for again
+    /// next time.
     @discardableResult
     func loadVoices() -> Task<Void, Never> {
         if let loading { return loading }
+        listings += 1
+        let number = listings
         let task = Task { [weak self, synthesizer] in
             let listed = await synthesizer.availableVoices()
-            guard let self else { return }
+            guard let self, number == listings else { return }
             voices = listed
             picks.removeAll()
             if listed.isEmpty { loading = nil }
         }
         loading = task
         return task
+    }
+
+    /// A voice was installed or removed while MyNotch runs: lists again, if the tab ever asked for the list.
+    private func voicesChanged() {
+        guard loading != nil else { return }
+        loading = nil
+        loadVoices()
     }
 
     /// The button's tap: reads `text`, or stops when this text is the one being read. Reading one text always stops the
@@ -90,6 +104,10 @@ final class SpeechPlayer {
 /// `AVSpeechSynthesizer`, which speaks on the device with no network.
 final class SystemSpeechSynthesizer: NSObject, SpeechSynthesizing, AVSpeechSynthesizerDelegate {
     var onFinish: (() -> Void)?
+    var onVoicesChanged: (() -> Void)?
+
+    private let notifications: NotificationCenter
+    private var voicesObserver: (any NSObjectProtocol)?
 
     private lazy var synthesizer: AVSpeechSynthesizer = {
         let synthesizer = AVSpeechSynthesizer()
@@ -98,6 +116,21 @@ final class SystemSpeechSynthesizer: NSObject, SpeechSynthesizing, AVSpeechSynth
     }()
     /// The utterance whose end counts. Cleared by `stop`, so the end the system reports for a cut-off one is ignored.
     private var current: AVSpeechUtterance?
+
+    init(notifications: NotificationCenter = .default) {
+        self.notifications = notifications
+        super.init()
+        // Delivered on the main queue, where the player lives.
+        voicesObserver = notifications.addObserver(
+            forName: AVSpeechSynthesizer.availableVoicesDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.onVoicesChanged?() }
+        }
+    }
+
+    isolated deinit {
+        if let voicesObserver { notifications.removeObserver(voicesObserver) }
+    }
 
     func availableVoices() async -> [SpeechVoice] {
         await Task.detached(priority: .utility) { Self.systemVoices() }.value
