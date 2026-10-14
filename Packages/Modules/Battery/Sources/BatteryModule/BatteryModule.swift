@@ -6,7 +6,17 @@ import SwiftUI
 @Observable
 final class BatteryState {
     var snapshot: PowerSourceSnapshot?
+    var details: BatteryDetails?
+    var isLowPowerMode = false
     var lowThreshold = 20
+    /// Whether the tab is on screen: the charging highlight and the polling only run then.
+    var isTabVisible = false
+}
+
+/// What the tab tells the module about itself.
+struct BatteryTabActions {
+    var appeared: () -> Void
+    var disappeared: () -> Void
 }
 
 /// Reference module: battery tab plus "charging" and "low battery" live activities.
@@ -28,6 +38,10 @@ public final class BatteryModule: FeatureModule {
     private var publishedLowPercent: Int?
     /// Threshold used for the previous decision, so lowering it in Settings dismisses the alert.
     private var lastThreshold: Int?
+    private var pollTimer: ScheduledAction?
+
+    /// How often the open tab reads the battery again: the power flowing in or out changes without a notification.
+    static let pollInterval = Duration.seconds(30)
 
     public init(reader: any PowerSourceReading = IOKitPowerSource()) {
         self.reader = reader
@@ -49,6 +63,7 @@ public final class BatteryModule: FeatureModule {
         publishedLowPercent = nil
         lastThreshold = nil
         apply(snapshot, previous: nil)
+        readDetails()
         // The view reads `state`, so it is offered once and follows the percent by itself.
         context.lockScreen.set(AnyView(BatteryLockScreenView(state: state)), priority: .low)
         if !reader.startObserving({ [weak self] in self?.refresh() }) {
@@ -65,15 +80,27 @@ public final class BatteryModule: FeatureModule {
 
     public func stop() async {
         reader.stopObserving()
+        pollTimer?.cancel()
+        pollTimer = nil
         context = nil
         state.snapshot = nil
+        state.details = nil
+        state.isLowPowerMode = false
+        state.isTabVisible = false
         lowActive = false
         publishedLowPercent = nil
         lastThreshold = nil
     }
 
     public func makeTab() -> NotchTab? {
-        NotchTab(id: descriptor.id, title: "Battery", systemImage: "battery.100percent", preferredHeight: 130, content: AnyView(BatteryTabView(state: state)))
+        NotchTab(
+            id: descriptor.id, title: "Battery", systemImage: "battery.100percent", preferredHeight: BatteryTabView.preferredHeight,
+            content: AnyView(BatteryTabView(state: state, actions: actions))
+        )
+    }
+
+    var actions: BatteryTabActions {
+        BatteryTabActions(appeared: { [weak self] in self?.tabAppeared() }, disappeared: { [weak self] in self?.tabDisappeared() })
     }
 
     public func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? {
@@ -88,6 +115,35 @@ public final class BatteryModule: FeatureModule {
     func refresh() {
         guard let snapshot = reader.read() else { return }
         apply(snapshot, previous: state.snapshot)
+        readDetails()
+    }
+
+    private func readDetails() {
+        state.details = reader.readDetails()
+        state.isLowPowerMode = reader.isLowPowerModeEnabled
+    }
+
+    /// Opening the tab shows fresh numbers, and from then on they are read again every `pollInterval`.
+    private func tabAppeared() {
+        guard context != nil else { return }
+        state.isTabVisible = true
+        refresh()
+        schedulePoll()
+    }
+
+    private func tabDisappeared() {
+        state.isTabVisible = false
+        pollTimer?.cancel()
+        pollTimer = nil
+    }
+
+    private func schedulePoll() {
+        pollTimer?.cancel()
+        pollTimer = context?.scheduler.schedule(after: Self.pollInterval) { [weak self] in
+            guard let self, state.isTabVisible else { return }
+            refresh()
+            schedulePoll()
+        }
     }
 
     private func settingsChanged() {

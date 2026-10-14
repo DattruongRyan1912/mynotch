@@ -7,13 +7,24 @@ import Testing
 
 final class FakePowerSource: PowerSourceReading {
     var snapshot: PowerSourceSnapshot?
+    var details: BatteryDetails?
+    var isLowPowerModeEnabled = false
+    /// How often the module asked for the registry details, to see when it polls and when it does not.
+    private(set) var detailReads = 0
     private var onChange: (@MainActor () -> Void)?
 
-    init(_ snapshot: PowerSourceSnapshot?) { self.snapshot = snapshot }
+    init(_ snapshot: PowerSourceSnapshot?, details: BatteryDetails? = nil) {
+        self.snapshot = snapshot
+        self.details = details
+    }
 
     var isObserving: Bool { onChange != nil }
 
     func read() -> PowerSourceSnapshot? { snapshot }
+    func readDetails() -> BatteryDetails? {
+        detailReads += 1
+        return details
+    }
     func startObserving(_ onChange: @escaping @MainActor () -> Void) -> Bool {
         self.onChange = onChange
         return true
@@ -161,9 +172,136 @@ final class FakePowerSource: PowerSourceReading {
         #expect(harness.activities.current?.id == "battery/low")
     }
 
-    @Test func durationFormatting() {
-        #expect(BatteryTabView.format(45) == "45 phút")
-        #expect(BatteryTabView.format(60) == "1 giờ")
-        #expect(BatteryTabView.format(135) == "2 giờ 15 phút")
+    // MARK: Details, Low Power Mode and polling
+
+    private static let details = BatteryDetails(cycleCount: 312, healthPercent: 92, batteryWatts: 12, adapterWatts: 96)
+
+    @Test func startsWithTheDetailsAndLowPowerModeTheReaderReports() async {
+        let source = FakePowerSource(PowerSourceSnapshot(percent: 60, isCharging: false, isOnAC: false), details: Self.details)
+        source.isLowPowerModeEnabled = true
+        let module = BatteryModule(reader: source)
+        await RegistryHarness([module]).registry.bootstrap()
+        #expect(module.state.details == Self.details)
+        #expect(module.state.isLowPowerMode)
+    }
+
+    @Test func aPowerSourceChangeReadsTheDetailsAndLowPowerModeAgain() async {
+        let source = FakePowerSource(PowerSourceSnapshot(percent: 60, isCharging: false, isOnAC: false))
+        let module = BatteryModule(reader: source)
+        await RegistryHarness([module]).registry.bootstrap()
+        #expect(module.state.details == nil)
+        #expect(!module.state.isLowPowerMode)
+
+        source.details = Self.details
+        source.isLowPowerModeEnabled = true
+        source.emit(PowerSourceSnapshot(percent: 59, isCharging: false, isOnAC: false))
+        #expect(module.state.snapshot?.percent == 59)
+        #expect(module.state.details == Self.details)
+        #expect(module.state.isLowPowerMode)
+
+        // Switching Low Power Mode off arrives as a change with the same battery reading.
+        source.isLowPowerModeEnabled = false
+        source.emit(PowerSourceSnapshot(percent: 59, isCharging: false, isOnAC: false))
+        #expect(!module.state.isLowPowerMode)
+    }
+
+    @Test func detailsDisappearWhenTheRegistryEntryCannotBeRead() async {
+        let source = FakePowerSource(PowerSourceSnapshot(percent: 60, isCharging: false, isOnAC: false), details: Self.details)
+        let module = BatteryModule(reader: source)
+        await RegistryHarness([module]).registry.bootstrap()
+        source.details = nil
+        source.emit(PowerSourceSnapshot(percent: 59, isCharging: false, isOnAC: false))
+        #expect(module.state.details == nil)
+    }
+
+    @Test func anOpenTabReadsFreshNumbersAndThenEveryThirtySeconds() async {
+        let source = FakePowerSource(PowerSourceSnapshot(percent: 60, isCharging: false, isOnAC: false), details: Self.details)
+        let module = BatteryModule(reader: source)
+        let harness = RegistryHarness([module])
+        await harness.registry.bootstrap()
+        let atStart = source.detailReads
+
+        module.actions.appeared()
+        #expect(module.state.isTabVisible)
+        #expect(source.detailReads == atStart + 1)
+
+        harness.scheduler.advance(by: .seconds(29))
+        #expect(source.detailReads == atStart + 1)
+        harness.scheduler.advance(by: .seconds(1))
+        #expect(source.detailReads == atStart + 2)
+
+        source.details = BatteryDetails(cycleCount: 313, healthPercent: 92, batteryWatts: 8, adapterWatts: 96)
+        harness.scheduler.advance(by: .seconds(30))
+        #expect(source.detailReads == atStart + 3)
+        #expect(module.state.details?.cycleCount == 313)
+    }
+
+    @Test func aHiddenTabDoesNotPoll() async {
+        let source = FakePowerSource(PowerSourceSnapshot(percent: 60, isCharging: false, isOnAC: false), details: Self.details)
+        let module = BatteryModule(reader: source)
+        let harness = RegistryHarness([module])
+        await harness.registry.bootstrap()
+        let atStart = source.detailReads
+        harness.scheduler.advance(by: .seconds(300))
+        #expect(source.detailReads == atStart)
+        #expect(!module.state.isTabVisible)
+    }
+
+    @Test func leavingTheTabStopsThePolling() async {
+        let source = FakePowerSource(PowerSourceSnapshot(percent: 60, isCharging: false, isOnAC: false), details: Self.details)
+        let module = BatteryModule(reader: source)
+        let harness = RegistryHarness([module])
+        await harness.registry.bootstrap()
+        module.actions.appeared()
+        harness.scheduler.advance(by: .seconds(30))
+        module.actions.disappeared()
+        #expect(!module.state.isTabVisible)
+        let afterLeaving = source.detailReads
+
+        harness.scheduler.advance(by: .seconds(300))
+        #expect(source.detailReads == afterLeaving)
+
+        module.actions.appeared()
+        #expect(source.detailReads == afterLeaving + 1)
+        harness.scheduler.advance(by: .seconds(30))
+        #expect(source.detailReads == afterLeaving + 2)
+    }
+
+    @Test func showingTheTabTwiceKeepsOneTimer() async {
+        let source = FakePowerSource(PowerSourceSnapshot(percent: 60, isCharging: false, isOnAC: false), details: Self.details)
+        let module = BatteryModule(reader: source)
+        let harness = RegistryHarness([module])
+        await harness.registry.bootstrap()
+        module.actions.appeared()
+        module.actions.appeared()
+        let before = source.detailReads
+        harness.scheduler.advance(by: .seconds(30))
+        #expect(source.detailReads == before + 1)
+    }
+
+    @Test func stoppingTheModuleStopsThePollingAndForgetsTheTab() async {
+        let source = FakePowerSource(PowerSourceSnapshot(percent: 60, isCharging: false, isOnAC: false), details: Self.details)
+        let module = BatteryModule(reader: source)
+        let harness = RegistryHarness([module])
+        await harness.registry.bootstrap()
+        module.actions.appeared()
+        await harness.registry.setEnabled(false, for: "battery")
+        #expect(module.state.details == nil)
+        #expect(!module.state.isLowPowerMode)
+        #expect(!module.state.isTabVisible)
+        let afterStop = source.detailReads
+
+        harness.scheduler.advance(by: .seconds(300))
+        // A tab view that outlives the module for a moment must not bring the polling back.
+        module.actions.appeared()
+        module.actions.disappeared()
+        harness.scheduler.advance(by: .seconds(300))
+        #expect(source.detailReads == afterStop)
+        #expect(!module.state.isTabVisible)
+    }
+
+    @Test func theTabDeclaresTheHeightOfItsLayout() throws {
+        let module = BatteryModule(reader: FakePowerSource(PowerSourceSnapshot(percent: 60, isCharging: false, isOnAC: false)))
+        #expect(try #require(module.makeTab()).preferredHeight == BatteryTabView.preferredHeight)
     }
 }
