@@ -11,7 +11,8 @@ protocol SpeechSynthesizing: AnyObject {
     /// Called when the utterance last passed to `speak` ends on its own. Never for one that `stop` cut off, nor for an
     /// earlier one, so a late report cannot clear the state of the utterance that replaced it.
     var onFinish: (() -> Void)? { get set }
-    func availableVoices() -> [SpeechVoice]
+    /// Listing the voices is slow (about 0.15 s), so it must not run on the caller's actor.
+    func availableVoices() async -> [SpeechVoice]
     func speak(_ text: String, voice: SpeechVoice)
     func stop()
 }
@@ -24,8 +25,10 @@ final class SpeechPlayer {
     private(set) var speaking: SpokenText?
 
     @ObservationIgnored private let synthesizer: any SpeechSynthesizing
-    /// Read when first needed and when the tab appears, not at launch: listing the voices is not free.
+    /// Listed in the background when the tab first appears, not at launch and not on every appearance: listing them
+    /// takes a good tenth of a second.
     private var voices: [SpeechVoice] = []
+    @ObservationIgnored private var loading: Task<Void, Never>?
     /// The pick for each language asked about: the buttons ask on every redraw, and picking weighs every voice.
     @ObservationIgnored private var picks: [Locale.Language: SpeechVoice?] = [:]
 
@@ -34,26 +37,36 @@ final class SpeechPlayer {
         synthesizer.onFinish = { [weak self] in self?.speaking = nil }
     }
 
-    /// Whether a voice of `language` is installed, for enabling the button.
+    /// Whether a voice of `language` is installed, for enabling the button. False until the voices are listed.
     func canSpeak(_ language: Locale.Language?) -> Bool {
         language.flatMap(voice(for:)) != nil
     }
 
-    /// Voices can be installed in System Settings while the app runs.
-    func refreshVoices() {
-        voices = synthesizer.availableVoices()
-        picks.removeAll()
+    /// Starts listing the system's voices in the background, once, and returns at once: the buttons stay off until
+    /// the list arrives. Voices installed while MyNotch runs show up after it restarts. A list that came back empty
+    /// (the system may still have been starting) is asked for again next time.
+    @discardableResult
+    func loadVoices() -> Task<Void, Never> {
+        if let loading { return loading }
+        let task = Task { [weak self, synthesizer] in
+            let listed = await synthesizer.availableVoices()
+            guard let self else { return }
+            voices = listed
+            picks.removeAll()
+            if listed.isEmpty { loading = nil }
+        }
+        loading = task
+        return task
     }
 
     /// The button's tap: reads `text`, or stops when this text is the one being read. Reading one text always stops the
-    /// other, so two voices never overlap.
+    /// other, so two voices never overlap. Does nothing before the voices are listed, which the buttons do not allow.
     func toggle(_ part: SpokenText, text: String, language: Locale.Language?) {
         if speaking == part {
             stop()
             return
         }
         stop()
-        if voices.isEmpty { refreshVoices() }
         guard !text.allSatisfy(\.isWhitespace), let language, let voice = voice(for: language) else { return }
         speaking = part
         synthesizer.speak(text, voice: voice)
@@ -86,7 +99,11 @@ final class SystemSpeechSynthesizer: NSObject, SpeechSynthesizing, AVSpeechSynth
     /// The utterance whose end counts. Cleared by `stop`, so the end the system reports for a cut-off one is ignored.
     private var current: AVSpeechUtterance?
 
-    func availableVoices() -> [SpeechVoice] {
+    func availableVoices() async -> [SpeechVoice] {
+        await Task.detached(priority: .utility) { Self.systemVoices() }.value
+    }
+
+    private nonisolated static func systemVoices() -> [SpeechVoice] {
         AVSpeechSynthesisVoice.speechVoices().map {
             SpeechVoice(
                 identifier: $0.identifier, language: $0.language, quality: $0.quality.rawValue,
@@ -96,8 +113,13 @@ final class SystemSpeechSynthesizer: NSObject, SpeechSynthesizing, AVSpeechSynth
     }
 
     func speak(_ text: String, voice: SpeechVoice) {
+        // A voice removed since it was listed would be replaced by the default one, which reads the wrong language.
+        guard let systemVoice = AVSpeechSynthesisVoice(identifier: voice.identifier) else {
+            onFinish?()
+            return
+        }
         let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(identifier: voice.identifier)
+        utterance.voice = systemVoice
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         current = utterance
         synthesizer.speak(utterance)

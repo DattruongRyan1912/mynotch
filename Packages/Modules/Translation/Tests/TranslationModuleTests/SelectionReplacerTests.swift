@@ -8,8 +8,14 @@ final class FakeApplications: ApplicationActivating {
     var exists = true
     /// How many `isFrontmost` questions are answered "no" before the app is in front; nil means never.
     var checksBeforeFront: Int? = 0
+    /// What `isFrontmost` answers once `holds` is false, e.g. no when the user switched apps while the notch closed.
+    var frontOnceKeyboardIsBack = true
+    /// Whether a MyNotch window is key right now; tests tie it to what the code under test has done.
+    var holds: () -> Bool = { false }
     private(set) var activated: [FocusedApplication] = []
     private var checks = 0
+
+    var myNotchHoldsKeyboard: Bool { holds() }
 
     func activate(_ application: FocusedApplication) -> Bool {
         activated.append(application)
@@ -18,6 +24,7 @@ final class FakeApplications: ApplicationActivating {
 
     func isFrontmost(_ application: FocusedApplication) -> Bool {
         defer { checks += 1 }
+        if !holds(), !frontOnceKeyboardIsBack { return false }
         return checksBeforeFront.map { checks >= $0 } ?? false
     }
 }
@@ -37,12 +44,31 @@ final class FakeKeystroke: PasteKeystroke {
 final class ReplacerPauses {
     private(set) var durations: [Duration] = []
     var during: (() -> Void)?
+    var onPause: ((Duration) -> Void)?
     var failure: (any Error)?
+    /// The one wait `failure` cuts short; every wait when nil.
+    var failsOn: Duration?
 
     func pause(_ duration: Duration) throws {
         durations.append(duration)
+        onPause?(duration)
         during?()
-        if let failure { throw failure }
+        if let failure, failsOn == nil || failsOn == duration { throw failure }
+    }
+}
+
+/// The notch as the replacer sees it: asked to close, and then closed unless a test says it refuses.
+final class NotchStub {
+    var isClosed = false
+    var closeRequests = 0
+}
+
+/// What happened, in order, across the fakes.
+final class EventLog {
+    private(set) var events: [String] = []
+
+    func add(_ event: String) {
+        events.append(event)
     }
 }
 
@@ -63,10 +89,16 @@ extension NSPasteboard {
     let applications = FakeApplications()
     let keystroke = FakeKeystroke()
     let pauses = ReplacerPauses()
+    let log = EventLog()
     let pasteboard = NSPasteboard(name: NSPasteboard.Name("MyNotchTests.\(UUID().uuidString)"))
+    let notch = NotchStub()
 
     init() {
-        accessibility.selections = ["Hello"]
+        // The tab's own read is not among these: the replacer reads before activating, right before writing, and
+        // once more before pasting.
+        accessibility.selections = Array(repeating: "Hello", count: 3)
+        // The notch panel is key until it closes.
+        applications.holds = { [notch] in !notch.isClosed }
     }
 
     func makeReplacer() -> SelectionReplacer {
@@ -75,8 +107,13 @@ extension NSPasteboard {
         ) { [pauses] duration in try pauses.pause(duration) }
     }
 
-    func replace(_ text: String = "Xin chào") async -> ReplaceOutcome {
-        await makeReplacer().replace(text, expecting: "Hello", in: source)
+    /// `closeNotch` is what the module does for a paste: close the notch; the notch panel holds the keyboard until then.
+    func replace(_ text: String = "Xin chào", closeNotch: (@MainActor () -> Void)? = nil) async -> ReplaceOutcome {
+        await makeReplacer().replace(text, expecting: "Hello", in: source) { [notch, log] in
+            notch.closeRequests += 1
+            log.add("close")
+            if let closeNotch { closeNotch() } else { notch.isClosed = true }
+        }
     }
 
     /// The user's clipboard: rich text from one app, a secret from a password manager, a second item.
@@ -137,7 +174,7 @@ extension NSPasteboard {
         let before = pasteboard.snapshot
         accessibility.replaces = false
         let replacer = makeReplacer()
-        let task = Task { await replacer.replace("Xin chào", expecting: "Hello", in: source) }
+        let task = Task { await replacer.replace("Xin chào", expecting: "Hello", in: source, handBackKeyboard: {}) }
         task.cancel()
         #expect(await task.value == .failed)
         #expect(accessibility.replacements.isEmpty)
@@ -186,10 +223,31 @@ extension NSPasteboard {
         #expect(keystroke.sent == 0)
     }
 
-    @Test func anAppThatDoesNotAnswerStillGetsTheReplacement() async {
+    @Test func aSelectionThatChangesWhileTheAppComesForwardIsNeverReplaced() async {
+        // The first read is the check before activating; the second is the one right before writing.
+        accessibility.selections = ["Hello", "Something else the user selected since"]
+        #expect(await replace() == .selectionChanged)
+        #expect(accessibility.replacements.isEmpty)
+        #expect(keystroke.sent == 0)
+        #expect(notch.closeRequests == 0)
+    }
+
+    @Test func anAppThatDoesNotAnswerIsLeftAlone() async {
+        fillPasteboard()
+        let before = pasteboard.snapshot
         accessibility.unresponsiveReads = [0]
-        #expect(await replace() == .replaced)
-        #expect(accessibility.replacements == ["Xin chào"])
+        #expect(await replace() == .failed)
+        #expect(applications.activated.isEmpty)
+        #expect(accessibility.replacements.isEmpty)
+        #expect(keystroke.sent == 0)
+        #expect(pasteboard.snapshot == before)
+    }
+
+    @Test func anAppThatStopsAnsweringBeforeTheWriteIsLeftAlone() async {
+        accessibility.unresponsiveReads = [1]
+        #expect(await replace() == .failed)
+        #expect(accessibility.replacements.isEmpty)
+        #expect(keystroke.sent == 0)
     }
 
     // MARK: Paste fallback
@@ -207,6 +265,86 @@ extension NSPasteboard {
         #expect(seen.first?[NSPasteboard.PasteboardType.string.rawValue] == Data("Xin chào".utf8))
         #expect(seen.first?[Self.marker] != nil)
         #expect(seen.first?[Self.concealed] == nil)
+    }
+
+    // MARK: The keyboard goes back first
+
+    @Test func closesTheNotchAndWaitsBeforeSendingTheKeystroke() async {
+        fillPasteboard()
+        let before = pasteboard.snapshot
+        accessibility.replaces = false
+        var atClose: [[String: Data]] = []
+        pauses.onPause = { [log] duration in log.add("wait \(duration)") }
+        keystroke.onSend = { [log] in log.add("paste") }
+        let outcome = await replace { [self] in
+            atClose = pasteboard.snapshot
+            notch.isClosed = true
+        }
+        #expect(outcome == .pasted)
+        // The notch panel is key until it closes, and ⌘V goes to the key window: it must be the app that gets it.
+        #expect(log.events == ["close", "wait 0.08 seconds", "paste", "wait 0.5 seconds"])
+        #expect(atClose == before)
+        #expect(notch.closeRequests == 1)
+    }
+
+    @Test func theAccessibilityPathNeedsNoKeyboardHandBack() async {
+        #expect(await replace() == .replaced)
+        #expect(notch.closeRequests == 0)
+    }
+
+    @Test func neverPastesWhileTheNotchStillHoldsTheKeyboard() async {
+        fillPasteboard()
+        let before = pasteboard.snapshot
+        accessibility.replaces = false
+        // The notch is asked to close and does not.
+        #expect(await replace(closeNotch: {}) == .failed)
+        #expect(notch.closeRequests == 1)
+        #expect(keystroke.sent == 0)
+        #expect(pasteboard.snapshot == before)
+        // It was waited for, but not forever.
+        #expect(pauses.durations == [.milliseconds(80)] + Array(repeating: .milliseconds(40), count: 5))
+    }
+
+    @Test func aKeyboardThatTakesAMomentToComeBackIsWaitedFor() async {
+        accessibility.replaces = false
+        var waits = 0
+        pauses.onPause = { _ in waits += 1 }
+        // Back only after the third wait: the 80 ms and one 40 ms one.
+        applications.holds = { waits < 3 }
+        #expect(await replace(closeNotch: {}) == .pasted)
+        #expect(keystroke.sent == 1)
+    }
+
+    @Test func neverPastesIntoAnotherAppThanTheOneTheTextCameFrom() async {
+        fillPasteboard()
+        let before = pasteboard.snapshot
+        accessibility.replaces = false
+        // Closing the notch left a different app in front.
+        applications.frontOnceKeyboardIsBack = false
+        #expect(await replace() == .failed)
+        #expect(keystroke.sent == 0)
+        #expect(pasteboard.snapshot == before)
+    }
+
+    @Test func aSelectionThatChangedWhileTheKeyboardCameBackIsNeverPasted() async {
+        fillPasteboard()
+        let before = pasteboard.snapshot
+        accessibility.replaces = false
+        // Before activating, right before the accessibility write, and (this one) right before pasting.
+        accessibility.selections = ["Hello", "Hello", "Something else the user selected since"]
+        #expect(await replace() == .selectionChanged)
+        #expect(keystroke.sent == 0)
+        #expect(pasteboard.snapshot == before)
+    }
+
+    @Test func cancellingWhileTheKeyboardComesBackPastesNothing() async {
+        fillPasteboard()
+        let before = pasteboard.snapshot
+        accessibility.replaces = false
+        pauses.failure = CancellationError()
+        #expect(await replace() == .failed)
+        #expect(keystroke.sent == 0)
+        #expect(pasteboard.snapshot == before)
     }
 
     @Test func ourOwnWriteUsesTheTypeClipboardHistoryIgnores() {
@@ -234,7 +372,7 @@ extension NSPasteboard {
         var duringWait: [[String: Data]] = []
         pauses.during = { duringWait = pasteboard.snapshot }
         #expect(await replace() == .pasted)
-        #expect(pauses.durations == [.milliseconds(500)])
+        #expect(pauses.durations == [.milliseconds(80), .milliseconds(500)])
         // Still the translation while the app reads it.
         #expect(duringWait.count == 1)
         #expect(duringWait.first?[NSPasteboard.PasteboardType.string.rawValue] == Data("Xin chào".utf8))
@@ -245,6 +383,7 @@ extension NSPasteboard {
         fillPasteboard()
         accessibility.replaces = false
         pauses.failure = CancellationError()
+        pauses.failsOn = .milliseconds(500)
         #expect(await replace() == .pasted)
         #expect(pasteboard.snapshot.count == 2)
         #expect(pasteboard.pasteboardItems?.first?.string(forType: .string) == "mine")

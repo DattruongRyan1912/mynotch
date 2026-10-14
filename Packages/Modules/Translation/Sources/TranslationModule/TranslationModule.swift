@@ -36,6 +36,8 @@ public final class TranslationModule: FeatureModule {
     private(set) var selectionRead: Task<Void, Never>?
     /// The replacement in progress; tests await it. Stopping cancels it, and waits for it to put the clipboard back.
     private(set) var replacement: Task<Void, Never>?
+    /// The replacement closed the notch to paste, so a failure has to bring it back to be seen.
+    private var closedNotchForPaste = false
 
     /// The module the app runs: Apple's on-device engine, the system Accessibility API, the system voices and the
     /// general pasteboard.
@@ -216,11 +218,14 @@ public final class TranslationModule: FeatureModule {
         let text = state.output
         state.isReplacing = true
         state.replaceFailure = nil
+        closedNotchForPaste = false
         let task = Task { [weak self, replacer] in
-            let outcome = await replacer.replace(text, expecting: source.text, in: source.application)
+            let outcome = await replacer.replace(text, expecting: source.text, in: source.application) { [weak self] in
+                self?.closeNotchForPaste()
+            }
             // Stopping cancelled it and resets the state itself.
             guard let self, !Task.isCancelled else { return }
-            finishReplacing(outcome)
+            finishReplacing(outcome, of: source)
         }
         replacement = task
         return task
@@ -254,21 +259,36 @@ public final class TranslationModule: FeatureModule {
         refreshAccessibility()
     }
 
-    private func finishReplacing(_ outcome: ReplaceOutcome) {
+    /// A paste needs the keyboard back in the app the text came from, and the notch panel holds it while the Translation
+    /// input has it, so the notch closes first, as it does for a paste from Clipboard.
+    private func closeNotchForPaste() {
+        closedNotchForPaste = true
+        context?.presenter.close()
+    }
+
+    private func finishReplacing(_ outcome: ReplaceOutcome, of source: SelectionSource) {
         replacement = nil
         state.isReplacing = false
+        let closedForPaste = closedNotchForPaste
+        closedNotchForPaste = false
+        // A newer press took over the tab while this one ran: what it found is not about the new selection, which it
+        // must not explain, drop or close the notch over.
+        guard state.selectionSource == source else { return }
         switch outcome {
         case .replaced, .pasted:
             // The selection now holds the translation: there is nothing left for the button to replace.
             state.selectionSource = nil
             state.needsAccessibility = false
-            context?.presenter.close()
+            // A paste closed it already, and the user may have opened it again while the clipboard was coming back.
+            if !closedForPaste { context?.presenter.close() }
         case .needsAccessibility:
             state.needsAccessibility = true
         case .selectionChanged:
             state.replaceFailure = "Vùng chọn đã đổi, nên chưa thay được"
+            if closedForPaste { context?.presenter.open() }
         case .failed:
             state.replaceFailure = "Không thay được chữ ở app kia"
+            if closedForPaste { context?.presenter.open() }
         }
     }
 

@@ -50,8 +50,8 @@ struct TranslationTabView: View {
             }
             releaseHold()
         }
-        // The system voices can change while the app runs.
-        .onAppear(perform: speech.refreshVoices)
+        // Lists the system's voices in the background the first time; the speaker buttons wait for the list.
+        .onAppear { speech.loadVoices() }
         // While the tab is shown: when it appears, then every 2 s, so the hint goes by itself once Accessibility is allowed.
         .task {
             while !Task.isCancelled {

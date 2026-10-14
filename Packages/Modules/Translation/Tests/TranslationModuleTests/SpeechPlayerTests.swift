@@ -17,13 +17,22 @@ final class FakeSynthesizer: SpeechSynthesizing {
     private(set) var spoken: [Utterance] = []
     private(set) var stops = 0
     private(set) var voiceLoads = 0
+    /// When true, listing the voices waits for `releaseVoices()`, like a slow system call.
+    var holdsVoices = false
+    private var heldVoices: CheckedContinuation<Void, Never>?
     /// Set when something was spoken while another utterance was still going.
     private(set) var overlapped = false
     private(set) var active: Utterance?
 
-    func availableVoices() -> [SpeechVoice] {
+    func availableVoices() async -> [SpeechVoice] {
         voiceLoads += 1
+        if holdsVoices { await withCheckedContinuation { heldVoices = $0 } }
         return voices
+    }
+
+    func releaseVoices() {
+        heldVoices?.resume()
+        heldVoices = nil
     }
 
     func speak(_ text: String, voice: SpeechVoice) {
@@ -54,7 +63,13 @@ final class FakeSynthesizer: SpeechSynthesizing {
         player = SpeechPlayer(synthesizer: synthesizer)
     }
 
-    @Test func speaksTheTextInAVoiceOfItsLanguage() {
+    /// The voices are listed in the background when the tab appears; tests wait for that.
+    func ready() async {
+        await player.loadVoices().value
+    }
+
+    @Test func speaksTheTextInAVoiceOfItsLanguage() async {
+        await ready()
         player.toggle(.original, text: "Hello", language: .en)
         #expect(synthesizer.spoken == [.init(text: "Hello", voice: "voice.en")])
         #expect(player.speaking == .original)
@@ -64,7 +79,8 @@ final class FakeSynthesizer: SpeechSynthesizing {
         #expect(player.speaking == .translation)
     }
 
-    @Test func tappingTheSameButtonAgainStops() {
+    @Test func tappingTheSameButtonAgainStops() async {
+        await ready()
         player.toggle(.translation, text: "Xin chào", language: .vi)
         player.toggle(.translation, text: "Xin chào", language: .vi)
         #expect(player.speaking == nil)
@@ -73,7 +89,8 @@ final class FakeSynthesizer: SpeechSynthesizing {
         #expect(synthesizer.stops == 1)
     }
 
-    @Test func onlyOneUtteranceAtATime() {
+    @Test func onlyOneUtteranceAtATime() async {
+        await ready()
         player.toggle(.original, text: "Hello", language: .en)
         player.toggle(.translation, text: "Xin chào", language: .vi)
         #expect(player.speaking == .translation)
@@ -86,7 +103,8 @@ final class FakeSynthesizer: SpeechSynthesizing {
         #expect(synthesizer.spoken.map(\.text) == ["Hello", "Xin chào", "Hello"])
     }
 
-    @Test func endingOnItsOwnClearsTheState() {
+    @Test func endingOnItsOwnClearsTheState() async {
+        await ready()
         player.toggle(.original, text: "Hello", language: .en)
         synthesizer.finish()
         #expect(player.speaking == nil)
@@ -96,7 +114,8 @@ final class FakeSynthesizer: SpeechSynthesizing {
         #expect(synthesizer.spoken.count == 2)
     }
 
-    @Test func stopSilencesAndIsHarmlessWhenIdle() {
+    @Test func stopSilencesAndIsHarmlessWhenIdle() async {
+        await ready()
         player.stop()
         #expect(synthesizer.stops == 0)
         player.toggle(.original, text: "Hello", language: .en)
@@ -106,7 +125,8 @@ final class FakeSynthesizer: SpeechSynthesizing {
         #expect(synthesizer.stops == 1)
     }
 
-    @Test func blankTextAndUnknownLanguagesSpeakNothing() {
+    @Test func blankTextAndUnknownLanguagesSpeakNothing() async {
+        await ready()
         player.toggle(.original, text: "  \n", language: .en)
         player.toggle(.original, text: "Hello", language: nil)
         player.toggle(.original, text: "こんにちは", language: .ja)
@@ -114,31 +134,56 @@ final class FakeSynthesizer: SpeechSynthesizing {
         #expect(player.speaking == nil)
     }
 
-    @Test func aFailedTapStillSilencesTheOtherButton() {
+    @Test func aFailedTapStillSilencesTheOtherButton() async {
+        await ready()
         player.toggle(.original, text: "Hello", language: .en)
         player.toggle(.translation, text: "こんにちは", language: .ja)
         #expect(player.speaking == nil)
         #expect(synthesizer.active == nil)
     }
 
-    @Test func knowsWhichLanguagesHaveAVoice() {
-        player.refreshVoices()
+    @Test func knowsWhichLanguagesHaveAVoice() async {
+        await ready()
         #expect(player.canSpeak(.en))
         #expect(player.canSpeak(.vi))
         #expect(!player.canSpeak(.ja))
         #expect(!player.canSpeak(nil))
     }
 
-    @Test func voicesAreReadWhenFirstNeededAndAgainOnRefresh() {
-        #expect(synthesizer.voiceLoads == 0)
+    @Test func voicesAreListedOnceInTheBackgroundAndNeverBlockTheCaller() async {
+        synthesizer.holdsVoices = true
+        let first = player.loadVoices()
+        // The caller has its turn back while the system call is still going, and nothing can be read yet.
+        #expect(!player.canSpeak(.en))
         player.toggle(.original, text: "Hello", language: .en)
+        #expect(synthesizer.spoken.isEmpty)
+        #expect(player.speaking == nil)
+        // Another appearance of the tab while that is going on starts nothing new.
+        let second = player.loadVoices()
+        await eventually { synthesizer.voiceLoads == 1 }
+
+        synthesizer.releaseVoices()
+        await first.value
+        await second.value
+        #expect(player.canSpeak(.en))
+        #expect(synthesizer.voiceLoads == 1)
+
+        // And once loaded they stay: later appearances read nothing.
+        await player.loadVoices().value
+        await player.loadVoices().value
         #expect(synthesizer.voiceLoads == 1)
         player.toggle(.original, text: "Hello", language: .en)
-        #expect(synthesizer.voiceLoads == 1)
-        synthesizer.voices.append(SpeechVoice(identifier: "voice.ja", language: "ja-JP", quality: 1, isNovelty: false))
-        #expect(!player.canSpeak(.ja))
-        player.refreshVoices()
-        #expect(player.canSpeak(.ja))
+        #expect(player.speaking == .original)
+    }
+
+    @Test func aListThatCameBackEmptyIsAskedForAgain() async {
+        synthesizer.voices = []
+        await ready()
+        #expect(!player.canSpeak(.en))
+        synthesizer.voices = [SpeechVoice(identifier: "voice.en", language: "en-US", quality: 1, isNovelty: false)]
+        await ready()
+        #expect(player.canSpeak(.en))
+        #expect(synthesizer.voiceLoads == 2)
     }
 }
 
@@ -147,6 +192,7 @@ final class FakeSynthesizer: SpeechSynthesizing {
 
     @Test func stoppingTheModuleSilencesTheVoice() async {
         await fixture.start()
+        await fixture.module.speech.loadVoices().value
         fixture.module.speech.toggle(.translation, text: "Xin chào", language: .vi)
         #expect(fixture.synthesizer.active != nil)
         await fixture.harness.registry.setEnabled(false, for: "translation")
@@ -156,8 +202,8 @@ final class FakeSynthesizer: SpeechSynthesizing {
 }
 
 @Suite struct SystemSpeechSynthesizerTests {
-    @Test func listsTheSystemVoicesWithoutSpeaking() {
-        let voices = SystemSpeechSynthesizer().availableVoices()
+    @Test func listsTheSystemVoicesWithoutSpeaking() async {
+        let voices = await SystemSpeechSynthesizer().availableVoices()
         #expect(voices.allSatisfy { !$0.identifier.isEmpty && !$0.language.isEmpty && (1...3).contains($0.quality) })
     }
 }

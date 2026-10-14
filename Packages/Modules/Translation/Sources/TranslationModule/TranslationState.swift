@@ -29,7 +29,8 @@ final class TranslationState {
     /// The shortcut opened the tab and the selection is still being read.
     var isReadingSelection = false
     /// The selection in another app that `input` came from, which the result can replace; nil for typed text and
-    /// text from Services.
+    /// text from Services, and once the user edits the input or swaps the direction, since the result is then a
+    /// translation of other text.
     var selectionSource: SelectionSource?
     /// The "Hiện nút thay vào chỗ đang chọn" setting.
     var offersReplace = true

@@ -21,6 +21,11 @@ final class SelectionReplacer {
     /// The app needs a moment to come to the front after `activate`.
     private static let frontPause = Duration.milliseconds(50)
     private static let frontChecks = 10
+    /// Closing the notch hands the keyboard back to the app in front: the same wait Clipboard gives a paste, then a
+    /// few short ones for a machine that is busy.
+    private static let handBackDelay = Duration.milliseconds(80)
+    private static let handBackPause = Duration.milliseconds(40)
+    private static let handBackChecks = 5
     /// The app reads the pasteboard some time after ⌘V; the user's clipboard goes back only after this.
     private static let restoreDelay = Duration.milliseconds(500)
 
@@ -49,35 +54,68 @@ final class SelectionReplacer {
 
     /// Replaces `selected`, which is still selected in `application`, with `text`: through Accessibility if the app
     /// takes it, else by pasting. Cancelling before the app is in front changes nothing.
-    func replace(_ text: String, expecting selected: String, in application: FocusedApplication) async -> ReplaceOutcome {
+    /// - Parameter handBackKeyboard: closes the notch. Called only before a paste: the notch panel is key while the
+    ///   Translation input has the keyboard, and ⌘V goes to the key window.
+    func replace(
+        _ text: String, expecting selected: String, in application: FocusedApplication,
+        handBackKeyboard: @MainActor () -> Void
+    ) async -> ReplaceOutcome {
         guard accessibility.isTrusted else { return .needsAccessibility }
         // The user may have selected something else since, and that is not theirs to lose. Checked before the app is
         // brought to the front, so a replacement that will not happen does not take the focus either.
-        switch accessibility.readSelection(in: application) {
-        case .text(let current) where current == selected: break
-        case .unresponsive: break   // cannot be told; the app may still answer the replacement
-        case .text, .empty: return .selectionChanged
-        }
+        if let refused = checkSelection(selected, in: application) { return refused }
         guard await bringToFront(application), !Task.isCancelled else { return .failed }
+        // The wait for the app can take a while, so the selection is looked at again right before it is written over.
+        if let refused = checkSelection(selected, in: application) { return refused }
         if accessibility.replaceSelection(with: text, in: application) { return .replaced }
-        return await paste(text)
+        return await paste(text, expecting: selected, in: application, handBackKeyboard: handBackKeyboard)
+    }
+
+    /// nil while `selected` is still what the app has selected. An app that does not answer proves nothing, and
+    /// writing to one that hangs would only queue the keystroke, so it counts as a failure.
+    private func checkSelection(_ selected: String, in application: FocusedApplication) -> ReplaceOutcome? {
+        switch accessibility.readSelection(in: application) {
+        case .text(let current) where current == selected: nil
+        case .unresponsive: .failed
+        case .text, .empty: .selectionChanged
+        }
     }
 
     private func bringToFront(_ application: FocusedApplication) async -> Bool {
         guard applications.activate(application) else { return false }
-        for _ in 0..<Self.frontChecks {
-            if applications.isFrontmost(application) { return true }
+        return await wait(Self.frontPause, checks: Self.frontChecks) { applications.isFrontmost(application) }
+    }
+
+    /// Asks `condition` up to `checks` times, `interval` apart, and once more at the end. False when it never held or
+    /// the wait was cancelled.
+    private func wait(_ interval: Duration, checks: Int, until condition: () -> Bool) async -> Bool {
+        for _ in 0..<checks {
+            if condition() { return true }
             do {
-                try await pause(Self.frontPause)
+                try await pause(interval)
             } catch {
                 return false   // cancelled
             }
         }
-        return applications.isFrontmost(application)
+        return condition()
     }
 
-    /// ⌘V with the translation on the pasteboard, which goes back to what it held.
-    private func paste(_ text: String) async -> ReplaceOutcome {
+    /// ⌘V with the translation on the pasteboard, which goes back to what it held. The notch closes first and the
+    /// keystroke waits until the app the text came from has the keyboard, since ⌘V sent while the notch panel is key
+    /// would paste into the notch's own input and still look like success.
+    private func paste(
+        _ text: String, expecting selected: String, in application: FocusedApplication,
+        handBackKeyboard: @MainActor () -> Void
+    ) async -> ReplaceOutcome {
+        handBackKeyboard()
+        do {
+            try await pause(Self.handBackDelay)
+        } catch {
+            return .failed   // cancelled
+        }
+        guard await wait(Self.handBackPause, checks: Self.handBackChecks, until: { !applications.myNotchHoldsKeyboard }),
+              applications.isFrontmost(application), !Task.isCancelled else { return .failed }
+        if let refused = checkSelection(selected, in: application) { return refused }
         let backup = PasteboardBackup(pasteboard)
         let item = NSPasteboardItem()
         item.setString(text, forType: .string)

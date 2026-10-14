@@ -56,7 +56,7 @@ final class Translator {
     /// The user typed. Translates after a pause; a blank input clears the result at once.
     func edit(_ text: String) {
         guard !isStopped else { return }
-        state.input = text
+        userSet(text)
         pendingTyping?.cancel()
         guard !text.allSatisfy(\.isWhitespace) else {
             translate()
@@ -98,7 +98,7 @@ final class Translator {
     /// Return. `text` is what the field shows, which can differ from the input while an input method composes.
     func submit(_ text: String) {
         guard !isStopped else { return }
-        state.input = text
+        userSet(text)
         translate()
     }
 
@@ -123,7 +123,7 @@ final class Translator {
         state.source = pair.target
         state.target = pair.source
         lastSource = pair.target
-        if !state.output.isEmpty { state.input = state.output }
+        if !state.output.isEmpty { userSet(state.output) }
         translate()
     }
 
@@ -151,6 +151,13 @@ final class Translator {
         isStopped = true
         pendingTyping?.cancel()
         supersede()
+    }
+
+    /// The user changed the text to translate. A result of other text must not be offered as the replacement of the
+    /// selection the input came from; a field reporting the text it already shows changes nothing.
+    private func userSet(_ text: String) {
+        if text != state.input { state.selectionSource = nil }
+        state.input = text
     }
 
     private func direction(for text: String) -> LanguagePair {

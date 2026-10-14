@@ -17,8 +17,8 @@ import Testing
         let hosting = NSHostingView(rootView: AnyView(tab.content.frame(width: 452, height: 176)))
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 452, height: 176), styleMask: .borderless, backing: .buffered, defer: true)
         window.contentView = hosting
-        // Appearing is what reads the system's voices.
-        try await waitFor { fixture.synthesizer.voiceLoads > 0 }
+        // Appearing is what lists the system's voices, in the background.
+        try await waitFor { fixture.module.speech.canSpeak(.en) }
         #expect(fixture.synthesizer.voiceLoads == 1)
 
         fixture.module.speech.toggle(.original, text: "Hello", language: .en)

@@ -10,10 +10,11 @@ import Testing
     let fixture = ModuleFixture()
     let safari = FocusedApplication(processID: 42, bundleID: "com.apple.Safari")
 
-    /// ⌃⌥T over a selection of `text`, translated. The selection is read twice: when the tab opens and when it is replaced.
+    /// ⌃⌥T over a selection of `text`, translated. The selection is read when the tab opens, then again before the app is
+    /// brought forward, before the write, and before a paste.
     func translateSelection(_ text: String = Self.text) async {
         await fixture.start()
-        fixture.accessibility.selections = [text, text]
+        fixture.accessibility.selections = Array(repeating: text, count: 4)
         await fixture.pressShortcutAndRead()
         await fixture.translated()
     }
@@ -83,6 +84,58 @@ import Testing
         await fixture.pressShortcutAndRead()
         #expect(fixture.state.replaceFailure == nil)
         #expect(!fixture.state.needsAccessibility)
+    }
+
+    // MARK: Only the untouched selection
+
+    @Test func editingTheInputDropsTheSource() async throws {
+        await translateSelection()
+        let translator = try #require(fixture.module.translator)
+        translator.edit("Something completely different")
+        #expect(fixture.state.selectionSource == nil)
+        translator.translate()
+        await fixture.translated()
+        #expect(!fixture.state.showsReplace)
+        #expect(fixture.module.replaceSelection() == nil)
+        #expect(fixture.accessibility.replacements.isEmpty)
+    }
+
+    @Test func returnOnEditedTextDropsTheSource() async throws {
+        await translateSelection()
+        let translator = try #require(fixture.module.translator)
+        translator.submit("Good morning, my friend")
+        #expect(fixture.state.selectionSource == nil)
+        await fixture.translated()
+        #expect(!fixture.state.showsReplace)
+    }
+
+    @Test func swappingTheDirectionDropsTheSource() async throws {
+        await translateSelection()
+        let translator = try #require(fixture.module.translator)
+        translator.swap()
+        // The translation became the text to translate back: it is no longer the selection.
+        #expect(fixture.state.input == Self.translated)
+        #expect(fixture.state.selectionSource == nil)
+        await fixture.translated()
+        #expect(!fixture.state.showsReplace)
+        #expect(fixture.module.replaceSelection() == nil)
+        #expect(fixture.accessibility.replacements.isEmpty)
+    }
+
+    @Test func theSameTextOrAnotherLanguageKeepsTheSource() async throws {
+        await translateSelection()
+        let translator = try #require(fixture.module.translator)
+        // The field reporting the text it already shows, as an input method does while composing.
+        translator.edit(Self.text)
+        translator.submit(Self.text)
+        #expect(fixture.state.selectionSource != nil)
+        translator.setTarget(.ja)
+        await fixture.translated()
+        translator.setSource(.en)
+        await fixture.translated()
+        #expect(fixture.state.selectionSource == SelectionSource(text: Self.text, application: safari))
+        #expect(fixture.state.canReplace)
+        #expect(fixture.state.output == "\(Self.text) [en→ja]")
     }
 
     @Test func servicesTextDropsTheOldSource() async {
@@ -239,13 +292,37 @@ import Testing
         fillPasteboard()
         fixture.accessibility.replaces = false
         var duringPaste: String?
-        fixture.keystroke.onSend = { duringPaste = fixture.pasteboard.string(forType: .string) }
+        var closesAtPaste = 0
+        fixture.keystroke.onSend = {
+            duringPaste = fixture.pasteboard.string(forType: .string)
+            closesAtPaste = fixture.harness.presenter.closeCount
+        }
         await fixture.module.replaceSelection()?.value
         #expect(fixture.keystroke.sent == 1)
         #expect(duringPaste == Self.translated)
+        // The notch was already closed when ⌘V went out, so the keyboard was back in the app the text came from.
+        #expect(closesAtPaste == 1)
         #expect(fixture.pasteboard.string(forType: .string) == "mine")
         #expect(fixture.state.selectionSource == nil)
         #expect(fixture.harness.presenter.closeCount == 1)
+        #expect(fixture.harness.presenter.openedTabs == ["translation"])
+    }
+
+    @Test func aPasteThatCannotHaveTheKeyboardFailsAndShowsTheNotchAgain() async {
+        await translateSelection()
+        fillPasteboard()
+        fixture.accessibility.replaces = false
+        // Something else keeps the keyboard even after the notch closed.
+        fixture.applications.holds = { true }
+        await fixture.module.replaceSelection()?.value
+        #expect(fixture.keystroke.sent == 0)
+        #expect(fixture.pasteboard.string(forType: .string) == "mine")
+        // Not a success: the notch comes back with the reason and the button to try again.
+        #expect(fixture.harness.presenter.closeCount == 1)
+        #expect(fixture.harness.presenter.openedTabs == ["translation", "translation"])
+        #expect(fixture.state.replaceFailure == "Không thay được chữ ở app kia")
+        #expect(fixture.state.selectionSource != nil)
+        #expect(fixture.state.canReplace)
     }
 
     @Test func aSelectionThatChangedIsKeptAndExplained() async {
@@ -257,6 +334,7 @@ import Testing
         #expect(fixture.state.selectionSource != nil)
         #expect(fixture.accessibility.replacements.isEmpty)
         #expect(fixture.harness.presenter.closeCount == 0)
+        #expect(fixture.harness.presenter.openedTabs == ["translation"])
         #expect(!fixture.state.isReplacing)
     }
 
@@ -273,6 +351,31 @@ import Testing
         fixture.module.translator?.translate()
         await fixture.translated()
         #expect(fixture.state.replaceFailure == nil)
+    }
+
+    @Test func aReplacementThatEndsAfterANewPressLeavesTheNewSelectionAlone() async {
+        await translateSelection()
+        fixture.accessibility.replaces = false
+        fixture.handBackPauses.holds = true
+        let old = fixture.module.replaceSelection()
+        await eventually { fixture.handBackPauses.isWaiting }
+        // The old replacement is waiting for the notch to hand the keyboard back when the shortcut is pressed again.
+        // The reads so far: the tab's, before activating, before the write. Then the press, and the old one's last.
+        fixture.accessibility.selections = [Self.text, Self.text, Self.text, "Good morning, my friend", "Good morning, my friend"]
+        fixture.module.selectionShortcutPressed()
+        await fixture.module.selectionRead?.value
+        let fresh = fixture.state.selectionSource
+        #expect(fresh?.text == "Good morning, my friend")
+        let tabsOpened = fixture.harness.presenter.openedTabs.count
+
+        fixture.handBackPauses.holds = false
+        fixture.handBackPauses.release()
+        await old?.value
+        // What the old one found or did is not about the new selection: no message, no source dropped, no reopening.
+        #expect(fixture.state.selectionSource == fresh)
+        #expect(fixture.state.replaceFailure == nil)
+        #expect(!fixture.state.isReplacing)
+        #expect(fixture.harness.presenter.openedTabs.count == tabsOpened)
     }
 
     @Test func aSecondClickWhileReplacingDoesNothing() async {
@@ -322,6 +425,7 @@ import Testing
         await replacement?.value
         #expect(fixture.pasteboard.string(forType: .string) == "mine")
         #expect(fixture.state.selectionSource == nil)
-        #expect(fixture.harness.presenter.closeCount == 0)
+        // The one that handed the keyboard back before the stop; the stop closes nothing more.
+        #expect(fixture.harness.presenter.closeCount == 1)
     }
 }

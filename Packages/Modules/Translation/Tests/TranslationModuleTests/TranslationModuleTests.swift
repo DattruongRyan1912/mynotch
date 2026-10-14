@@ -10,8 +10,10 @@ struct ModuleFixture {
     let engine = FakeEngine()
     let accessibility = FakeAccessibility()
     let pauses = PauseGate()
-    /// The waits of the replacement: for the app to come to the front, and before the clipboard goes back.
+    /// The wait of the replacement before the clipboard goes back (500 ms).
     let replacePauses = PauseGate()
+    /// Its other waits: for the app to come to the front, and for the keyboard to come back before a paste.
+    let handBackPauses = PauseGate()
     let applications = FakeApplications()
     let keystroke = FakeKeystroke()
     let synthesizer = FakeSynthesizer()
@@ -30,10 +32,14 @@ struct ModuleFixture {
             speech: SpeechPlayer(synthesizer: synthesizer),
             replacer: SelectionReplacer(
                 accessibility: accessibility, applications: applications, keystroke: keystroke, pasteboard: pasteboard
-            ) { [replacePauses] _ in try await replacePauses.pause() },
+            ) { [replacePauses, handBackPauses] duration in
+                try await (duration == .milliseconds(500) ? replacePauses : handBackPauses).pause()
+            },
             shortcut: nil
         )
         harness = RegistryHarness([module])
+        // The notch panel holds the keyboard until the module closes the notch.
+        applications.holds = { [harness] in harness.presenter.closeCount == 0 }
     }
 
     var state: TranslationState { module.state }
