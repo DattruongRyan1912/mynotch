@@ -24,6 +24,9 @@ struct ScreenshotSettingsView: View {
             }
             Toggle("Chụp cửa sổ kèm bóng đổ", isOn: settings.binding(keys.windowShadow))
             Toggle("Hiện “Đã chụp” bên cạnh notch", isOn: settings.binding(keys.showCapturedActivity))
+            Picker("Nền phần mở rộng khi sửa ảnh", selection: settings.binding(keys.canvasFill)) {
+                ForEach(CanvasFill.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
             ocrLanguages
             Text(Self.reconfirmationNote)
                 .font(.caption)

@@ -4,23 +4,38 @@ import Foundation
 
 /// Burns a `MarkupDocument` into its capture at full pixel resolution. Pure, so a host may flatten off the main actor.
 nonisolated enum MarkupRenderer {
-    /// The capture with its annotations drawn in order at the image's pixel size, or nil if no bitmap could be made.
-    /// Annotations are scaled when `document.imageSize` differs from the image's pixel size.
+    /// The capture with its annotations drawn in order, or nil if no bitmap could be made. The bitmap is the capture's
+    /// pixel size plus the padding of the document's canvas, filled as `document.canvasFill` says, with the capture
+    /// at the padding's offset. Annotations are scaled when `document.imageSize` differs from the image's pixel size.
     static func flatten(_ image: CGImage, _ document: MarkupDocument) -> CGImage? {
         let width = image.width, height = image.height
-        guard let context = makeContext(width: width, height: height, space: image.colorSpace)
-            ?? makeContext(width: width, height: height, space: CGColorSpace(name: CGColorSpace.sRGB)) else { return nil }
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        context.translateBy(x: 0, y: CGFloat(height))
+        let hasSize = document.imageSize.width > 0 && document.imageSize.height > 0
+        let scaleX = hasSize ? CGFloat(width) / document.imageSize.width : 1
+        let scaleY = hasSize ? CGFloat(height) / document.imageSize.height : 1
+        let insets = document.canvas
+        let left = Int((CGFloat(insets.left) * scaleX).rounded(.up)), right = Int((CGFloat(insets.right) * scaleX).rounded(.up))
+        let top = Int((CGFloat(insets.top) * scaleY).rounded(.up)), bottom = Int((CGFloat(insets.bottom) * scaleY).rounded(.up))
+        let canvasWidth = left + width + right, canvasHeight = top + height + bottom
+        guard let context = makeContext(width: canvasWidth, height: canvasHeight, space: image.colorSpace)
+            ?? makeContext(width: canvasWidth, height: canvasHeight, space: CGColorSpace(name: CGColorSpace.sRGB)) else { return nil }
+        context.clear(CGRect(x: 0, y: 0, width: canvasWidth, height: canvasHeight))
+        // The bitmap's origin is bottom-left here, so the bottom padding is the offset up from it.
+        context.draw(image, in: CGRect(x: left, y: bottom, width: width, height: height))
+        fillPadding(document.canvasFill, around: PixelRegion(columns: left..<(left + width), rows: top..<(top + height)), in: context)
+        context.translateBy(x: 0, y: CGFloat(canvasHeight))
         context.scaleBy(x: 1, y: -1)
-        let toPixels = document.imageSize.width > 0 && document.imageSize.height > 0
-            ? CGAffineTransform(scaleX: CGFloat(width) / document.imageSize.width, y: CGFloat(height) / document.imageSize.height)
-            : .identity
+        // Annotation space starts at the capture's top-left corner, which sits at the padding's offset.
+        let toPixels = CGAffineTransform(a: scaleX, b: 0, c: 0, d: scaleY, tx: CGFloat(left), ty: CGFloat(top))
         let blockSize = redactBlockSize(for: CGSize(width: width, height: height))
         for annotation in document.annotations {
-            if case .redact(let rect) = annotation {
+            switch annotation {
+            case .redact(let rect):
                 pixelate(rect.applying(toPixels), blockSize: blockSize, in: context)
-            } else {
+            case .erase(let rect):
+                erase(rect.applying(toPixels), blockSize: blockSize, in: context)
+            case .magnifier(let center, let radius, let zoom, let style):
+                magnify(center: center.applying(toPixels), radius: radius * scaleX, zoom: zoom, border: style.color, borderWidth: style.width * scaleX, in: context)
+            default:
                 context.saveGState()
                 context.concatenate(toPixels)
                 draw(annotation, in: context)
@@ -31,7 +46,7 @@ nonisolated enum MarkupRenderer {
     }
 
     /// Draws a vector annotation into a context whose user space is image pixels with y down: the flattened bitmap,
-    /// or the editor's live preview. Redaction needs the pixels underneath, so only `flatten` performs it.
+    /// or the editor's live draft. Redaction, erasing and the lens need the pixels underneath, so only `flatten` performs them.
     static func draw(_ annotation: Annotation, in context: CGContext) {
         context.saveGState()
         defer { context.restoreGState() }
@@ -54,7 +69,11 @@ nonisolated enum MarkupRenderer {
             context.setLineJoin(.round)
             context.addLines(between: points.count > 1 ? points : [first, first])
             context.strokePath()
-        case .redact:
+        case .step(let number, let center, let radius, let color):
+            drawStep(number: number, center: center, radius: radius, color: color, in: context)
+        case .ruler(let start, let end, let style, let fontSize, let scale):
+            drawRuler(from: start, to: end, style: style, fontSize: fontSize, scale: scale, in: context)
+        case .redact, .magnifier, .erase:
             break
         }
     }
@@ -94,13 +113,35 @@ nonisolated enum MarkupRenderer {
         context.fillPath()
     }
 
-    private static func drawText(_ string: String, at origin: CGPoint, fontSize: CGFloat, color: RGBAColor, in context: CGContext) {
-        let font = CTFontCreateUIFontForLanguage(.emphasizedSystem, fontSize, nil) ?? CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
-        let attributes: [NSAttributedString.Key: Any] = [
+    /// The size of `string` as `draw` lays it out: the widest line by the height of all its lines.
+    static func textSize(_ string: String, fontSize: CGFloat) -> CGSize {
+        let font = textFont(fontSize)
+        let lines = string.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        let widest = lines.map { line in
+            CTLineGetTypographicBounds(CTLineCreateWithAttributedString(NSAttributedString(string: String(line), attributes: textAttributes(font, .black))), nil, nil, nil)
+        }.max() ?? 0
+        return CGSize(width: widest, height: CGFloat(lines.count) * lineHeight(of: font))
+    }
+
+    static func textFont(_ fontSize: CGFloat) -> CTFont {
+        CTFontCreateUIFontForLanguage(.emphasizedSystem, fontSize, nil) ?? CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
+    }
+
+    private static func lineHeight(of font: CTFont) -> CGFloat {
+        CTFontGetAscent(font) + CTFontGetDescent(font) + CTFontGetLeading(font)
+    }
+
+    static func textAttributes(_ font: CTFont, _ color: RGBAColor) -> [NSAttributedString.Key: Any] {
+        [
             NSAttributedString.Key(kCTFontAttributeName as String): font,
             NSAttributedString.Key(kCTForegroundColorAttributeName as String): color.cgColor,
         ]
-        let ascent = CTFontGetAscent(font), lineHeight = ascent + CTFontGetDescent(font) + CTFontGetLeading(font)
+    }
+
+    private static func drawText(_ string: String, at origin: CGPoint, fontSize: CGFloat, color: RGBAColor, in context: CGContext) {
+        let font = textFont(fontSize)
+        let attributes = textAttributes(font, color)
+        let ascent = CTFontGetAscent(font), lineHeight = lineHeight(of: font)
         // The text matrix is not part of the graphics state; glyphs are y-up, so flip them for this y-down space.
         let textMatrix = context.textMatrix
         defer { context.textMatrix = textMatrix }
@@ -114,7 +155,7 @@ nonisolated enum MarkupRenderer {
     /// Replaces `rect` (pixels, y down, rounded outward to whole pixels) with blocks of its average colour, anchored at
     /// its top-left. Averages are written straight into the bitmap, which stores the top row first, so no original
     /// pixel survives, unlike a light blur, which can be reversed.
-    private static func pixelate(_ rect: CGRect, blockSize: Int, in context: CGContext) {
+    static func pixelate(_ rect: CGRect, blockSize: Int, in context: CGContext) {
         let region = rect.standardized.integral.intersection(CGRect(x: 0, y: 0, width: context.width, height: context.height))
         guard !region.isEmpty, let data = context.data else { return }
         context.flush()

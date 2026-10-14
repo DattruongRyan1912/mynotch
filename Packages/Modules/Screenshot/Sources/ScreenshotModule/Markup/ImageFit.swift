@@ -1,19 +1,25 @@
 import CoreGraphics
 
-/// Where an image sits in the editor's canvas when aspect-fitted and centred, and the conversions between
-/// view points (origin top-left) and image pixels (origin top-left) that drawing gestures need.
+/// Where the canvas (the capture plus any padding) sits in the editor's view when aspect-fitted and centred, and
+/// the conversions between view points (origin top-left) and annotation pixels (origin top-left) that drawing
+/// gestures need.
 nonisolated struct ImageFit: Equatable, Sendable {
+    /// The canvas's size in pixels.
     let imageSize: CGSize
+    /// The annotation-space point of the canvas's top-left corner: negative once the canvas grew left or up.
+    let origin: CGPoint
     /// View points per image pixel; 0 when either size is empty.
     let scale: CGFloat
     /// The image's frame in the view; the rest is letterbox.
     let frame: CGRect
 
-    /// `maximumScale` stops small captures from being blown up past that many points per pixel.
-    init(imageSize: CGSize, viewSize: CGSize, maximumScale: CGFloat = .infinity) {
+    /// `maximumScale` stops small captures from being blown up past that many points per pixel. `margin` keeps that
+    /// many points free around the canvas, so a drag can leave the picture and grow the canvas.
+    init(imageSize: CGSize, viewSize: CGSize, maximumScale: CGFloat = .infinity, margin: CGFloat = 0, origin: CGPoint = .zero) {
         self.imageSize = imageSize
+        self.origin = origin
         let fitted = imageSize.width > 0 && imageSize.height > 0
-            ? min(viewSize.width / imageSize.width, viewSize.height / imageSize.height, maximumScale)
+            ? min((viewSize.width - 2 * margin) / imageSize.width, (viewSize.height - 2 * margin) / imageSize.height, maximumScale)
             : 0
         scale = max(fitted, 0)
         let size = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
@@ -23,17 +29,17 @@ nonisolated struct ImageFit: Equatable, Sendable {
         )
     }
 
-    /// The image pixel under a view point, clamped to the image so drags that leave it stay on its edge.
-    func imagePoint(fromView point: CGPoint) -> CGPoint {
+    /// The annotation pixel under a view point. Clamped to the canvas by default, so drags that leave it stay on its
+    /// edge; drawing tools pass `clamped: false` to reach beyond it.
+    func imagePoint(fromView point: CGPoint, clamped: Bool = true) -> CGPoint {
         guard scale > 0 else { return .zero }
-        return CGPoint(
-            x: min(max((point.x - frame.minX) / scale, 0), imageSize.width),
-            y: min(max((point.y - frame.minY) / scale, 0), imageSize.height)
-        )
+        let x = (point.x - frame.minX) / scale, y = (point.y - frame.minY) / scale
+        guard clamped else { return CGPoint(x: x + origin.x, y: y + origin.y) }
+        return CGPoint(x: min(max(x, 0), imageSize.width) + origin.x, y: min(max(y, 0), imageSize.height) + origin.y)
     }
 
     func viewPoint(fromImage point: CGPoint) -> CGPoint {
-        CGPoint(x: frame.minX + point.x * scale, y: frame.minY + point.y * scale)
+        CGPoint(x: frame.minX + (point.x - origin.x) * scale, y: frame.minY + (point.y - origin.y) * scale)
     }
 
     func viewRect(fromImage rect: CGRect) -> CGRect {

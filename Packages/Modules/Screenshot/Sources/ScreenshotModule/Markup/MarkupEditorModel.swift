@@ -12,29 +12,42 @@ nonisolated struct TextDraft: Equatable, Sendable {
 }
 
 /// The markup editor's state: tool choices, the shape being drawn, inline text, undo history and the flattened
-/// preview. Gesture positions arrive already converted to image pixels, so the view only handles layout.
+/// preview. Gesture positions arrive already converted to annotation pixels (origin at the capture's top-left, so
+/// they may be negative or past its far edges), so the view only handles layout.
 @Observable final class MarkupEditorModel {
     let image: CGImage
+    /// The capture's pixels per point, for the ruler's label.
+    let pointScale: CGFloat
     private(set) var tool: MarkupTool = .arrow
     var color: RGBAColor = .red
     var thickness: StrokeThickness = .medium
+    var magnification: CGFloat = 2
     /// The shape under the pointer during a drag, drawn live over the preview.
     private(set) var draft: Annotation?
     var text: TextDraft?
-    /// The capture with every committed annotation burned in, as it will be saved.
+    /// The canvas with every committed annotation burned in, as it will be saved.
     private(set) var preview: CGImage
+    /// How far the canvas reaches past the capture, from the annotations that stick out.
+    private(set) var canvas: CanvasInsets
     private var history: UndoStack
     @ObservationIgnored private var dragPoints: [CGPoint] = []
 
-    /// `document` reopens earlier markup; it must belong to `image`.
-    init(image: CGImage, document: MarkupDocument? = nil) {
+    /// `document` reopens earlier markup; it must belong to `image`. `pointScale` is the capture's pixels per point,
+    /// and `canvasFill` is what padding is filled with; it replaces the document's, which is not saved.
+    init(image: CGImage, document: MarkupDocument? = nil, pointScale: CGFloat = 1, canvasFill: CanvasFill = .standard) {
         self.image = image
-        let document = document ?? MarkupDocument(imageSize: CGSize(width: image.width, height: image.height))
+        self.pointScale = pointScale
+        var document = document ?? MarkupDocument(imageSize: CGSize(width: image.width, height: image.height))
+        document.canvasFill = canvasFill
         history = UndoStack(document)
+        canvas = document.canvas
         preview = Self.flattened(image, document)
     }
 
     var document: MarkupDocument { history.document }
+    var canvasSize: CGSize { canvas.size(of: document.imageSize) }
+    /// The annotation-space point at the canvas's top-left corner.
+    var canvasOrigin: CGPoint { CGPoint(x: -canvas.left, y: -canvas.top) }
     var canUndo: Bool { history.canUndo }
     var canRedo: Bool { history.canRedo }
     /// The size of the text being typed, in image pixels.
@@ -45,18 +58,25 @@ nonisolated struct TextDraft: Equatable, Sendable {
         self.tool = tool
     }
 
-    /// `start` and `end` are image pixels; `pixelsPerPoint` converts the view-sized thickness into pixels.
-    func dragChanged(from start: CGPoint, to end: CGPoint, pixelsPerPoint: CGFloat) {
-        guard tool != .text else { return }
-        track(from: start, to: end, minimumStep: pixelsPerPoint)
-        draft = tool.annotation(through: dragPoints, color: color, thickness: thickness, pixelsPerPoint: pixelsPerPoint)
+    /// `start` and `end` are annotation pixels; `pixelsPerPoint` converts the view-sized thickness into pixels. A
+    /// drawing tool may be dragged past the capture's edge, which grows the canvas when the shape is committed.
+    func dragChanged(from start: CGPoint, to end: CGPoint, pixelsPerPoint: CGFloat, modifiers: MarkupModifiers = []) {
+        guard tool != .text, !removesStep(modifiers) else { return }
+        track(from: limited(start), to: limited(end), minimumStep: pixelsPerPoint)
+        draft = tool.annotation(through: dragPoints, options: options(pixelsPerPoint, modifiers))
     }
 
-    /// Commits the drawn shape, or for the text tool starts typing where the drag began.
-    func dragEnded(from start: CGPoint, to end: CGPoint, pixelsPerPoint: CGFloat) {
+    /// Commits the drawn shape, or for the text tool starts typing where the drag began. ⌥-clicking a step badge
+    /// removes it instead.
+    func dragEnded(from start: CGPoint, to end: CGPoint, pixelsPerPoint: CGFloat, modifiers: MarkupModifiers = []) {
         defer {
             dragPoints = []
             draft = nil
+        }
+        let start = limited(start), end = limited(end)
+        if removesStep(modifiers) {
+            removeStep(at: end)
+            return
         }
         guard tool != .text else {
             commitText()
@@ -64,7 +84,7 @@ nonisolated struct TextDraft: Equatable, Sendable {
             return
         }
         track(from: start, to: end, minimumStep: 0)
-        guard let annotation = tool.annotation(through: dragPoints, color: color, thickness: thickness, pixelsPerPoint: pixelsPerPoint) else { return }
+        guard let annotation = tool.annotation(through: dragPoints, options: options(pixelsPerPoint, modifiers)) else { return }
         edit { $0.apply { $0.annotations.append(annotation) } }
     }
 
@@ -96,6 +116,38 @@ nonisolated struct TextDraft: Equatable, Sendable {
         return document
     }
 
+    private func options(_ pixelsPerPoint: CGFloat, _ modifiers: MarkupModifiers) -> DrawingOptions {
+        DrawingOptions(
+            color: color, thickness: thickness, pixelsPerPoint: pixelsPerPoint, pointScale: pointScale, magnification: magnification,
+            nextStep: StepBadges.nextNumber(in: document.annotations), snapsToAxis: modifiers.contains(.shift)
+        )
+    }
+
+    private func removesStep(_ modifiers: MarkupModifiers) -> Bool {
+        tool == .step && modifiers.contains(.option)
+    }
+
+    /// Takes the badge under `point` out and renumbers the ones after it, as one undo step.
+    private func removeStep(at point: CGPoint) {
+        guard let index = StepBadges.indexOfTopmost(at: point, in: document.annotations) else { return }
+        edit {
+            $0.apply {
+                $0.annotations.remove(at: index)
+                $0.annotations = StepBadges.renumbered($0.annotations)
+            }
+        }
+    }
+
+    /// `point` held inside what the current tool may reach: redaction and erasing work on pixels that exist, so they
+    /// stop at the canvas; everything else may grow the canvas, but only so far as `CanvasInsets.limit` allows, which
+    /// keeps a drag that leaves the window from asking for an enormous bitmap.
+    private func limited(_ point: CGPoint) -> CGPoint {
+        let size = document.imageSize
+        let reach = CGFloat(CanvasInsets.limit(for: size))
+        let allowed = tool == .redact || tool == .erase ? canvas.bounds(of: size) : CGRect(origin: .zero, size: size).insetBy(dx: -reach, dy: -reach)
+        return CGPoint(x: min(max(point.x, allowed.minX), allowed.maxX), y: min(max(point.y, allowed.minY), allowed.maxY))
+    }
+
     /// A new drag restarts the path. The highlighter keeps points at least `minimumStep` apart (one view point while
     /// dragging, so long strokes stay small in the JSON); other tools only need both ends.
     private func track(from start: CGPoint, to end: CGPoint, minimumStep: CGFloat) {
@@ -114,11 +166,12 @@ nonisolated struct TextDraft: Equatable, Sendable {
         let before = history.document
         change(&history)
         guard history.document != before else { return }
+        canvas = history.document.canvas
         preview = Self.flattened(image, history.document)
     }
 
     /// The preview falls back to the plain capture when rendering fails; that is logged, since the annotations
-    /// would otherwise vanish from the screen without a word.
+    /// would otherwise vanish from the screen without a word. Without annotations the canvas has not grown either.
     private static func flattened(_ image: CGImage, _ document: MarkupDocument) -> CGImage {
         guard !document.annotations.isEmpty else { return image }
         guard let flattened = MarkupRenderer.flatten(image, document) else {

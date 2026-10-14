@@ -50,3 +50,32 @@ import Testing
         #expect(noImage.imagePoint(fromView: CGPoint(x: 5, y: 5)) == .zero)
     }
 }
+
+@Suite struct ImageFitCanvasTests {
+    @Test func aMarginLeavesRoomAroundTheCanvasToDrawBeyondItsEdge() {
+        let fit = ImageFit(imageSize: CGSize(width: 400, height: 200), viewSize: CGSize(width: 300, height: 300), margin: 20)
+        #expect(fit.scale == 0.65)
+        #expect(fit.frame == CGRect(x: 20, y: 85, width: 260, height: 130))
+        let plain = ImageFit(imageSize: CGSize(width: 400, height: 200), viewSize: CGSize(width: 300, height: 300))
+        #expect(plain.scale == 0.75)
+    }
+
+    @Test func aNegativeOriginPutsTheCanvasCornerAtTheFramesCorner() {
+        // A 421 × 314 canvas that grew 5 pixels left and 3 up: annotation space starts at (-5, -3).
+        let fit = ImageFit(imageSize: CGSize(width: 421, height: 314), viewSize: CGSize(width: 842, height: 628), origin: CGPoint(x: -5, y: -3))
+        #expect(fit.scale == 2)
+        #expect(fit.viewPoint(fromImage: CGPoint(x: -5, y: -3)) == fit.frame.origin)
+        #expect(fit.viewPoint(fromImage: .zero) == CGPoint(x: fit.frame.minX + 10, y: fit.frame.minY + 6))
+        #expect(fit.imagePoint(fromView: fit.frame.origin) == CGPoint(x: -5, y: -3))
+        #expect(fit.imagePoint(fromView: CGPoint(x: fit.frame.minX + 10, y: fit.frame.minY + 6)) == .zero)
+        let rect = fit.viewRect(fromImage: CGRect(x: 0, y: 0, width: 10, height: 5))
+        #expect(rect == CGRect(x: fit.frame.minX + 10, y: fit.frame.minY + 6, width: 20, height: 10))
+    }
+
+    @Test func clampingKeepsAPointOnTheCanvasUnlessAskedNotTo() {
+        let fit = ImageFit(imageSize: CGSize(width: 400, height: 200), viewSize: CGSize(width: 400, height: 200), origin: CGPoint(x: -10, y: -10))
+        let outside = CGPoint(x: -50, y: 500)
+        #expect(fit.imagePoint(fromView: outside) == CGPoint(x: -10, y: 190))
+        #expect(fit.imagePoint(fromView: outside, clamped: false) == CGPoint(x: -60, y: 490))
+    }
+}

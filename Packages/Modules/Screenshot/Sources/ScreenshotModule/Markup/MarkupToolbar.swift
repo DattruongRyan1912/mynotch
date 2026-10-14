@@ -8,6 +8,13 @@ struct MarkupToolbar: View {
     let onSave: () -> Void
 
     var body: some View {
+        VStack(spacing: 0) {
+            controls
+            if model.tool == .magnifier { magnificationRow }
+        }
+    }
+
+    private var controls: some View {
         HStack(spacing: 14) {
             HStack(spacing: 2) {
                 ForEach(MarkupTool.allCases, id: \.self, content: toolButton)
@@ -15,7 +22,7 @@ struct MarkupToolbar: View {
             .padding(2)
             .background(.quaternary, in: .rect(cornerRadius: 7))
 
-            // Redaction has neither colour nor thickness.
+            // Redaction and smart erase have neither colour nor thickness.
             Group {
                 HStack(spacing: 4) {
                     ForEach(RGBAColor.presets, id: \.name) { preset in colorButton(preset.name, preset.color) }
@@ -28,7 +35,7 @@ struct MarkupToolbar: View {
                 .fixedSize()
                 .help(thicknessTitle)
             }
-            .disabled(model.tool == .redact)
+            .disabled(!model.tool.usesStyle)
 
             Spacer(minLength: 0)
 
@@ -61,7 +68,31 @@ struct MarkupToolbar: View {
         .padding(.vertical, 8)
     }
 
-    private var thicknessTitle: String { model.tool == .text ? "Cỡ chữ" : "Độ dày nét" }
+    private var thicknessTitle: String {
+        switch model.tool {
+        case .text: "Cỡ chữ"
+        case .step: "Cỡ số"
+        default: "Độ dày nét"
+        }
+    }
+
+    /// The lens's zoom, shown only while the lens tool is selected.
+    private var magnificationRow: some View {
+        HStack(spacing: 8) {
+            Text("Độ phóng đại")
+            Slider(value: $model.magnification, in: DrawingOptions.magnificationRange, step: 0.5)
+                .frame(width: 160)
+            Text("\(model.magnification, format: .number.precision(.fractionLength(0...1)))×")
+                .monospacedDigit()
+                .frame(minWidth: 32, alignment: .leading)
+            Spacer(minLength: 0)
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+        .help("Độ phóng đại của kính lúp: 1,5× đến 4×")
+    }
 
     private func toolButton(_ tool: MarkupTool) -> some View {
         let isSelected = model.tool == tool
@@ -73,7 +104,7 @@ struct MarkupToolbar: View {
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .help(tool.title)
+        .help(tool.hint)
         .accessibilityLabel(tool.title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }

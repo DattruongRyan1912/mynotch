@@ -21,7 +21,7 @@ final class MarkupEditorWindowController: NSObject {
         init(record: CaptureRecord, source: MarkupEditorSource) {
             self.record = record
             self.source = source
-            model = MarkupEditorModel(image: source.image, document: source.document)
+            model = MarkupEditorModel(image: source.image, document: source.document, pointScale: source.scale, canvasFill: source.canvasFill)
             savedDocument = model.document
         }
     }
@@ -52,7 +52,7 @@ final class MarkupEditorWindowController: NSObject {
         let window = NSWindow(contentViewController: NSHostingController(rootView: view))
         window.title = "Sửa ảnh chụp"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 960, height: 640))
+        window.setContentSize(NSSize(width: 1040, height: 680))
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()

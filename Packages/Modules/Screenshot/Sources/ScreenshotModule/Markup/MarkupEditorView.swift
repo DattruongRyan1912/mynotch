@@ -1,9 +1,10 @@
+import AppKit
 import SwiftUI
 
-/// Draws markup on a capture. The host owns the window and decides what Lưu, Copy and Huỷ do; each callback receives
-/// the document including text still being typed, so the host can flatten it with `MarkupRenderer` or compare it
-/// with what was last saved. The host builds the model once and keeps it, so the preview is not rendered again
-/// whenever SwiftUI recreates this view.
+/// Draws markup on a capture, and past its edges: the canvas grows to hold what sticks out. The host owns the window
+/// and decides what Lưu, Copy and Huỷ do; each callback receives the document including text still being typed, so
+/// the host can flatten it with `MarkupRenderer` or compare it with what was last saved. The host builds the model
+/// once and keeps it, so the preview is not rendered again whenever SwiftUI recreates this view.
 struct MarkupEditorView: View {
     let model: MarkupEditorModel
     @FocusState private var isTyping: Bool
@@ -23,12 +24,18 @@ struct MarkupEditorView: View {
             Divider()
             GeometryReader { proxy in
                 // At most one device pixel per image pixel, so small captures are not blown up into a blur.
-                canvas(fit: ImageFit(imageSize: model.document.imageSize, viewSize: proxy.size, maximumScale: 1 / displayScale))
+                canvas(fit: ImageFit(
+                    imageSize: model.canvasSize, viewSize: proxy.size, maximumScale: 1 / displayScale,
+                    margin: Self.margin, origin: model.canvasOrigin
+                ))
             }
             .background(Color(nsColor: .underPageBackgroundColor))
         }
-        .frame(minWidth: 780, minHeight: 440)
+        .frame(minWidth: 900, minHeight: 440)
     }
+
+    /// Points kept free around the canvas, so a drag can leave the capture and grow the canvas.
+    private static let margin: CGFloat = 24
 
     private func canvas(fit: ImageFit) -> some View {
         let draft = model.draft
@@ -58,23 +65,35 @@ struct MarkupEditorView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    /// Points are not clamped to the picture: the model decides how far each tool may reach beyond it.
     private func drawingGesture(fit: ImageFit) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 guard fit.scale > 0 else { return }
                 model.dragChanged(
-                    from: fit.imagePoint(fromView: value.startLocation), to: fit.imagePoint(fromView: value.location),
-                    pixelsPerPoint: 1 / fit.scale
+                    from: fit.imagePoint(fromView: value.startLocation, clamped: false),
+                    to: fit.imagePoint(fromView: value.location, clamped: false),
+                    pixelsPerPoint: 1 / fit.scale, modifiers: Self.heldModifiers
                 )
             }
             .onEnded { value in
                 guard fit.scale > 0 else { return }
                 model.dragEnded(
-                    from: fit.imagePoint(fromView: value.startLocation), to: fit.imagePoint(fromView: value.location),
-                    pixelsPerPoint: 1 / fit.scale
+                    from: fit.imagePoint(fromView: value.startLocation, clamped: false),
+                    to: fit.imagePoint(fromView: value.location, clamped: false),
+                    pixelsPerPoint: 1 / fit.scale, modifiers: Self.heldModifiers
                 )
                 if model.text != nil { isTyping = true }
             }
+    }
+
+    /// ⇧ and ⌥ as they are held now, read when the pointer moves or the button is released.
+    private static var heldModifiers: MarkupModifiers {
+        let flags = NSEvent.modifierFlags
+        var held: MarkupModifiers = []
+        if flags.contains(.shift) { held.insert(.shift) }
+        if flags.contains(.option) { held.insert(.option) }
+        return held
     }
 
     /// Return adds the text, Esc drops it; clicking elsewhere or switching tools also adds it.
@@ -102,22 +121,28 @@ struct MarkupEditorView: View {
         Binding(get: { model.text?.string ?? "" }, set: { model.text?.string = $0 })
     }
 
-    /// The shape being dragged, drawn by the renderer itself so it matches the saved result. Redaction needs the
-    /// pixels underneath, so it shows as a dashed box until the drag ends and the preview pixelates it.
+    /// The shape being dragged, drawn by the renderer itself so it matches the saved result. Redaction, erasing and
+    /// the lens need the pixels underneath, so they show as a dashed outline until the drag ends and the preview
+    /// applies them. What is drawn beyond the picture is kept: committing it grows the canvas.
     private static func draw(_ draft: Annotation?, in context: inout GraphicsContext, fit: ImageFit) {
         guard let draft else { return }
-        // A drag may leave the picture; what is drawn outside it would not be saved.
-        context.clip(to: Path(fit.frame))
-        if case .redact(let rect) = draft {
-            let path = Path(fit.viewRect(fromImage: rect))
-            context.fill(path, with: .color(.black.opacity(0.35)))
-            context.stroke(path, with: .color(.white), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-            return
+        switch draft {
+        case .redact(let rect), .erase(let rect):
+            outline(Path(fit.viewRect(fromImage: rect)), in: &context)
+        case .magnifier(let center, let radius, _, _):
+            outline(Path(ellipseIn: fit.viewRect(fromImage: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))), in: &context)
+        default:
+            context.withCGContext { cgContext in
+                let origin = fit.viewPoint(fromImage: .zero)
+                cgContext.translateBy(x: origin.x, y: origin.y)
+                cgContext.scaleBy(x: fit.scale, y: fit.scale)
+                MarkupRenderer.draw(draft, in: cgContext)
+            }
         }
-        context.withCGContext { cgContext in
-            cgContext.translateBy(x: fit.frame.minX, y: fit.frame.minY)
-            cgContext.scaleBy(x: fit.scale, y: fit.scale)
-            MarkupRenderer.draw(draft, in: cgContext)
-        }
+    }
+
+    private static func outline(_ path: Path, in context: inout GraphicsContext) {
+        context.fill(path, with: .color(.black.opacity(0.35)))
+        context.stroke(path, with: .color(.white), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
     }
 }

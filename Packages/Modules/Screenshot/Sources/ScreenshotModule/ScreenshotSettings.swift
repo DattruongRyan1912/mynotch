@@ -12,6 +12,8 @@ struct ScreenshotSettingKeys {
     /// BCP 47 identifiers, most important first; see `OCRLanguages`.
     let ocrLanguages: SettingKey<[String]>
     let showCapturedActivity: SettingKey<Bool>
+    /// What fills the canvas where the markup editor grew it past the capture.
+    let canvasFill: SettingKey<CanvasFill>
 
     init(_ settings: ModuleSettings) {
         copyToClipboard = settings.key("copyToClipboard", default: true)
@@ -20,5 +22,6 @@ struct ScreenshotSettingKeys {
         windowShadow = settings.key("windowShadow", default: true)
         ocrLanguages = settings.key("ocrLanguages", default: OCRService.defaultLanguages)
         showCapturedActivity = settings.key("showCapturedActivity", default: true)
+        canvasFill = settings.key("canvasFill", default: .standard)
     }
 }

@@ -166,6 +166,75 @@ extension ScreenshotModuleTests {
     }
 }
 
+/// Annotations past the capture's edge grow the saved and copied image, and the padding follows the setting.
+extension ScreenshotModuleTests {
+    /// A badge that sticks 15 pixels out of the 40-pixel-wide capture on the right.
+    static let overflowing = MarkupDocument(
+        imageSize: CGSize(width: 40, height: 50),
+        annotations: [.step(number: 1, at: CGPoint(x: 45, y: 10), radius: 10, color: .red)],
+        canvasFill: .white
+    )
+
+    @Test func canvasPaddingDefaultsToTheCapturesEdgeColourAndFollowsTheSetting() async throws {
+        let record = try await capturedRecord()
+        let (settings, keys) = try settings()
+        #expect(settings.value(keys.canvasFill) == .edgeColor)
+        #expect(try #require(await module.editorSource(for: record)).canvasFill == .edgeColor)
+
+        settings.set(.black, for: keys.canvasFill)
+
+        #expect(try #require(await module.editorSource(for: record)).canvasFill == .black)
+    }
+
+    @Test func savingAGrownCanvasReplacesTheImageWithTheBiggerOneAndKeepsTheOriginal() async throws {
+        let record = try await capturedRecord()
+        let before = try pngData(of: record)
+        let source = try #require(await module.editorSource(for: record))
+
+        #expect(await module.saveMarkup(Self.overflowing, of: source, for: record))
+
+        let updated = try #require(module.state.records.first)
+        #expect((updated.pixelWidth, updated.pixelHeight) == (55, 50))
+        #expect(updated.hasMarkup)
+        let visible = try visibleBitmap(of: record)
+        #expect((visible.width, visible.height) == (55, 50))
+        #expect(visible.pixel(54, 49) == .white)
+        #expect(visible.pixel(0, 0) == Bitmap.Pixel(r: 20, g: 30, b: 0, a: 255))
+        let store = try #require(module.store)
+        #expect(try Data(contentsOf: store.originalURL(for: record.id)) == before)
+        #expect(try dpi(of: #require(store.url(for: record.id))) == 144)
+    }
+
+    @Test func reopeningAGrownCaptureStartsFromTheOriginalSizeWithItsCanvasRebuilt() async throws {
+        let record = try await capturedRecord()
+        let first = try #require(await module.editorSource(for: record))
+        #expect(await module.saveMarkup(Self.overflowing, of: first, for: record))
+        let updated = try #require(module.state.records.first)
+
+        let reopened = try #require(await module.editorSource(for: updated))
+
+        let bitmap = try Bitmap(reopened.image)
+        #expect((bitmap.width, bitmap.height) == (40, 50))
+        let model = MarkupEditorModel(image: reopened.image, document: reopened.document, pointScale: reopened.scale, canvasFill: reopened.canvasFill)
+        #expect(model.canvas == CanvasInsets(left: 0, top: 0, right: 15, bottom: 0))
+        #expect((model.preview.width, model.preview.height) == (55, 50))
+        // What was saved is the starting point: undo only goes back through this session's edits.
+        #expect(!model.canUndo)
+    }
+
+    @Test func copyingAGrownCanvasPutsTheBiggerImageOnThePasteboard() async throws {
+        let record = try await capturedRecord()
+        let source = try #require(await module.editorSource(for: record))
+
+        #expect(await module.copyMarkup(Self.overflowing, of: source))
+
+        let copied = try #require(pasteboard.images.last)
+        #expect((copied.image.width, copied.image.height) == (55, 50))
+        #expect(copied.scale == 2)
+        #expect(module.state.records.first?.pixelWidth == 40)
+    }
+}
+
 extension CGImageSource {
     static func image(at url: URL) -> CGImage? {
         CGImageSourceCreateWithURL(url as CFURL, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }

@@ -8,6 +8,8 @@ struct MarkupEditorSource {
     let document: MarkupDocument?
     /// Pixels per point, for the PNG's DPI and the clipboard.
     let scale: CGFloat
+    /// What fills the canvas where it grows past the capture, from Settings when the editor opened.
+    let canvasFill: CanvasFill
 }
 
 /// The tray's "Sửa": opening the editor, and what its Lưu and Copy do with the result. Results show as toasts.
@@ -41,7 +43,8 @@ extension ScreenshotModule {
                 context?.logger.error("Could not read the markup of a capture: \(error, privacy: .public)")
             }
         }
-        return MarkupEditorSource(image: loaded.image, document: document, scale: loaded.scale)
+        let fill = context.flatMap { context in keys.map { context.settings.value($0.canvasFill) } } ?? .standard
+        return MarkupEditorSource(image: loaded.image, document: document, scale: loaded.scale, canvasFill: fill)
     }
 
     /// Lưu: keeps the untouched PNG and the annotations next to the capture the first time, then replaces the

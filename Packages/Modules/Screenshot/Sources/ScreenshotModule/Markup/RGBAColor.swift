@@ -19,4 +19,7 @@ nonisolated struct RGBAColor: Codable, Equatable, Sendable {
     ]
 
     var cgColor: CGColor { CGColor(srgbRed: r, green: g, blue: b, alpha: a) }
+
+    /// Whether black reads better than white on top of this colour, by its perceived brightness.
+    var prefersDarkText: Bool { 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5 }
 }
