@@ -114,14 +114,20 @@
 
   var NAMED_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 
+  function numericEntity(body) {
+    var code = body.charAt(1) === "x" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+    var valid = code >= 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff);
+    return valid ? String.fromCodePoint(code) : "";
+  }
+
   function decodeEntities(text) {
-    return text.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[A-Za-z]+);/g, function (whole, body) {
-      if (body.charAt(0) === "#") {
-        var code = body.charAt(1) === "x" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
-        var valid = code >= 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff);
-        return valid ? String.fromCodePoint(code) : "";
-      }
+    var once = text.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[A-Za-z]+);/g, function (whole, body) {
+      if (body.charAt(0) === "#") return numericEntity(body);
       return Object.prototype.hasOwnProperty.call(NAMED_ENTITIES, body) ? NAMED_ENTITIES[body] : whole;
+    });
+    // Some timedtext XML escapes apostrophes twice ("&amp;#39;"): decode numeric entities that are left.
+    return once.replace(/&(#x[0-9a-fA-F]+|#[0-9]+);/g, function (whole, body) {
+      return numericEntity(body);
     });
   }
 

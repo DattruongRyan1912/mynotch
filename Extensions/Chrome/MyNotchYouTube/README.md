@@ -16,7 +16,7 @@ Extension Chrome nhỏ (Manifest V3) chuyển phụ đề mà YouTube đã tải
 1. Trong MyNotch, mở Cài đặt của module Media, bật "Phụ đề YouTube làm lời" rồi bấm **Cài cầu nối cho Chrome**. MyNotch cài host, ghi manifest cho Chrome và sao chép extension vào `~/Library/Application Support/io.lucasvu.mynotch/ChromeExtension`.
 2. Mở `chrome://extensions`, bật **Developer mode**.
 3. Bấm **Load unpacked** và chọn thư mục `~/Library/Application Support/io.lucasvu.mynotch/ChromeExtension`.
-4. Mở một video trên `www.youtube.com` và **bật phụ đề (CC)**. Không có CC thì không có gì được chuyển sang MyNotch.
+4. Mở một video trên `www.youtube.com` và **bật phụ đề (CC)**. Không bật CC thì không có phụ đề nào được gửi; khi xem video, extension vẫn gửi các trường phát lại đã nêu ở trên (mã video, tiêu đề, vị trí, trạng thái phát, tốc độ), và chỉ những trường đó.
 
 Mã extension (id) cố định nhờ khoá công khai trong `manifest.json`, id nằm trong file `EXTENSION_ID`. Cầu nối của MyNotch chỉ cho phép đúng id này kết nối.
 

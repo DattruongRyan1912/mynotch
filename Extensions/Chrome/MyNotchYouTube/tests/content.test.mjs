@@ -221,6 +221,144 @@ test("captions from the page are relayed after re-validation, without the source
   assert.equal("source" in relayed, false);
 });
 
+function pausedPage(options = {}) {
+  const video = fakeVideo();
+  video.paused = true; // keeps the 5 s heartbeat out of the way
+  return makePage({ video, ...options });
+}
+
+test("captions of another video id are neither relayed nor cached", () => {
+  const page = pausedPage();
+  page.start();
+  page.take();
+
+  page.postFromPage(captionsMessage(ID2));
+  assert.deepEqual(page.take(), []);
+
+  // nothing was cached either: a CC off/on cycle has nothing to replay
+  page.button.pressed = "false";
+  page.advance(1000);
+  assert.deepEqual(page.take(), [{ v: 1, type: "clear", videoId: ID }]);
+  page.button.pressed = "true";
+  page.advance(1000);
+  assert.deepEqual(page.take(), []);
+});
+
+test("captions are ignored on pages without a current video (feed, preview, miniplayer)", () => {
+  const page = pausedPage();
+  page.start();
+  page.navigate(`${ORIGIN}/feed/subscriptions`, "Subscriptions - YouTube");
+  page.take();
+
+  page.postFromPage(captionsMessage(ID));
+  page.postFromPage(captionsMessage(ID2));
+  assert.deepEqual(page.take(), []);
+});
+
+test("after a navigation the old captions are gone: a late response of the old video is dropped", () => {
+  const page = pausedPage();
+  page.start();
+  page.postFromPage(captionsMessage(ID));
+  page.take();
+
+  page.navigate(watch(ID2), "Another placeholder - YouTube");
+  assert.deepEqual(page.take().filter((message) => message.type !== "playback"), [{ v: 1, type: "clear", videoId: ID }]);
+
+  page.postFromPage(captionsMessage(ID, "late old line")); // arrives after the URL moved on
+  assert.deepEqual(page.take(), []);
+
+  // the new video has no captions, and the old ones are not replayed for it
+  page.button.pressed = "false";
+  page.advance(1000);
+  page.take();
+  page.button.pressed = "true";
+  page.advance(1000);
+  assert.deepEqual(page.take(), []);
+
+  // and coming back to the first video does not bring them back either
+  page.navigate(watch(ID), "Placeholder title - YouTube");
+  page.take();
+  page.button.pressed = "false";
+  page.advance(1000);
+  page.take();
+  page.button.pressed = "true";
+  page.advance(1000);
+  assert.deepEqual(page.take().filter((message) => message.type === "captions"), []);
+});
+
+test("captions that arrive right after the URL changed, before the next tick, are kept for the new video", () => {
+  const page = pausedPage();
+  page.start();
+  page.take();
+
+  page.location.href = watch(ID2); // the 1 s tick has not noticed yet
+  page.title = "Another placeholder - YouTube";
+  page.postFromPage(captionsMessage(ID2));
+  assert.deepEqual(page.take(), [captionsMessage(ID2)]);
+
+  page.advance(1000);
+  const afterTick = page.take();
+  assert.deepEqual(afterTick.filter((message) => message.type === "captions"), [], "not sent twice");
+  assert.deepEqual(afterTick.filter((message) => message.type === "clear"), [{ v: 1, type: "clear", videoId: ID }]);
+
+  // still cached for the new video
+  page.button.pressed = "false";
+  page.advance(1000);
+  page.take();
+  page.button.pressed = "true";
+  page.advance(1000);
+  assert.deepEqual(page.take(), [captionsMessage(ID2)]);
+});
+
+test("captions replay after pagehide and a back/forward cache restore", () => {
+  const page = pausedPage();
+  page.start();
+  page.postFromPage(captionsMessage());
+  page.take();
+
+  page.fire("pagehide");
+  assert.deepEqual(page.take(), [{ v: 1, type: "clear", videoId: ID }]);
+
+  page.advance(1000); // the page is back: the tick finds the video id again
+  const restored = page.take();
+  assert.deepEqual(restored.filter((message) => message.type === "captions"), [captionsMessage()]);
+});
+
+test("captions that arrive again after CC is switched back on are not sent twice", () => {
+  const page = pausedPage();
+  page.start();
+  page.postFromPage(captionsMessage());
+  page.take();
+
+  page.button.pressed = "false";
+  page.advance(1000);
+  assert.deepEqual(page.take(), [{ v: 1, type: "clear", videoId: ID }]);
+
+  page.button.pressed = "true";
+  page.postFromPage(captionsMessage(ID, "refetched line")); // the player fetched the track again
+  assert.equal(page.take().length, 1);
+  page.advance(1000);
+  assert.deepEqual(page.take(), [], "the tick must not replay the older copy");
+});
+
+test("playing changes without a media event (ad ends or starts) are reported on the next tick", () => {
+  const page = makePage();
+  page.ad = true;
+  page.start();
+  assert.deepEqual(page.take(), [playbackOf(ID, { playing: false })]);
+
+  page.ad = false; // the ad-showing class drops after the last media event
+  page.advance(1000);
+  assert.deepEqual(page.take(), [playbackOf(ID)]);
+
+  page.advance(2000);
+  assert.deepEqual(page.take(), [], "nothing new, nothing sent");
+
+  page.ad = true;
+  page.advance(1000);
+  assert.deepEqual(page.take(), [playbackOf(ID, { playing: false })]);
+});
+
 test("forged or malformed page messages are ignored", () => {
   const page = makePage();
   page.start();

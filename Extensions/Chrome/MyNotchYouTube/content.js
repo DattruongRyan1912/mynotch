@@ -28,7 +28,9 @@
     videoId: null,
     video: null,
     cc: "unknown", // "on" | "off" | "unknown", from the captions button
-    captions: null, // latest validated captions message, resent when CC is switched back on
+    captions: null, // latest captions message of the current video, resent after a clear
+    clearedId: null, // video id whose captions were last cleared and not sent again since
+    lastPlaying: null, // the `playing` value of the last playback message
     lastSentAt: 0,
     pending: false, // a playback message is waiting for a usable title
     lastTitle: "",
@@ -50,7 +52,9 @@
   }
 
   function sendClear(videoId) {
-    if (videoId) send({ v: 1, type: "clear", videoId: videoId });
+    if (!videoId) return;
+    state.clearedId = videoId;
+    send({ v: 1, type: "clear", videoId: videoId });
   }
 
   function findVideo() {
@@ -85,15 +89,17 @@
       return;
     }
     state.pending = false;
+    var playing = isPlaying(video);
     state.lastTitle = title;
     state.lastSentAt = now;
+    state.lastPlaying = playing;
     send({
       v: 1,
       type: "playback",
       videoId: videoId,
       title: title,
       time: time,
-      playing: isPlaying(video),
+      playing: playing,
       rate: video.playbackRate
     });
   }
@@ -133,12 +139,13 @@
     var pressed = button ? button.getAttribute("aria-pressed") : null;
     var next = pressed === "true" ? "on" : pressed === "false" ? "off" : "unknown";
     if (next === "unknown" || next === state.cc) return;
-    var previous = state.cc;
     state.cc = next;
     if (next === "off") {
       sendClear(state.videoId);
-    } else if (previous === "off" && state.captions && state.captions.videoId === state.videoId) {
-      // The player may reuse its cached track instead of fetching it again after CC is back on.
+    } else if (state.clearedId === state.videoId && state.captions && state.captions.videoId === state.videoId) {
+      // The captions were cleared (CC off, or the page was hidden) and the player may reuse its
+      // cached track instead of fetching it again, so send our copy.
+      state.clearedId = null;
       send(state.captions);
     }
   }
@@ -149,8 +156,10 @@
       bindVideo();
       checkCaptionsButton();
       if (state.video && state.videoId) {
-        var due = Date.now() - state.lastSentAt >= HEARTBEAT_MS && isPlaying(state.video);
-        if (state.pending || due) sendPlayback();
+        var playing = isPlaying(state.video);
+        var due = playing && Date.now() - state.lastSentAt >= HEARTBEAT_MS;
+        // `playing` can change without a media event (the ad-showing class drops after the last one).
+        if (state.pending || due || playing !== state.lastPlaying) sendPlayback();
       }
     } catch (e) {
       /* a failed tick must not stop the next one */
@@ -159,8 +168,12 @@
 
   function onPageMessage(event) {
     var message = C.acceptPageMessage(event, root, root.location.origin);
-    if (!message) return;
+    // Only the video of the page's live URL (not state.videoId: the tick may not have run yet).
+    // A late response of the previous video, a preview or miniplayer track, or a forged id would
+    // otherwise be cached and replayed although no clear for it would ever be sent.
+    if (!message || message.videoId !== C.videoIdFromUrl(root.location.href)) return;
     state.captions = message;
+    state.clearedId = null;
     send(message);
   }
 

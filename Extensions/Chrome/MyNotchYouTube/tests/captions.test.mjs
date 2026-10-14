@@ -77,6 +77,31 @@ test("srv3: malformed input yields no events and never throws", () => {
   assert.deepEqual(C.eventsFromSrv3("<p t='1000' d='500'>a&#1114112;b</p>"), [{ t: 1, d: 0.5, text: "ab" }]);
 });
 
+test("srv3: numeric entities are decoded even when the text was escaped twice", () => {
+  assert.deepEqual(C.eventsFromSrv3("<p t='1000' d='500'>it&amp;#39;s &amp;#x41;&#66;</p>"), [{ t: 1, d: 0.5, text: "it's AB" }]);
+  // named entities are decoded once: this is literal text that looks like an entity
+  assert.deepEqual(C.eventsFromSrv3("<p t='1000' d='500'>fish &amp;amp; chips</p>"), [{ t: 1, d: 0.5, text: "fish &amp; chips" }]);
+});
+
+test("srv3: &nbsp; becomes a space and unknown entities stay literal", () => {
+  assert.deepEqual(C.eventsFromSrv3("<p t='1000' d='500'>a&nbsp;b &unknown; c</p>"), [{ t: 1, d: 0.5, text: "a b &unknown; c" }]);
+});
+
+test("json3: ASR-shaped tracks keep one event per segs, ignoring aAppend, tOffsetMs and overlap", () => {
+  const asr = {
+    wireMagic: "pb3",
+    events: [
+      { tStartMs: 0, dDurationMs: 4000, wWinId: 1, segs: [{ utf8: "first" }, { utf8: " words", tOffsetMs: 400 }, { utf8: " here", tOffsetMs: 800 }] },
+      { tStartMs: 3000, dDurationMs: 1000, wWinId: 1, aAppend: 1, segs: [{ utf8: "\n" }] },
+      { tStartMs: 3000, dDurationMs: 4000, wWinId: 1, segs: [{ utf8: "second", acAsrConf: 0 }, { utf8: " line", tOffsetMs: 300, acAsrConf: 0 }] }
+    ]
+  };
+  assert.deepEqual(C.eventsFromJson3(asr), [
+    { t: 0, d: 4, text: "first words here" },
+    { t: 3, d: 4, text: "second line" }
+  ]);
+});
+
 test("eventsFromBody sniffs json3, srv3 and ignores everything else", () => {
   assert.equal(C.eventsFromBody(JSON.stringify(json3Body)).length, 4);
   assert.equal(C.eventsFromBody("﻿  \n" + JSON.stringify(json3Body)).length, 4);

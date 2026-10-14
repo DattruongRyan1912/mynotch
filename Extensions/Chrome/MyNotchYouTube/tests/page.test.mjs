@@ -154,6 +154,21 @@ test("fetch: bodies that are not captions, empty or without a video id post noth
   assert.deepEqual(page.posted, []);
 });
 
+test("fetch: a body above 20 million characters is not parsed", async () => {
+  const page = makePage();
+  const withPadding = (size) => JSON.stringify({ events: [{ tStartMs: 500, dDurationMs: 1000, segs: [{ utf8: "line one" }] }], pad: "x".repeat(size) });
+
+  page.nextFetch = respond(withPadding(1000));
+  await page.window.fetch(TIMEDTEXT);
+  await flush();
+  assert.equal(page.posted.length, 1, "the same body without the padding is accepted");
+
+  page.nextFetch = respond(withPadding(20000001));
+  await page.window.fetch(TIMEDTEXT);
+  await flush();
+  assert.equal(page.posted.length, 1, "too large: ignored");
+});
+
 test("fetch: a failing clone, a used body or a throwing postMessage never reaches the page", async () => {
   const rejections = [];
   const onRejection = (reason) => rejections.push(reason);
