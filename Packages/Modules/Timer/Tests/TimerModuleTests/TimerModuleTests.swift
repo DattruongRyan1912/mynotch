@@ -38,14 +38,25 @@ struct TimerFixture {
         harness.scheduler.advance(by: .seconds(seconds))
     }
 
-    func seedFile(_ model: TimerModel) throws {
-        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(model).write(to: fileURL)
+    func seedFile(_ model: TimerModel, session: TimerSession = .plain) throws {
+        try write(JSONEncoder().encode(StoredTimer(model: model, session: session)))
     }
 
-    func savedModel() throws -> TimerModel {
-        try JSONDecoder().decode(TimerModel.self, from: Data(contentsOf: fileURL))
+    /// The file as the version before the timer types wrote it: the bare model.
+    func seedLegacyFile(_ model: TimerModel) throws {
+        try write(JSONEncoder().encode(model))
     }
+
+    private func write(_ data: Data) throws {
+        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: fileURL)
+    }
+
+    func saved() throws -> StoredTimer {
+        try JSONDecoder().decode(StoredTimer.self, from: Data(contentsOf: fileURL))
+    }
+
+    func savedModel() throws -> TimerModel { try saved().model }
 }
 
 @Suite struct TimerModuleTests {
@@ -57,7 +68,8 @@ struct TimerFixture {
         #expect(fixture.module.descriptor.order == 880)
         let tab = try #require(fixture.module.makeTab())
         #expect(tab.title == "Hẹn giờ")
-        #expect(tab.preferredHeight == 150)
+        #expect(tab.preferredHeight == TimerTabView.preferredHeight)
+        #expect(tab.acceptsKeyboard)
     }
 
     @Test func runningCountdownPublishesOneActivityWithoutPerSecondUpdates() async {

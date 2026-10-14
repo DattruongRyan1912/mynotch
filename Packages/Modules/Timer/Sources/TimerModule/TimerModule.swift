@@ -3,7 +3,8 @@ import NotchUI
 import SwiftUI
 import os
 
-/// Countdown timer and stopwatch. The state lives in `timer.json`, so a timer keeps running across relaunch.
+/// Focus, reminder and break timers set with a minute dial, and a stopwatch. The state lives in `timer.json`, so a timer
+/// keeps running across relaunch.
 public final class TimerModule: FeatureModule {
     public let descriptor = ModuleDescriptor(
         id: "timer",
@@ -38,7 +39,7 @@ public final class TimerModule: FeatureModule {
             throw .failed(reason: "Không tạo được thư mục lưu hẹn giờ")
         }
         let url = context.storage.directory.appending(path: "timer.json")
-        let (stored, loadError) = Self.load(from: url)
+        let (stored, session, loadError) = Self.load(from: url)
         if let loadError {
             context.logger.error("Could not read timer.json, starting idle: \(loadError.localizedDescription)")
         }
@@ -47,18 +48,20 @@ public final class TimerModule: FeatureModule {
         self.context = context
         fileURL = url
         state.model = model
+        state.session = session
         // One that was already finished at the last quit stays in the tab but is not raised again on every launch.
         commit(announcesFinish: stored != .finished)
     }
 
     /// A missing file is a first run: idle, no error. Any other failure is returned with the idle state, to be logged.
-    static func load(from url: URL) -> (model: TimerModel, error: (any Error)?) {
+    static func load(from url: URL) -> (model: TimerModel, session: TimerSession, error: (any Error)?) {
         do {
-            return (try JSONDecoder().decode(TimerModel.self, from: Data(contentsOf: url)), nil)
+            let stored = try JSONDecoder().decode(StoredTimer.self, from: Data(contentsOf: url))
+            return (stored.model, stored.session, nil)
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
-            return (.idle, nil)
+            return (.idle, .plain, nil)
         } catch {
-            return (.idle, error)
+            return (.idle, .plain, error)
         }
     }
 
@@ -68,15 +71,28 @@ public final class TimerModule: FeatureModule {
         context = nil
         fileURL = nil
         state.model = .idle
+        state.session = .plain
+        state.adjustedMinutes = [:]
     }
 
+    /// Takes the keyboard (the dial answers the arrow keys and the reminder has a text field).
     public func makeTab() -> NotchTab? {
-        NotchTab(id: descriptor.id, title: "Hẹn giờ", systemImage: "timer", preferredHeight: 150, content: AnyView(TimerTabView(state: state, module: self)))
+        NotchTab(
+            id: descriptor.id, title: "Hẹn giờ", systemImage: "timer", preferredHeight: TimerTabView.preferredHeight,
+            acceptsKeyboard: true, content: AnyView(TimerTabView(state: state, module: self)))
     }
 
-    public func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? { nil }
+    public func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? {
+        AnyView(TimerSettingsView(settings: environment.settings, keys: TimerSettingsKeys(environment.settings)))
+    }
 
-    func startCountdown(minutes: Int) { mutate { $0.startCountdown(minutes: minutes, now: $1) } }
+    /// A countdown of zero minutes would end before it began, so it is not started. Without a type it is the old quick
+    /// timer: a reminder with no label.
+    func startCountdown(minutes: Int, kind: TimerKind = .reminder, label: String = "") {
+        guard minutes > 0 else { return }
+        mutate(starting: TimerSession(kind: kind, label: label)) { $0.startCountdown(minutes: minutes, now: $1) }
+    }
+
     func startStopwatch() { mutate { $0.startStopwatch(now: $1) } }
     func pause() { mutate { $0.pause(now: $1) } }
     func resume() { mutate { $0.resume(now: $1) } }
@@ -84,11 +100,45 @@ public final class TimerModule: FeatureModule {
     /// Also dismisses a finished timer.
     func cancel() { mutate { model, _ in model.cancel() } }
 
+    // MARK: Types and the dial
+
+    /// What to offer once the timer on screen has ended: a break after a task and a task after a break.
+    var suggestion: TimerSuggestion? {
+        guard state.model == .finished, let next = state.session.kind.next else { return nil }
+        return TimerSuggestion(kind: next, minutes: defaultMinutes(for: next))
+    }
+
+    /// Starts what `suggestion` offers.
+    func startNext() {
+        guard let suggestion else { return }
+        startCountdown(minutes: suggestion.minutes, kind: suggestion.kind)
+    }
+
+    /// The length the user chose for the type in Settings.
+    func defaultMinutes(for kind: TimerKind) -> Int {
+        guard let context else { return kind.defaultMinutes }
+        return context.settings.value(TimerSettingsKeys(context.settings).key(for: kind))
+    }
+
+    /// What the dial shows for the type: where it was turned to, else the Settings default.
+    func minutes(for kind: TimerKind) -> Int {
+        state.adjustedMinutes[kind] ?? defaultMinutes(for: kind)
+    }
+
+    func setMinutes(_ minutes: Int, for kind: TimerKind) {
+        state.adjustedMinutes[kind] = MinuteDial.clamped(minutes)
+    }
+
     /// A countdown that is already due finishes first, so pausing it (or any other change) cannot freeze it at zero.
-    private func mutate(_ change: (inout TimerModel, Date) -> Void) {
+    /// Starting one sets its type, and the dial of that type goes back to its default for the next time.
+    private func mutate(starting session: TimerSession? = nil, _ change: (inout TimerModel, Date) -> Void) {
         guard context != nil else { return }
         let now = now()
         if state.model.refresh(now: now) { sound.play(named: Self.finishedSound) }
+        if let session {
+            state.session = session
+            state.adjustedMinutes[session.kind] = nil
+        }
         change(&state.model, now)
         commit()
     }
@@ -104,7 +154,7 @@ public final class TimerModule: FeatureModule {
     private func save(logger: Logger) {
         guard let fileURL else { return }
         do {
-            try JSONEncoder().encode(state.model).write(to: fileURL, options: .atomic)
+            try JSONEncoder().encode(StoredTimer(model: state.model, session: state.session)).write(to: fileURL, options: .atomic)
         } catch {
             logger.error("Could not save the timer: \(error.localizedDescription)")
         }
@@ -115,15 +165,13 @@ public final class TimerModule: FeatureModule {
         let now = now()
         switch state.model {
         case .countdown(let endDate):
-            context.activities.set(TimerActivity.running(
-                systemImage: "hourglass", range: now...max(endDate, now), countsDown: true))
-            context.lockScreen.set(AnyView(TimerLockScreenView(endDate: endDate)), priority: .high)
+            context.activities.set(TimerActivity.running(session: state.session, range: now...max(endDate, now)))
+            context.lockScreen.set(AnyView(TimerLockScreenView(endDate: endDate, session: state.session)), priority: .high)
         case .stopwatch(let accumulated, let startedAt):
-            context.activities.set(TimerActivity.running(
-                systemImage: "stopwatch", range: startedAt.addingTimeInterval(-accumulated)...Date.distantFuture, countsDown: false))
+            context.activities.set(TimerActivity.stopwatch(range: startedAt.addingTimeInterval(-accumulated)...Date.distantFuture))
             context.lockScreen.clear()
         case .finished:
-            context.activities.set(TimerActivity.finished(expiresAfter: Self.finishedLifetime))
+            context.activities.set(TimerActivity.finished(session: state.session, expiresAfter: Self.finishedLifetime))
             context.lockScreen.clear()
         case .idle, .countdownPaused, .stopwatchPaused:
             context.activities.clear(id: Self.activityID)
