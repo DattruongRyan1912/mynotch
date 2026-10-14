@@ -64,8 +64,9 @@ nonisolated struct TrackKey: Hashable, Sendable {
         if state.bundleIdentifier == Self.appleMusicBundleID { appleCatalogID = state.catalogID }
     }
 
-    /// Bumped when the lookup changes, so answers of an older lookup (all "not found" for videos) are asked again.
-    static let cacheVersion = "v4"
+    /// Bumped when the lookup changes, so answers of an older lookup are asked again: all "not found" for videos (v3), and
+    /// the "not found" that Apple's 404 for a sign-in it did not accept was cached as (v5).
+    static let cacheVersion = "v5"
 
     /// SHA-256 of the fields as hex, a file name that is safe whatever the track is called. A lookup that asked Apple
     /// Music has its own key ("+am"): an answer found without the account, "not found" above all, does not stand for it.

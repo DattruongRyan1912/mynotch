@@ -31,6 +31,14 @@ import Testing
         for _ in 0..<200 where !condition() { await Task.yield() }
     }
 
+    /// Lets the lyrics service's spacing pass, a request at a time, until `condition` holds (Apple's lookup is three requests).
+    func letTimePass(until condition: () -> Bool) async {
+        for _ in 0..<8 where !condition() {
+            await settle(until: condition)
+            harness.scheduler.advance(by: LyricsService.minimumSpacing)
+        }
+    }
+
     func enableLyrics() {
         harness.settings.set(true, for: keys.lyrics)
     }
@@ -383,10 +391,11 @@ import Testing
         client.reply(appleFound)
         await harness.registry.bootstrap()
         playMusicTrack()
-        await settle { store.syncedLyrics != nil }
+        await letTimePass { store.syncedLyrics != nil }
         #expect(store.syncedLyrics == AppleReplies.lines(count: 5, tag: "apple"))
-        #expect(client.requests.count == 1)
-        #expect(try #require(client.requests.first).url?.host() == "amp-api.music.apple.com")
+        // The catalog entry, then the lyrics: both from Apple, nothing from lrclib.
+        #expect(client.requests.count == 2)
+        #expect(client.requests.allSatisfy { $0.url?.host() == "amp-api.music.apple.com" })
     }
 
     @Test func withoutAnAccountAMusicTrackGoesToLrclibOnly() async {
@@ -426,8 +435,7 @@ import Testing
         module.connectAppleMusic()
         #expect(signIn.openCount == 1)
         #expect(await signIn.found(credentials))
-        harness.scheduler.advance(by: LyricsService.minimumSpacing)
-        await settle { store.syncedLyrics != nil }
+        await letTimePass { store.syncedLyrics != nil }
         #expect(store.syncedLyrics == AppleReplies.lines(count: 5, tag: "apple"))
         #expect(client.requests.last?.url?.host() == "amp-api.music.apple.com")
     }
@@ -438,10 +446,10 @@ import Testing
         client.reply(appleFound)
         await harness.registry.bootstrap()
         playMusicTrack()
-        await settle { store.syncedLyrics != nil }
+        await letTimePass { store.syncedLyrics != nil }
         module.appleAccount.markNeedsReauth()
-        await settle { client.requests.count > 1 }
-        #expect(client.requests.count == 1)
+        await settle { client.requests.count > 2 }
+        #expect(client.requests.count == 2)
         #expect(store.syncedLyrics == AppleReplies.lines(count: 5, tag: "apple"))
     }
 
