@@ -33,7 +33,7 @@ Mỗi tính năng là một package trong `Packages/Modules/`, bật/tắt trong
 | Module | Id | Mặc định | Làm gì |
 |---|---|---|---|
 | Clipboard | `clipboard` | Bật | Lịch sử clipboard (text, ảnh, file, màu), tìm kiếm, board, dán trực tiếp. ⌃⌥V |
-| Media | `media` | Bật | Bài đang phát của mọi app, điều khiển, cột sóng. Phổ âm thật và lời bài hát (lrclib.net) tắt sẵn |
+| Media | `media` | Bật | Bài đang phát của mọi app, điều khiển, cột sóng. Tắt sẵn: phổ âm thật; lời bài hát theo thứ tự phụ đề YouTube từ extension Chrome, Apple Music (bài của app Music, cần đăng nhập tài khoản của bạn), lrclib.net |
 | Dịch | `translation` | Bật | Dịch trên máy bằng framework Translation: tab, mục Services, ⌃⌥T |
 | Ảnh chụp | `screenshot` | Bật, cần Screen Recording | Chụp vùng, cửa sổ, màn hình, OCR, sửa ảnh. ⌃⌥S, ⌃⌥O |
 | AI agents | `aiagents` | Bật | Trạng thái, token và chi phí của Claude Code và Codex; hook "trạng thái chính xác" tuỳ chọn |
@@ -45,7 +45,7 @@ Mỗi tính năng là một package trong `Packages/Modules/`, bật/tắt trong
 | Khay | `shelf` | Bật | Thả file, link, văn bản lên notch; AirDrop, chia sẻ |
 | Màn hình khoá | `lockscreen` | **Tắt**, thử nghiệm | Widget media, hẹn giờ, pin trên màn hình khoá (API riêng SkyLight, chưa kiểm chứng) |
 
-Phím tắt chung: ⌃⌥N mở/đóng notch. Dữ liệu của module nằm ở `~/Library/Application Support/io.lucasvu.mynotch/Modules/<id>/`. Mặc định app không gửi dữ liệu ra ngoài; chỉ lời bài hát (đang tắt) gửi tên bài tới lrclib.net.
+Phím tắt chung: ⌃⌥N mở/đóng notch. Dữ liệu của module nằm ở `~/Library/Application Support/io.lucasvu.mynotch/Modules/<id>/`. Mặc định app không gửi dữ liệu ra ngoài. Chỉ lời bài hát (đang tắt) gửi tên bài tới lrclib.net; khi bạn kết nối Apple Music thì id bài của app Music cùng token của bạn đi tới Apple; phụ đề YouTube (đang tắt) chỉ đi trong máy, không gửi gì cho YouTube.
 
 ## Cấu trúc và cách ghép module
 
@@ -56,6 +56,8 @@ Phím tắt chung: ⌃⌥N mở/đóng notch. Dữ liệu của module nằm ở
 | `Packages/NotchUI` | Cửa sổ notch, hình học, state machine, đa màn hình, thả file, SkyLight shim |
 | `Packages/Modules/*` | Mỗi tính năng một package; chỉ phụ thuộc MyNotchCore và NotchUI, không module nào import module khác |
 | `Tools/mynotch-hook` | Helper CLI của AI agents, được nhúng vào `Contents/MacOS` |
+| `Tools/mynotch-youtube-host` | Helper Native Messaging cho extension Chrome (mã nằm ở thư viện `YouTubeBridgeKit` của package Media), nhúng vào `Contents/MacOS` |
+| `Extensions/Chrome/MyNotchYouTube` | Extension Chrome (Manifest V3) chuyển phụ đề YouTube cho module Media; được nhúng vào `Contents/Resources/ChromeExtension`, và nút "Cài cầu nối cho Chrome" chép nó ra `~/Library/Application Support/io.lucasvu.mynotch/ChromeExtension` để nạp bằng Load unpacked. Test: `node --test Extensions/Chrome/MyNotchYouTube/tests/` (`verify.sh` không chạy test này) |
 | `Vendor/` | `mediaremote-adapter` (không sửa file vendor) |
 | `docs/` | Spec, ghi chú triển khai, checklist kiểm thử tay |
 
@@ -92,7 +94,7 @@ Không dùng `cp -R` đè lên bản cũ: macOS sẽ giết app khi mở vì ch�
 
 ## Ký app
 
-App, helper `mynotch-hook` và framework MediaRemoteAdapter được ký bằng chứng chỉ **Apple Development** (`CODE_SIGN_IDENTITY: "Apple Development"`, `DEVELOPMENT_TEAM: B394MAY4QN` trong `project.yml`, có hardened runtime). Nhờ vậy macOS nhớ các quyền đã cấp (Accessibility, Screen Recording, Lịch…) qua các lần build lại.
+App, các helper `mynotch-hook` và `mynotch-youtube-host`, và framework MediaRemoteAdapter được ký bằng chứng chỉ **Apple Development** (`CODE_SIGN_IDENTITY: "Apple Development"`, `DEVELOPMENT_TEAM: B394MAY4QN` trong `project.yml`, có hardened runtime). Nhờ vậy macOS nhớ các quyền đã cấp (Accessibility, Screen Recording, Lịch…) qua các lần build lại.
 
 Chứng chỉ này cần chứng chỉ trung gian **Apple WWDR G3** (`AppleWWDRCAG3.cer`) trong keychain **login** (cài bằng `security add-certificates -k ~/Library/Keychains/login.keychain-db AppleWWDRCAG3.cer`; keychain iCloud không nhận chứng chỉ, báo lỗi `-25294`). Kiểm tra: `security find-identity -v -p codesigning` phải báo `1 valid identities found`. Máy không có chứng chỉ thì đổi lại `CODE_SIGN_IDENTITY: "-"` (ad-hoc), khi đó macOS quên quyền sau mỗi lần build.
 
