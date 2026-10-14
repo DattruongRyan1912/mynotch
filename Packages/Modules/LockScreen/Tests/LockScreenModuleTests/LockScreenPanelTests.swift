@@ -1,5 +1,7 @@
+import AppKit
 import CoreGraphics
 import NotchUI
+import SwiftUI
 import Testing
 @testable import LockScreenModule
 
@@ -47,5 +49,62 @@ import Testing
         let top: CGFloat = 856 - gap
         #expect(frame.midX == centre)
         #expect(frame.maxY == top)
+    }
+
+    // MARK: hiding from screen recordings
+
+    /// The panel is built but never shown, so nothing appears on a screen and nothing can be captured.
+    func makePanel(_ interface: NotchInterface) -> LockScreenPanel {
+        LockScreenPanel(frame: CGRect(x: 0, y: 0, width: 300, height: 80), content: AnyView(EmptyView()), interface: interface)
+    }
+
+    func eventually(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<400 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return condition()
+    }
+
+    @Test func aNewPanelIsHiddenFromRecordingsFromTheStartWhenTheSettingSaysSo() {
+        // The panel is a widget under the collapsed notch, so "when collapsed" hides it as well as "always".
+        for (hiding, expected) in [
+            (CaptureHiding.never, NSWindow.SharingType.readOnly), (.whenCollapsed, .none), (.always, .none),
+        ] {
+            let interface = NotchInterface()
+            interface.captureHiding = hiding
+            let panel = makePanel(interface)
+            #expect(panel.sharingType == expected, "\(hiding)")
+            panel.dismiss()
+        }
+    }
+
+    @Test func aChangeOfTheSettingReachesAPanelThatIsAlreadyUp() async {
+        let interface = NotchInterface()
+        let panel = makePanel(interface)
+        defer { panel.dismiss() }
+        #expect(panel.sharingType == .readOnly)
+        interface.captureHiding = .always
+        #expect(await eventually { panel.sharingType == .none })
+        interface.captureHiding = .never
+        #expect(await eventually { panel.sharingType == .readOnly })
+        interface.captureHiding = .whenCollapsed
+        #expect(await eventually { panel.sharingType == .none })
+    }
+
+    @Test func aDismissedPanelStopsFollowingTheSetting() async {
+        let interface = NotchInterface()
+        let panel = makePanel(interface)
+        panel.dismiss()
+        interface.captureHiding = .always
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(panel.sharingType == .readOnly)
+    }
+
+    @Test func thePanelStaysClickThroughAndOutOfTheKeyboard() {
+        let panel = makePanel(NotchInterface())
+        defer { panel.dismiss() }
+        #expect(panel.ignoresMouseEvents)
+        #expect(!panel.canBecomeKey && !panel.canBecomeMain)
     }
 }
