@@ -505,6 +505,7 @@ public final class MediaModule: FeatureModule {
         youtubeListenFailed = false
         if youtubeBridge.listenFailed { youtubeBridge.listenFailed = false }
         if youtubeBridge.lastMessageAt != nil { youtubeBridge.lastMessageAt = nil }
+        if youtubeBridge.accessWithheld { youtubeBridge.accessWithheld = false }
         captionStore.removeAll()
         loggedMatchDecision = nil
         lastDriftLoggedAt = nil
@@ -516,8 +517,13 @@ public final class MediaModule: FeatureModule {
         guard youtubeCaptionsEnabled else { return }
         captionStore.apply(message, at: now)
         youtubeBridge.lastMessageAt = now
-        // A diagnostic only shows that the extension is there.
-        if case .diag = message { return }
+        // A diagnostic shows that the extension is there, and one of them says whether Chrome lets it read YouTube.
+        if case .diag(let diag) = message {
+            if let access = diag.siteAccess, youtubeBridge.accessWithheld != (access == .withheld) {
+                youtubeBridge.accessWithheld = access == .withheld
+            }
+            return
+        }
         refreshLyrics()
         logDrift(of: message, at: now)
     }

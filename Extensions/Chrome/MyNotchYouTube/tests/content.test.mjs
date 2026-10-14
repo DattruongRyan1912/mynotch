@@ -660,6 +660,133 @@ test("starting twice installs nothing twice", () => {
   assert.equal(page.take().length, 1);
 });
 
+// ---- the shared library is missing -----------------------------------------------------------------
+
+test("without the captions library nothing starts, and one fixed diag says so instead of failing silently", () => {
+  const page = makePage();
+  assert.doesNotThrow(() => runScripts(page.context, ["content.js"])); // captions.js did not run in this world
+  assert.deepEqual(page.diags, [{ v: 1, type: "diag", where: "content", event: "content-no-lib" }]);
+  assert.deepEqual(page.sent, []);
+  assert.equal(page.intervals.length, 0, "no timer");
+  assert.equal(Object.keys(page.windowListeners).length, 0, "no listener");
+  assertSafeDiag(page.diags[0], "content");
+});
+
+test("a failing send of the missing-library diag is swallowed, a rejected one leaves no unhandled rejection", async () => {
+  const thrower = makePage();
+  thrower.sendThrows = new Error("Extension context invalidated.");
+  assert.doesNotThrow(() => runScripts(thrower.context, ["content.js"]));
+
+  const rejected = makePage();
+  rejected.sendResult = () => Promise.reject(new Error("Could not establish connection. Receiving end does not exist."));
+  const unhandled = [];
+  const listener = (reason) => unhandled.push(reason);
+  process.on("unhandledRejection", listener);
+  try {
+    assert.doesNotThrow(() => runScripts(rejected.context, ["content.js"]));
+    await flush();
+  } finally {
+    process.off("unhandledRejection", listener);
+  }
+  assert.deepEqual(unhandled, []);
+  assert.equal(rejected.diags.length, 1);
+});
+
+test("a page without chrome.runtime at all does not break the script that has no library", () => {
+  const page = makePage();
+  vm.runInContext("delete globalThis.chrome", page.context);
+  assert.doesNotThrow(() => runScripts(page.context, ["content.js"]));
+});
+
+// ---- re-injection (the extension was installed, updated or reloaded while the tab was open) ------
+
+test("re-injecting while the current copy is alive starts nothing and the first copy keeps working", () => {
+  const page = makePage();
+  page.start();
+  page.take();
+  page.diags.length = 0;
+
+  page.start();
+  assert.equal(page.intervals.length, 1, "no second interval");
+  assert.equal(page.windowListeners.message.size, 1, "no second message listener");
+  assert.equal(page.windowListeners.pagehide.size, 1);
+  assert.equal(page.windowListeners["yt-navigate-finish"].size, 1);
+  assert.deepEqual(page.take(), [], "nothing is sent by the second run");
+  assert.deepEqual(page.diags, [], "and it does not report a second content-start");
+
+  page.video.paused = true;
+  page.video.emit("pause");
+  assert.deepEqual(page.take(), [playbackOf(ID, { playing: false })], "one copy, one message");
+  assert.equal(page.video.listenerCount(), 6, "the video is bound once");
+});
+
+test("re-injecting after the old copy shut down (orphaned by a reload) starts a fresh copy", () => {
+  const page = makePage();
+  page.start();
+  page.take();
+  // The extension is reloaded: the old copy's next send fails and it shuts itself down.
+  page.runtime.id = undefined;
+  page.sendThrows = new Error("Extension context invalidated.");
+  page.video.emit("play");
+  assert.equal(page.intervals[0].cleared, true);
+  page.take();
+  page.diags.length = 0;
+
+  // The new extension instance injects the scripts into the same tab (the same isolated world here).
+  page.runtime.id = "extension-id";
+  page.sendThrows = null;
+  page.start();
+
+  assert.equal(page.intervals.length, 2);
+  assert.equal(page.intervals[1].cleared, false, "the new copy ticks");
+  assert.equal(page.windowListeners.message.size, 1);
+  assert.equal(page.windowListeners.pagehide.size, 1);
+  assert.equal(page.windowListeners["yt-navigate-finish"].size, 1);
+  assert.equal(page.video.listenerCount(), 6, "bound to the video once");
+  assert.deepEqual(page.take(), [playbackOf(ID)], "it reports the playback state straight away");
+  assert.deepEqual(diagEvents(page).slice(0, 1), ["content-start"]);
+
+  page.advance(5000);
+  assert.equal(page.take().filter((message) => message.type === "playback").length, 1, "heartbeat from the new copy only");
+});
+
+test("a copy whose extension context is gone is stopped and replaced, not left running beside the new one", () => {
+  const page = makePage();
+  page.start();
+  page.take();
+  page.runtime.id = undefined; // orphaned, but it has not tried to send anything yet
+  page.start();
+
+  assert.equal(page.intervals[0].cleared, true, "the old interval is cleared");
+  assert.equal(page.intervals.length, 2);
+  assert.equal(page.windowListeners.message.size, 1, "one message listener, the new one");
+  assert.equal(page.windowListeners.pagehide.size, 1);
+  assert.equal(page.windowListeners["yt-navigate-finish"].size, 1);
+  assert.equal(page.video.listenerCount(), 6, "the video is bound by the new copy only");
+});
+
+test("a leftover flag of an older version of the script (plain true) does not block the new copy", () => {
+  const page = makePage();
+  vm.runInContext('globalThis[Symbol.for("io.lucasvu.mynotch.yt.content")] = true', page.context);
+  page.start();
+  assert.equal(page.intervals.length, 1);
+  assert.deepEqual(page.take(), [playbackOf(ID)]);
+  page.start();
+  assert.equal(page.intervals.length, 1, "and the new copy is guarded as before");
+});
+
+test("a fresh isolated world (nothing left from the old copy) starts normally", () => {
+  const old = makePage();
+  old.start();
+  old.runtime.id = undefined;
+  old.sendThrows = new Error("Extension context invalidated.");
+  old.video.emit("play");
+  const fresh = makePage();
+  fresh.start();
+  assert.equal(fresh.intervals.length, 1);
+  assert.deepEqual(fresh.take(), [playbackOf(ID)]);
+});
+
 test("an invalidated extension context shuts the script down quietly", () => {
   const page = makePage();
   page.start();

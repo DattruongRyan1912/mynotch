@@ -64,7 +64,28 @@ export function assertSafeDiag(message, where) {
   assert.ok(message.event.length > 0 && message.event.length <= 120, message.event);
   assert.deepEqual(sharedCaptions.validateMessage(message), message, `valid per validateMessage: ${message.event}`);
   assert.match(message.event, /^[a-z0-9][a-z0-9 =_.-]*$/, "lowercase code, numbers and booleans only");
-  assert.equal(/[/:?&#]|https?|www|youtube|\.com/.test(message.event), false, `no URL: ${message.event}`);
+  assert.equal(/[/:?&#]|https?|www|youtube\.|\.com/.test(message.event), false, `no URL: ${message.event}`);
   assert.equal(ID_TOKEN.test(message.event), false, `no id-like token: ${message.event}`);
 }
 
+
+/**
+ * Injects the manifest's content scripts the way Chrome does, into one context per world, and returns the files
+ * that really ran in each world. Chrome keeps one "already injected" set per document for the whole extension: a file
+ * that appears in two content_scripts entries runs only for the first entry, in that entry's world, and never in the
+ * other (found in Chrome 151 and 155: captions.js listed for both worlds never reached the isolated one).
+ */
+export function injectLikeChrome(manifest, worlds) {
+  const injected = new Set();
+  const ran = { MAIN: [], ISOLATED: [] };
+  for (const entry of manifest.content_scripts) {
+    const world = entry.world === "MAIN" ? "MAIN" : "ISOLATED";
+    for (const file of entry.js) {
+      if (injected.has(file)) continue;
+      injected.add(file);
+      if (worlds) runScripts(worlds[world], [file]);
+      ran[world].push(file);
+    }
+  }
+  return ran;
+}

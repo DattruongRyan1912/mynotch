@@ -28,6 +28,9 @@ struct YouTubeBridgeRows: View {
             if model.listenFailed {
                 Text(YouTubeBridgeModel.listenFailureMessage).font(.caption).foregroundStyle(.red)
             }
+            if model.accessWithheld {
+                Text(YouTubeBridgeModel.accessWithheldMessage).font(.caption).foregroundStyle(.orange)
+            }
             HStack {
                 Button(Self.installTitle) { model.install() }
                 Button(Self.removeTitle, role: .destructive) { model.remove() }

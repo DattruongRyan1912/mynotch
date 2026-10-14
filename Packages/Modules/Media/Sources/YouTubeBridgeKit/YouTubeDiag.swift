@@ -13,6 +13,13 @@ public struct YouTubeDiag: Equatable, Sendable {
         case page
     }
 
+    /// What Chrome lets the extension do on youtube.com. The user can set the extension's site access to "On click",
+    /// which withholds it: Chrome then loads none of the extension's scripts into the page and the extension is silent.
+    public enum SiteAccess: Sendable {
+        case granted
+        case withheld
+    }
+
     public static let maxEventLength = 120
 
     public var origin: Origin
@@ -21,6 +28,17 @@ public struct YouTubeDiag: Equatable, Sendable {
     public init(origin: Origin, event: String) {
         self.origin = origin
         self.event = event
+    }
+
+    /// What the service worker's `sw-access youtube=granted` or `sw-access youtube=withheld` says; nil for any other event,
+    /// and for the same words from a part that cannot know.
+    public var siteAccess: SiteAccess? {
+        guard origin == .sw else { return nil }
+        switch event {
+        case "sw-access youtube=granted": return .granted
+        case "sw-access youtube=withheld": return .withheld
+        default: return nil
+        }
     }
 
     /// Whether `event` is one of the extension's, sent by `origin`: its code starts with the part's name, its
@@ -44,7 +62,7 @@ public struct YouTubeDiag: Equatable, Sendable {
             words = arguments.dropFirst().split(separator: " ", omittingEmptySubsequences: false)
         }
         switch code {
-        case "content-start", "content-video-found", "content-video-missing", "page-timedtext-parse-error", "page-timedtext-too-large":
+        case "content-start", "content-no-lib", "content-video-found", "content-video-missing", "page-timedtext-parse-error", "page-timedtext-too-large":
             return words.isEmpty
         case "sw-start":
             return words.count == 1 && value(of: "v", in: words[0]).map { $0 == "unknown" || isVersion($0) } == true
@@ -57,6 +75,12 @@ public struct YouTubeDiag: Equatable, Sendable {
         case "sw-reconnect":
             return words.count == 2 && value(of: "after", in: words[0]).map(isToken) == true
                 && value(of: "failures", in: words[1]).map { isNumber($0, digits: 1...6) } == true
+        case "sw-inject":
+            return words.count == 3 && value(of: "tabs", in: words[0]).map { isNumber($0, digits: 1...6) } == true
+                && value(of: "injected", in: words[1]).map { isNumber($0, digits: 1...6) } == true
+                && value(of: "failed", in: words[2]).map { isNumber($0, digits: 1...6) } == true
+        case "sw-access":
+            return words.count == 1 && value(of: "youtube", in: words[0]).map { $0 == "granted" || $0 == "withheld" } == true
         case "content-cc":
             return words.count == 1 && (words[0] == "on" || words[0] == "off")
         case "content-send-error":

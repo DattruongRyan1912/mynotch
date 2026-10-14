@@ -17,8 +17,37 @@
 
   var C = root.__mynotchCaptions;
   var STARTED = Symbol.for("io.lucasvu.mynotch.yt.content");
-  if (!C || root[STARTED]) return;
-  root[STARTED] = true;
+  if (!C) {
+    reportMissingLibrary();
+    return;
+  }
+  // The scripts can run again in a tab that already has a copy: the background script injects them
+  // into the open YouTube tabs after the extension is installed, updated or reloaded, because Chrome
+  // only injects content scripts into pages that load afterwards. A copy that is still alive keeps
+  // the tab (one set of timers, listeners and messages); one whose extension context is gone, or
+  // that has shut down, is stopped and replaced. Anything else under the key (a plain `true` left
+  // by an older version of this script, which cannot be asked) is treated as an orphan.
+  var previous = root[STARTED];
+  if (previous && typeof previous.isAlive === "function") {
+    if (previous.isAlive()) return;
+    previous.stop();
+  }
+
+  /**
+   * Without the captions library nothing can be validated or built, so this one fixed diagnostic goes
+   * out as it is. It exists so that a missing library (Chrome injects a file listed for two worlds
+   * only once, so captions.js never reached this world) shows in the bridge log instead of nothing.
+   */
+  function reportMissingLibrary() {
+    try {
+      var result = root.chrome.runtime.sendMessage({ v: 1, type: "diag", where: "content", event: "content-no-lib" });
+      if (result && typeof result.then === "function") result.then(noop, noop);
+    } catch (error) {
+      /* the extension context may be gone as well */
+    }
+  }
+
+  function noop() {}
 
   var TICK_MS = 1000;
   var HEARTBEAT_MS = 5000;
@@ -48,7 +77,8 @@
     lastAliveAt: Date.now(),
     sendErrors: 0, // failed sends since the last report
     sendErrorCode: "", // code of the latest failure, reported once a send works again
-    timer: 0
+    timer: 0,
+    stopped: false
   };
 
   var allowDiag = C.createDiagLimiter(function () {
@@ -286,7 +316,13 @@
     state.cc = "unknown";
   }
 
+  /** Whether this copy still runs and the extension that injected it is still there. */
+  function isAlive() {
+    return !state.stopped && Boolean(root.chrome && root.chrome.runtime && root.chrome.runtime.id);
+  }
+
   function shutdown() {
+    state.stopped = true;
     if (state.timer) root.clearInterval(state.timer);
     state.timer = 0;
     unbindVideo();
@@ -295,6 +331,7 @@
     root.removeEventListener("pagehide", onPageHide, false);
   }
 
+  root[STARTED] = { isAlive: isAlive, stop: shutdown };
   root.addEventListener("message", onPageMessage, false);
   root.addEventListener("yt-navigate-finish", tick, true);
   root.addEventListener("pagehide", onPageHide, false);

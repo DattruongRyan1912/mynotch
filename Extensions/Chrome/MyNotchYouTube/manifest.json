@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "MyNotch YouTube Bridge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Forwards the captions YouTube already loaded in Chrome to the MyNotch app on this Mac. Nothing goes over the network.",
   "minimum_chrome_version": "111",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArhpwZaHcezuiaecE/3y3l8to3Bq6hE/CDHHoTk8RHHLEW0wor75PhkC6XBm8a5qthFufM9qmtlZ6OA+k3+naoKV30ao6Av1y+2K33fTcEZARBSSVYldgCPfAeiYGwOIjMkKBhss40pw43KzPe09QE07KWn5yp8fhSMbAy/JjSUVs6kCO0OAlBR42d8I7xLPazgOZ3Rj+FlfvONrGj3YBwb63NgnQIvFVtotz+I9epuRWHt0wLJavfdZtDTlktVdt1Nx1I/iX85gLXr+8befsubW5zl2FPMF8BRw6qy2Z6kFqxQ8iHbB1opgAg8tTBIHW5LnivgK7WiW9r54MLCOr1wIDAQAB",
   "permissions": [
-    "nativeMessaging"
+    "nativeMessaging",
+    "scripting"
   ],
   "host_permissions": [
     "https://www.youtube.com/*"
@@ -20,7 +21,7 @@
         "https://www.youtube.com/*"
       ],
       "js": [
-        "captions.js",
+        "captions-page.js",
         "page.js"
       ],
       "run_at": "document_start",

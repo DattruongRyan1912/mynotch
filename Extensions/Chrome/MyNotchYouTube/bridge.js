@@ -11,6 +11,14 @@
  * createRelay() is the message handler of the service worker: it checks the sender, validates,
  * forwards, and reports its own diagnostics (rate limited).
  *
+ * createInjector() runs the manifest's content scripts in the YouTube tabs that were already open
+ * when the extension was installed, updated or reloaded (Chrome only injects into pages that load
+ * afterwards).
+ *
+ * createAccessWatcher() reports whether Chrome granted the extension access to YouTube. The user
+ * can set the extension's site access to "On click", which withholds the host permission: Chrome
+ * then injects no content script and the extension is silent. It also tells when that changes.
+ *
  * Everything Chrome-specific is injected, so the logic runs under Node in the tests.
  */
 (function (root) {
@@ -163,12 +171,26 @@
   function createRelay(deps) {
     var C = deps.captions;
     var allow = C.createDiagLimiter(deps.now, DIAG_WINDOW_MS);
+    var states = {}; // kind -> the last state event sent by reportState
 
     /** The worker's own diagnostics: one event per kind every 5 s. */
     function report(event) {
       if (!allow(event)) return;
       var message = C.buildDiag("sw", event);
       if (message) deps.bridge.handle(message);
+    }
+
+    /**
+     * A state report instead of an event: sent whenever its value differs from the last one sent,
+     * with no 5 s limit, so a state that changes and changes back quickly is never left stale.
+     * Repeating a value that reached the host sends nothing; one that could not be sent is tried again.
+     */
+    function reportState(event) {
+      var kind = String(event).replace(/=\S*/g, "");
+      if (states[kind] === event) return;
+      var message = C.buildDiag("sw", event);
+      if (!message) return;
+      if (deps.bridge.handle(message)) states[kind] = event;
     }
 
     /** Eager connection when the worker starts, then the first diagnostic. */
@@ -199,7 +221,127 @@
       deps.bridge.handle(clean);
     }
 
-    return { start: start, onMessage: onMessage };
+    return { start: start, onMessage: onMessage, report: report, reportState: reportState };
+  }
+
+  /** The manifest's content scripts as executeScript injections, in their declared order and worlds. */
+  function injectionsOf(manifest) {
+    var entries = (manifest && manifest.content_scripts) || [];
+    return entries.map(function (entry) {
+      return { files: entry.js.slice(), world: entry.world === "MAIN" ? "MAIN" : "ISOLATED" };
+    });
+  }
+
+  /** Every URL pattern the manifest's content scripts match, once each. */
+  function matchesOf(manifest) {
+    var patterns = [];
+    ((manifest && manifest.content_scripts) || []).forEach(function (entry) {
+      entry.matches.forEach(function (pattern) {
+        if (patterns.indexOf(pattern) < 0) patterns.push(pattern);
+      });
+    });
+    return patterns;
+  }
+
+  /**
+   * Injects the content scripts into the matching tabs that are already open, so the bridge does not
+   * wait for the user to reload each YouTube tab after the extension was installed, updated or
+   * reloaded. The scripts guard themselves against running twice (content.js and page.js).
+   * deps: manifest, queryTabs(query) -> Promise<tab[]>, executeScript(injection) -> Promise,
+   * report(event) for the `sw-inject` diagnostic, log(text).
+   */
+  function createInjector(deps) {
+    var injections = injectionsOf(deps.manifest);
+
+    /** The tab's scripts one after the other (the page's observer first); never rejects. */
+    function injectTab(tab) {
+      if (!tab || typeof tab.id !== "number") return Promise.resolve(false);
+      var target = { tabId: tab.id }; // the top frame only, like the manifest (no all_frames)
+      return injections
+        .reduce(function (previous, injection) {
+          return previous.then(function () {
+            return deps.executeScript({ target: target, files: injection.files, world: injection.world });
+          });
+        }, Promise.resolve())
+        .then(
+          function () {
+            return true;
+          },
+          function () {
+            return false; // discarded tab, error page, tab closed in the meantime, ...
+          }
+        );
+    }
+
+    /** Resolves to { tabs, injected, failed }, or to null when the tabs could not be listed. */
+    function injectIntoOpenTabs() {
+      return new Promise(function (resolve) {
+        resolve(deps.queryTabs({ url: matchesOf(deps.manifest) }));
+      })
+        .then(function (tabs) {
+          return Promise.all(tabs.map(injectTab)).then(function (outcomes) {
+            var injected = outcomes.filter(Boolean).length;
+            var result = { tabs: tabs.length, injected: injected, failed: tabs.length - injected };
+            deps.report("sw-inject tabs=" + result.tabs + " injected=" + result.injected + " failed=" + result.failed);
+            return result;
+          });
+        })
+        .catch(function () {
+          deps.log("sw-inject could not list the open YouTube tabs");
+          return null;
+        });
+    }
+
+    /** chrome.runtime.onInstalled: only a new install or an update leaves tabs without the scripts. */
+    function onInstalled(details) {
+      var reason = details && details.reason;
+      if (reason === "install" || reason === "update") return injectIntoOpenTabs();
+      return undefined;
+    }
+
+    return { injectIntoOpenTabs: injectIntoOpenTabs, onInstalled: onInstalled };
+  }
+
+  /**
+   * Reports `sw-access youtube=granted|withheld` and notices when access is granted later.
+   * deps: manifest, contains(query) -> Promise<boolean> (chrome.permissions.contains),
+   * report(event), onGranted() for access that was not there before, log(text).
+   */
+  function createAccessWatcher(deps) {
+    var granted = null; // the last known answer: true, false, or null while unknown
+
+    /** Reads the access and reports it. Resolves to true when it was not granted before and is now, null when unreadable. */
+    function update() {
+      return new Promise(function (resolve) {
+        resolve(deps.contains({ origins: matchesOf(deps.manifest) }));
+      }).then(
+        function (answer) {
+          var now = answer === true;
+          var newlyGranted = now && granted !== true;
+          granted = now;
+          deps.report("sw-access youtube=" + (now ? "granted" : "withheld"));
+          return newlyGranted;
+        },
+        function () {
+          deps.log("sw-access could not read the site access");
+          return null;
+        }
+      );
+    }
+
+    /** When the worker starts. */
+    function start() {
+      return update().then(function () {});
+    }
+
+    /** chrome.permissions.onAdded / onRemoved: the open tabs get the scripts as soon as access appears. */
+    function onChanged() {
+      return update().then(function (newlyGranted) {
+        if (newlyGranted === true) deps.onGranted();
+      });
+    }
+
+    return { start: start, onChanged: onChanged };
   }
 
   var api = {
@@ -208,6 +350,8 @@
     MAX_BACKOFF_MS: MAX_BACKOFF_MS,
     createBridge: createBridge,
     createRelay: createRelay,
+    createInjector: createInjector,
+    createAccessWatcher: createAccessWatcher,
     isTrustedSender: isTrustedSender
   };
 

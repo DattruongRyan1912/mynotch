@@ -11,8 +11,9 @@ public enum YouTubeHostCLI {
 
     /// Runs until `stdin` ends, which is Chrome closing the extension's port; always returns 0.
     ///
-    /// The host remembers the latest captions of up to three videos and the latest playback, and sends them first
-    /// whenever it (re)connects, so an app that was started or restarted after the page loaded its captions still gets them.
+    /// The host remembers the latest captions of up to three videos, the latest playback and the latest report of the
+    /// extension's access to YouTube, and sends them first whenever it (re)connects, so an app that was started or
+    /// restarted after the page loaded its captions still gets them.
     /// - Parameters:
     ///   - now: a monotonic clock in seconds, for the age of the playback to replay and for the pace of the log.
     ///   - expectedOwner: the user the socket file must belong to.
@@ -85,6 +86,9 @@ final class HostRelay: Sendable {
         /// Whole frames, oldest first, one per video.
         var captions: [(videoID: String, frame: Data)] = []
         var playback: (frame: Data, receivedAt: TimeInterval)?
+        /// The latest report of the extension's access to YouTube (`sw-access`): said once when its worker starts, which is
+        /// about when the host does, so the app may not be there yet.
+        var access: Data?
         /// Tries in a row that did not reach the app, and when the log last said so.
         var failedAttempts = 0
         var lastReminder: TimeInterval?
@@ -159,9 +163,10 @@ final class HostRelay: Sendable {
                 state.playback = (frame, now())
             case .clear(let videoID):
                 state.captions.removeAll { $0.videoID == videoID }
-            case .diag:
-                // Said once, live: a diagnostic is about now, so it is not kept for a later connection.
-                break
+            case .diag(let diag):
+                // Said live: a diagnostic is about now, so it is not kept for a later connection. Except the access
+                // report, which is a state the app shows until it changes.
+                if diag.siteAccess != nil { state.access = frame }
             }
             guard let socket = state.socket else {
                 tally.lose("app-away")
@@ -206,6 +211,7 @@ final class HostRelay: Sendable {
             replay.append(playback.frame)
             playbackIncluded = true
         }
+        if let access = state.access { replay.append(access) }
         guard replay.allSatisfy({ UnixStreamSocket.writeAll($0, to: socket) }) else {
             close(socket)
             noteFailedAttempt(&state, reason: "send-failed")

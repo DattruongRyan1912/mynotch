@@ -291,6 +291,64 @@ import Testing
         #expect(await host.finish() == 0)
     }
 
+    // The service worker says at once, when it starts, whether Chrome withholds its access to YouTube, and the app may not
+    // be there yet (the host is started by the same moment): that one report is kept for the app that connects later.
+
+    static func diag(_ event: String, from origin: String = "sw") -> [String: Any] {
+        YouTubeDiagTests.message(where: origin, event: event)
+    }
+
+    @Test(arguments: readDelays) func theLatestAccessReportIsReplayedAfterTheCaptionsAndThePlayback(readDelay: TimeInterval) async throws {
+        defer { server.remove() }
+        let host = start(readDelay: readDelay)
+        host.sendJSON(Self.diag("sw-access youtube=withheld"))
+        let captions = host.sendJSON(Self.captions("aaaaaaaaaaa"))
+        let playing = host.sendJSON(Self.playback("aaaaaaaaaaa"))
+        let granted = host.sendJSON(Self.diag("sw-access youtube=granted"))
+        await host.waitUntilHandled()
+        try server.start()
+        await waitUntil { server.frames.count == 3 }
+        #expect(server.frames == [captions, playing, granted], "only the latest report, and it comes last")
+        // New diagnostics follow, live.
+        let live = host.sendJSON(Self.diag("sw-access youtube=withheld"))
+        await waitUntil { server.frames.count == 4 }
+        #expect(server.frames.last == live)
+        #expect(await host.finish() == 0)
+    }
+
+    @Test(arguments: readDelays) func otherDiagnosticsAreNotKeptForALaterConnection(readDelay: TimeInterval) async throws {
+        defer { server.remove() }
+        let host = start(readDelay: readDelay)
+        host.sendJSON(Self.diag("sw-start v=0.1.2"))
+        host.sendJSON(Self.diag("sw-inject tabs=1 injected=1 failed=0"))
+        host.sendJSON(Self.diag("content-start", from: "content"))
+        await host.waitUntilHandled()
+        try server.start()
+        await waitUntil { server.connectionCount == 1 }
+        await host.waitForLog(containing: "app socket connected replayed-captions=0 replayed-playback=false")
+        #expect(server.frames.isEmpty)
+        #expect(await host.finish() == 0)
+    }
+
+    @Test(arguments: readDelays) func theAccessReportIsReplayedAgainToARestartedApp(readDelay: TimeInterval) async throws {
+        defer { server.remove() }
+        try server.start()
+        let host = start(readDelay: readDelay)
+        await waitUntil { server.connectionCount == 1 }
+        let report = host.sendJSON(Self.diag("sw-access youtube=withheld"))
+        await waitUntil { server.frames.count == 1 }
+        #expect(server.frames == [report])
+        server.stop()
+        await host.waitForLog(containing: "app socket disconnected")
+
+        let restarted = FrameServer(directory: server.directory)
+        try restarted.start()
+        await waitUntil { restarted.frames.count == 1 }
+        #expect(restarted.frames == [report])
+        restarted.stop()
+        #expect(await host.finish() == 0)
+    }
+
     @Test(arguments: readDelays) func aClearAndAStalePausedPlaybackLeaveNothingToReplay(readDelay: TimeInterval) async throws {
         defer { server.remove() }
         let host = start(readDelay: readDelay)

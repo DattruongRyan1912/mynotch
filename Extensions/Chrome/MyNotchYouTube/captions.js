@@ -5,6 +5,10 @@
  * classic script by the page (MAIN world) script, the content script and the service
  * worker, and is required directly by the Node tests.
  *
+ * Chrome injects a file once per document, whichever content_scripts entries list it, so the
+ * MAIN world loads a byte-identical copy under another name: captions-page.js. After every
+ * change run `cp captions.js captions-page.js` (a test fails when they differ).
+ *
  * Message shapes and limits follow the shared MyNotch protocol (version 1).
  */
 (function (root) {
@@ -317,7 +321,10 @@
     "sw-msg": /^ (?:captions events=[0-9]{1,5}|playback|clear)$/,
     "sw-reject": /^ (?:untrusted|invalid (?:captions|playback|clear|diag|unknown))$/,
     "sw-reconnect": /^ after=[a-z0-9-]{1,80} failures=[0-9]{1,6}$/,
+    "sw-access": /^ youtube=(?:granted|withheld)$/,
+    "sw-inject": /^ tabs=[0-9]{1,6} injected=[0-9]{1,6} failed=[0-9]{1,6}$/,
     "content-start": NO_ARGS,
+    "content-no-lib": NO_ARGS,
     "content-video-found": NO_ARGS,
     "content-video-missing": NO_ARGS,
     "content-cc": /^ (?:on|off)$/,

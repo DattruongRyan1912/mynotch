@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assertSafeDiag, loadBridge, loadCaptions } from "./helpers.mjs";
+import { assertSafeDiag, flush, loadBridge, loadCaptions, readSource } from "./helpers.mjs";
 
 const B = loadBridge();
 const C = loadCaptions();
@@ -419,4 +419,294 @@ test("relay.start connects even when no diagnostic can be built", () => {
   assert.deepEqual(h.connects, ["io.lucasvu.mynotch.youtube"]);
   assert.deepEqual(h.ports[0].posted, []);
   assert.deepEqual(h.ports[0].diags, []);
+});
+
+// ---- injection into the YouTube tabs that were open before the extension loaded -------------------
+
+const MANIFEST = JSON.parse(readSource("manifest.json"));
+
+/** createInjector against fakes: `tabs` is what the query returns, the rest are the ways a tab can fail. */
+function injectorHarness({ tabs = [], rejectFor = [], throwFor = [], rejectIsolatedFor = [], queryError = null, manifest = MANIFEST } = {}) {
+  const h = { queries: [], calls: [], events: [], reported: [], logs: [] };
+  h.injector = B.createInjector({
+    manifest,
+    queryTabs(query) {
+      h.queries.push(query);
+      return queryError ? Promise.reject(queryError) : Promise.resolve(tabs);
+    },
+    executeScript(injection) {
+      const { tabId } = injection.target;
+      const label = `${tabId} ${injection.world} ${injection.files.join("+")}`;
+      h.calls.push(injection);
+      h.events.push(`start ${label}`);
+      if (throwFor.includes(tabId)) throw new TypeError("Cannot read properties of undefined (reading 'executeScript')");
+      if (rejectFor.includes(tabId)) return Promise.reject(new Error("The tab was discarded."));
+      if (injection.world === "ISOLATED" && rejectIsolatedFor.includes(tabId)) return Promise.reject(new Error("The tab was closed."));
+      return Promise.resolve().then(() => {
+        h.events.push(`end ${label}`);
+        return [{ result: null }];
+      });
+    },
+    report: (event) => h.reported.push(event),
+    log: (text) => h.logs.push(text)
+  });
+  return h;
+}
+
+test("injector: every YouTube tab gets the manifest's two scripts, in order and worlds, in the top frame only", async () => {
+  const h = injectorHarness({ tabs: [{ id: 7 }] });
+  const result = await h.injector.injectIntoOpenTabs();
+
+  assert.deepEqual(h.queries, [{ url: ["https://www.youtube.com/*"] }], "matched by URL; no tabs permission needed");
+  assert.deepEqual(h.calls, [
+    { target: { tabId: 7 }, files: ["captions-page.js", "page.js"], world: "MAIN" },
+    { target: { tabId: 7 }, files: ["captions.js", "content.js"], world: "ISOLATED" }
+  ]);
+  for (const call of h.calls) {
+    assert.equal(call.target.allFrames, undefined, "frame 0 only, like the manifest (no all_frames)");
+    assert.equal(call.target.frameIds, undefined);
+  }
+  assert.deepEqual(h.events, [
+    "start 7 MAIN captions-page.js+page.js",
+    "end 7 MAIN captions-page.js+page.js",
+    "start 7 ISOLATED captions.js+content.js",
+    "end 7 ISOLATED captions.js+content.js"
+  ], "the second injection starts only after the first one finished");
+  assert.deepEqual(result, { tabs: 1, injected: 1, failed: 0 });
+});
+
+test("injector: no file is injected twice into a tab (Chrome would run it in one world only)", async () => {
+  const h = injectorHarness({ tabs: [{ id: 7 }] });
+  await h.injector.injectIntoOpenTabs();
+  const files = h.calls.flatMap((call) => call.files);
+  assert.deepEqual(files, [...new Set(files)], files.join(", "));
+  assert.ok(files.length >= 4);
+});
+
+test("injector: the scripts, worlds and URLs come from the manifest, not from a copy that could drift", async () => {
+  const manifest = {
+    content_scripts: [
+      { matches: ["https://a.example/*"], js: ["one.js", "two.js"], world: "MAIN" },
+      { matches: ["https://a.example/*", "https://b.example/*"], js: ["three.js"] }
+    ]
+  };
+  const h = injectorHarness({ tabs: [{ id: 1 }], manifest });
+  await h.injector.injectIntoOpenTabs();
+  assert.deepEqual(h.queries, [{ url: ["https://a.example/*", "https://b.example/*"] }]);
+  assert.deepEqual(h.calls, [
+    { target: { tabId: 1 }, files: ["one.js", "two.js"], world: "MAIN" },
+    { target: { tabId: 1 }, files: ["three.js"], world: "ISOLATED" }
+  ]);
+});
+
+test("injector: one diag after the pass, numbers only, valid for the closed grammar", async () => {
+  const h = injectorHarness({ tabs: [{ id: 1 }, { id: 2 }, { id: 3 }] });
+  await h.injector.injectIntoOpenTabs();
+  assert.deepEqual(h.reported, ["sw-inject tabs=3 injected=3 failed=0"]);
+  const message = C.buildDiag("sw", h.reported[0]);
+  assert.ok(message, "accepted by captions.js");
+  assertSafeDiag(message, "sw");
+});
+
+test("injector: a tab that fails (rejection, synchronous throw, no id) is counted, never thrown, and the others still get theirs", async () => {
+  const h = injectorHarness({
+    tabs: [{ id: 1 }, { id: 2 }, { id: 3 }, { url: "https://www.youtube.com/watch?v=aaaaaaaaaaa" }, { id: 5 }],
+    rejectFor: [2],
+    throwFor: [3]
+  });
+  const result = await h.injector.injectIntoOpenTabs();
+  assert.deepEqual(result, { tabs: 5, injected: 2, failed: 3 });
+  assert.deepEqual(h.reported, ["sw-inject tabs=5 injected=2 failed=3"]);
+  const injectedTabs = h.calls.filter((call) => call.world === "ISOLATED").map((call) => call.target.tabId);
+  assert.deepEqual(injectedTabs, [1, 5], "the isolated-world script went to the tabs that took the first one");
+  assert.equal(JSON.stringify(h.reported).includes("youtube"), false, "no URL in the diag");
+});
+
+test("injector: a tab where only the second injection fails counts as failed", async () => {
+  const h = injectorHarness({ tabs: [{ id: 1 }, { id: 2 }], rejectIsolatedFor: [1] });
+  assert.deepEqual(await h.injector.injectIntoOpenTabs(), { tabs: 2, injected: 1, failed: 1 });
+  assert.deepEqual(h.reported, ["sw-inject tabs=2 injected=1 failed=1"]);
+});
+
+test("injector: no open YouTube tab is reported as zeros", async () => {
+  const h = injectorHarness({ tabs: [] });
+  assert.deepEqual(await h.injector.injectIntoOpenTabs(), { tabs: 0, injected: 0, failed: 0 });
+  assert.deepEqual(h.reported, ["sw-inject tabs=0 injected=0 failed=0"]);
+  assert.deepEqual(h.calls, []);
+});
+
+test("injector: a failing tab query is logged, never thrown, and reports nothing", async () => {
+  const h = injectorHarness({ queryError: new Error("boom") });
+  assert.equal(await h.injector.injectIntoOpenTabs(), null);
+  assert.deepEqual(h.reported, []);
+  assert.equal(h.logs.length, 1);
+
+  const throwing = B.createInjector({
+    manifest: MANIFEST,
+    queryTabs: () => {
+      throw new TypeError("chrome.tabs is undefined");
+    },
+    executeScript: () => Promise.resolve([]),
+    report: (event) => h.reported.push(event),
+    log: (text) => h.logs.push(text)
+  });
+  assert.equal(await throwing.injectIntoOpenTabs(), null);
+  assert.equal(h.logs.length, 2);
+});
+
+test("injector: it runs after an install or an update and after nothing else", async () => {
+  for (const reason of ["install", "update"]) {
+    const h = injectorHarness({ tabs: [{ id: 1 }] });
+    await h.injector.onInstalled({ reason });
+    assert.equal(h.queries.length, 1, reason);
+    assert.deepEqual(h.reported, ["sw-inject tabs=1 injected=1 failed=0"], reason);
+  }
+  for (const details of [{ reason: "chrome_update" }, { reason: "shared_module_update" }, { reason: "unknown" }, {}, undefined, null]) {
+    const h = injectorHarness({ tabs: [{ id: 1 }] });
+    assert.equal(h.injector.onInstalled(details), undefined, JSON.stringify(details));
+    await flush();
+    assert.deepEqual(h.queries, [], JSON.stringify(details));
+    assert.deepEqual(h.reported, []);
+  }
+});
+
+test("relay exposes report() for the worker's own events, rate limited like the others", () => {
+  const h = relayHarness();
+  h.relay.start();
+  h.relay.report("sw-inject tabs=1 injected=1 failed=0");
+  h.relay.report("sw-inject tabs=2 injected=2 failed=0"); // same kind within 5 s
+  assert.deepEqual(swDiags(h.ports[0]), ["sw-start v=0.1.1", "sw-inject tabs=1 injected=1 failed=0"]);
+  h.advance(5000);
+  h.relay.report("sw-inject tabs=2 injected=2 failed=0");
+  assert.equal(swDiags(h.ports[0]).at(-1), "sw-inject tabs=2 injected=2 failed=0");
+});
+
+// ---- site access: Chrome can withhold the extension's host permission ("On click") -------------------
+
+/** createAccessWatcher against fakes: `granted` is what permissions.contains answers right now. */
+function accessHarness({ granted = true, containsError = null, containsThrows = null } = {}) {
+  const h = { granted, queries: [], reported: [], logs: [], injections: 0 };
+  h.watcher = B.createAccessWatcher({
+    manifest: MANIFEST,
+    contains(query) {
+      h.queries.push(query);
+      if (containsThrows) throw containsThrows;
+      return containsError ? Promise.reject(containsError) : Promise.resolve(h.granted);
+    },
+    report: (event) => h.reported.push(event),
+    onGranted: () => {
+      h.injections += 1;
+    },
+    log: (text) => h.logs.push(text)
+  });
+  return h;
+}
+
+test("access: the start reports granted or withheld for the origins the manifest asks for", async () => {
+  const granted = accessHarness({ granted: true });
+  await granted.watcher.start();
+  assert.deepEqual(granted.queries, [{ origins: ["https://www.youtube.com/*"] }]);
+  assert.deepEqual(granted.reported, ["sw-access youtube=granted"]);
+
+  const withheld = accessHarness({ granted: false });
+  await withheld.watcher.start();
+  assert.deepEqual(withheld.reported, ["sw-access youtube=withheld"]);
+  for (const event of [...granted.reported, ...withheld.reported]) {
+    const message = C.buildDiag("sw", event);
+    assert.ok(message, event);
+    assertSafeDiag(message, "sw");
+  }
+  assert.equal(granted.injections + withheld.injections, 0, "the start itself injects nothing (onInstalled does)");
+});
+
+test("access: when it becomes granted the open tabs are injected once; other changes only report", async () => {
+  const h = accessHarness({ granted: false });
+  await h.watcher.start();
+
+  await h.watcher.onChanged(); // still withheld (some other permission changed)
+  assert.equal(h.injections, 0);
+
+  h.granted = true; // the user switched the site access to "On all sites"
+  await h.watcher.onChanged();
+  assert.equal(h.injections, 1);
+  assert.deepEqual(h.reported, ["sw-access youtube=withheld", "sw-access youtube=withheld", "sw-access youtube=granted"]);
+
+  await h.watcher.onChanged(); // granted again with nothing new
+  assert.equal(h.injections, 1, "already granted: nothing new to inject");
+
+  h.granted = false; // and back to "On click"
+  await h.watcher.onChanged();
+  assert.equal(h.injections, 1);
+  assert.equal(h.reported.at(-1), "sw-access youtube=withheld");
+
+  h.granted = true;
+  await h.watcher.onChanged();
+  assert.equal(h.injections, 2, "granted again after being withheld");
+});
+
+test("access: granted when nothing was known yet (the first check failed) still injects", async () => {
+  const h = accessHarness({ granted: true });
+  await h.watcher.onChanged();
+  assert.equal(h.injections, 1);
+});
+
+test("access: a granted state at the start is not a change", async () => {
+  const h = accessHarness({ granted: true });
+  await h.watcher.start();
+  await h.watcher.onChanged();
+  assert.equal(h.injections, 0);
+});
+
+test("access: a failing contains() is logged, never thrown, and reports nothing", async () => {
+  for (const options of [{ containsError: new Error("boom") }, { containsThrows: new TypeError("chrome.permissions is undefined") }]) {
+    const h = accessHarness(options);
+    await h.watcher.start();
+    await h.watcher.onChanged();
+    assert.deepEqual(h.reported, []);
+    assert.equal(h.injections, 0);
+    assert.equal(h.logs.length, 2);
+  }
+});
+
+test("relay.reportState sends a state event when its value changes, however soon it flips back, and not when it repeats", () => {
+  const h = relayHarness();
+  h.relay.start();
+  h.relay.reportState("sw-access youtube=withheld");
+  h.relay.reportState("sw-access youtube=withheld"); // nothing new
+  h.relay.reportState("sw-access youtube=granted"); // changed at once: not held back by the 5 s limit
+  h.relay.reportState("sw-access youtube=withheld"); // and back again
+  h.relay.reportState("sw-access youtube=withheld");
+  assert.deepEqual(swDiags(h.ports[0]), [
+    "sw-start v=0.1.1",
+    "sw-access youtube=withheld",
+    "sw-access youtube=granted",
+    "sw-access youtube=withheld"
+  ]);
+
+  const restarted = relayHarness(); // a new worker has said nothing yet, so it says its state again
+  restarted.relay.start();
+  restarted.relay.reportState("sw-access youtube=withheld");
+  assert.equal(swDiags(restarted.ports[0]).at(-1), "sw-access youtube=withheld");
+});
+
+test("relay.reportState ignores events that are not in the closed grammar", () => {
+  const h = relayHarness();
+  h.relay.start();
+  h.relay.reportState("sw-access youtube=maybe");
+  h.relay.reportState("my favourite song");
+  assert.deepEqual(swDiags(h.ports[0]), ["sw-start v=0.1.1"]);
+});
+
+test("relay.reportState keeps trying while the host cannot be reached: the state counts as sent only once it was", () => {
+  const h = relayHarness();
+  h.connectError = new Error("Specified native messaging host not found.");
+  h.relay.reportState("sw-access youtube=withheld");
+  assert.equal(h.ports.length, 0, "nothing could be sent");
+
+  h.connectError = null;
+  h.advance(5000);
+  h.relay.reportState("sw-access youtube=withheld"); // the same value is tried again, now that the host answers
+  assert.deepEqual(swDiags(h.ports[0]).slice(-1), ["sw-access youtube=withheld"]);
+  h.relay.reportState("sw-access youtube=withheld");
+  assert.equal(swDiags(h.ports[0]).filter((event) => event === "sw-access youtube=withheld").length, 1);
 });

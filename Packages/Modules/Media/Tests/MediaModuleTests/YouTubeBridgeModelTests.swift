@@ -122,6 +122,26 @@ import Testing
         #expect(installs == 1)
     }
 
+    // MARK: access withheld
+
+    @Test func chromeWithholdingTheAccessIsOffUntilTheExtensionSaysSoAndItsNoticeTellsWhatToDo() {
+        #expect(!model.accessWithheld)
+        #expect(
+            YouTubeBridgeModel.accessWithheldMessage
+                == "Chrome đang chặn extension đọc YouTube. Mở chrome://extensions, chọn MyNotch YouTube Bridge → Quyền truy cập trang web → Trên tất cả trang web, rồi tải lại tab YouTube."
+        )
+    }
+
+    @Test func theStatusIsTheSameWhetherOrNotChromeWithholdsTheAccess() throws {
+        try makeBundle()
+        configure()
+        model.install()
+        model.accessWithheld = true
+        #expect(model.status(at: now) == .waiting)
+        model.lastMessageAt = now
+        #expect(model.status(at: now + 1) == .connected)
+    }
+
     // MARK: strings
 
     @Test func theRowsSayWhatTheyDoAndWhatLeavesTheMac() {

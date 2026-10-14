@@ -1,15 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { assertSafeDiag, createContext, plain, readSource, runScripts } from "./helpers.mjs";
+import { assertSafeDiag, createContext, flush, plain, readSource, runScripts } from "./helpers.mjs";
 
 const OWN = "cccjddkmjjmnnccbgokidgbkpblogbnp";
+const VERSION = JSON.parse(readSource("manifest.json")).version;
 const SENDER = { id: OWN, url: "https://www.youtube.com/watch?v=aaaaaaaaaaa" };
 const PLAYBACK = { v: 1, type: "playback", videoId: "aaaaaaaaaaa", title: "Placeholder title", time: 1, playing: true, rate: 1 };
 
 /** Runs background.js the way the service worker does, against a fake chrome object. */
-function startWorker({ connectThrows = null } = {}) {
-  const worker = { connects: [], ports: [], listeners: [], infos: [], warnings: [], now: 1000000 };
+function startWorker({ connectThrows = null, tabs = [], rejectFor = [], queryThrows = null, access = true } = {}) {
+  const worker = {
+    connects: [], ports: [], listeners: [], installedListeners: [], addedListeners: [], removedListeners: [], infos: [],
+    warnings: [], now: 1000000, queries: [], injections: [], accessQueries: [], access
+  };
   const chrome = {
     runtime: {
       id: OWN,
@@ -32,7 +36,30 @@ function startWorker({ connectThrows = null } = {}) {
         worker.ports.push(port);
         return port;
       },
-      onMessage: { addListener: (fn) => worker.listeners.push(fn) }
+      onMessage: { addListener: (fn) => worker.listeners.push(fn) },
+      onInstalled: { addListener: (fn) => worker.installedListeners.push(fn) }
+    },
+    permissions: {
+      contains(query) {
+        worker.accessQueries.push(plain(query));
+        return Promise.resolve(worker.access);
+      },
+      onAdded: { addListener: (fn) => worker.addedListeners.push(fn) },
+      onRemoved: { addListener: (fn) => worker.removedListeners.push(fn) }
+    },
+    tabs: {
+      query(query) {
+        worker.queries.push(plain(query));
+        if (queryThrows) return Promise.reject(queryThrows);
+        return Promise.resolve(tabs);
+      }
+    },
+    scripting: {
+      executeScript(injection) {
+        worker.injections.push(plain(injection));
+        if (rejectFor.includes(injection.target.tabId)) return Promise.reject(new Error("The tab was discarded."));
+        return Promise.resolve([{ result: null }]);
+      }
     }
   };
   const context = createContext({
@@ -56,9 +83,9 @@ test("the worker registers its message listener and connects to the native host 
   const worker = startWorker();
   assert.equal(worker.listeners.length, 1, "onMessage listener registered synchronously");
   assert.deepEqual(worker.connects, ["io.lucasvu.mynotch.youtube"], "no message was needed to connect");
-  assert.deepEqual(worker.diags().map((message) => message.event), ["sw-start v=0.1.1"]);
+  assert.deepEqual(worker.diags().map((message) => message.event), [`sw-start v=${VERSION}`]);
   for (const message of worker.diags()) assertSafeDiag(message, "sw");
-  assert.deepEqual(worker.infos, ["[MyNotch YouTube Bridge] sw-start v=0.1.1"]);
+  assert.deepEqual(worker.infos, [`[MyNotch YouTube Bridge] sw-start v=${VERSION}`]);
   assert.deepEqual(worker.warnings, []);
 });
 
@@ -72,7 +99,7 @@ test("messages from the content script are validated, reported and forwarded to 
   const worker = startWorker();
   worker.listeners[0](PLAYBACK, SENDER);
   assert.deepEqual(worker.protocol(), [PLAYBACK]);
-  assert.deepEqual(worker.diags().map((message) => message.event), ["sw-start v=0.1.1", "sw-msg playback"]);
+  assert.deepEqual(worker.diags().map((message) => message.event), [`sw-start v=${VERSION}`, "sw-msg playback"]);
 
   worker.listeners[0]({ v: 1, type: "diag", where: "content", event: "content-start" }, SENDER);
   assert.equal(worker.diags().at(-1).event, "content-start");
@@ -84,7 +111,7 @@ test("untrusted senders and invalid messages are reported and never forwarded", 
   worker.listeners[0](PLAYBACK, { id: "another", url: SENDER.url });
   worker.listeners[0]({ ...PLAYBACK, rate: 0 }, SENDER);
   assert.deepEqual(worker.protocol(), []);
-  assert.deepEqual(worker.diags().map((message) => message.event), ["sw-start v=0.1.1", "sw-reject untrusted", "sw-reject invalid playback"]);
+  assert.deepEqual(worker.diags().map((message) => message.event), [`sw-start v=${VERSION}`, "sw-reject untrusted", "sw-reject invalid playback"]);
 });
 
 test("a host that is not installed: no exception, no spam, the reason is reported after the next connect", () => {
@@ -119,4 +146,120 @@ test("every message is acknowledged so the sender's promise resolves", () => {
   worker.listeners[0]({ garbage: true }, SENDER, (value) => acks.push(value));
   assert.deepEqual(acks, [true, true, true]);
   assert.equal(worker.listeners[0](PLAYBACK, SENDER), undefined, "and it does not keep the channel open");
+});
+
+// ---- injection into the tabs that were open before the extension loaded -----------------------------
+
+const MAIN_INJECTION = { files: ["captions-page.js", "page.js"], world: "MAIN" };
+const ISOLATED_INJECTION = { files: ["captions.js", "content.js"], world: "ISOLATED" };
+
+test("the worker listens for onInstalled from the moment it starts, and injects nothing before it fires", () => {
+  const worker = startWorker({ tabs: [{ id: 1 }] });
+  assert.equal(worker.installedListeners.length, 1, "registered synchronously, as MV3 requires");
+  assert.deepEqual(worker.queries, []);
+  assert.deepEqual(worker.injections, []);
+});
+
+test("after an update the open YouTube tabs get both scripts and the host gets one sw-inject diag", async () => {
+  const worker = startWorker({ tabs: [{ id: 11 }, { id: 12 }, { id: 13 }], rejectFor: [12] });
+  worker.installedListeners[0]({ reason: "update", previousVersion: "0.1.1" });
+  await flush();
+
+  assert.deepEqual(worker.queries, [{ url: ["https://www.youtube.com/*"] }]);
+  assert.deepEqual(
+    worker.injections.map(({ target, ...rest }) => [target.tabId, rest]),
+    [
+      [11, MAIN_INJECTION],
+      [12, MAIN_INJECTION],
+      [13, MAIN_INJECTION],
+      [11, ISOLATED_INJECTION],
+      [13, ISOLATED_INJECTION]
+    ]
+  );
+  assert.deepEqual(worker.diags().map((message) => message.event), [
+    `sw-start v=${VERSION}`,
+    "sw-access youtube=granted",
+    "sw-inject tabs=3 injected=2 failed=1"
+  ]);
+  for (const message of worker.diags()) assertSafeDiag(message, "sw");
+  assert.deepEqual(worker.warnings, []);
+});
+
+test("after an install the open YouTube tabs are injected too", async () => {
+  const worker = startWorker({ tabs: [{ id: 5 }] });
+  worker.installedListeners[0]({ reason: "install" });
+  await flush();
+  assert.equal(worker.injections.length, 2);
+  assert.equal(worker.diags().at(-1).event, "sw-inject tabs=1 injected=1 failed=0");
+});
+
+test("other onInstalled reasons inject nothing", async () => {
+  const worker = startWorker({ tabs: [{ id: 5 }] });
+  worker.installedListeners[0]({ reason: "chrome_update" });
+  worker.installedListeners[0]({ reason: "shared_module_update" });
+  await flush();
+  assert.deepEqual(worker.queries, []);
+  assert.deepEqual(worker.injections, []);
+});
+
+test("a failing tab query does not break the worker and reports nothing", async () => {
+  const worker = startWorker({ queryThrows: new Error("boom") });
+  assert.doesNotThrow(() => worker.installedListeners[0]({ reason: "update" }));
+  await flush();
+  assert.deepEqual(worker.diags().map((message) => message.event), [`sw-start v=${VERSION}`, "sw-access youtube=granted"]);
+  assert.doesNotThrow(() => worker.listeners[0](PLAYBACK, SENDER));
+});
+
+test("no tab permission is used: the worker only reads tab ids", async () => {
+  const worker = startWorker({ tabs: [{ id: 3, url: "https://www.youtube.com/watch?v=aaaaaaaaaaa", title: "A Secret Title" }] });
+  worker.installedListeners[0]({ reason: "update" });
+  await flush();
+  assert.equal(JSON.stringify(worker.injections).includes("Secret"), false);
+  assert.equal(JSON.stringify(worker.ports[0].messages).includes("Secret"), false);
+  assert.equal(JSON.stringify(worker.ports[0].messages).includes("watch"), false);
+});
+
+// ---- site access ------------------------------------------------------------------------------------
+
+test("the worker reports whether Chrome granted it access to YouTube right after sw-start", async () => {
+  const granted = startWorker({ access: true });
+  await flush();
+  assert.deepEqual(granted.accessQueries, [{ origins: ["https://www.youtube.com/*"] }]);
+  assert.deepEqual(granted.diags().map((message) => message.event), [`sw-start v=${VERSION}`, "sw-access youtube=granted"]);
+
+  const withheld = startWorker({ access: false });
+  await flush();
+  assert.deepEqual(withheld.diags().map((message) => message.event), [`sw-start v=${VERSION}`, "sw-access youtube=withheld"]);
+  for (const message of withheld.diags()) assertSafeDiag(message, "sw");
+});
+
+test("permission changes are listened for from the start, and a grant injects the tabs that were waiting", async () => {
+  const worker = startWorker({ access: false, tabs: [{ id: 21 }, { id: 22 }] });
+  assert.equal(worker.addedListeners.length, 1, "onAdded registered synchronously");
+  assert.equal(worker.removedListeners.length, 1, "onRemoved registered synchronously");
+  await flush();
+  assert.deepEqual(worker.injections, [], "nothing is injected while the access is withheld");
+
+  worker.access = true; // Site access switched to "On all sites" in chrome://extensions
+  worker.addedListeners[0]({ origins: ["https://www.youtube.com/*"] });
+  await flush();
+  assert.deepEqual(
+    worker.injections.map(({ target, ...rest }) => [target.tabId, rest.world]),
+    [[21, "MAIN"], [22, "MAIN"], [21, "ISOLATED"], [22, "ISOLATED"]]
+  );
+  assert.deepEqual(
+    worker.diags().map((message) => message.event).slice(1),
+    ["sw-access youtube=withheld", "sw-access youtube=granted", "sw-inject tabs=2 injected=2 failed=0"],
+    "a quick change is reported, not held back by the rate limit"
+  );
+});
+
+test("withdrawing the access is reported and injects nothing", async () => {
+  const worker = startWorker({ access: true, tabs: [{ id: 1 }] });
+  await flush();
+  worker.access = false;
+  worker.removedListeners[0]({ origins: ["https://www.youtube.com/*"] });
+  await flush();
+  assert.equal(worker.diags().at(-1).event, "sw-access youtube=withheld");
+  assert.deepEqual(worker.injections, []);
 });

@@ -10,7 +10,10 @@ import Testing
         ("sw", "sw-reject untrusted"), ("sw", "sw-reject invalid captions"), ("sw", "sw-reject invalid playback"),
         ("sw", "sw-reject invalid clear"), ("sw", "sw-reject invalid diag"), ("sw", "sw-reject invalid unknown"),
         ("sw", "sw-reconnect after=host-not-found failures=3"), ("sw", "sw-reconnect after=disconnected failures=120"),
-        ("content", "content-start"), ("content", "content-video-found"), ("content", "content-video-missing"),
+        ("sw", "sw-inject tabs=3 injected=2 failed=1"), ("sw", "sw-inject tabs=0 injected=0 failed=0"),
+        ("sw", "sw-inject tabs=999999 injected=999999 failed=0"),
+        ("sw", "sw-access youtube=granted"), ("sw", "sw-access youtube=withheld"),
+        ("content", "content-start"), ("content", "content-no-lib"), ("content", "content-video-found"), ("content", "content-video-missing"),
         ("content", "content-cc on"), ("content", "content-cc off"),
         ("content", "content-send-error no-receiving-end count=2"), ("content", "content-send-error context-invalidated count=100000"),
         ("content", "content-alive videoid-present=true playing=false"),
@@ -82,6 +85,15 @@ import Testing
             ("sw", "sw-msg captions events=123456"), ("sw", "sw-msg seek"), ("sw", "sw-reject invalid seek"), ("sw", "sw-reject"),
             ("sw", "sw-reconnect after=host-not-found"), ("sw", "sw-reconnect after=Host-Not-Found failures=1"),
             ("sw", "sw-reconnect after= failures=1"), ("sw", "sw-reconnect after=a_b failures=1"), ("sw", "sw-reconnect after=x failures=1234567"),
+            ("sw", "sw-inject"), ("sw", "sw-inject tabs=1"), ("sw", "sw-inject tabs=1 injected=1"),
+            ("sw", "sw-inject tabs=1 failed=0 injected=1"), ("sw", "sw-inject tabs=1 injected=1 failed=0 extra"),
+            ("sw", "sw-inject tabs=-1 injected=0 failed=0"), ("sw", "sw-inject tabs=1000000 injected=0 failed=0"),
+            ("sw", "sw-inject tabs=x injected=1 failed=0"), ("sw", "sw-inject tabs=1  injected=1 failed=0"),
+            ("sw", "sw-inject tabs=1 injected=1 failed=abcdefghijk"), ("sw", "sw-inject tabs=\u{0661} injected=1 failed=0"),
+            ("sw", "sw-access"), ("sw", "sw-access youtube"), ("sw", "sw-access youtube="), ("sw", "sw-access youtube=maybe"),
+            ("sw", "sw-access youtube=GRANTED"), ("sw", "sw-access youtube=granted extra"), ("sw", "sw-access  youtube=granted"),
+            ("sw", "sw-access site=granted"), ("sw", "sw-access youtube=granted,withheld"),
+            ("content", "content-no-lib extra"), ("content", "content-no-lib "), ("content", "content-no-lib=1"),
             ("content", "content-start extra"), ("content", "content-start "), ("content", "content-cc"), ("content", "content-cc maybe"),
             ("content", "content-alive videoid-present=true"), ("content", "content-alive videoid-present=yes playing=true"),
             ("content", "content-send-error count=1"), ("content", "content-send-error x"),
@@ -129,6 +141,17 @@ import Testing
     @Test func theEventIsKeptAsItWasSentNothingIsRewritten() {
         let event = "sw-reconnect after=host-has-exited failures=7"
         #expect(Self.decode(where: "sw", event: event) == .diag(YouTubeDiag(origin: .sw, event: event)))
+    }
+
+    @Test func theAccessReportIsReadAsGrantedOrWithheldAndNothingElseIs() {
+        #expect(YouTubeDiag(origin: .sw, event: "sw-access youtube=granted").siteAccess == .granted)
+        #expect(YouTubeDiag(origin: .sw, event: "sw-access youtube=withheld").siteAccess == .withheld)
+        for event in ["sw-start v=1", "sw-access youtube=maybe", "sw-access youtube=granted extra", "sw-access", ""] {
+            #expect(YouTubeDiag(origin: .sw, event: event).siteAccess == nil, "\(event)")
+        }
+        // Only the service worker knows what Chrome granted it.
+        #expect(YouTubeDiag(origin: .content, event: "sw-access youtube=granted").siteAccess == nil)
+        #expect(YouTubeDiag(origin: .page, event: "sw-access youtube=withheld").siteAccess == nil)
     }
 
     @Test func aDiagIsNotAVideosMessage() {

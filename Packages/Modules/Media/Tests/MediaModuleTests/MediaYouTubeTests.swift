@@ -565,6 +565,47 @@ import Testing
         #expect(store.syncedLyrics == YouTubeTestMessages.lines)
     }
 
+    // MARK: site access
+
+    @Test func theExtensionsAccessReportShowsOrClearsTheWithheldNotice() async {
+        await bootstrapWithCaptions()
+        #expect(!module.youtubeBridge.accessWithheld)
+        receive(YouTubeTestMessages.diag("sw-access youtube=withheld"))
+        #expect(module.youtubeBridge.accessWithheld)
+        // Other diagnostics do not touch it.
+        receive(YouTubeTestMessages.diag("sw-start v=0.1.2"), YouTubeTestMessages.diag("content-cc off", from: .content))
+        #expect(module.youtubeBridge.accessWithheld)
+        // Chrome gave the access back.
+        receive(YouTubeTestMessages.diag("sw-access youtube=granted"))
+        #expect(!module.youtubeBridge.accessWithheld)
+    }
+
+    @Test func onlyTheServiceWorkersAccessReportCounts() async {
+        await bootstrapWithCaptions()
+        receive(YouTubeTestMessages.diag("sw-access youtube=withheld", from: .content), YouTubeTestMessages.diag("sw-access youtube=withheld", from: .page))
+        #expect(!module.youtubeBridge.accessWithheld)
+    }
+
+    @Test func theWithheldNoticeDoesNotDecideAnythingAboutTheLyrics() async {
+        await bootstrapWithCaptions()
+        playInChrome()
+        let decided = decisions
+        receive(YouTubeTestMessages.diag("sw-access youtube=withheld"))
+        #expect(decisions == decided)
+        #expect(store.syncedLyrics == nil)
+    }
+
+    @Test func turningTheSettingOffForgetsTheWithheldNoticeAndItIsIgnoredWhileOff() async {
+        await bootstrapWithCaptions()
+        receive(YouTubeTestMessages.diag("sw-access youtube=withheld"))
+        #expect(module.youtubeBridge.accessWithheld)
+        harness.settings.set(false, for: keys.youtubeCaptions)
+        await settle { !module.youtubeBridge.accessWithheld }
+        #expect(!module.youtubeBridge.accessWithheld)
+        receive(YouTubeTestMessages.diag("sw-access youtube=withheld"))
+        #expect(!module.youtubeBridge.accessWithheld, "a message that arrives while the setting is off is ignored")
+    }
+
     @Test func noLineHoldsATitleAVideoIdCaptionTextOrAUrl() async throws {
         await bootstrapWithCaptions()
         let secretID = "abcdefghijk"

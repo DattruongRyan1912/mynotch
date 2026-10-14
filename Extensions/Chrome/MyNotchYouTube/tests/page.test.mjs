@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { assertSafeDiag, createContext, flush, plain, runScripts } from "./helpers.mjs";
 
-const SCRIPTS = ["captions.js", "page.js"];
+const SCRIPTS = ["captions-page.js", "page.js"]; // the MAIN world's files, as the manifest lists them
 const ORIGIN = "https://www.youtube.com";
 const TIMEDTEXT = `${ORIGIN}/api/timedtext?v=abcdefghijk&lang=vi&fmt=json3&pot=SECRET_TOKEN&sig=SECRET_SIG`;
 
@@ -329,6 +329,29 @@ test("wrapping is idempotent: running the scripts again does not wrap or post tw
   xhr.open("GET", TIMEDTEXT);
   xhr.finish(200, json3);
   assert.equal(page.posted.length, 2);
+});
+
+test("re-injecting into a page that already has the observer (the extension was reloaded) changes nothing", async () => {
+  const page = makePage();
+  const wrappedFetch = page.window.fetch;
+  const wrappedOpen = page.window.XMLHttpRequest.prototype.open;
+  assert.equal(page.timers.length, 2);
+
+  page.run(); // what chrome.scripting.executeScript does: captions-page.js, then page.js, in the MAIN world
+  assert.equal(page.window.fetch, wrappedFetch, "fetch is not wrapped a second time");
+  assert.equal(page.window.XMLHttpRequest.prototype.open, wrappedOpen, "nor is XMLHttpRequest.open");
+  assert.equal(page.timers.length, 2, "no second set of diagnostic timers");
+  assert.deepEqual(
+    Object.keys(page.window).filter((key) => /mynotch/i.test(key)),
+    [],
+    "the shared captions module is removed again, so the page still sees no new globals"
+  );
+
+  // The first wrappers keep observing: one captions message per response, as before.
+  page.nextFetch = respond(json3);
+  await page.window.fetch(TIMEDTEXT);
+  await flush();
+  assert.equal(page.posted.length, 1);
 });
 
 test("the page script leaves no visible globals behind", () => {

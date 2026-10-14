@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { extensionDir, readSource } from "./helpers.mjs";
+import { extensionDir, injectLikeChrome, readSource } from "./helpers.mjs";
 
 const manifest = JSON.parse(readSource("manifest.json"));
 
@@ -16,10 +16,13 @@ function idFromKey(base64Key) {
 test("manifest has the expected MV3 fields", () => {
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.name, "MyNotch YouTube Bridge");
-  assert.equal(manifest.version, "0.1.1");
+  assert.equal(manifest.version, "0.1.2");
   assert.match(manifest.description, /^[\x20-\x7e]+$/, "English (ASCII) description");
   assert.ok(manifest.description.length > 20 && manifest.description.length <= 132);
-  assert.deepEqual(manifest.permissions, ["nativeMessaging"]);
+  // `scripting` is for injecting the content scripts into the YouTube tabs that were open before the
+  // extension loaded; the host permission below is what lets it do so (and match them by URL), so
+  // there is no `tabs` permission.
+  assert.deepEqual(manifest.permissions, ["nativeMessaging", "scripting"]);
   assert.deepEqual(manifest.host_permissions, ["https://www.youtube.com/*"]);
   assert.equal(manifest.background.service_worker, "background.js");
   assert.ok(Number(manifest.minimum_chrome_version) >= 111, "world: MAIN content scripts need Chrome 111");
@@ -29,7 +32,7 @@ test("content scripts: page.js in the MAIN world, content.js isolated, both at d
   const [main, isolated, ...rest] = manifest.content_scripts;
   assert.deepEqual(rest, []);
   assert.deepEqual(main.matches, ["https://www.youtube.com/*"]);
-  assert.deepEqual(main.js, ["captions.js", "page.js"]);
+  assert.deepEqual(main.js, ["captions-page.js", "page.js"]);
   assert.equal(main.world, "MAIN");
   assert.equal(main.run_at, "document_start");
   assert.deepEqual(isolated.matches, ["https://www.youtube.com/*"]);
@@ -81,4 +84,35 @@ test("the scripts never touch the network themselves", () => {
   // page.js only wraps the page's own fetch/XHR and never calls them with a URL of its own.
   const page = readSource("page.js");
   assert.equal(/\bfetch\s*\(|sendBeacon|WebSocket|new XMLHttpRequest/.test(page), false);
+});
+
+test("no script file is listed in more than one content_scripts entry (Chrome injects it once per document, in one world)", () => {
+  const files = manifest.content_scripts.flatMap((entry) => entry.js);
+  assert.deepEqual(files, [...new Set(files)], `a file is listed twice: ${files.join(", ")}`);
+});
+
+test("every world gets all the files its entry lists, with Chrome's one-injection-per-file rule applied", () => {
+  const ran = injectLikeChrome(manifest, null);
+  for (const entry of manifest.content_scripts) {
+    const world = entry.world === "MAIN" ? "MAIN" : "ISOLATED";
+    assert.deepEqual(ran[world].filter((file) => entry.js.includes(file)), entry.js, `${world} world`);
+  }
+  assert.ok(ran.ISOLATED.includes("captions.js") && ran.ISOLATED.includes("content.js"), "the isolated world has the captions API and content.js");
+  assert.ok(ran.MAIN.includes("page.js"));
+});
+
+test("injectLikeChrome reproduces the old manifest's bug: the shared file never reaches the second world", () => {
+  const old = {
+    content_scripts: [
+      { js: ["captions.js", "page.js"], world: "MAIN" },
+      { js: ["captions.js", "content.js"] }
+    ]
+  };
+  assert.deepEqual(injectLikeChrome(old, null), { MAIN: ["captions.js", "page.js"], ISOLATED: ["content.js"] });
+});
+
+test("captions-page.js (the MAIN world's copy of captions.js) is byte-identical; refresh it with: cp captions.js captions-page.js", () => {
+  const a = fs.readFileSync(path.join(extensionDir, "captions.js"));
+  const b = fs.readFileSync(path.join(extensionDir, "captions-page.js"));
+  assert.ok(a.equals(b), "captions-page.js differs from captions.js");
 });
