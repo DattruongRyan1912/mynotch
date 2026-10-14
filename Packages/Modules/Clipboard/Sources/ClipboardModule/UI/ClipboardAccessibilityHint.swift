@@ -4,12 +4,7 @@ import SwiftUI
 /// One line over the tab or the library: a click pastes, but Accessibility is not allowed yet, with the button that
 /// asks for it. The views show it only while `ClipboardState.needsAccessibility` is set.
 struct ClipboardAccessibilityHint: View {
-    enum Look {
-        /// Light on the notch's black.
-        case notch
-        /// System colors, for the library window.
-        case library
-    }
+    typealias Look = ClipboardLook
 
     static let text = "Cần quyền Accessibility để dán trực tiếp"
     static let buttonTitle = "Cấp quyền"

@@ -12,8 +12,8 @@ nonisolated enum ClipboardDragProvider {
     /// one file URL, so an item of several files drags its first one.
     static func make(for content: ClipboardContent, fileURLs: [URL]) -> NSItemProvider {
         switch content {
-        case .text(let text), .richText(let text, _), .color(let text):
-            NSItemProvider(object: text as NSString)
+        case .text, .richText, .color:
+            NSItemProvider(object: (content.plainText ?? "") as NSString)
         case .link(let url):
             NSItemProvider(object: url as NSURL)
         case .image, .files:

@@ -24,6 +24,10 @@ final class ClipboardState {
     var needsAccessibility = false
     /// Items matching `query`: newest first, or in pin order when a board is selected.
     private(set) var visibleItems: [ClipboardItem] = []
+    /// The rows under the search field while an `@` word is being typed.
+    private(set) var suggestions = ClipboardSuggestionList()
+    /// The apps of the history, for `@app` tokens; only kept up to date while the search text has an "@".
+    @ObservationIgnored private var apps: [ClipboardLibraryApp] = []
     /// Kept across changes so typing and new copies fold only the items that are new or changed. Filtering with
     /// search text folds what is missing, so nothing is folded until the user searches.
     @ObservationIgnored private(set) var searchIndex = ClipboardSearchIndex()
@@ -41,11 +45,37 @@ final class ClipboardState {
         historyObservers[ObjectIdentifier(owner)] = nil
     }
 
+    /// The `@` tokens of the search text the user has finished, shown as removable chips.
+    var chips: [ClipboardSearchToken] {
+        ClipboardSearchTerms(parsing: query.text, apps: apps).chips
+    }
+
+    /// A key typed in the search field while suggestions are shown. False when there are none, so the key keeps its
+    /// usual meaning in the tab.
+    func handleSuggestionKey(_ command: ClipboardKeyCommand) -> Bool {
+        var text = query.text
+        guard suggestions.handle(command, text: &text) else { return false }
+        query.text = text
+        return true
+    }
+
+    /// A click on a suggestion.
+    func acceptSuggestion(at index: Int) {
+        var text = query.text
+        suggestions.accept(index, into: &text)
+        query.text = text
+    }
+
+    func removeChip(_ token: ClipboardSearchToken) {
+        query.text = ClipboardSearchTerms.removing(token, from: query.text)
+    }
+
     /// Back to the state of a module that never started.
     func reset() {
         searchIndex = ClipboardSearchIndex()
         history = ClipboardHistory()
         query = ClipboardQuery()
+        suggestions = ClipboardSuggestionList()
         selectedID = nil
         pasteboardDenied = false
         needsAccessibility = false
@@ -65,6 +95,8 @@ final class ClipboardState {
     }
 
     private func refreshVisibleItems() {
-        visibleItems = searchIndex.filter(history, query)
+        apps = query.text.contains("@") ? ClipboardLibraryContent.counts(of: history).apps : []
+        suggestions.update(text: query.text, apps: apps)
+        visibleItems = searchIndex.filter(history, query, apps: apps)
     }
 }

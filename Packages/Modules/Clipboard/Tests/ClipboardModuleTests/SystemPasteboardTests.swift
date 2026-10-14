@@ -50,6 +50,8 @@ import Testing
         .richText(plain: "Xin chào", rtf: rtf),
         .link(URL(string: "https://example.com/a?b=1")!),
         .color(hex: "#FF8800"),
+        .color(hex: "#FF8800", original: "rgb(255, 136, 0)"),
+        .color(hex: "#33669980", original: "hsla(210 50% 40% / 50%)"),
     ])
     func textualContentReadsBackWithTheMarker(content: ClipboardContent) throws {
         let snapshot = try writeAndRead(content)

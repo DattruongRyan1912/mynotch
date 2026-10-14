@@ -37,6 +37,11 @@ import Testing
         #expect(three.detail == "và 2 file khác")
     }
 
+    @Test func aColorCardReadsAsTheTextThatWasCopied() {
+        #expect(ClipboardCardText.summary(of: .color(hex: "#FF8800")) == "#FF8800")
+        #expect(ClipboardCardText.summary(of: .color(hex: "#FF8800", original: "rgb(255, 136, 0)")) == "rgb(255, 136, 0)")
+    }
+
     @Test func colorsParseWithAndWithoutAlpha() throws {
         let orange = try #require(ClipboardCardText.colorComponents(hex: "#FF8800"))
         #expect(orange.red == 1 && orange.green == 0x88 / 255.0 && orange.blue == 0 && orange.alpha == 1)

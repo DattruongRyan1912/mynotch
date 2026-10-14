@@ -16,7 +16,7 @@ nonisolated enum ClipboardLibraryContent {
     ) -> [ClipboardItem] {
         var query = ClipboardQuery(text: searchText)
         if case .kind(let kind) = selection { query.kind = kind }
-        var items = index.filter(history, query)
+        var items = index.filter(history, query, apps: apps)
         switch selection {
         case .all, .kind:
             break

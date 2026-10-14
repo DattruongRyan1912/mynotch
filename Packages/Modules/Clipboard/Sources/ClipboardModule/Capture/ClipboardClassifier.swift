@@ -24,7 +24,8 @@ nonisolated struct ClipboardClassifier: Sendable {
     var ignoreSensitive: Bool
     var colorsWithoutHash: Bool
 
-    /// Rules in priority order: sensitive, own write, files, image, then text (link, color, rich text, plain text).
+    /// Rules in priority order: sensitive, own write, files, image, then text (link, color as hex or as an rgb()/hsl()
+    /// function, rich text, plain text).
     func classify(_ snapshot: PasteboardSnapshot) -> ClassificationResult {
         let types = Set(snapshot.types)
         if ignoreSensitive, !types.isDisjoint(with: Self.sensitiveTypes) { return .skipped(.sensitive) }
@@ -45,6 +46,7 @@ nonisolated struct ClipboardClassifier: Sendable {
         if trimmed.isEmpty { return .skipped(.empty) }
         if let url = Self.link(trimmed) { return .content(.link(url), imageData: nil) }
         if let hex = colorHex(trimmed) { return .content(.color(hex: hex), imageData: nil) }
+        if let hex = ClipboardCSSColor.hex(trimmed) { return .content(.color(hex: hex, original: trimmed), imageData: nil) }
         if let rtf = snapshot.rtf, rtf.count <= Self.maxTextBytes { return .content(.richText(plain: string, rtf: rtf), imageData: nil) }
         return .content(.text(string), imageData: nil)
     }

@@ -56,10 +56,11 @@ struct ClipboardContentPreview: View {
                         .lineLimit(3)
                 }
             }
-        case .color(let hex):
+        case .color(let hex, let original):
             VStack(alignment: .leading, spacing: 6) {
                 ClipboardColorSwatch(hex: hex, border: style.swatchBorder)
-                Text(hex)
+                Text(original ?? hex)
+                    .lineLimit(2)
                     .font(.system(size: style.textSize, weight: .medium, design: .monospaced))
                     .foregroundStyle(style.primary)
             }

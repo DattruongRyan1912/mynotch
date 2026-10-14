@@ -131,7 +131,7 @@ struct ClipboardLibraryRow: View {
         switch item.content {
         case .image:
             ClipboardThumbnailView(url: imageURL, cache: thumbnails, placeholder: .secondary, placeholderSize: 16)
-        case .color(let hex):
+        case .color(let hex, _):
             ClipboardColorSwatch(hex: hex, border: .primary.opacity(0.2))
                 .frame(width: 28, height: 28)
         case .files(let urls):

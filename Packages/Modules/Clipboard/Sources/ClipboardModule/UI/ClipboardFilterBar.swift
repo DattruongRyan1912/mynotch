@@ -108,7 +108,7 @@ struct ClipboardPill: View {
     }
 }
 
-extension ClipboardKind {
+nonisolated extension ClipboardKind {
     /// Label of the kind's filter chip.
     var title: String {
         switch self {

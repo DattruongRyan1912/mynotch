@@ -8,6 +8,8 @@ struct ClipboardLibraryView: View {
     @State private var visibility = NavigationSplitViewVisibility.all
     @State private var naming: ClipboardLibraryBoardNaming?
     @State private var boardName = ""
+    /// Bumped by ⌘F to give the search field the keyboard.
+    @State private var searchFocusRequest = 0
 
     var body: some View {
         NavigationSplitView(columnVisibility: $visibility) {
@@ -15,14 +17,16 @@ struct ClipboardLibraryView: View {
                 .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 320)
         } detail: {
             ClipboardLibraryContentView(module: module, model: model, requestName: startNaming)
-                .safeAreaInset(edge: .top, spacing: 0) { accessibilityHint }
+                .safeAreaInset(edge: .top, spacing: 0) { topStrips }
+                // Under the toolbar, where the search field is.
+                .overlay(alignment: .topTrailing) { suggestionList }
                 .navigationSubtitle("\(model.title) · \(model.items.count) mục")
         }
         // The toolbar of a window hosted like this showed no sidebar toggle when inspected off screen, so it gets its
         // own, and the split view's is removed in case it does appear, so there are never two.
         .toolbar(removing: .sidebarToggle)
-        .searchable(text: $model.searchText, placement: .toolbar, prompt: "Tìm trong clipboard")
         .toolbar { toolbarContent }
+        .background { findShortcut }
         .frame(minWidth: 760, minHeight: 480)
         // While the window is open: when it appears, then every 2 s, so the hint goes by itself once it is allowed.
         .task {
@@ -46,18 +50,55 @@ struct ClipboardLibraryView: View {
         }
     }
 
-    /// Under the toolbar while a click would paste without Accessibility.
+    /// Under the toolbar: the search's `@` filters as chips, and, while a click would paste without Accessibility, how to allow it.
+    private var topStrips: some View {
+        VStack(spacing: 0) {
+            chips
+            accessibilityHint
+        }
+    }
+
+    @ViewBuilder private var chips: some View {
+        if !model.chips.isEmpty {
+            strip {
+                ClipboardSearchChips(look: .library, tokens: model.chips) { model.removeChip($0) }
+            }
+        }
+    }
+
     @ViewBuilder private var accessibilityHint: some View {
         if module.state.needsAccessibility {
-            VStack(spacing: 0) {
+            strip {
                 ClipboardAccessibilityHint(look: .library) { module.requestAccessibility() }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
-                Divider()
             }
-            .background(.bar)
         }
+    }
+
+    private func strip<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(spacing: 0) {
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 8)
+            Divider()
+        }
+        .background(.bar)
+    }
+
+    @ViewBuilder private var suggestionList: some View {
+        if model.suggestions.isOpen {
+            ClipboardSuggestionListView(look: .library, list: model.suggestions) { model.acceptSuggestion(at: $0) }
+                .padding(.top, 6)
+                .padding(.trailing, 14)
+        }
+    }
+
+    /// ⌘F, which `.searchable` used to provide.
+    private var findShortcut: some View {
+        Button("Tìm kiếm") { searchFocusRequest += 1 }
+            .keyboardShortcut("f", modifiers: .command)
+            .opacity(0)
+            .accessibilityHidden(true)
     }
 
     // MARK: Toolbar
@@ -133,6 +174,13 @@ struct ClipboardLibraryView: View {
                 Label("Board mới", systemImage: "folder.badge.plus")
             }
             .help("Board mới")
+        }
+        ToolbarItem {
+            ClipboardSearchField(
+                text: $model.searchText, look: .library, takesFocus: true, focusRequest: searchFocusRequest,
+                onCommand: { model.handleSearchKey($0) }
+            )
+            .frame(width: 200)
         }
     }
 

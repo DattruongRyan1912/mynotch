@@ -82,7 +82,7 @@ struct ClipboardBoardNameField: NSViewRepresentable {
                 parent.onCommit()
             case .clearSearch, .close:
                 parent.onCancel()
-            case .next, .previous, nil:
+            case .next, .previous, .complete, nil:
                 return false
             }
             return true

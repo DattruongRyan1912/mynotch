@@ -37,6 +37,11 @@ struct ClipboardTabView: View {
                     boards: state.history.boards, selection: queryBinding(\.boardID), editing: boardEditing, name: $boardName,
                     onEdit: startEditing, onFinish: finishEditing, onDelete: { module.deleteBoard($0) }
                 )
+                // The `@` filters the search text holds, as chips that remove them.
+                if !state.chips.isEmpty {
+                    ClipboardSearchChips(look: .notch, tokens: state.chips) { state.removeChip($0) }
+                        .fixedSize()
+                }
                 // Beside the boards, where there is room: the tab's content height is used up by the rows and the cards.
                 if state.needsAccessibility {
                     ClipboardAccessibilityHint(look: .notch) {
@@ -60,6 +65,13 @@ struct ClipboardTabView: View {
             cards
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // Over the cards, right under the field.
+        .overlay(alignment: .topLeading) {
+            if state.suggestions.isOpen {
+                ClipboardSuggestionListView(look: .notch, list: state.suggestions) { state.acceptSuggestion(at: $0) }
+                    .padding(.top, 26)
+            }
+        }
         .onAppear {
             module.refreshPasteboardAccess()
             // Each open starts from the newest item; the kind and board filters stay as chosen.
@@ -194,6 +206,8 @@ struct ClipboardTabView: View {
     }
 
     private func perform(_ command: ClipboardKeyCommand) -> Bool {
+        // While suggestions are shown the keys are theirs.
+        if state.handleSuggestionKey(command) { return true }
         let ids = state.visibleItems.map(\.id)
         switch command {
         case .next:
@@ -207,6 +221,9 @@ struct ClipboardTabView: View {
             queryBinding(\.text).wrappedValue = ""
         case .close:
             notch.close()
+        case .complete:
+            // Tab with nothing to complete stays with the field.
+            return false
         }
         return true
     }

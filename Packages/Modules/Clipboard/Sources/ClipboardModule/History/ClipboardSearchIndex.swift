@@ -7,10 +7,13 @@ nonisolated final class ClipboardSearchIndex {
     static let maxSearchableCharacters = 20_000
 
     private struct Entry {
-        /// What the text was built from: the hash fixes the content, the app name can change on a repeated copy.
+        /// What the text was built from: the hash fixes the content, the app can change on a repeated copy.
         let contentHash: String
         let sourceAppName: String?
+        let sourceBundleID: String?
         let text: String
+        /// What an `@app` token is matched against: the app's name and the end of its bundle ID.
+        let appNames: [String]
     }
 
     private var entries: [UUID: Entry] = [:]
@@ -20,10 +23,14 @@ nonisolated final class ClipboardSearchIndex {
     /// Folds new or changed items and forgets removed ones.
     func update(_ history: ClipboardHistory) {
         for item in history.items {
-            if let entry = entries[item.id], entry.contentHash == item.contentHash, entry.sourceAppName == item.sourceAppName {
+            if let entry = entries[item.id], entry.contentHash == item.contentHash, entry.sourceAppName == item.sourceAppName,
+               entry.sourceBundleID == item.sourceBundleID {
                 continue
             }
-            entries[item.id] = Entry(contentHash: item.contentHash, sourceAppName: item.sourceAppName, text: Self.foldedText(of: item))
+            entries[item.id] = Entry(
+                contentHash: item.contentHash, sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
+                text: Self.foldedText(of: item), appNames: ClipboardAppName.folded(name: item.sourceAppName, bundleID: item.sourceBundleID)
+            )
             foldCount += 1
         }
         if entries.count > history.items.count {
@@ -32,9 +39,10 @@ nonisolated final class ClipboardSearchIndex {
         }
     }
 
-    /// Items matching every word of `query.text`, ignoring case and diacritics so "dong ho" finds "Đồng hồ".
-    /// Newest first, or in the board's pin order when a board is selected.
-    func filter(_ history: ClipboardHistory, _ query: ClipboardQuery) -> [ClipboardItem] {
+    /// Items matching every word of `query.text`, ignoring case and diacritics so "dong ho" finds "Đồng hồ", and every
+    /// `@` token in it (see `ClipboardSearchTerms`). Newest first, or in the board's pin order when a board is selected.
+    /// `apps` are the apps of the history, which the caller usually has already; nil works them out when the text has an "@".
+    func filter(_ history: ClipboardHistory, _ query: ClipboardQuery, apps: [ClipboardLibraryApp]? = nil) -> [ClipboardItem] {
         var items = history.items
         if let boardID = query.boardID {
             let pinnedIDs = history.boards.first { $0.id == boardID }?.itemIDs ?? []
@@ -44,17 +52,26 @@ nonisolated final class ClipboardSearchIndex {
         if let kind = query.kind {
             items = items.filter { $0.content.kind == kind }
         }
-        let words = query.text.split(whereSeparator: \.isWhitespace).map { Self.fold(String($0)) }
-        guard !words.isEmpty else { return items }
+        let hasAt = query.text.contains("@")
+        let terms = ClipboardSearchTerms(parsing: query.text, apps: hasAt ? apps ?? ClipboardLibraryContent.counts(of: history).apps : [])
+        let kinds = terms.kinds
+        if !kinds.isEmpty {
+            items = items.filter { item in kinds.allSatisfy { $0 == item.content.kind } }
+        }
+        let words = terms.text.split(whereSeparator: \.isWhitespace).map { Self.fold(String($0)) }
+        let appPrefixes = terms.appPrefixes
+        guard !words.isEmpty || !appPrefixes.isEmpty else { return items }
         update(history)
         return items.filter { item in
-            let text = entries[item.id]?.text ?? ""
-            return words.allSatisfy { text.range(of: $0, options: .literal) != nil }
+            guard let entry = entries[item.id] else { return false }
+            return appPrefixes.allSatisfy { prefix in entry.appNames.contains { $0.hasPrefix(prefix) } }
+                && words.allSatisfy { entry.text.range(of: $0, options: .literal) != nil }
         }
     }
 
     /// The source app name plus what the card shows: text, link (and its host when the URL spells it differently),
-    /// color hex or file names. Folders are left out so a common path such as "/Users" does not match every file.
+    /// color hex (and the rgb() or hsl() text it was copied as) or file names. Folders are left out so a common path
+    /// such as "/Users" does not match every file.
     private static func foldedText(of item: ClipboardItem) -> String {
         var content: String
         switch item.content {
@@ -63,14 +80,16 @@ nonisolated final class ClipboardSearchIndex {
         case .link(let url):
             content = url.absoluteString
             if let host = url.host(percentEncoded: false), !content.contains(host) { content += "\n" + host }
-        case .text, .richText, .color, .image:
+        case .color(let hex, let original):
+            content = original.map { hex + "\n" + $0 } ?? hex
+        case .text, .richText, .image:
             content = item.content.plainText ?? ""
         }
         return fold((item.sourceAppName ?? "") + "\n" + content.prefix(maxSearchableCharacters))
     }
 
     /// Lowercased without diacritics. "đ" has no decomposition, so `.diacriticInsensitive` keeps it and it is mapped by hand.
-    private static func fold(_ text: String) -> String {
+    static func fold(_ text: String) -> String {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).replacing("đ", with: "d")
     }
 }

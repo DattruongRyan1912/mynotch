@@ -23,9 +23,15 @@ import Testing
         #expect(ClipboardKeyCommand(#selector(NSResponder.cancelOperation(_:)), searchIsEmpty: true) == .close)
     }
 
+    @Test func tabCompletesASuggestion() {
+        for searchIsEmpty in [true, false] {
+            #expect(ClipboardKeyCommand(#selector(NSResponder.insertTab(_:)), searchIsEmpty: searchIsEmpty) == .complete)
+        }
+    }
+
     @Test func otherKeysStayWithTheField() {
         #expect(ClipboardKeyCommand(#selector(NSResponder.deleteBackward(_:)), searchIsEmpty: false) == nil)
-        #expect(ClipboardKeyCommand(#selector(NSResponder.insertTab(_:)), searchIsEmpty: true) == nil)
+        #expect(ClipboardKeyCommand(#selector(NSResponder.insertBacktab(_:)), searchIsEmpty: true) == nil)
         #expect(ClipboardKeyCommand(#selector(NSResponder.moveToBeginningOfLine(_:)), searchIsEmpty: false) == nil)
     }
 }

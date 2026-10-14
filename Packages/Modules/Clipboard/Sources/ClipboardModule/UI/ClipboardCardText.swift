@@ -64,8 +64,8 @@ enum ClipboardCardText {
         case .link(let url):
             let link = Self.link(url)
             return [link.title, link.detail].compactMap(\.self).joined(separator: " ")
-        case .color(let hex):
-            return hex
+        case .color(let hex, let original):
+            return original ?? hex
         case .image(let image):
             return "\(image.pixelWidth) × \(image.pixelHeight)"
         case .files(let urls):

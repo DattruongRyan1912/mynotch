@@ -9,6 +9,17 @@ import Testing
         }
     }
 
+    @Test func aCssColorDragsAsTheTextItWasCopiedAs() async {
+        let provider = ClipboardDragProvider.make(for: .color(hex: "#FF8800", original: "rgb(255, 136, 0)"), fileURLs: [])
+        #expect(provider.registeredTypeIdentifiers == ["public.utf8-plain-text"])
+        let text = await withCheckedContinuation { continuation in
+            _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+                continuation.resume(returning: (object as? NSString).map { $0 as String })
+            }
+        }
+        #expect(text == "rgb(255, 136, 0)")
+    }
+
     @Test func linksDragAsURLs() {
         let provider = ClipboardDragProvider.make(for: .link(URL(string: "https://apple.com")!), fileURLs: [])
         #expect(provider.registeredTypeIdentifiers == ["public.url"])

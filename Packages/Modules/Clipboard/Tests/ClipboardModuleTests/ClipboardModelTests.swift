@@ -54,6 +54,30 @@ final class ClipboardIDModule: FeatureModule {
         #expect(try JSONDecoder().decode([ClipboardContent].self, from: Data(json.utf8)) == Self.contents)
     }
 
+    /// A color that was copied as rgb() or hsl() keeps the text it was copied as; hex colors store nothing extra, so
+    /// history saved before this field still reads back and hex colors are written as before.
+    @Test func aColorKeepsItsOriginalTextThroughJSON() throws {
+        let css = ClipboardContent.color(hex: "#FF8800", original: "rgb(255, 136, 0)")
+        #expect(try JSONDecoder().decode(ClipboardContent.self, from: JSONEncoder().encode(css)) == css)
+        let json = ##"{"color": {"hex": "#FF8800", "original": "rgb(255, 136, 0)"}}"##
+        #expect(try JSONDecoder().decode(ClipboardContent.self, from: Data(json.utf8)) == css)
+        let stored = String(decoding: try JSONEncoder().encode(ClipboardContent.color(hex: "#FF8800")), as: UTF8.self)
+        #expect(!stored.contains("original"))
+    }
+
+    @Test func aColorsPlainTextIsWhatWasCopied() {
+        #expect(ClipboardContent.color(hex: "#FF8800", original: "rgb(255, 136, 0)").plainText == "rgb(255, 136, 0)")
+        #expect(ClipboardContent.color(hex: "#FF8800").plainText == "#FF8800")
+        #expect(ClipboardContent.color(hex: "#FF8800", original: "rgb(255, 136, 0)").kind == .color)
+    }
+
+    @Test func colorsCopiedDifferentlyAreDifferentItems() {
+        let hex = ClipboardContent.hash(of: .color(hex: "#FF8800"))
+        let css = ClipboardContent.hash(of: .color(hex: "#FF8800", original: "rgb(255, 136, 0)"))
+        let spaced = ClipboardContent.hash(of: .color(hex: "#FF8800", original: "rgb(255 136 0)"))
+        #expect(Set([hex, css, spaced]).count == 3)
+    }
+
     @Test func boardsRoundTripThroughJSON() throws {
         let board = ClipboardBoard(id: UUID(), name: "Công việc", systemImage: "tray.full", itemIDs: [UUID(), UUID()])
         #expect(try JSONDecoder().decode(ClipboardBoard.self, from: JSONEncoder().encode(board)) == board)

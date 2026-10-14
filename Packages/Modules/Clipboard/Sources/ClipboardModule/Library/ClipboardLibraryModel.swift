@@ -49,6 +49,8 @@ final class ClipboardLibraryModel {
     /// What the content shows, in display order.
     private(set) var items: [ClipboardItem] = []
     private(set) var counts = ClipboardLibraryCounts()
+    /// The rows under the search field while an `@` word is being typed.
+    private(set) var suggestions = ClipboardSuggestionList()
     /// Items in any board.
     private(set) var pinnedIDs: Set<UUID> = []
     /// Always a subset of `items`.
@@ -120,6 +122,11 @@ final class ClipboardLibraryModel {
         }
     }
 
+    /// The `@` tokens of the search text the user has finished, shown as removable chips.
+    var chips: [ClipboardSearchToken] {
+        ClipboardSearchTerms(parsing: searchText, apps: counts.apps).chips
+    }
+
     /// The boards row above the history: only for the whole history, and not while searching.
     var showsBoardTiles: Bool {
         selection == .all && searchText.allSatisfy(\.isWhitespace)
@@ -136,6 +143,28 @@ final class ClipboardLibraryModel {
 
     var pendingDeletionIncludesPinned: Bool {
         pendingDeletion.map { !$0.isDisjoint(with: pinnedIDs) } ?? false
+    }
+
+    // MARK: Search tokens
+
+    /// A key typed in the search field while suggestions are shown. False when there are none, so the key keeps its
+    /// usual meaning.
+    func handleSearchKey(_ command: ClipboardKeyCommand) -> Bool {
+        var text = searchText
+        guard suggestions.handle(command, text: &text) else { return false }
+        searchText = text
+        return true
+    }
+
+    /// A click on a suggestion.
+    func acceptSuggestion(at index: Int) {
+        var text = searchText
+        suggestions.accept(index, into: &text)
+        searchText = text
+    }
+
+    func removeChip(_ token: ClipboardSearchToken) {
+        searchText = ClipboardSearchTerms.removing(token, from: searchText)
     }
 
     // MARK: Selecting
@@ -344,6 +373,7 @@ final class ClipboardLibraryModel {
             in: history, selection: selection, kindFilter: kindFilter, searchText: searchText, sort: sort,
             apps: counts.apps, index: searchIndex
         )
+        suggestions.update(text: searchText, apps: counts.apps)
         let shown = Set(items.map(\.id))
         if !selectedIDs.isSubset(of: shown) { selectedIDs.formIntersection(shown) }
         if let focusID, !selectedIDs.contains(focusID) {

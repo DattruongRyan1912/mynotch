@@ -1,10 +1,14 @@
 import AppKit
 import SwiftUI
 
-/// The tab's search field. AppKit rather than SwiftUI so arrows, Return and Esc are taken from the field editor
-/// before it uses them, and so the field takes the keyboard exactly when the notch panel becomes key.
+/// The search field of the tab, and of the library's toolbar. AppKit rather than SwiftUI so arrows, Tab, Return and Esc
+/// are taken from the field editor before it uses them, which is how the suggestions for an `@` word are driven, and so
+/// the notch's field takes the keyboard exactly when the notch panel becomes key.
 struct ClipboardSearchField: NSViewRepresentable {
     @Binding var text: String
+    /// The notch's field is dark with no focus ring and takes the keyboard when its panel becomes key; the library's follows
+    /// the system and takes it only when asked, through `focusRequest`.
+    var look = ClipboardLook.notch
     /// False while another field of the tab (a board name) has the keyboard.
     var takesFocus: Bool
     /// Changed by the tab to give the keyboard back to this field.
@@ -18,16 +22,22 @@ struct ClipboardSearchField: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WindowReportingSearchField {
         let field = WindowReportingSearchField()
-        field.placeholderString = "Tìm trong lịch sử"
-        // The notch is always black, whatever the system appearance.
-        field.appearance = NSAppearance(named: .darkAqua)
-        field.focusRingType = .none
+        if look == .notch {
+            field.placeholderString = "Tìm trong lịch sử"
+            // The notch is always black, whatever the system appearance.
+            field.appearance = NSAppearance(named: .darkAqua)
+            field.focusRingType = .none
+        } else {
+            field.placeholderString = "Tìm trong clipboard"
+        }
         field.stringValue = text
         field.delegate = context.coordinator
         // The clear button changes the text without a text-change notification, only through the action.
         field.target = context.coordinator
         field.action = #selector(Coordinator.searchChanged(_:))
-        field.onWindowChange = { [weak coordinator = context.coordinator] window in coordinator?.watch(window) }
+        if look == .notch {
+            field.onWindowChange = { [weak coordinator = context.coordinator] window in coordinator?.watch(window) }
+        }
         context.coordinator.field = field
         return field
     }
@@ -35,7 +45,11 @@ struct ClipboardSearchField: NSViewRepresentable {
     func updateNSView(_ field: WindowReportingSearchField, context: Context) {
         let coordinator = context.coordinator
         coordinator.parent = self
-        if field.stringValue != text { field.stringValue = text }
+        if field.stringValue != text {
+            field.stringValue = text
+            // Puts the caret after the new text, e.g. after the word a suggestion completed.
+            field.currentEditor()?.selectedRange = NSRange(location: (text as NSString).length, length: 0)
+        }
         if coordinator.focusRequest != focusRequest {
             coordinator.focusRequest = focusRequest
             coordinator.focusIfKey()

@@ -6,8 +6,9 @@ nonisolated enum ClipboardContent: Codable, Sendable, Hashable {
     case text(String)
     case richText(plain: String, rtf: Data)
     case link(URL)
-    /// Normalized uppercase "#RRGGBB" or "#RRGGBBAA".
-    case color(hex: String)
+    /// Normalized uppercase "#RRGGBB" or "#RRGGBBAA", for the swatch. `original` is the text as copied when it was not
+    /// a hex code (`rgb(255, 136, 0)`, `hsl(…)`), which the card shows and copying back writes; nil for hex colors.
+    case color(hex: String, original: String? = nil)
     case image(ClipboardImage)
     case files([URL])
 
@@ -27,7 +28,7 @@ nonisolated enum ClipboardContent: Codable, Sendable, Hashable {
         case .text(let text): text
         case .richText(let plain, _): plain
         case .link(let url): url.absoluteString
-        case .color(let hex): hex
+        case .color(let hex, let original): original ?? hex
         case .image: nil
         case .files(let urls): urls.map { $0.path(percentEncoded: false) }.joined(separator: "\n")
         }

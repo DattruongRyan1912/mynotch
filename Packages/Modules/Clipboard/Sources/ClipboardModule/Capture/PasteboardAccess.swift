@@ -73,8 +73,8 @@ final class SystemPasteboard: PasteboardAccess {
         case .link(let url):
             item.setString(url.absoluteString, forType: .URL)
             item.setString(url.absoluteString, forType: .string)
-        case .color(let hex):
-            item.setString(hex, forType: .string)
+        case .color(let hex, let original):
+            item.setString(original ?? hex, forType: .string)
         case .image:
             guard let png = imageURL.flatMap({ try? Data(contentsOf: $0) }), !png.isEmpty else { return nil }
             item.setData(png, forType: .png)

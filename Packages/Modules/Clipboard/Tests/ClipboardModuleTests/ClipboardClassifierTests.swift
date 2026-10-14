@@ -168,6 +168,33 @@ import Testing
         #expect(classifier.classify(text(input)) == .content(.text(input), imageData: nil))
     }
 
+    @Test(arguments: [
+        ("rgb(255, 136, 0)", "#FF8800"),
+        ("rgb(255 136 0 / 50%)", "#FF880080"),
+        ("rgba(255, 136, 0, 0.5)", "#FF880080"),
+        ("hsl(210, 50%, 40%)", "#336699"),
+        ("hsla(210 50% 40% / 0.5)", "#33669980"),
+        ("RGB(255,136,0)", "#FF8800"),
+        ("  rgb(255, 136, 0)\n", "#FF8800"),
+    ])
+    func cssColorFunctionsAreColorsThatKeepTheirText(input: String, hex: String) {
+        let original = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(classifier.classify(text(input)) == .content(.color(hex: hex, original: original), imageData: nil))
+    }
+
+    @Test func cssColorFunctionsAreColorsWhateverTheHashSetting() {
+        let classifier = ClipboardClassifier(ignoreSensitive: true, colorsWithoutHash: false)
+        #expect(classifier.classify(text("rgb(1, 2, 3)")) == .content(.color(hex: "#010203", original: "rgb(1, 2, 3)"), imageData: nil))
+    }
+
+    @Test(arguments: [
+        "rgb(255, 136)", "rgb(a, b, c)", "color: rgb(255, 136, 0);", "rgb(255, 136, 0) and more", "hsl(120, 100, 50)",
+        "background: hsl(120, 100%, 50%)", "rgb(255, 136, 0)\nrgb(0, 0, 0)",
+    ])
+    func otherTextAroundColorFunctionsStaysText(input: String) {
+        #expect(classifier.classify(text(input)) == .content(.text(input), imageData: nil))
+    }
+
     @Test func textWithRTFIsRichText() {
         let rtf = Data("{\\rtf1 Hello}".utf8)
         #expect(classifier.classify(text("Hello", rtf: rtf)) == .content(.richText(plain: "Hello", rtf: rtf), imageData: nil))
@@ -182,6 +209,9 @@ import Testing
         let rtf = Data("{\\rtf1 x}".utf8)
         #expect(classifier.classify(text("https://example.com", rtf: rtf)) == .content(.link(URL(string: "https://example.com")!), imageData: nil))
         #expect(classifier.classify(text("#FFF", rtf: rtf)) == .content(.color(hex: "#FFFFFF"), imageData: nil))
+        #expect(
+            classifier.classify(text("rgb(1, 2, 3)", rtf: rtf)) == .content(.color(hex: "#010203", original: "rgb(1, 2, 3)"), imageData: nil)
+        )
     }
 
     @Test func plainTextIsKeptVerbatim() {
