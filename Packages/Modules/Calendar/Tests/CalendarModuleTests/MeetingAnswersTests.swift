@@ -149,6 +149,35 @@ import Testing
         #expect(meetingEntry != nil)
     }
 
+    /// A refresh reads the calendar, which takes a moment; the snooze can end in that moment and the timer bring the
+    /// card back. The refresh must then judge the card by the clock as it is when the read is done, not as it was when
+    /// the read began, or it hides the card again and shows it again as a new entry.
+    @Test func aRefreshThatStraddlesTheEndOfASnoozeLeavesTheCardAlone() async {
+        source.events = [standup()]
+        await start()
+        module.snoozeMeeting(module.state.featured!)
+        // Four minute ticks (60.1 s apart) run first and finish, so the straddling refresh is the newest one.
+        elapse(.milliseconds(240_400), clockAt: calendar.on(14, at: 9, 50))
+        await letAnythingPending()
+        #expect(meetingEntry == nil)
+
+        let gate = AsyncGate()
+        source.eventsGate = { await gate.wait() }
+        clock.now = calendar.on(14, at: 9, 50, 59)
+        let refresh = Task { await module.refresh() }
+        await settle { gate.waitCalls == 1 }
+
+        // The read is under way; the snooze ends, and its timer brings the card back.
+        elapse(.milliseconds(59_700), clockAt: calendar.on(14, at: 9, 51))
+        let shown = meetingEntry
+        #expect(shown != nil)
+
+        gate.open()
+        await refresh.value
+        #expect(meetingEntry == shown)
+        #expect(module.publishedMeeting?.countdown == "9 phút")
+    }
+
     @Test func theSnoozeTimerLeavesNothingBehindOnceItHasRun() async {
         source.events = [standup()]
         await start()

@@ -173,4 +173,61 @@ import Testing
         #expect(MeetingLinkDetector.detect(url: nil, location: jitsi, notes: whereby)?.provider == .jitsi)
         #expect(MeetingLinkDetector.detect(url: URL(string: "https://example.com/agenda"), location: "Room 4", notes: whereby)?.provider == .whereby)
     }
+
+    // MARK: Line endings
+
+    /// Invites that come by mail or from an .ics file end their lines with CRLF, or with a bare CR or a Unicode
+    /// separator; "the line above" must mean the same thing for all of them.
+    nonisolated static let lineEndings = ["\n", "\r\n", "\r", "\u{2028}", "\u{2029}", "\u{85}"]
+
+    @Test(arguments: lineEndings)
+    func theWordJitsiOnTheLineAboveCountsWhateverTheLineEnding(_ eol: String) {
+        let room = URL(string: "https://meet.acme.example/WeeklyStandup")!
+        #expect(link(in: "Jitsi Meet\(eol)https://meet.acme.example/WeeklyStandup") == MeetingLink(provider: .jitsi, url: room))
+        #expect(link(in: "Agenda\(eol)Jitsi\(eol)https://meet.acme.example/WeeklyStandup") == MeetingLink(provider: .jitsi, url: room))
+    }
+
+    @Test(arguments: lineEndings)
+    func theWordJitsiFurtherUpDoesNotCountWhateverTheLineEnding(_ eol: String) {
+        let notes = ["Jitsi migration plan", "", "Lots of text", "more text", "https://docs.acme.example/plan"]
+        #expect(link(in: notes.joined(separator: eol)) == nil)
+        // Two lines above is already too far, and so is the whole text being one line.
+        #expect(link(in: ["Jitsi", "Agenda to follow.", "https://meet.acme.example/WeeklyStandup"].joined(separator: eol)) == nil)
+        #expect(link(in: "Jitsi\(eol)\(eol)Agenda to follow.\(eol)https://meet.acme.example/WeeklyStandup") == nil)
+    }
+
+    // MARK: Room URLs only
+
+    @Test func onlyRoomsOfWherebyAndPublicJitsiAreLinks() {
+        for page in [
+            "https://support.whereby.com/hc/en-us/articles/123",
+            "https://whereby.com/information/terms",
+            "https://docs.whereby.com/reference",
+            "https://help.whereby.com/start",
+            "https://www.whereby.com/pricing",
+            "https://whereby.com/robots.txt",
+            "https://meet.jit.si/static/close3.html",
+            "https://meet.jit.si/images/favicon.ico",
+        ] {
+            #expect(link(in: "See \(page) for details") == nil, "\(page)")
+        }
+    }
+
+    @Test func aRoomStopsAtTheEndOfItsAddress() {
+        #expect(link(in: "'https://whereby.com/acme-standup'")?.url == URL(string: "https://whereby.com/acme-standup"))
+        #expect(link(in: "\"https://meet.jit.si/WeeklyStandup\"")?.url == URL(string: "https://meet.jit.si/WeeklyStandup"))
+        #expect(link(in: "Join at https://meet.jit.si/WeeklyStandup.")?.url == URL(string: "https://meet.jit.si/WeeklyStandup"))
+        #expect(link(in: "Join at https://whereby.com/acme-standup/ now")?.url == URL(string: "https://whereby.com/acme-standup"))
+        #expect(link(in: "Join at https://whereby.com/acme-standup?roomKey=abc.def-ghi.")?.url == URL(string: "https://whereby.com/acme-standup?roomKey=abc.def-ghi"))
+    }
+
+    // MARK: Rooms on a server of one's own look like rooms
+
+    @Test func aRoomOnAServerOfOneOwnIsANameNotAPage() {
+        #expect(link(in: "Jitsi: https://meet.acme.example/ab") == nil)
+        #expect(link(in: "Jitsi: https://meet.acme.example/abc")?.provider == .jitsi)
+        #expect(link(in: "https://jitsi.github.io/handbook") == nil)
+        #expect(link(in: "Jitsi: https://acme.github.io/handbook") == nil)
+        #expect(link(in: "Jitsi: https://acme.gitlab.io/handbook") == nil)
+    }
 }

@@ -13,6 +13,7 @@ nonisolated final class FakeCalendarDataSource: CalendarDataSource {
         var completedIDs: [String] = []
         var completionFailure: (any Error)?
         var eventRanges: [DateInterval] = []
+        var eventsGate: (@Sendable () async -> Void)?
         var reminderFetchCount = 0
         var observers: [AsyncStream<Void>.Continuation] = []
     }
@@ -46,6 +47,13 @@ nonisolated final class FakeCalendarDataSource: CalendarDataSource {
         set { state.withLock { $0.completionFailure = newValue } }
     }
 
+    /// Awaited by every events request after it is recorded and before it answers, so a test can hold a refresh in
+    /// the middle of its read, and let the clock and the timers move meanwhile.
+    var eventsGate: (@Sendable () async -> Void)? {
+        get { state.withLock { $0.eventsGate } }
+        set { state.withLock { $0.eventsGate = newValue } }
+    }
+
     /// The range of every events request, in order.
     var eventRanges: [DateInterval] { state.withLock { $0.eventRanges } }
     var eventFetchCount: Int { eventRanges.count }
@@ -67,10 +75,12 @@ nonisolated final class FakeCalendarDataSource: CalendarDataSource {
 
     /// Like EventKit's predicate, every event overlapping the range.
     func events(from start: Date, to end: Date) async -> [AgendaEvent] {
-        state.withLock {
-            $0.eventRanges.append(DateInterval(start: start, end: end))
-            return $0.events.filter { $0.start < end && $0.end > start }
+        let gate = state.withLock { state in
+            state.eventRanges.append(DateInterval(start: start, end: end))
+            return state.eventsGate
         }
+        await gate?()
+        return state.withLock { $0.events.filter { $0.start < end && $0.end > start } }
     }
 
     func reminders(dueBy end: Date) async -> [AgendaReminder] {

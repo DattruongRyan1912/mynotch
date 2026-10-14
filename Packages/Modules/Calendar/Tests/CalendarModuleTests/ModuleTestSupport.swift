@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 @testable import CalendarModule
 
 /// The module's "now": tests move it, then trigger a refresh.
@@ -42,4 +43,38 @@ func reminder(
     list: String = "Reminders"
 ) -> AgendaReminder {
     AgendaReminder(id: id, title: id, due: due, isOverdue: overdue, listTitle: list, listColor: .gray)
+}
+
+/// Holds whoever calls `wait()` until the test calls `open()`.
+nonisolated final class AsyncGate: Sendable {
+    private struct State {
+        var isOpen = false
+        var waiters: [CheckedContinuation<Void, Never>] = []
+        var waitCalls = 0
+    }
+
+    private let state = Mutex(State())
+
+    /// How many callers have arrived, so a test can wait until one is held.
+    var waitCalls: Int { state.withLock { $0.waitCalls } }
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            let passes = state.withLock { state -> Bool in
+                state.waitCalls += 1
+                if !state.isOpen { state.waiters.append(continuation) }
+                return state.isOpen
+            }
+            if passes { continuation.resume() }
+        }
+    }
+
+    func open() {
+        let waiters = state.withLock { state -> [CheckedContinuation<Void, Never>] in
+            state.isOpen = true
+            defer { state.waiters = [] }
+            return state.waiters
+        }
+        for waiter in waiters { waiter.resume() }
+    }
 }

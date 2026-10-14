@@ -253,9 +253,12 @@ public final class CalendarModule: FeatureModule {
         apply(events: events, reminders: reminders, settings: settings, now: now)
     }
 
+    /// `now` is when the calendar was read. What the card shows follows the clock as it is now: a snooze that ended
+    /// while the read was under way has already brought the card back, and a stale time would hide it again.
     private func apply(events: [AgendaEvent], reminders: [AgendaReminder]?, settings: CalendarSettings, now: Date) {
+        let current = clock()
         policy.leadMinutes = settings.meetingLeadMinutes
-        pruneReplies(now: now)
+        pruneReplies(now: current)
         let hidden = Set(settings.hiddenCalendarIDs)
         let shown = events.filter { !hidden.contains($0.calendarID) && (settings.showAllDay || !$0.isAllDay) }
         let agenda = AgendaBuilder.build(events: shown, now: now, calendar: calendar)
@@ -264,7 +267,7 @@ public final class CalendarModule: FeatureModule {
         let section = remindersSection(reminders, settings: settings)
         if state.reminders != section { state.reminders = section }
         appliedRefreshes += 1
-        updateMeeting(now: now)
+        updateMeeting(now: current)
     }
 
     private func remindersSection(_ reminders: [AgendaReminder]?, settings: CalendarSettings) -> RemindersSection {
