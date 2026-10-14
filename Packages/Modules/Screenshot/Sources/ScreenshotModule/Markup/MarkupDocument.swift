@@ -19,7 +19,8 @@ nonisolated enum Annotation: Codable, Equatable, Sendable {
     case redact(CGRect)
     /// A numbered badge. The number is kept in step with the badges before it: see `StepBadges`.
     case step(number: Int, at: CGPoint, radius: CGFloat, color: RGBAColor)
-    /// A circle showing the pixels under it, `zoom` times larger, taken when the document is flattened.
+    /// A circle showing the pixels under it, `zoom` times larger, taken when the document is flattened. It sees the
+    /// picture with every `redact` and `erase` applied, also those drawn after it, so it never shows what they hide.
     case magnifier(center: CGPoint, radius: CGFloat, zoom: CGFloat, style: StrokeStyle)
     /// A measured line. `scale` is the capture's pixels per point, which decides whether the label also gives points.
     case ruler(from: CGPoint, to: CGPoint, style: StrokeStyle, fontSize: CGFloat, scale: CGFloat)

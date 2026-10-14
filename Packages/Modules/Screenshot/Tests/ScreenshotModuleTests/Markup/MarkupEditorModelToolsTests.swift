@@ -324,4 +324,47 @@ import Testing
         #expect(model.canvas == CanvasInsets(left: 0, top: 0, right: 15, bottom: 0))
         #expect((model.preview.width, model.preview.height) == (415, 300))
     }
+
+    // MARK: Failed renders
+
+    /// A renderer that can be told to fail, as when no bitmap of the canvas's size could be allocated.
+    final class FlakyRenderer {
+        var fails = false
+        func render(_ image: CGImage, _ document: MarkupDocument) -> CGImage? {
+            fails ? nil : MarkupRenderer.flatten(image, document)
+        }
+    }
+
+    @Test func aFailedRenderKeepsThePreviousPreviewAndCanvasSoTheyStillMatch() {
+        let renderer = FlakyRenderer()
+        let model = MarkupEditorModel(image: image, render: renderer.render)
+        model.select(.step)
+        click(model, CGPoint(x: 395, y: 100))
+        let grown = model.preview
+        #expect(model.canvasSize == CGSize(width: 423, height: 300))
+
+        renderer.fails = true
+        click(model, CGPoint(x: 450, y: 250))
+        // The annotation is in the document, but the picture on screen is still the last one that could be made.
+        #expect(model.document.annotations.count == 2)
+        #expect(model.preview === grown)
+        #expect(model.canvasSize == CGSize(width: 423, height: 300))
+        #expect((model.preview.width, model.preview.height) == (Int(model.canvasSize.width), Int(model.canvasSize.height)))
+
+        renderer.fails = false
+        click(model, CGPoint(x: 100, y: 100))
+        #expect(model.document.annotations.count == 3)
+        #expect(model.canvasSize == CGSize(width: 478, height: 300))
+        #expect((model.preview.width, model.preview.height) == (478, 300))
+    }
+
+    @Test func openingADocumentThatCannotBeRenderedShowsTheCaptureAtItsOwnSize() {
+        let document = MarkupDocument(
+            imageSize: CGSize(width: 400, height: 300),
+            annotations: [.step(number: 1, at: CGPoint(x: 395, y: 100), radius: 20, color: .red)]
+        )
+        let model = MarkupEditorModel(image: image, document: document, render: { _, _ in nil })
+        #expect(model.preview === image)
+        #expect(model.canvasSize == CGSize(width: 400, height: 300))
+    }
 }

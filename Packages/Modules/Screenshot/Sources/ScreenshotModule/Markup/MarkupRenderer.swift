@@ -13,8 +13,11 @@ nonisolated enum MarkupRenderer {
         let scaleX = hasSize ? CGFloat(width) / document.imageSize.width : 1
         let scaleY = hasSize ? CGFloat(height) / document.imageSize.height : 1
         let insets = document.canvas
-        let left = Int((CGFloat(insets.left) * scaleX).rounded(.up)), right = Int((CGFloat(insets.right) * scaleX).rounded(.up))
-        let top = Int((CGFloat(insets.top) * scaleY).rounded(.up)), bottom = Int((CGFloat(insets.bottom) * scaleY).rounded(.up))
+        // Padding in pixels, never more than a capture of this size may grow, whatever scale a damaged file asks for.
+        let reach = CGFloat(CanvasInsets.limit(for: CGSize(width: width, height: height)))
+        func padding(_ inset: Int, _ scale: CGFloat) -> Int { Int(min((CGFloat(inset) * scale).rounded(.up), reach)) }
+        let left = padding(insets.left, scaleX), right = padding(insets.right, scaleX)
+        let top = padding(insets.top, scaleY), bottom = padding(insets.bottom, scaleY)
         let canvasWidth = left + width + right, canvasHeight = top + height + bottom
         guard let context = makeContext(width: canvasWidth, height: canvasHeight, space: image.colorSpace)
             ?? makeContext(width: canvasWidth, height: canvasHeight, space: CGColorSpace(name: CGColorSpace.sRGB)) else { return nil }
@@ -27,14 +30,22 @@ nonisolated enum MarkupRenderer {
         // Annotation space starts at the capture's top-left corner, which sits at the padding's offset.
         let toPixels = CGAffineTransform(a: scaleX, b: 0, c: 0, d: scaleY, tx: CGFloat(left), ty: CGFloat(top))
         let blockSize = redactBlockSize(for: CGSize(width: width, height: height))
-        for annotation in document.annotations {
+        for (index, annotation) in document.annotations.enumerated() {
             switch annotation {
             case .redact(let rect):
-                pixelate(rect.applying(toPixels), blockSize: blockSize, in: context)
+                apply(.pixelate(rect.applying(toPixels)), blockSize: blockSize, in: context)
             case .erase(let rect):
-                erase(rect.applying(toPixels), blockSize: blockSize, in: context)
+                apply(.erase(rect.applying(toPixels)), blockSize: blockSize, in: context)
             case .magnifier(let center, let radius, let zoom, let style):
-                magnify(center: center.applying(toPixels), radius: radius * scaleX, zoom: zoom, border: style.color, borderWidth: style.width * scaleX, in: context)
+                // The lens shows the picture as it ends up: every redaction and erase that comes after it is
+                // applied to what it samples, or it would keep an enlarged copy of what they hide.
+                let later = document.annotations.dropFirst(index + 1).compactMap { pixelEffect($0, toPixels) }
+                // Without a safe source nothing is drawn, rather than a lens that could show hidden pixels.
+                guard let source = snapshot(of: context, applying: later, blockSize: blockSize) else { continue }
+                magnify(
+                    source, center: center.applying(toPixels), radius: radius * scaleX, zoom: zoom,
+                    border: style.color, borderWidth: style.width * scaleX, in: context
+                )
             default:
                 context.saveGState()
                 context.concatenate(toPixels)
@@ -83,7 +94,7 @@ nonisolated enum MarkupRenderer {
         max(12, Int(min(imageSize.width, imageSize.height) / 30))
     }
 
-    private static func makeContext(width: Int, height: Int, space: CGColorSpace?) -> CGContext? {
+    static func makeContext(width: Int, height: Int, space: CGColorSpace?) -> CGContext? {
         guard let space, space.model == .rgb else { return nil }
         return CGContext(
             data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,

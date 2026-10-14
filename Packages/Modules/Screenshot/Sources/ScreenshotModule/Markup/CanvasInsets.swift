@@ -33,7 +33,8 @@ nonisolated struct CanvasInsets: Equatable, Sendable {
     func growing(toContain rect: CGRect, imageSize: CGSize) -> CanvasInsets {
         guard !rect.isNull, !rect.isInfinite, rect.minX.isFinite, rect.minY.isFinite, rect.maxX.isFinite, rect.maxY.isFinite else { return self }
         let limit = Self.limit(for: imageSize)
-        func overflow(_ distance: CGFloat) -> Int { distance > 0 ? min(Int(distance.rounded(.up)), limit) : 0 }
+        // Clamped before converting: a coordinate from a damaged file can be far beyond what an Int holds.
+        func overflow(_ distance: CGFloat) -> Int { distance > 0 ? Int(min(distance.rounded(.up), CGFloat(limit))) : 0 }
         return CanvasInsets(
             left: max(left, overflow(-rect.minX)),
             top: max(top, overflow(-rect.minY)),

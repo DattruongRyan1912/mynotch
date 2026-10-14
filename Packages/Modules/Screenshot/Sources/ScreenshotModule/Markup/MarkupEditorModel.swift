@@ -31,17 +31,25 @@ nonisolated struct TextDraft: Equatable, Sendable {
     private(set) var canvas: CanvasInsets
     private var history: UndoStack
     @ObservationIgnored private var dragPoints: [CGPoint] = []
+    @ObservationIgnored private let render: (CGImage, MarkupDocument) -> CGImage?
 
     /// `document` reopens earlier markup; it must belong to `image`. `pointScale` is the capture's pixels per point,
-    /// and `canvasFill` is what padding is filled with; it replaces the document's, which is not saved.
-    init(image: CGImage, document: MarkupDocument? = nil, pointScale: CGFloat = 1, canvasFill: CanvasFill = .standard) {
+    /// and `canvasFill` is what padding is filled with; it replaces the document's, which is not saved. `render` makes
+    /// the preview and is only replaced in tests, to see what happens when no bitmap can be made.
+    init(
+        image: CGImage, document: MarkupDocument? = nil, pointScale: CGFloat = 1, canvasFill: CanvasFill = .standard,
+        render: @escaping (CGImage, MarkupDocument) -> CGImage? = MarkupRenderer.flatten
+    ) {
         self.image = image
         self.pointScale = pointScale
+        self.render = render
         var document = document ?? MarkupDocument(imageSize: CGSize(width: image.width, height: image.height))
         document.canvasFill = canvasFill
         history = UndoStack(document)
-        canvas = document.canvas
-        preview = Self.flattened(image, document)
+        // A document that cannot be drawn shows the plain capture, which is also all the canvas then is.
+        let rendered = Self.rendered(image, document, using: render)
+        canvas = rendered == nil ? .zero : document.canvas
+        preview = rendered ?? image
     }
 
     var document: MarkupDocument { history.document }
@@ -161,24 +169,26 @@ nonisolated struct TextDraft: Equatable, Sendable {
         }
     }
 
-    /// Re-flattens the preview after a change to the history, which costs a full-resolution render.
+    /// Re-flattens the preview after a change to the history, which costs a full-resolution render. When that fails the
+    /// last picture that could be made stays on screen with the canvas that goes with it, so the two never disagree.
     private func edit(_ change: (inout UndoStack) -> Void) {
         let before = history.document
         change(&history)
         guard history.document != before else { return }
+        guard let rendered = Self.rendered(image, history.document, using: render) else { return }
         canvas = history.document.canvas
-        preview = Self.flattened(image, history.document)
+        preview = rendered
     }
 
-    /// The preview falls back to the plain capture when rendering fails; that is logged, since the annotations
-    /// would otherwise vanish from the screen without a word. Without annotations the canvas has not grown either.
-    private static func flattened(_ image: CGImage, _ document: MarkupDocument) -> CGImage {
+    /// The capture itself while there is nothing to draw (nor any padding); nil when rendering fails, which is logged
+    /// since the annotations would otherwise vanish from the screen without a word.
+    private static func rendered(_ image: CGImage, _ document: MarkupDocument, using render: (CGImage, MarkupDocument) -> CGImage?) -> CGImage? {
         guard !document.annotations.isEmpty else { return image }
-        guard let flattened = MarkupRenderer.flatten(image, document) else {
+        guard let rendered = render(image, document) else {
             logger.error("Could not render \(document.annotations.count) annotations onto a \(image.width)×\(image.height) capture")
-            return image
+            return nil
         }
-        return flattened
+        return rendered
     }
 
     private static let logger = Log.logger(category: "MarkupEditor")

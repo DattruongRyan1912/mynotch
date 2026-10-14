@@ -32,6 +32,10 @@ import Testing
         #expect(Ruler.label(distance: 240.4, scale: 2) == "240 px (120 pt)")
     }
 
+    @Test func aHugeDistanceFromADamagedFileStillGivesALabel() {
+        #expect(Ruler.label(distance: 1e30, scale: 1) == "1000000000 px")
+    }
+
     @Test func anInvalidScaleIsTreatedAsOne() {
         #expect(Ruler.label(distance: 50, scale: 0) == "50 px")
         #expect(Ruler.label(distance: 50, scale: -2) == "50 px")

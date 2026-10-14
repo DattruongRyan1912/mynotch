@@ -324,6 +324,14 @@ import Testing
         #expect(output.pixel(60, 10) == background)
     }
 
+    @Test func aDamagedImageSizeCannotMakeThePaddingEnormous() throws {
+        // An imageSize a thousand times too small would scale a 10-pixel inset to 10 000 pixels.
+        let badge = Annotation.step(number: 1, at: CGPoint(x: 0.19, y: 0.05), radius: 0.02, color: .red)
+        let document = MarkupDocument(imageSize: CGSize(width: 0.2, height: 0.1), annotations: [badge, .step(number: 2, at: CGPoint(x: 0.25, y: 0.05), radius: 0.02, color: .red)])
+        let output = try #require(MarkupRenderer.flatten(Self.plain.image(), document))
+        #expect(output.width <= 200 + 2 * 256 && output.height <= 100 + 2 * 256)
+    }
+
     @Test func aDocumentWithNothingBeyondTheEdgeKeepsTheCapturesSize() throws {
         let output = try Self.render(Self.plain, [.rectangle(CGRect(x: 0, y: 0, width: 200, height: 100), style: .init(color: .red, width: 4))], fill: .white)
         #expect((output.width, output.height) == (200, 100))

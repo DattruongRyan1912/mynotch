@@ -235,6 +235,85 @@ extension ScreenshotModuleTests {
     }
 }
 
+/// Everything that leaves the editor (the stored image, Chép, dragging out, saving a copy) is the same render, so a
+/// lens drawn before a redaction cannot show what the redaction hides.
+extension ScreenshotModuleTests {
+    /// A lens at the middle of the 40×50 capture at 4×, then a redaction over the area the lens magnifies.
+    static let lensThenRedaction = MarkupDocument(
+        imageSize: CGSize(width: 40, height: 50),
+        annotations: [
+            .magnifier(center: CGPoint(x: 20, y: 25), radius: 18, zoom: 4, style: .init(color: .blue, width: 2)),
+            .redact(CGRect(x: 14, y: 19, width: 12, height: 12)),
+        ]
+    )
+
+    /// (34, 25) is inside the lens and outside the redacted rectangle, and shows source (23.6, 25), which is inside it.
+    static let probe = (x: 34, y: 25)
+
+    /// What the lens should show there: the redacted capture's flat block, not the capture's own gradient.
+    func hiddenColour(of source: MarkupEditorSource) throws -> Bitmap.Pixel {
+        let redacted = try #require(MarkupRenderer.flatten(source.image, MarkupDocument(imageSize: Self.lensThenRedaction.imageSize, annotations: [Self.lensThenRedaction.annotations[1]])))
+        return try Bitmap(redacted).pixel(23, 25)
+    }
+
+    func pixel(of image: CGImage) throws -> Bitmap.Pixel {
+        try Bitmap(image).pixel(Self.probe.x, Self.probe.y)
+    }
+
+    func pixel(ofFileAt url: URL) throws -> Bitmap.Pixel {
+        try pixel(of: #require(CGImageSource.image(at: url)))
+    }
+
+    @Test func copyingFromTheEditorHidesTheRedactedAreaInsideAnEarlierLens() async throws {
+        let record = try await capturedRecord()
+        let source = try #require(await module.editorSource(for: record))
+        let hidden = try hiddenColour(of: source)
+        let leaky = try #require(MarkupRenderer.flatten(source.image, MarkupDocument(imageSize: Self.lensThenRedaction.imageSize, annotations: [Self.lensThenRedaction.annotations[0]])))
+        #expect(try pixel(of: leaky) != hidden)
+
+        #expect(await module.copyMarkup(Self.lensThenRedaction, of: source))
+
+        #expect(try pixel(of: #require(pasteboard.images.last).image) == hidden)
+    }
+
+    @Test func theStoredImageAndEverythingMadeFromItHideTheRedactedAreaToo() async throws {
+        let record = try await capturedRecord()
+        let source = try #require(await module.editorSource(for: record))
+        let hidden = try hiddenColour(of: source)
+        #expect(await module.saveMarkup(Self.lensThenRedaction, of: source, for: record))
+        let saved = try #require(module.state.records.first)
+
+        // The stored PNG, which the tray shows and thumbnails.
+        let store = try #require(module.store)
+        #expect(try pixel(ofFileAt: #require(store.url(for: record.id))) == hidden)
+
+        // The tray's Chép, OCR's input and Lưu vào: all read the stored PNG.
+        let copies = pasteboard.images.count
+        await module.copy(saved)
+        #expect(pasteboard.images.count == copies + 1)
+        #expect(try pixel(of: #require(pasteboard.images.last).image) == hidden)
+
+        // Dragging a card out hands over a link to that same file.
+        let dragged = try #require(module.dragFileURL(for: saved))
+        #expect(try pixel(ofFileAt: dragged) == hidden)
+
+        // Lưu thành… and Lưu vào.
+        let folder = temporaryRoot.appending(path: "Exports", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let destination = folder.appending(path: "chosen.png")
+        await module.export(saved, to: destination)
+        #expect(try pixel(ofFileAt: destination) == hidden)
+        system.saveDirectory = folder
+        await module.save(saved)
+        let copiedFiles = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil).filter { $0.lastPathComponent != destination.lastPathComponent }
+        #expect(copiedFiles.count == 1)
+        #expect(try pixel(ofFileAt: #require(copiedFiles.first)) == hidden)
+
+        // The unredacted capture stays next to it for editing again, and is never what leaves the module.
+        #expect(try pixel(ofFileAt: store.originalURL(for: record.id)) != hidden)
+    }
+}
+
 extension CGImageSource {
     static func image(at url: URL) -> CGImage? {
         CGImageSourceCreateWithURL(url as CFURL, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }

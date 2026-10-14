@@ -45,4 +45,9 @@ import Testing
         #expect(grown.size(of: image) == CGSize(width: 420, height: 300))
         #expect(grown.bounds(of: image).origin == .zero)
     }
+
+    @Test func aHugeCoordinateFromADamagedFileIsCappedInsteadOfTrapping() {
+        let grown = CanvasInsets.zero.growing(toContain: CGRect(x: -1e30, y: 0, width: 2e30, height: 1e300), imageSize: image)
+        #expect(grown == CanvasInsets(left: 256, top: 0, right: 256, bottom: 256))
+    }
 }

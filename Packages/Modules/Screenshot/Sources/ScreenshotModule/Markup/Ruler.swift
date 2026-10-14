@@ -16,7 +16,7 @@ nonisolated enum Ruler {
     /// "240 px", and on a Retina capture "240 px (120 pt)". `scale` is pixels per point; anything not above 1 shows pixels only.
     /// The points come from the pixels as shown, so the two numbers always agree.
     static func label(distance: CGFloat, scale: CGFloat) -> String {
-        let pixels = Int(distance.rounded())
+        let pixels = Int(min(distance.rounded(), 1e9))
         guard scale > 1 else { return "\(pixels) px" }
         let points = (Double(pixels) / Double(scale) * 10).rounded() / 10
         let formatted = points == points.rounded() ? String(Int(points)) : String(format: "%.1f", points)
