@@ -275,7 +275,9 @@ test("after a navigation the old captions are gone: a late response of the old v
   page.advance(1000);
   assert.deepEqual(page.take(), []);
 
-  // and coming back to the first video does not bring them back either
+  // and once the held late track has expired, coming back to the first video does not bring it back
+  page.advance(11000);
+  page.take();
   page.navigate(watch(ID), "Placeholder title - YouTube");
   page.take();
   page.button.pressed = "false";
@@ -284,6 +286,140 @@ test("after a navigation the old captions are gone: a late response of the old v
   page.button.pressed = "true";
   page.advance(1000);
   assert.deepEqual(page.take().filter((message) => message.type === "captions"), []);
+});
+
+const ID3 = "wxyzabcdefg";
+const kinds = (messages) => messages.map((message) => message.type);
+
+test("a track that arrives before the page switches videos is held and relayed once the video matches", () => {
+  const page = pausedPage();
+  page.start();
+  page.take();
+
+  page.postFromPage(captionsMessage(ID2, "early line")); // the player asked for it before the URL changed
+  assert.deepEqual(page.take(), [], "held, not relayed");
+
+  page.navigate(watch(ID2), "Another placeholder - YouTube");
+  const sent = page.take();
+  assert.deepEqual(kinds(sent), ["clear", "playback", "captions"], "clear(old), playback(new), then the held captions");
+  assert.deepEqual(sent[0], { v: 1, type: "clear", videoId: ID });
+  assert.deepEqual(sent[2], captionsMessage(ID2, "early line"));
+
+  page.advance(3000);
+  assert.deepEqual(page.take(), [], "relayed once, not repeated");
+
+  // it is cached like any relayed track: a CC off/on cycle replays it
+  page.button.pressed = "false";
+  page.advance(1000);
+  page.take();
+  page.button.pressed = "true";
+  page.advance(1000);
+  assert.deepEqual(page.take(), [captionsMessage(ID2, "early line")]);
+});
+
+test("a held track survives a visit to a page without a video id", () => {
+  const page = pausedPage();
+  page.start();
+  page.navigate(`${ORIGIN}/feed/subscriptions`, "Subscriptions - YouTube");
+  page.take();
+
+  page.postFromPage(captionsMessage(ID2));
+  page.advance(2000);
+  assert.deepEqual(page.take(), []);
+
+  page.navigate(watch(ID2), "Another placeholder - YouTube");
+  assert.deepEqual(page.take().filter((message) => message.type === "captions"), [captionsMessage(ID2)]);
+});
+
+test("a track already held when the page leaves for a page without a video id is kept", () => {
+  const page = pausedPage();
+  page.start();
+  page.take();
+
+  page.postFromPage(captionsMessage(ID2)); // held while still on the first video
+  page.navigate(`${ORIGIN}/`, "YouTube"); // home page: no video id, nothing to discard against
+  page.take();
+  page.navigate(watch(ID2), "Another placeholder - YouTube");
+  assert.deepEqual(page.take().filter((message) => message.type === "captions"), [captionsMessage(ID2)]);
+});
+
+test("a held track is relayed up to 10 s after it arrived and never after that", () => {
+  const inTime = pausedPage();
+  inTime.start();
+  inTime.take();
+  inTime.postFromPage(captionsMessage(ID2));
+  inTime.advance(10000);
+  inTime.navigate(watch(ID2), "Another placeholder - YouTube");
+  assert.deepEqual(inTime.take().filter((message) => message.type === "captions"), [captionsMessage(ID2)]);
+
+  const expired = pausedPage();
+  expired.start();
+  expired.take();
+  expired.postFromPage(captionsMessage(ID2));
+  expired.advance(11000);
+  expired.navigate(watch(ID2), "Another placeholder - YouTube");
+  assert.deepEqual(expired.take().filter((message) => message.type === "captions"), []);
+  expired.button.pressed = "false";
+  expired.advance(1000);
+  expired.take();
+  expired.button.pressed = "true";
+  expired.advance(1000);
+  assert.deepEqual(expired.take(), [], "nothing was cached either");
+});
+
+test("expiry is judged by the clock even if no tick ran in between", () => {
+  const page = pausedPage();
+  page.start();
+  page.take();
+  page.postFromPage(captionsMessage(ID2));
+  page.context.__now += 60000; // the tab was throttled: the interval did not fire
+  page.navigate(watch(ID2), "Another placeholder - YouTube");
+  assert.deepEqual(page.take().filter((message) => message.type === "captions"), []);
+});
+
+test("a held track for another id than the one navigated to is discarded for good", () => {
+  const page = pausedPage();
+  page.start();
+  page.take();
+
+  page.postFromPage(captionsMessage(ID2));
+  page.navigate(watch(ID3), "Third placeholder - YouTube");
+  assert.deepEqual(page.take().filter((message) => message.type === "captions"), []);
+
+  // it is gone: navigating to its video later (still inside 10 s) does not resurrect it
+  page.navigate(watch(ID2), "Another placeholder - YouTube");
+  assert.deepEqual(page.take().filter((message) => message.type === "captions"), []);
+});
+
+test("only the most recent held track is kept", () => {
+  const replaced = pausedPage();
+  replaced.start();
+  replaced.take();
+  replaced.postFromPage(captionsMessage(ID2, "first held"));
+  replaced.postFromPage(captionsMessage(ID3, "second held"));
+  replaced.navigate(watch(ID2), "Another placeholder - YouTube");
+  assert.deepEqual(replaced.take().filter((message) => message.type === "captions"), [], "the older held track was replaced");
+
+  const newest = pausedPage();
+  newest.start();
+  newest.take();
+  newest.postFromPage(captionsMessage(ID2, "first held"));
+  newest.postFromPage(captionsMessage(ID3, "second held"));
+  newest.navigate(watch(ID3), "Third placeholder - YouTube");
+  assert.deepEqual(newest.take().filter((message) => message.type === "captions"), [captionsMessage(ID3, "second held")]);
+});
+
+test("a track for the current video does not disturb a track held for the next one", () => {
+  const page = pausedPage();
+  page.start();
+  page.take();
+  page.postFromPage(captionsMessage(ID2, "next video"));
+  page.postFromPage(captionsMessage(ID, "current video"));
+  assert.deepEqual(page.take(), [captionsMessage(ID, "current video")], "the current one is relayed at once");
+
+  page.navigate(watch(ID2), "Another placeholder - YouTube");
+  const captions = page.take().filter((message) => message.type === "captions");
+  assert.deepEqual(captions, [captionsMessage(ID2, "next video")]);
 });
 
 test("captions that arrive right after the URL changed, before the next tick, are kept for the new video", () => {

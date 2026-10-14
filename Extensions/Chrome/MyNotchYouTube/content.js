@@ -21,6 +21,8 @@
   var HEARTBEAT_MS = 5000;
   // After a navigation document.title can still hold the previous video's title for a moment.
   var STALE_TITLE_MS = 3000;
+  // How long a track for a video other than the page's current one is kept (see onPageMessage).
+  var HELD_CAPTIONS_MS = 10000;
   var VIDEO_EVENTS = ["play", "pause", "seeked", "ratechange", "ended", "playing"];
 
   var doc = root.document;
@@ -29,6 +31,7 @@
     video: null,
     cc: "unknown", // "on" | "off" | "unknown", from the captions button
     captions: null, // latest captions message of the current video, resent after a clear
+    held: null, // { message, at }: one track that arrived before the page switched to its video
     clearedId: null, // video id whose captions were last cleared and not sent again since
     lastPlaying: null, // the `playing` value of the last playback message
     lastSentAt: 0,
@@ -114,6 +117,25 @@
     state.staleTitle = state.lastTitle;
     state.staleUntil = Date.now() + STALE_TITLE_MS;
     sendPlayback();
+    releaseHeldCaptions(videoId);
+  }
+
+  function deliverCaptions(message) {
+    state.captions = message;
+    state.clearedId = null;
+    send(message);
+  }
+
+  /**
+   * The held track goes out when the page has switched to its video (and it is not too old),
+   * and is discarded when the page switched to a different video. Leaving for a page without a
+   * video id (videoId null) keeps it until it expires.
+   */
+  function releaseHeldCaptions(videoId) {
+    var held = state.held;
+    if (!held || !videoId) return;
+    state.held = null;
+    if (held.message.videoId === videoId && Date.now() - held.at <= HELD_CAPTIONS_MS) deliverCaptions(held.message);
   }
 
   function unbindVideo() {
@@ -155,6 +177,7 @@
       onVideoChange(C.videoIdFromUrl(root.location.href));
       bindVideo();
       checkCaptionsButton();
+      if (state.held && Date.now() - state.held.at > HELD_CAPTIONS_MS) state.held = null;
       if (state.video && state.videoId) {
         var playing = isPlaying(state.video);
         var due = playing && Date.now() - state.lastSentAt >= HEARTBEAT_MS;
@@ -168,13 +191,17 @@
 
   function onPageMessage(event) {
     var message = C.acceptPageMessage(event, root, root.location.origin);
-    // Only the video of the page's live URL (not state.videoId: the tick may not have run yet).
-    // A late response of the previous video, a preview or miniplayer track, or a forged id would
-    // otherwise be cached and replayed although no clear for it would ever be sent.
-    if (!message || message.videoId !== C.videoIdFromUrl(root.location.href)) return;
-    state.captions = message;
-    state.clearedId = null;
-    send(message);
+    if (!message) return;
+    // The live URL decides (not state.videoId: the tick may not have run yet). A track for any
+    // other video is only held, never relayed: the player can fetch the next video's captions just
+    // before the address bar changes, but a late response of the previous video, a preview or
+    // miniplayer track or a forged id must not reach the host, which would keep it with no clear
+    // to ever remove it. One slot: a newer foreign track replaces the held one.
+    if (message.videoId !== C.videoIdFromUrl(root.location.href)) {
+      state.held = { message: message, at: Date.now() };
+      return;
+    }
+    deliverCaptions(message);
   }
 
   function onPageHide() {
