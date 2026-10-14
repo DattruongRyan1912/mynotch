@@ -11,12 +11,16 @@ struct CalendarSettingsKeys {
     /// IDs of calendars whose events never show.
     let hiddenCalendarIDs: SettingKey<[String]>
     let showAllDay: SettingKey<Bool>
+    /// What the user answered to the meeting card ("Báo lại", "Bỏ qua"), per occurrence. Not part of
+    /// `CalendarSettings`: the module writes it itself, and a write must not make it read the calendar again.
+    let meetingReplies: SettingKey<MeetingReplies>
 
     init(_ settings: ModuleSettings) {
         showReminders = settings.key("showReminders", default: false)
         meetingLeadMinutes = settings.key("meetingLeadMinutes", default: 5, clampedTo: Self.meetingLeadRange)
         hiddenCalendarIDs = settings.key("hiddenCalendarIDs", default: [])
         showAllDay = settings.key("showAllDay", default: true)
+        meetingReplies = settings.key("meetingReplies", default: MeetingReplies())
     }
 }
 

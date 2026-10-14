@@ -7,7 +7,8 @@ nonisolated struct UpcomingMeetingPolicy: Equatable, Sendable {
 
     /// How early before the start the activity appears (the `meetingLeadMinutes` setting).
     var leadMinutes: Int
-    private var dismissedEventID: String?
+    /// What the user answered to each meeting's card; a meeting with an answer in force is hidden.
+    var replies = MeetingReplies()
 
     init(leadMinutes: Int) {
         self.leadMinutes = leadMinutes
@@ -18,18 +19,30 @@ nonisolated struct UpcomingMeetingPolicy: Equatable, Sendable {
         /// Whole minutes until the start, rounded up so "1" holds until the start itself.
         case upcoming(minutesLeft: Int)
         case inProgress
+
+        /// Before the start: the only time there is something to wait for.
+        var isUpcoming: Bool {
+            if case .upcoming = self { true } else { false }
+        }
     }
 
-    /// A copy that keeps this event hidden. A rescheduled event has a new id, so it shows again.
-    func dismissed(eventID: String) -> UpcomingMeetingPolicy {
+    /// A copy that keeps this occurrence hidden. A rescheduled event has a new id or start, so it shows again.
+    func dismissed(_ event: AgendaEvent) -> UpcomingMeetingPolicy {
         var copy = self
-        copy.dismissedEventID = eventID
+        copy.replies = replies.dismissing(event)
+        return copy
+    }
+
+    /// A copy that hides this occurrence for five minutes, or until it starts if that is sooner.
+    func snoozed(_ event: AgendaEvent, now: Date) -> UpcomingMeetingPolicy {
+        var copy = self
+        copy.replies = replies.snoozing(event, now: now)
         return copy
     }
 
     /// `event` is the agenda's next event. Shown from `leadMinutes` before its start up to 5 minutes after it.
     func state(for event: AgendaEvent?, now: Date) -> State {
-        guard let event, event.id != dismissedEventID else { return .hidden }
+        guard let event, !replies.isHidden(event, now: now) else { return .hidden }
         let untilStart = event.start.timeIntervalSince(now)
         if untilStart > 0 {
             return untilStart <= Double(leadMinutes) * 60 ? .upcoming(minutesLeft: Int((untilStart / 60).rounded(.up))) : .hidden
@@ -39,11 +52,11 @@ nonisolated struct UpcomingMeetingPolicy: Equatable, Sendable {
 
     /// The event the activity is about: the first of `events`, in the order given (by start), that hasn't started or
     /// started less than `inProgressDuration` ago. Taking the first of the agenda's `next` instead would let a
-    /// workshop that began at nine hide the meeting at two. The dismissed event steps aside for the next one, so
-    /// dismissing a meeting doesn't hide another that starts a few minutes later; `includingDismissed` keeps it.
-    func nextMeeting(in events: [AgendaEvent], now: Date, includingDismissed: Bool = false) -> AgendaEvent? {
+    /// workshop that began at nine hide the meeting at two. A dismissed or snoozed event steps aside for the next one,
+    /// so answering a meeting doesn't hide another that starts a few minutes later; `includingHidden` keeps it.
+    func nextMeeting(in events: [AgendaEvent], now: Date, includingHidden: Bool = false) -> AgendaEvent? {
         events.first { event in
-            (includingDismissed || event.id != dismissedEventID)
+            (includingHidden || !replies.isHidden(event, now: now))
                 && (event.start > now || now.timeIntervalSince(event.start) < Self.inProgressDuration)
         }
     }

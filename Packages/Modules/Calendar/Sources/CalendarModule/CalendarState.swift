@@ -20,6 +20,8 @@ final class CalendarState {
     var featured: AgendaEvent?
     /// Whether the activity currently shows `featured`, so the card offers "Bỏ qua".
     var canDismissFeatured = false
+    /// The same, and the meeting has not started: the card also offers "Báo lại".
+    var canSnoozeFeatured = false
     var reminders = RemindersSection.hidden
     let calendar: Calendar
 
@@ -42,6 +44,7 @@ final class CalendarState {
         agenda = Agenda()
         featured = nil
         canDismissFeatured = false
+        canSnoozeFeatured = false
         reminders = .hidden
     }
 }

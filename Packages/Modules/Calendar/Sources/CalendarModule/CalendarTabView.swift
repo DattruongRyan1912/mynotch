@@ -3,7 +3,15 @@ import SwiftUI
 
 /// The "Lịch" tab: today's date, the next event as a card, today's events and the reminders due.
 struct CalendarTabView: View {
-    static let cardWidth: CGFloat = 188
+    /// The notch's preferred height for the tab: the area below the notch, tab bar and inner padding included.
+    static let height: CGFloat = 220
+    /// Wide enough for "Tham gia", "Báo lại" and "Bỏ qua" in one row.
+    static let cardWidth: CGFloat = 216
+    /// Left and right space between the card's edge and its text.
+    static let cardInset: CGFloat = 10
+    /// What is left for the card: the tab's height less the notch's inner padding (14), the tab bar (30), the date
+    /// line above it (19) and the gap under that line (8).
+    static let cardMaxHeight: CGFloat = height - 14 - 30 - 19 - 8
 
     let state: CalendarState
     let actions: CalendarActions
@@ -26,7 +34,7 @@ struct CalendarTabView: View {
 }
 
 /// The "Sắp tới" card: the event to watch for next, with a way in when it has a link.
-private struct UpcomingCard: View {
+struct UpcomingCard: View {
     let state: CalendarState
     let actions: CalendarActions
 
@@ -46,8 +54,8 @@ private struct UpcomingCard: View {
                 Spacer(minLength: 0)
             }
         }
-        .padding(8)
-        .padding(.horizontal, 2)
+        .padding(.vertical, 8)
+        .padding(.horizontal, CalendarTabView.cardInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
@@ -77,29 +85,9 @@ private struct UpcomingCard: View {
         .help("Mở trong Lịch")
         Spacer(minLength: 0)
         if event.meetingURL != nil || state.canDismissFeatured {
-            HStack(spacing: 6) {
-                if event.meetingURL != nil {
-                    Button { actions.join(event) } label: {
-                        Label("Tham gia", systemImage: "video.fill")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(NotchTokens.primaryText)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(NotchTokens.accent, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-                if state.canDismissFeatured {
-                    Button { actions.dismiss(event) } label: {
-                        Text("Bỏ qua")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(NotchTokens.secondaryText)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 4)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
+            MeetingCardActions(
+                event: event, now: state.now, canSnooze: state.canSnoozeFeatured, canDismiss: state.canDismissFeatured, actions: actions
+            )
         }
     }
 

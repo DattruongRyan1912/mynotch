@@ -54,23 +54,62 @@ import Testing
     }
 
     @Test func dismissedHidesThatEventInEveryPhase() {
-        let dismissed = policy.dismissed(eventID: "standup")
+        let dismissed = policy.dismissed(standup)
         #expect(state(dismissed, at: calendar.on(14, at: 9, 57)) == .hidden)
         #expect(state(dismissed, at: calendar.on(14, at: 10, 2)) == .hidden)
     }
 
     @Test func dismissingDoesNotMutateTheOriginalPolicy() {
-        _ = policy.dismissed(eventID: "standup")
+        _ = policy.dismissed(standup)
         #expect(state(at: calendar.on(14, at: 9, 57)) == .upcoming(minutesLeft: 3))
     }
 
     @Test func dismissedDoesNotHideAnotherOrAChangedEvent() {
-        let dismissed = policy.dismissed(eventID: "standup")
+        let dismissed = policy.dismissed(standup)
         let other = event("retro", calendar.on(14, at: 10), calendar.on(14, at: 11))
         // A reschedule gives the event a new id (it carries the occurrence start), so it is a different event.
         let moved = event("standup@moved", calendar.on(14, at: 10, 30), calendar.on(14, at: 11))
         #expect(state(dismissed, at: calendar.on(14, at: 9, 57), for: other) == .upcoming(minutesLeft: 3))
         #expect(state(dismissed, at: calendar.on(14, at: 10, 27), for: moved) == .upcoming(minutesLeft: 3))
+    }
+
+    @Test func dismissedDoesNotHideTheSameEventAtAnotherStart() {
+        let dismissed = policy.dismissed(standup)
+        // The next day's stand-up shares the item, not the occurrence.
+        let tomorrow = event("standup", calendar.on(15, at: 10), calendar.on(15, at: 11))
+        #expect(state(dismissed, at: calendar.on(15, at: 9, 57), for: tomorrow) == .upcoming(minutesLeft: 3))
+    }
+
+    @Test func snoozedHidesTheMeetingUntilTheSnoozeEnds() {
+        let early = UpcomingMeetingPolicy(leadMinutes: 15)
+        let snoozed = early.snoozed(standup, now: calendar.on(14, at: 9, 46))
+        #expect(state(snoozed, at: calendar.on(14, at: 9, 46)) == .hidden)
+        #expect(state(snoozed, at: calendar.on(14, at: 9, 50, 59)) == .hidden)
+        #expect(state(snoozed, at: calendar.on(14, at: 9, 51)) == .upcoming(minutesLeft: 9))
+    }
+
+    @Test func aSnoozeEndsAtTheStartWhenThatComesFirst() {
+        let snoozed = policy.snoozed(standup, now: calendar.on(14, at: 9, 57))
+        #expect(state(snoozed, at: calendar.on(14, at: 9, 59, 59)) == .hidden)
+        #expect(state(snoozed, at: calendar.on(14, at: 10)) == .inProgress)
+    }
+
+    @Test func snoozedDoesNotHideAnotherOrAChangedEvent() {
+        let snoozed = policy.snoozed(standup, now: calendar.on(14, at: 9, 56))
+        let other = event("retro", calendar.on(14, at: 10), calendar.on(14, at: 11))
+        let moved = event("standup", calendar.on(14, at: 10, 30), calendar.on(14, at: 11))
+        #expect(state(snoozed, at: calendar.on(14, at: 9, 57), for: other) == .upcoming(minutesLeft: 3))
+        #expect(state(snoozed, at: calendar.on(14, at: 10, 27), for: moved) == .upcoming(minutesLeft: 3))
+    }
+
+    @Test func snoozingDoesNotMutateTheOriginalPolicy() {
+        _ = policy.snoozed(standup, now: calendar.on(14, at: 9, 56))
+        #expect(state(at: calendar.on(14, at: 9, 57)) == .upcoming(minutesLeft: 3))
+    }
+
+    @Test func aMeetingThatHasStartedStaysOnShowWhenSnoozeIsAsked() {
+        let snoozed = policy.snoozed(standup, now: calendar.on(14, at: 10, 1))
+        #expect(state(snoozed, at: calendar.on(14, at: 10, 2)) == .inProgress)
     }
 }
 
@@ -80,8 +119,8 @@ import Testing
     /// Wednesday 14 October 2026, 13:56.
     var now: Date { calendar.on(14, at: 13, 56) }
 
-    func next(_ events: [AgendaEvent], at now: Date? = nil, policy: UpcomingMeetingPolicy? = nil, includingDismissed: Bool = false) -> String? {
-        (policy ?? self.policy).nextMeeting(in: events, now: now ?? self.now, includingDismissed: includingDismissed)?.id
+    func next(_ events: [AgendaEvent], at now: Date? = nil, policy: UpcomingMeetingPolicy? = nil, includingHidden: Bool = false) -> String? {
+        (policy ?? self.policy).nextMeeting(in: events, now: now ?? self.now, includingHidden: includingHidden)?.id
     }
 
     @Test func noEventsGiveNoMeeting() {
@@ -122,9 +161,19 @@ import Testing
     @Test func aDismissedMeetingStepsAsideForTheNextOne() {
         let early = event("early", calendar.on(14, at: 14), calendar.on(14, at: 15))
         let overlapping = event("overlapping", calendar.on(14, at: 14, 2), calendar.on(14, at: 15))
-        let dismissed = policy.dismissed(eventID: "early")
+        let dismissed = policy.dismissed(early)
         #expect(next([early, overlapping], policy: dismissed) == "overlapping")
-        #expect(next([early, overlapping], policy: dismissed, includingDismissed: true) == "early")
+        #expect(next([early, overlapping], policy: dismissed, includingHidden: true) == "early")
         #expect(next([early], policy: dismissed) == nil)
+    }
+
+    @Test func aSnoozedMeetingStepsAsideForTheNextOneUntilItsSnoozeEnds() {
+        let early = event("early", calendar.on(14, at: 14), calendar.on(14, at: 15))
+        let overlapping = event("overlapping", calendar.on(14, at: 14, 2), calendar.on(14, at: 15))
+        let snoozed = policy.snoozed(early, now: now)
+        #expect(next([early, overlapping], policy: snoozed) == "overlapping")
+        #expect(next([early, overlapping], policy: snoozed, includingHidden: true) == "early")
+        // The snooze made at 13:56 ends at 14:00, the start.
+        #expect(next([early, overlapping], at: calendar.on(14, at: 14), policy: snoozed) == "early")
     }
 }

@@ -16,7 +16,7 @@ import Testing
         #expect(content(at: calendar.on(14, at: 9)) == nil)
         #expect(content(at: calendar.on(14, at: 10, 5)) == nil)
         #expect(MeetingActivityContent(event: nil, policy: policy, now: calendar.on(14, at: 10)) == nil)
-        #expect(content(at: calendar.on(14, at: 9, 58), policy: policy.dismissed(eventID: "standup")) == nil)
+        #expect(content(at: calendar.on(14, at: 9, 58), policy: policy.dismissed(standup)) == nil)
     }
 
     @Test func theContentCarriesTheCountdownAndTheCalendarColour() {

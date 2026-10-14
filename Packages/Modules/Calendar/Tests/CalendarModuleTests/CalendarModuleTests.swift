@@ -109,7 +109,8 @@ import Testing
         #expect(tab.title == "Lịch")
         #expect(tab.systemImage == "calendar")
         #expect(tab.preferredHeight == 220)
-        #expect(!tab.acceptsKeyboard)
+        // The card's buttons are reached with the keyboard once the notch is open on purpose.
+        #expect(tab.acceptsKeyboard)
     }
 
     @Test func startReadsTheWeekAheadAndBuildsTheAgenda() async {
@@ -243,7 +244,7 @@ import Testing
         #expect(module.refreshRequests == requests)
     }
 
-    @Test func restartingStartsFresh() async {
+    @Test func restartingStartsFromTheCalendarButKeepsTheAnswersToTheCard() async {
         source.events = [standup(at: 9, 3)]
         await start()
         module.dismissMeeting(module.state.featured!)
@@ -251,9 +252,11 @@ import Testing
 
         await harness.registry.setEnabled(false, for: "calendar")
         await harness.registry.setEnabled(true, for: "calendar")
-        await settle { module.appliedRefreshes >= 1 && meetingEntry != nil }
+        await settle { module.appliedRefreshes >= 2 }
 
-        #expect(meetingEntry != nil)
+        // The agenda is read again; the dismissal is not forgotten (more in `MeetingAnswersTests`).
+        #expect(module.state.featured?.id == "standup")
+        #expect(meetingEntry == nil)
     }
 
     // MARK: Meeting activity
@@ -684,9 +687,13 @@ import Testing
         await start()
         let meeting = module.state.featured!
         let actions = module.actions
+        #expect(meetingEntry != nil)
 
         actions.open(meeting)
         #expect(opener.urls.map(\.absoluteString) == ["ical://ekevent/standup"])
+        actions.snooze(meeting)
+        #expect(meetingEntry == nil)
+        #expect(module.state.featured?.id == "standup")
         actions.dismiss(meeting)
         #expect(meetingEntry == nil)
         actions.join(meeting)

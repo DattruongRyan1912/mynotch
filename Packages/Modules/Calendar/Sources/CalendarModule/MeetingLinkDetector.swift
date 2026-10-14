@@ -1,7 +1,7 @@
 import Foundation
 
 nonisolated enum MeetingProvider: Equatable, Sendable {
-    case zoom, googleMeet, teams, webex, faceTime
+    case zoom, googleMeet, teams, webex, faceTime, whereby, jitsi
 }
 
 nonisolated struct MeetingLink: Equatable, Sendable {
@@ -10,13 +10,15 @@ nonisolated struct MeetingLink: Equatable, Sendable {
 }
 
 /// Finds the join link of an online meeting. EventKit has no property for it, so it is read out of the text the
-/// organizer's invite leaves in the event.
+/// organizer's invite leaves in the event. Jitsi on a server of one's own has no address of its own to recognise (any
+/// `https://<host>/<room>` could be a document), so it counts only when the invite says "jitsi" itself.
 nonisolated enum MeetingLinkDetector {
     /// A link ends at whitespace or at a character that marks the end of an HTML attribute or tag.
     private static let rest = #"[^\s"<>]"#
 
     /// Hosts match in any case, since people type and paste them that way. ZoomGov also lives on `zoomgov.com`, and
-    /// Zoom and Webex hosts can have several labels in front (`acme.my.webex.com`). A Zoom passcode can carry `%` and `+`.
+    /// Zoom, Webex and Whereby hosts can have several labels in front (`acme.my.webex.com`, `acme.whereby.com`). A Zoom
+    /// passcode can carry `%` and `+`. A Whereby or Jitsi link needs a room after the host, since the bare host is a website.
     private static let patterns: [(provider: MeetingProvider, regex: NSRegularExpression)] = {
         let table: [(MeetingProvider, String)] = [
             (.zoom, #"https://([\w-]+\.)*zoom(\.us|gov\.(us|com))/(j|my|w)/[\w?=&.%+\-]+"#),
@@ -24,9 +26,20 @@ nonisolated enum MeetingLinkDetector {
             (.teams, #"https://teams\.(microsoft|live)\.com/(l/meetup-join|meet)/\#(rest)+"#),
             (.webex, #"https://([\w-]+\.)+webex\.com/\#(rest)+"#),
             (.faceTime, #"https://facetime\.apple\.com/join\#(rest)+"#),
+            (.whereby, #"https://([\w-]+\.)*whereby\.com/[\w-]\#(rest)*"#),
+            (.jitsi, #"https://([\w-]+\.)*meet\.jit\.si/[\w%-]\#(rest)*"#),
         ]
         return table.map { (provider: $0.0, regex: try! NSRegularExpression(pattern: $0.1, options: .caseInsensitive)) }
     }()
+
+    /// Every `https://` address in a text, to be looked at one by one for a Jitsi room.
+    private static let anyLink = try! NSRegularExpression(pattern: #"https://\#(rest)+"#, options: .caseInsensitive)
+
+    /// What a room on a server of one's own looks like: one path segment, then at most a query or a fragment. The
+    /// first group is the host.
+    private static let ownServerRoom = try! NSRegularExpression(
+        pattern: #"^https://((?:[\w-]+\.)+[\w-]+)(?::\d+)?/[\w%-]+(?:[?#].*)?$"#, options: .caseInsensitive
+    )
 
     /// Punctuation that follows a link in prose or sits around it as a wrapper, not part of the address.
     private static let trailingPunctuation = CharacterSet(charactersIn: ")>],.;")
@@ -42,14 +55,45 @@ nonisolated enum MeetingLinkDetector {
 
     private static func firstLink(in text: String) -> MeetingLink? {
         let whole = NSRange(text.startIndex..., in: text)
-        return patterns
-            .compactMap { pattern -> (location: Int, link: MeetingLink)? in
-                guard let match = pattern.regex.firstMatch(in: text, range: whole), let range = Range(match.range, in: text),
-                      let url = URL(string: trimmed(String(text[range]))) else { return nil }
-                return (match.range.location, MeetingLink(provider: pattern.provider, url: url))
+        var found = patterns.compactMap { pattern -> (location: Int, link: MeetingLink)? in
+            guard let match = pattern.regex.firstMatch(in: text, range: whole), let range = Range(match.range, in: text),
+                  let url = URL(string: trimmed(String(text[range]))) else { return nil }
+            return (match.range.location, MeetingLink(provider: pattern.provider, url: url))
+        }
+        if let room = ownServerJitsiRoom(in: text, whole: whole) { found.append(room) }
+        return found.min { $0.location < $1.location }?.link
+    }
+
+    /// The first address that is a Jitsi room on a server of one's own: its host says "jitsi", or the line it is on or
+    /// the line above says it before the address. The text since the previous address is all that counts, so the
+    /// word is never shared by two addresses.
+    private static func ownServerJitsiRoom(in text: String, whole: NSRange) -> (location: Int, link: MeetingLink)? {
+        var contextStart = text.startIndex
+        for match in anyLink.matches(in: text, range: whole) {
+            guard let range = Range(match.range, in: text) else { continue }
+            let context = text[contextStart..<range.lowerBound]
+            contextStart = range.upperBound
+            let address = trimmed(String(text[range]))
+            let addressRange = NSRange(address.startIndex..., in: address)
+            guard let room = ownServerRoom.firstMatch(in: address, range: addressRange), let hostRange = Range(room.range(at: 1), in: address),
+                  !isJitsiProjectSite(String(address[hostRange])), let url = URL(string: address) else { continue }
+            let nearby = context.split(separator: "\n", omittingEmptySubsequences: false).suffix(2)
+            if mentionsJitsi(address[hostRange]) || nearby.contains(where: mentionsJitsi) {
+                return (match.range.location, MeetingLink(provider: .jitsi, url: url))
             }
-            .min { $0.location < $1.location }?
-            .link
+        }
+        return nil
+    }
+
+    /// Whatever the Mac's language, so a Turkish locale does not part "JITSI" from "jitsi".
+    private static func mentionsJitsi(_ text: some StringProtocol) -> Bool {
+        text.range(of: "jitsi", options: .caseInsensitive) != nil
+    }
+
+    /// The project's website and forum say "jitsi" too, and are not rooms.
+    private static func isJitsiProjectSite(_ host: String) -> Bool {
+        let host = host.lowercased()
+        return host == "jitsi.org" || host.hasSuffix(".jitsi.org")
     }
 
     private static func trimmed(_ link: String) -> String {

@@ -22,6 +22,14 @@ import Testing
         ("https://acme.webex.com/acme/j.php?MTID=m1234abcd", .webex),
         ("https://acme.my.webex.com/meet/ryan", .webex),
         ("https://facetime.apple.com/join#v=1&p=AbCdEf123&k=XyZ", .faceTime),
+        ("https://whereby.com/acme-standup", .whereby),
+        ("https://acme.whereby.com/standup", .whereby),
+        ("https://whereby.com/acme-standup?roomKey=ZXlKaGJHY2lPaUpTVXpJMU5pSjk.Ab-c_D", .whereby),
+        ("https://meet.jit.si/WeeklyStandup2026", .jitsi),
+        ("https://meet.jit.si/WeeklyStandup2026#config.prejoinPageEnabled=false&userInfo.displayName=%22Ryan%22", .jitsi),
+        ("https://meet.jit.si/weekly-standup?jwt=eyJhbGciOiJIUzI1NiJ9.e30.Zm9v", .jitsi),
+        ("https://jitsi.acme.example/WeeklyStandup", .jitsi),
+        ("https://meet.jitsi.acme.example:8443/WeeklyStandup?lang=vi", .jitsi),
     ])
     func detectsEachProvider(url: String, provider: MeetingProvider) {
         #expect(link(in: "Join: \(url) see you") == MeetingLink(provider: provider, url: URL(string: url)!))
@@ -66,5 +74,103 @@ import Testing
         #expect(link(in: "meet.google.com/abc-defg-hij") == nil)
         #expect(link(in: "https://meet.google.com/landing") == nil)
         #expect(link(in: "https://notzoom.example.com/j/123") == nil)
+    }
+
+    // MARK: Whereby and Jitsi
+
+    @Test func wherebyAndJitsiHostsMatchInAnyCase() {
+        #expect(link(in: "https://Meet.Jit.Si/WeeklyStandup")?.provider == .jitsi)
+        #expect(link(in: "HTTPS://ACME.WHEREBY.COM/standup")?.provider == .whereby)
+        #expect(link(in: "https://JITSI.acme.example/Standup")?.provider == .jitsi)
+    }
+
+    @Test func trailingPunctuationIsStrippedFromWherebyAndJitsiLinks() {
+        #expect(link(in: "Join at (https://whereby.com/acme-standup).")?.url == URL(string: "https://whereby.com/acme-standup"))
+        #expect(link(in: "Join <https://meet.jit.si/WeeklyStandup>,")?.url == URL(string: "https://meet.jit.si/WeeklyStandup"))
+        #expect(link(in: #"<a href="https://meet.jit.si/WeeklyStandup">Join</a>"#)?.url == URL(string: "https://meet.jit.si/WeeklyStandup"))
+    }
+
+    @Test func wherebyNeedsARoom() {
+        #expect(link(in: "https://whereby.com/") == nil)
+        #expect(link(in: "https://whereby.com") == nil)
+        #expect(link(in: "https://notwhereby.com/acme-standup") == nil)
+        #expect(link(in: "https://whereby.com.evil.example/acme-standup") == nil)
+        #expect(link(in: "whereby.com/acme-standup") == nil)
+    }
+
+    @Test func publicJitsiNeedsARoom() {
+        #expect(link(in: "https://meet.jit.si/") == nil)
+        #expect(link(in: "https://meet.jit.si") == nil)
+        #expect(link(in: "https://notmeet.jit.si.evil.example/WeeklyStandup") == nil)
+        #expect(link(in: "meet.jit.si/WeeklyStandup") == nil)
+    }
+
+    @Test func aServerOfOneOwnIsJitsiOnlyWhenTheHostSaysSo() {
+        #expect(link(in: "Room: https://meet.acme.example/WeeklyStandup") == nil)
+        #expect(link(in: "Room: https://acme.example/WeeklyStandup") == nil)
+        #expect(link(in: "Room: https://jitsi.acme.example/WeeklyStandup") == MeetingLink(provider: .jitsi, url: URL(string: "https://jitsi.acme.example/WeeklyStandup")!))
+        #expect(MeetingLinkDetector.detect(url: URL(string: "https://meet.jitsi.acme.example/WeeklyStandup"), location: nil, notes: nil)?.provider == .jitsi)
+        #expect(MeetingLinkDetector.detect(url: URL(string: "https://meet.acme.example/WeeklyStandup"), location: nil, notes: nil) == nil)
+    }
+
+    @Test func aServerOfOneOwnIsJitsiWhenTheNotesSaySoBeforeTheLink() {
+        let room = URL(string: "https://meet.acme.example/WeeklyStandup")!
+        #expect(link(in: "Jitsi: https://meet.acme.example/WeeklyStandup") == MeetingLink(provider: .jitsi, url: room))
+        #expect(link(in: "Join via JITSI Meet at https://meet.acme.example/WeeklyStandup.") == MeetingLink(provider: .jitsi, url: room))
+        #expect(link(in: "Jitsi Meet\nhttps://meet.acme.example/WeeklyStandup") == MeetingLink(provider: .jitsi, url: room))
+        #expect(MeetingLinkDetector.detect(url: nil, location: "Jitsi https://meet.acme.example/WeeklyStandup", notes: nil)?.url == room)
+    }
+
+    @Test func theWordJitsiMustBeNearTheLink() {
+        // After the link, or lines away from it, it says nothing about this address.
+        #expect(link(in: "https://meet.acme.example/WeeklyStandup (Jitsi)") == nil)
+        #expect(link(in: "Jitsi\n\nAgenda to follow.\nhttps://meet.acme.example/WeeklyStandup") == nil)
+        #expect(link(in: "Same as last week https://meet.acme.example/WeeklyStandup") == nil)
+    }
+
+    @Test func anotherLinkInTheNotesIsNotTakenForTheJitsiRoom() {
+        let room = URL(string: "https://meet.acme.example/WeeklyStandup")!
+        #expect(link(in: "Agenda: https://docs.acme.example/agenda\nJitsi: https://meet.acme.example/WeeklyStandup")?.url == room)
+        #expect(link(in: "Jitsi: https://meet.acme.example/WeeklyStandup, agenda https://docs.acme.example/agenda")?.url == room)
+        // The word belongs to the first link that follows it only.
+        #expect(link(in: "Jitsi: https://meet.acme.example/WeeklyStandup https://docs.acme.example/agenda")?.url == room)
+        #expect(link(in: "Agenda https://docs.acme.example/agenda\nJitsi: see you") == nil)
+        // The word is used up by the first address after it, even when that one is not a room.
+        #expect(link(in: "Jitsi docs: https://docs.acme.example/a/b see also https://meet.acme.example/WeeklyStandup") == nil)
+    }
+
+    @Test func aServerOfOneOwnNeedsASingleRoomName() {
+        #expect(link(in: "Jitsi: https://meet.acme.example/") == nil)
+        #expect(link(in: "Jitsi: https://meet.acme.example") == nil)
+        #expect(link(in: "Jitsi: https://meet.acme.example/team/WeeklyStandup") == nil)
+        #expect(link(in: "Jitsi: https://meet.acme.example/WeeklyStandup/") == nil)
+        #expect(link(in: "Jitsi: https://meet.acme.example/report.pdf") == nil)
+        #expect(link(in: "Jitsi: http://meet.acme.example/WeeklyStandup") == nil)
+        #expect(link(in: "Jitsi: https://meet.acme.example/WeeklyStandup?lang=vi")?.url == URL(string: "https://meet.acme.example/WeeklyStandup?lang=vi"))
+    }
+
+    @Test func theJitsiProjectsOwnSitesAreNotRooms() {
+        #expect(link(in: "https://jitsi.org/downloads") == nil)
+        #expect(link(in: "Jitsi: https://jitsi.org/downloads") == nil)
+        #expect(link(in: "https://community.jitsi.org/t/how-to-host/12345") == nil)
+        #expect(link(in: "Jitsi: https://community.jitsi.org/latest") == nil)
+        #expect(link(in: "https://jitsi.github.io/handbook/docs/intro") == nil)
+    }
+
+    @Test func theFirstLinkInAFieldWinsAmongTheNewServicesToo() {
+        let jitsi = "https://meet.jit.si/WeeklyStandup"
+        let whereby = "https://acme.whereby.com/standup"
+        #expect(link(in: "Main \(whereby) or backup \(jitsi)")?.provider == .whereby)
+        #expect(link(in: "Main \(jitsi) or backup \(whereby)")?.provider == .jitsi)
+        #expect(link(in: "Main https://zoom.us/j/123 or Jitsi: https://meet.acme.example/WeeklyStandup")?.provider == .zoom)
+        #expect(link(in: "Jitsi: https://meet.acme.example/WeeklyStandup or https://zoom.us/j/123")?.provider == .jitsi)
+    }
+
+    @Test func urlBeatsLocationBeatsNotesForTheNewServices() {
+        let whereby = "https://acme.whereby.com/standup"
+        let jitsi = "https://meet.jit.si/WeeklyStandup"
+        #expect(MeetingLinkDetector.detect(url: URL(string: whereby), location: jitsi, notes: "https://zoom.us/j/111")?.provider == .whereby)
+        #expect(MeetingLinkDetector.detect(url: nil, location: jitsi, notes: whereby)?.provider == .jitsi)
+        #expect(MeetingLinkDetector.detect(url: URL(string: "https://example.com/agenda"), location: "Room 4", notes: whereby)?.provider == .whereby)
     }
 }

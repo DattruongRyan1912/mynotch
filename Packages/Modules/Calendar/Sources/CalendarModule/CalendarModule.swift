@@ -7,6 +7,7 @@ import SwiftUI
 struct CalendarActions {
     var open: (AgendaEvent) -> Void
     var join: (AgendaEvent) -> Void
+    var snooze: (AgendaEvent) -> Void
     var dismiss: (AgendaEvent) -> Void
     var complete: (AgendaReminder) -> Void
     var requestRemindersAccess: () -> Void
@@ -52,6 +53,9 @@ public final class CalendarModule: FeatureModule {
     /// The settings the latest refresh used; a settings write that leaves them as they are needs no refresh.
     private var usedSettings: CalendarSettings?
     private var minuteTimer: ScheduledAction?
+    /// Brings the card back when a snooze ends, with the moment it is set for, so a refresh that finds the same
+    /// snooze pending leaves it be.
+    private var snoozeTimer: (wake: Date, action: ScheduledAction)?
     private var debounce: ScheduledAction?
     /// Only the newest refresh applies its result: an older one may have read the calendar before a change.
     private var refreshGeneration = 0
@@ -92,6 +96,8 @@ public final class CalendarModule: FeatureModule {
         let settings = CalendarSettings(context.settings)
         usedSettings = settings
         policy = UpcomingMeetingPolicy(leadMinutes: settings.meetingLeadMinutes)
+        policy.replies = context.settings.value(CalendarSettingsKeys(context.settings).meetingReplies)
+        pruneReplies(now: clock())
         // Each source is asked for its stream here, not in the loop that reads it, so nothing that happens
         // from now on is missed while that loop is still getting started.
         refreshOn(dataSource.changes, debounced: false)
@@ -108,6 +114,8 @@ public final class CalendarModule: FeatureModule {
     public func stop() async {
         minuteTimer?.cancel()
         minuteTimer = nil
+        snoozeTimer?.action.cancel()
+        snoozeTimer = nil
         debounce?.cancel()
         debounce = nil
         context = nil
@@ -120,8 +128,8 @@ public final class CalendarModule: FeatureModule {
 
     public func makeTab() -> NotchTab? {
         NotchTab(
-            id: descriptor.id, title: "Lịch", systemImage: "calendar", preferredHeight: 220,
-            content: AnyView(CalendarTabView(state: state, actions: actions))
+            id: descriptor.id, title: "Lịch", systemImage: "calendar", preferredHeight: CalendarTabView.height,
+            acceptsKeyboard: true, content: AnyView(CalendarTabView(state: state, actions: actions))
         )
     }
 
@@ -140,6 +148,7 @@ public final class CalendarModule: FeatureModule {
         CalendarActions(
             open: { [weak self] event in self?.open(event) },
             join: { [weak self] event in self?.join(event) },
+            snooze: { [weak self] event in self?.snoozeMeeting(event) },
             dismiss: { [weak self] event in self?.dismissMeeting(event) },
             complete: { [weak self] reminder in self?.context?.run { await self?.complete(reminder) } },
             requestRemindersAccess: { [weak self] in self?.context?.run { await self?.requestRemindersAccess() } },
@@ -161,9 +170,35 @@ public final class CalendarModule: FeatureModule {
         dismissMeeting(event)
     }
 
+    /// "Bỏ qua": the card stays away for this occurrence until it is over.
     func dismissMeeting(_ event: AgendaEvent) {
-        policy = policy.dismissed(eventID: event.id)
+        answer { $0.dismissed(event) }
+    }
+
+    /// "Báo lại": the card goes away for five minutes, or until the start if that comes first, and comes back by itself.
+    func snoozeMeeting(_ event: AgendaEvent) {
+        let now = clock()
+        answer { $0.snoozed(event, now: now) }
+    }
+
+    /// Applies an answer to the card, keeps it for the next start and shows what is left to show.
+    private func answer(_ change: (UpcomingMeetingPolicy) -> UpcomingMeetingPolicy) {
+        policy = change(policy)
+        storeReplies()
         updateMeeting(now: clock())
+    }
+
+    private func storeReplies() {
+        guard let context else { return }
+        context.settings.set(policy.replies, for: CalendarSettingsKeys(context.settings).meetingReplies)
+    }
+
+    /// Forgets the answers to meetings that are over, so what is stored stays as small as the day's meetings.
+    private func pruneReplies(now: Date) {
+        let kept = policy.replies.pruned(now: now)
+        guard kept != policy.replies else { return }
+        policy.replies = kept
+        storeReplies()
     }
 
     /// Ticks the reminder off in the data source, then reads the list again: a save that failed brings it back.
@@ -220,6 +255,7 @@ public final class CalendarModule: FeatureModule {
 
     private func apply(events: [AgendaEvent], reminders: [AgendaReminder]?, settings: CalendarSettings, now: Date) {
         policy.leadMinutes = settings.meetingLeadMinutes
+        pruneReplies(now: now)
         let hidden = Set(settings.hiddenCalendarIDs)
         let shown = events.filter { !hidden.contains($0.calendarID) && (settings.showAllDay || !$0.isAllDay) }
         let agenda = AgendaBuilder.build(events: shown, now: now, calendar: calendar)
@@ -293,11 +329,14 @@ public final class CalendarModule: FeatureModule {
         let upcoming = state.agenda.upcoming
         let content = MeetingActivityContent(event: policy.nextMeeting(in: upcoming, now: now), policy: policy, now: now)
         let endOfToday = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
-        let featured = policy.nextMeeting(in: upcoming.filter { $0.start < endOfToday }, now: now, includingDismissed: true)
+        let featured = policy.nextMeeting(in: upcoming.filter { $0.start < endOfToday }, now: now, includingHidden: true)
             ?? state.agenda.next
         if state.featured != featured { state.featured = featured }
         let canDismiss = content != nil && content?.eventID == featured?.id
         if state.canDismissFeatured != canDismiss { state.canDismissFeatured = canDismiss }
+        let canSnooze = canDismiss && content?.state.isUpcoming == true
+        if state.canSnoozeFeatured != canSnooze { state.canSnoozeFeatured = canSnooze }
+        scheduleSnoozeEnd(now: now)
         guard content != publishedMeeting else { return }
         publishedMeeting = content
         if let content {
@@ -305,6 +344,23 @@ public final class CalendarModule: FeatureModule {
         } else {
             context.activities.clear(id: Self.activityID)
         }
+    }
+
+    /// The card comes back the moment a snooze ends, not at the next minute: five minutes is five minutes.
+    private func scheduleSnoozeEnd(now: Date) {
+        guard let context, let wake = policy.replies.nextWake(after: now) else {
+            snoozeTimer?.action.cancel()
+            snoozeTimer = nil
+            return
+        }
+        guard snoozeTimer?.wake != wake else { return }
+        snoozeTimer?.action.cancel()
+        let delay = Duration.milliseconds(Int((wake.timeIntervalSince(now) * 1000).rounded(.up))) + Self.minuteMargin
+        snoozeTimer = (wake, context.scheduler.schedule(after: delay) { [weak self] in
+            guard let self else { return }
+            snoozeTimer = nil
+            updateMeeting(now: clock())
+        })
     }
 }
 
