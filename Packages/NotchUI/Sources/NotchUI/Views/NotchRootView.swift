@@ -37,6 +37,7 @@ struct NotchRootView: View {
     var body: some View {
         let size = geometry.shapeSize(for: state, contentHeight: contentHeight)
         let radii = geometry.cornerRadii(for: state)
+        let _ = NotchLog.record("body display=\(state.logDescription) size=\(size.width)x\(size.height) shownTab=\(shownTab?.id.rawValue ?? "-")")
         let shape = NotchShape(topRadius: radii.top, bottomRadius: radii.bottom)
         shape
             .fill(NotchTokens.background)
@@ -72,6 +73,7 @@ struct NotchRootView: View {
                 }
                 .frame(height: geometry.notchSize.height)
                 .transition(.opacity)
+                .notchLogLifecycle("compact")
             }
         case .open, .toast:
             // One branch for both, so a tab covered by a toast keeps its identity and its SwiftUI state
@@ -103,6 +105,7 @@ struct NotchRootView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     // Esc while the tab has focus; the panel's cancelOperation covers the rest.
                     .onExitCommand { model.close() }
+                    .notchLogLifecycle("tab \(shownTab.id.rawValue)")
                     .id(shownTab.id)
             } else {
                 Text("Chưa có module nào đang chạy")
@@ -118,6 +121,7 @@ struct NotchRootView: View {
             content()
         }
         .padding([.horizontal, .bottom], NotchTokens.padding)
+        .notchLogLifecycle("expanded")
         .transition(.asymmetric(
             insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)).animation(NotchTokens.spring.delay(0.08)),
             removal: .opacity.animation(.easeOut(duration: 0.1))

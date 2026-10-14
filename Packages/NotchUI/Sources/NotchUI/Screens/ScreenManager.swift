@@ -18,6 +18,7 @@ public final class ScreenManager {
         onMouseDown: { [weak self] point in self?.mouseDown(at: point) }
     )
     private lazy var fullscreenDetector = FullscreenDetector { [weak self] displays in
+        if displays != self?.fullscreenDisplays { NotchLog.record("fullscreen displays=\(displays.sorted())") }
         self?.fullscreenDisplays = displays
         self?.applyVisibility()
     }
@@ -102,7 +103,14 @@ public final class ScreenManager {
             case .cursor: id == (cursorDisplay ?? mainID)
             }
             let hiddenByFullscreen = hideInFullscreen && fullscreenDisplays.contains(id)
-            controller.setVisible(allowedByMode && !isHiddenByUser && !hiddenByFullscreen)
+            let visible = allowedByMode && !isHiddenByUser && !hiddenByFullscreen
+            if visible != controller.isVisible {
+                NotchLog.record(
+                    "visibility display=\(id) -> \(visible) mode=\(mode) allowedByMode=\(allowedByMode) "
+                        + "hiddenByUser=\(isHiddenByUser) hiddenByFullscreen=\(hiddenByFullscreen)"
+                )
+            }
+            controller.setVisible(visible)
         }
     }
 

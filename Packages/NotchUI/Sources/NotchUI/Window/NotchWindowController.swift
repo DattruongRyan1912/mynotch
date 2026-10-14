@@ -14,6 +14,9 @@ final class NotchWindowController {
     private let registry: ModuleRegistry
     private let activities: ActivityCenter
     private var observation: Task<Void, Never>?
+    #if DEBUG
+    private let trace: NotchWindowTrace
+    #endif
     /// Last keyboard focus decision; the panel makes itself key only when it turns true.
     private var lastFocus = false
     /// Pasteboard types of the drag in progress, empty when nothing is being dragged.
@@ -40,6 +43,9 @@ final class NotchWindowController {
         hosting = FirstMouseHostingView(rootView: NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry))
         hosting.frame = CGRect(origin: .zero, size: geometry.panelSize)
         panel.contentView = hosting
+        #if DEBUG
+        trace = NotchWindowTrace(panel)
+        #endif
         panel.onCancel = { [weak model] in model?.close() }
         panel.onResignKey = { [weak self] in self?.panelDidResignKey() }
         observe()
@@ -51,6 +57,7 @@ final class NotchWindowController {
         self.displayID = displayID
         let newGeometry = NotchGeometry(screen: screen, config: config)
         guard newGeometry != geometry || screen.frame != screenFrame else { return }
+        NotchLog.record("update display=\(displayID) panel \(panel.frame.logDescription) -> \(newGeometry.panelFrame(in: screen.frame).logDescription)")
         screenFrame = screen.frame
         geometry = newGeometry
         panel.setFrame(geometry.panelFrame(in: screen.frame), display: true)
@@ -63,7 +70,7 @@ final class NotchWindowController {
         guard visible != isVisible else { return }
         isVisible = visible
         if visible {
-            panel.orderFrontRegardless()
+            orderFront("visible")
             refreshHitTesting()
         } else {
             if model.isPointerInside { model.pointerExited() }
@@ -73,7 +80,7 @@ final class NotchWindowController {
             panel.allowsKeyStatus = false
             lastFocus = false
             panel.ignoresMouseEvents = true
-            panel.orderOut(nil)
+            orderOut("hidden")
         }
     }
 
@@ -89,7 +96,10 @@ final class NotchWindowController {
         let dropTab = dragTypes.isEmpty
             ? nil : DropRouting.tab(for: dragTypes, tabs: registry.tabs, preferring: model.displayState.shownTab(tabUnderToast: model.tabUnderToast))
         let inside = currentHitRect(dragging: dropTab != nil).contains(point)
-        if panel.ignoresMouseEvents == inside { panel.ignoresMouseEvents = !inside }
+        if panel.ignoresMouseEvents == inside {
+            panel.ignoresMouseEvents = !inside
+            NotchLog.record("passthrough ignoresMouse=\(!inside) state=\(model.displayState.logDescription)")
+        }
         let action = DropRouting.dragAction(
             dropTab: dropTab, inside: inside, isDragging: model.isDragging, startedInside: dragStartedInside, isRefresh: isRefresh
         )
@@ -119,8 +129,18 @@ final class NotchWindowController {
         observation?.cancel()
         observation = nil
         panel.allowsKeyStatus = false
-        panel.orderOut(nil)
+        orderOut("controller closed")
         panel.close()
+    }
+
+    private func orderFront(_ reason: String) {
+        NotchLog.record("orderFront reason=\(reason) \(panel.logSummary)")
+        panel.orderFrontRegardless()
+    }
+
+    private func orderOut(_ reason: String) {
+        NotchLog.record("orderOut reason=\(reason) \(panel.logSummary)")
+        panel.orderOut(nil)
     }
 
     /// The shape can change while the mouse is still (hotkey, toast, activity), so re-check the pointer.
@@ -142,15 +162,19 @@ final class NotchWindowController {
     /// the user clicked another app.
     private func updateKeyboard(wants: Bool, focuses: Bool) {
         if wants != panel.allowsKeyStatus {
+            NotchLog.record("keyboard allowsKey=\(wants) isKey=\(panel.isKeyWindow) state=\(model.displayState.logDescription)")
             panel.allowsKeyStatus = wants
             if !wants, isVisible, panel.isKeyWindow {
                 // Ordering out returns key status to the app in front; ordering back in leaves it there.
-                panel.orderOut(nil)
-                panel.orderFrontRegardless()
+                orderOut("hand keyboard back")
+                orderFront("hand keyboard back")
             }
         }
         // An ordered-out panel must not take the keyboard where nobody can see it.
-        if focuses, !lastFocus, isVisible { panel.makeKey() }
+        if focuses, !lastFocus, isVisible {
+            NotchLog.record("keyboard makeKey state=\(model.displayState.logDescription)")
+            panel.makeKey()
+        }
         lastFocus = focuses
     }
 
@@ -163,7 +187,7 @@ final class NotchWindowController {
 
     private func observe() {
         observation = Task { [weak self, activities, registry, model] in
-            for await (hasActivity, _, _, wantsKeyboard, focusesKeyboard, isDragging) in Observations({
+            for await (hasActivity, state, contentHeight, wantsKeyboard, focusesKeyboard, isDragging) in Observations({
                 let state = model.displayState
                 let covered = model.tabUnderToast
                 return (
@@ -178,6 +202,10 @@ final class NotchWindowController {
                 )
             }) {
                 guard let self else { return }
+                NotchLog.record(
+                    "observed display=\(state.logDescription) activity=\(hasActivity) contentHeight=\(contentHeight) "
+                        + "wantsKeyboard=\(wantsKeyboard) focusesKeyboard=\(focusesKeyboard) dragging=\(isDragging)"
+                )
                 self.model.hasActivity = hasActivity
                 // A finished drag (drop, or the pointer left) must not leave its types behind for later refreshes.
                 if !isDragging { self.dragTypes = [] }

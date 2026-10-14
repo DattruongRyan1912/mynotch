@@ -5,18 +5,33 @@ import SwiftUI
 /// Per-screen notch state machine. Time is injected through `Scheduler`.
 @Observable
 public final class NotchViewModel {
-    public private(set) var state: NotchState = .closed
+    public private(set) var state: NotchState = .closed {
+        didSet {
+            guard state != oldValue else { return }
+            NotchLog.record(
+                "state \(oldValue.logDescription) -> \(state.logDescription) display=\(displayState.logDescription) "
+                    + "tabUnderToast=\(tabUnderToast?.rawValue ?? "-") onPurpose=\(isOpenedOnPurpose) dragging=\(isDragging) "
+                    + "pinned=\(isPinned) pointerInside=\(isPointerInside)"
+            )
+        }
+    }
     public private(set) var toastContent: AnyView?
     public private(set) var lastTab: ModuleID?
     public private(set) var isPointerInside = false
     /// Set by the owner when the activity center has something to show.
-    public var hasActivity = false
+    public var hasActivity = false {
+        didSet {
+            guard hasActivity != oldValue else { return }
+            NotchLog.record("activity \(hasActivity) display=\(displayState.logDescription)")
+        }
+    }
     /// Keeps the notch open until unpinned or explicitly closed. Any window of MyNotch other than the notch
     /// (Settings, alerts, sheets, popovers, menus) counts as outside, so a module pins the notch while it
     /// shows such auxiliary UI.
     public var isPinned = false {
         didSet {
             guard isPinned != oldValue else { return }
+            NotchLog.record("pinned \(isPinned)")
             isPinned ? pendingClose?.cancel() : scheduleCloseIfPointerOutside()
         }
     }
@@ -53,6 +68,7 @@ public final class NotchViewModel {
     }
 
     public func pointerEntered() {
+        NotchLog.record("pointer entered state=\(state.logDescription)")
         isPointerInside = true
         pendingClose?.cancel()
         guard !state.isExpanded, pendingOpen == nil else { return }
@@ -63,6 +79,7 @@ public final class NotchViewModel {
     }
 
     public func pointerExited() {
+        NotchLog.record("pointer exited state=\(state.logDescription)")
         isPointerInside = false
         pendingOpen?.cancel()
         pendingOpen = nil
@@ -85,6 +102,7 @@ public final class NotchViewModel {
     }
 
     private func show(tab: ModuleID?, onPurpose: Bool) {
+        NotchLog.record("show tab=\(tab?.rawValue ?? "-") onPurpose=\(onPurpose) from=\(state.logDescription)")
         pendingOpen?.cancel()
         pendingOpen = nil
         pendingClose?.cancel()
@@ -102,6 +120,7 @@ public final class NotchViewModel {
     /// Shows `content` for at least `duration`. Over an open tab the notch then returns to that tab
     /// instead of closing, so a toast never throws the user out of what they were doing.
     public func showToast(_ content: AnyView, duration: Duration) {
+        NotchLog.record("toast duration=\(duration) from=\(state.logDescription)")
         pendingOpen?.cancel()
         pendingOpen = nil
         pendingClose?.cancel()
@@ -121,12 +140,14 @@ public final class NotchViewModel {
     /// auxiliary UI it shows; so do notches with a drag in progress.
     public func clickedOutside() {
         guard state.isExpanded, !isPinned, !isDragging else { return }
+        NotchLog.record("close: click outside")
         close()
     }
 
     /// Closes the notch and ends pin and drag mode with it: a closed notch (hidden, toggled shut) must not stay stuck
     /// in drag mode, which would ignore outside clicks and keep a later toast open.
     public func close() {
+        NotchLog.record("close from=\(state.logDescription)")
         pendingOpen?.cancel()
         pendingOpen = nil
         pendingClose?.cancel()
@@ -142,6 +163,7 @@ public final class NotchViewModel {
 
     public func setDragging(_ dragging: Bool) {
         guard dragging != isDragging else { return }
+        NotchLog.record("drag mode dragging=\(dragging)")
         isDragging = dragging
         dragging ? pendingClose?.cancel() : scheduleCloseIfPointerOutside()
     }
@@ -171,7 +193,9 @@ public final class NotchViewModel {
     private func scheduleCloseIfPointerOutside() {
         guard state.isExpanded, !isPointerInside, !isPinned, !isDragging, state != .toast || toastExpired else { return }
         pendingClose?.cancel()
+        NotchLog.record("close scheduled")
         pendingClose = scheduler.schedule(after: delays().close) { [weak self] in
+            NotchLog.record("close: delay elapsed")
             self?.close()
         }
     }
