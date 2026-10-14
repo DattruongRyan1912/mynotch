@@ -25,6 +25,19 @@ final class ClipboardState {
     /// Kept across changes so typing and new copies fold only the items that are new or changed. Filtering with
     /// search text folds what is missing, so nothing is folded until the user searches.
     @ObservationIgnored private(set) var searchIndex = ClipboardSearchIndex()
+    /// Told after every change of `history`, by whoever shows more than the tab (the library window while it is open).
+    /// Plain closures rather than observation, so the work stops the moment its owner is gone.
+    @ObservationIgnored private var historyObservers: [ObjectIdentifier: () -> Void] = [:]
+    var historyObserverCount: Int { historyObservers.count }
+
+    /// Replaces any action `owner` registered before.
+    func observeHistory(_ owner: AnyObject, _ action: @escaping () -> Void) {
+        historyObservers[ObjectIdentifier(owner)] = action
+    }
+
+    func stopObservingHistory(_ owner: AnyObject) {
+        historyObservers[ObjectIdentifier(owner)] = nil
+    }
 
     /// Back to the state of a module that never started.
     func reset() {
@@ -45,6 +58,7 @@ final class ClipboardState {
         if let selectedID, !history.items.contains(where: { $0.id == selectedID }) {
             self.selectedID = nil
         }
+        for action in Array(historyObservers.values) { action() }
     }
 
     private func refreshVisibleItems() {

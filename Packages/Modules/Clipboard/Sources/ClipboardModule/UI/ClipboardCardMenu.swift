@@ -9,14 +9,20 @@ struct ClipboardCardMenu: View {
 
     let module: ClipboardModule
     let item: ClipboardItem
+    /// The board on show, which "Bỏ ghim" unpins from; nil unpins from every board.
+    var shownBoardID: UUID?
+    /// Told what a copy or paste did, for a window that shows it.
+    var onResult: (ClipboardPaster.Outcome?) -> Void = { _ in }
+    /// Replaces deleting at once, for a window that asks before deleting a pinned item.
+    var onDelete: ((ClipboardItem) -> Void)?
     /// Shows the inline name field; the new board gets this item pinned.
     let onNewBoard: () -> Void
 
     var body: some View {
-        Button("Chép", systemImage: "doc.on.doc") { module.copy(item) }
-        Button("Dán", systemImage: "doc.on.clipboard") { module.paste(item) }
+        Button("Chép", systemImage: "doc.on.doc") { onResult(module.copy(item)) }
+        Button("Dán", systemImage: "doc.on.clipboard") { onResult(module.paste(item)) }
         if case .richText = item.content {
-            Button("Chép dạng văn bản thuần", systemImage: "textformat") { module.copy(item, plainText: true) }
+            Button("Chép dạng văn bản thuần", systemImage: "textformat") { onResult(module.copy(item, plainText: true)) }
         }
         if item.content.kind == .text, let text = item.content.plainText {
             transforms(of: text)
@@ -29,7 +35,9 @@ struct ClipboardCardMenu: View {
             Button("Hiện trong Finder", systemImage: "folder") { module.revealInFinder(item) }
         }
         Divider()
-        Button("Xoá", systemImage: "trash", role: .destructive) { module.delete(item) }
+        Button("Xoá", systemImage: "trash", role: .destructive) {
+            if let onDelete { onDelete(item) } else { module.delete(item) }
+        }
     }
 
     private func transforms(of text: String) -> some View {
@@ -62,7 +70,7 @@ struct ClipboardCardMenu: View {
         }
         if !pinnedIn.isEmpty {
             Button("Bỏ ghim", systemImage: "pin.slash") {
-                let shown = state.query.boardID.flatMap { pinnedIn.contains($0) ? [$0] : nil }
+                let shown = shownBoardID.flatMap { pinnedIn.contains($0) ? [$0] : nil }
                 for boardID in shown ?? pinnedIn { module.unpin(item, from: boardID) }
             }
         }

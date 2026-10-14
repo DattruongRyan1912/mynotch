@@ -135,6 +135,25 @@ import MyNotchTestSupport
         #expect(harness.registry.isEnabled("m") == false)
     }
 
+    @Test func menuItemsComeFromRunningModulesInModuleOrder() async {
+        func item(_ id: String) -> ModuleMenuItem { ModuleMenuItem(id: id, title: id.uppercased(), action: {}) }
+        let first = FakeModule("a", order: 1)
+        first.menuItems = [item("a1")]
+        let off = FakeModule("b", order: 2, defaultEnabled: false)
+        off.menuItems = [item("b1")]
+        let last = FakeModule("c", order: 3)
+        last.menuItems = [item("c1"), item("c2")]
+        let plain = FakeModule("d", order: 4)
+        let harness = Harness([plain, last, off, first])
+        #expect(harness.registry.menuItems.isEmpty)
+
+        await harness.registry.bootstrap()
+        #expect(harness.registry.menuItems.map(\.id) == ["a1", "c1", "c2"])
+
+        await harness.registry.setEnabled(false, for: "a")
+        #expect(harness.registry.menuItems.map(\.id) == ["c1", "c2"])
+    }
+
     @Test func retryRestartsAFailedModule() async {
         let module = FakeModule("m")
         module.startError = .unavailable(reason: "nope")

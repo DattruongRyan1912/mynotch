@@ -13,6 +13,7 @@ final class FakeModule: FeatureModule {
     /// Service name registered on `start`; texts it receives go to `serviceTexts`.
     var serviceOnStart: String?
     private(set) var serviceTexts: [String] = []
+    var menuItems: [ModuleMenuItem] = []
     private(set) var startCount = 0
     private(set) var stopCount = 0
     private(set) var context: ModuleContext?

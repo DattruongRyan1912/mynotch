@@ -19,7 +19,7 @@ table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:b
 th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
 th{background:var(--card)}
 @media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
-</style></head><body><div class="layout"><nav><a class="h2" href="#1-mục-tiêu">1. Mục tiêu</a><a class="h2" href="#2-hành-vi-tham-chiếu-onenotch-rút-gọn">2. Hành vi tham chiếu (OneNotch, rút gọn)</a><a class="h2" href="#3-kiến-trúc">3. Kiến trúc</a><a class="h3" href="#3-1-phân-loại-theo-thứ-tự-ưu-tiên">3.1 Phân loại (theo thứ tự ưu tiên)</a><a class="h3" href="#3-2-lịch-sử-và-giới-hạn">3.2 Lịch sử và giới hạn</a><a class="h3" href="#3-3-lưu-trữ">3.3 Lưu trữ</a><a class="h3" href="#3-4-thao-tác">3.4 Thao tác</a><a class="h3" href="#3-5-giao-diện">3.5 Giao diện</a><a class="h3" href="#3-6-cài-đặt-module-clipboard">3.6 Cài đặt (<code>module.clipboard.*</code>)</a><a class="h3" href="#3-7-quyền">3.7 Quyền</a><a class="h2" href="#4-xử-lý-lỗi">4. Xử lý lỗi</a><a class="h2" href="#5-kiểm-thử">5. Kiểm thử</a></nav><main><h1 id="mynotch-clipboard-dự-án-con-1">MyNotch — Clipboard (dự án con 1)</h1>
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-mục-tiêu">1. Mục tiêu</a><a class="h2" href="#2-hành-vi-tham-chiếu-onenotch-rút-gọn">2. Hành vi tham chiếu (OneNotch, rút gọn)</a><a class="h2" href="#3-kiến-trúc">3. Kiến trúc</a><a class="h3" href="#3-1-phân-loại-theo-thứ-tự-ưu-tiên">3.1 Phân loại (theo thứ tự ưu tiên)</a><a class="h3" href="#3-2-lịch-sử-và-giới-hạn">3.2 Lịch sử và giới hạn</a><a class="h3" href="#3-3-lưu-trữ">3.3 Lưu trữ</a><a class="h3" href="#3-4-thao-tác">3.4 Thao tác</a><a class="h3" href="#3-5-giao-diện">3.5 Giao diện</a><a class="h3" href="#3-6-cài-đặt-module-clipboard">3.6 Cài đặt (<code>module.clipboard.*</code>)</a><a class="h3" href="#3-7-quyền">3.7 Quyền</a><a class="h3" href="#3-8-cửa-sổ-thư-viện-thêm-2026-10-14">3.8 Cửa sổ Thư viện (thêm 2026-10-14)</a><a class="h2" href="#4-xử-lý-lỗi">4. Xử lý lỗi</a><a class="h2" href="#5-kiểm-thử">5. Kiểm thử</a></nav><main><h1 id="mynotch-clipboard-dự-án-con-1">MyNotch — Clipboard (dự án con 1)</h1>
 <ul>
 <li><strong>Ngày:</strong> 2026-10-13</li>
 <li><strong>Trạng thái:</strong> Triển khai trên nhánh <code>feat/modules</code>, sau dự án con 0.5 (điểm nối nền tảng)</li>
@@ -36,6 +36,7 @@ th{background:var(--card)}
 <li>Board: tạo, đổi tên, xoá, ghim và bỏ ghim mục. Mục đã ghim không bị dọn tự động.</li>
 <li>Biến đổi văn bản: hoa/thường, viết hoa chữ đầu, bỏ khoảng trắng thừa, bỏ dòng trống, sắp xếp dòng, JSON format/minify, Base64 và URL encode/decode.</li>
 <li>Phím tắt ⌃⌥V mở notch ở tab Clipboard.</li>
+<li>Cửa sổ Thư viện riêng (⌃⌥⇧V), thêm ngày 2026-10-14: mục 3.8.</li>
 <li>Dán trực tiếp vào app đang dùng (cần quyền Accessibility, tuỳ chọn).</li>
 </ul>
 <p><strong>Ngoài phạm vi:</strong></p>
@@ -43,7 +44,8 @@ th{background:var(--card)}
 <li>Đồng bộ iCloud: CloudKit cần tài khoản trả phí.</li>
 <li>Board khoá bằng mật mã.</li>
 <li>Xem trước link: cần mạng, trái nguyên tắc không gửi dữ liệu ra ngoài.</li>
-<li>Cửa sổ Library riêng và panel nổi cạnh con trỏ.</li>
+<li>Panel nổi cạnh con trỏ.</li>
+<li>Trong cửa sổ Thư viện: nhóm "Ảnh chụp" gộp các lần chụp của module Screenshot (việc của hai module, để sau).</li>
 <li>Copy Stack / hàng đợi dán.</li>
 <li>Máy chủ MCP cho AI agent: xét lại ở dự án con AI.</li>
 <li>Import từ app khác.</li>
@@ -161,6 +163,18 @@ th{background:var(--card)}
 <li>Trạng thái lấy từ <code>NSPasteboard.general.accessBehavior</code>: <code>alwaysAllow</code> → granted, <code>alwaysDeny</code> → denied, còn lại → notDetermined.</li>
 <li>macOS 26 có thể hỏi mỗi lần app đọc pasteboard. Settings hướng dẫn chọn "Luôn cho phép" trong System Settings → Quyền riêng tư &amp; Bảo mật → Dán từ app khác.</li>
 <li>Khi <code>alwaysDeny</code>, module vẫn chạy nhưng tab hiện hướng dẫn thay vì lịch sử trống.</li>
+</ul>
+<h3 id="3-8-cửa-sổ-thư-viện-thêm-2026-10-14">3.8 Cửa sổ Thư viện (thêm 2026-10-14)</h3>
+<p>Cửa sổ riêng để duyệt cả lịch sử khi băng chuyền của tab không đủ chỗ. Dùng lại dữ liệu và thao tác của tab; không lưu thêm gì ngoài khung cửa sổ và cách hiển thị.</p>
+<ul>
+<li><strong>Mở:</strong> nút "Mở thư viện" ở hàng trên của tab (notch đóng theo), phím tắt <code>openLibrary</code> mặc định ⌃⌥⇧V (hiện trong mục phím tắt của Settings) và mục "Thư viện Clipboard…" đầu menu ở menu bar (qua <code>FeatureModule.menuItems</code>). Chỉ một cửa sổ: mở lại thì đưa ra trước. Khi cửa sổ mở app là <code>.regular</code> để nhận phím; đóng thì về <code>.accessory</code> nếu không còn cửa sổ có tiêu đề nào khác. Module dừng thì cửa sổ đóng.</li>
+<li><strong>Cửa sổ:</strong> ~980×640, tối thiểu 760×480, nhớ khung (<code>setFrameAutosaveName</code>), theo sáng/tối của hệ thống, thanh tiêu đề chuẩn có nút ẩn/hiện thanh bên. <code>NavigationSplitView</code>.</li>
+<li><strong>Thanh bên:</strong> "Tất cả"; "Boards" (từng board, nút + và kéo thẻ vào để ghim); "Loại" (Văn bản gồm rich text, Link, Ảnh, Màu, File); "Ứng dụng" (mỗi app nguồn có trong lịch sử, theo số mục giảm dần). Mỗi dòng kèm số mục, cập nhật ngay khi lịch sử đổi; số đếm tính trên cả lịch sử, không đổi theo tìm kiếm hay lọc.</li>
+<li><strong>Thanh công cụ:</strong> ô tìm kiếm (cùng <code>ClipboardSearchIndex</code> với tab), sắp xếp (Mới nhất, Cũ nhất, Theo ứng dụng, Theo loại), thanh trượt cỡ thẻ 3 mức, "Board mới", lưới/danh sách, lọc loại ("Tất cả loại" hoặc một loại, áp lên lựa chọn ở thanh bên). Tiêu đề phụ ghi tên lựa chọn và số mục.</li>
+<li><strong>Nội dung:</strong> chọn "Tất cả" thì hiện hàng tile Boards (kèm ô nét đứt "Board mới", ẩn khi đang tìm) rồi "Lịch sử"; chọn mục khác chỉ hiện thẻ. Thẻ giống thẻ của tab (xem trước theo loại, icon app, thời gian tương đối, dấu ghim) nhưng theo màu hệ thống; dạng danh sách là một dòng mỗi mục. Lưới và danh sách đều lazy, ảnh dùng thumbnail 400 px của <code>ClipboardThumbnailCache</code> riêng, giải mã ngoài main thread.</li>
+<li><strong>Thao tác:</strong> click chọn; ⌘-click thêm/bớt, ⇧-click chọn dải; double click hoặc Return = <code>clickAction</code>; ⌘C chép thẻ đang chọn; Delete xoá (có mục đã ghim thì hỏi); ⌘A chọn hết; mũi tên di chuyển (⇧ mở rộng); Esc bỏ chọn. Chuột phải: menu của tab (<code>ClipboardCardMenu</code>), hoặc ghim/xoá cả nhóm khi đang chọn nhiều mục. Kéo thẻ ra app khác dùng <code>ClipboardDragProvider</code>; kéo vào board ở thanh bên hoặc tile board thì ghim (nhóm đang chọn đi cùng).</li>
+<li><strong>Dán từ cửa sổ:</strong> <code>clickAction</code> là dán thì cửa sổ trả bàn phím cho app phía sau (<code>NSApp.deactivate()</code>) rồi ⌘V gửi sau 250 ms thay vì 80 ms.</li>
+<li><strong>Hiệu năng và riêng tư:</strong> model của thư viện chỉ tồn tại khi cửa sổ mở (đóng thì thôi theo dõi lịch sử, giải phóng view và thumbnail); không mạng; cài đặt thêm: <code>libraryLayout</code>, <code>librarySort</code>, <code>libraryCardSize</code>.</li>
 </ul>
 <h2 id="4-xử-lý-lỗi">4. Xử lý lỗi</h2>
 <ul>

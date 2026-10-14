@@ -18,6 +18,7 @@ final class FakeSystem {
 
     let pasteboard = FakePasteboard()
     let keystrokes = FakeKeystrokeSender()
+    let libraryWindow = FakeLibraryWindow()
     let system = FakeSystem()
     let module: ClipboardModule
     let harness: RegistryHarness
@@ -29,7 +30,7 @@ final class FakeSystem {
         module = ClipboardModule(
             pasteboard: pasteboard, keystrokes: keystrokes,
             frontmostApp: { system.frontmost }, isTrusted: { system.trusted },
-            pasteboardAccessBehavior: { system.accessBehavior }, now: { system.now }
+            pasteboardAccessBehavior: { system.accessBehavior }, now: { system.now }, libraryWindow: libraryWindow
         )
         harness = RegistryHarness([module])
         temporaryRoot = harness.storageRoot.applicationSupport.deletingLastPathComponent()
@@ -127,8 +128,8 @@ final class FakeSystem {
     @Test func startRegistersTheOpenClipboardHotkey() async throws {
         await start()
 
-        let registration = try #require(harness.hotkeys.registrations.first)
-        #expect(harness.hotkeys.registrations.count == 1)
+        let registration = try #require(harness.hotkeys.registrations.first { $0.id == "clipboard_openClipboard" })
+        #expect(harness.hotkeys.registrations.count == 2)
         #expect(registration.id == "clipboard_openClipboard")
         #expect(registration.title == "Mở lịch sử clipboard")
         #expect(harness.hotkeyBackend.getShortcut(for: registration.name) == KeyboardShortcuts.Shortcut(.v, modifiers: [.control, .option]))

@@ -17,6 +17,7 @@ Lịch sử clipboard ngay trong notch: tự ghi lại mọi thứ người dùn
 - Board: tạo, đổi tên, xoá, ghim và bỏ ghim mục. Mục đã ghim không bị dọn tự động.
 - Biến đổi văn bản: hoa/thường, viết hoa chữ đầu, bỏ khoảng trắng thừa, bỏ dòng trống, sắp xếp dòng, JSON format/minify, Base64 và URL encode/decode.
 - Phím tắt ⌃⌥V mở notch ở tab Clipboard.
+- Cửa sổ Thư viện riêng (⌃⌥⇧V), thêm ngày 2026-10-14: mục 3.8.
 - Dán trực tiếp vào app đang dùng (cần quyền Accessibility, tuỳ chọn).
 
 **Ngoài phạm vi:**
@@ -24,7 +25,8 @@ Lịch sử clipboard ngay trong notch: tự ghi lại mọi thứ người dùn
 - Đồng bộ iCloud: CloudKit cần tài khoản trả phí.
 - Board khoá bằng mật mã.
 - Xem trước link: cần mạng, trái nguyên tắc không gửi dữ liệu ra ngoài.
-- Cửa sổ Library riêng và panel nổi cạnh con trỏ.
+- Panel nổi cạnh con trỏ.
+- Trong cửa sổ Thư viện: nhóm "Ảnh chụp" gộp các lần chụp của module Screenshot (việc của hai module, để sau).
 - Copy Stack / hàng đợi dán.
 - Máy chủ MCP cho AI agent: xét lại ở dự án con AI.
 - Import từ app khác.
@@ -147,6 +149,19 @@ Trang Settings có thêm: nút "Xoá lịch sử…" theo khoảng, dung lượn
   - Trạng thái lấy từ `NSPasteboard.general.accessBehavior`: `alwaysAllow` → granted, `alwaysDeny` → denied, còn lại → notDetermined.
   - macOS 26 có thể hỏi mỗi lần app đọc pasteboard. Settings hướng dẫn chọn "Luôn cho phép" trong System Settings → Quyền riêng tư & Bảo mật → Dán từ app khác.
   - Khi `alwaysDeny`, module vẫn chạy nhưng tab hiện hướng dẫn thay vì lịch sử trống.
+
+### 3.8 Cửa sổ Thư viện (thêm 2026-10-14)
+
+Cửa sổ riêng để duyệt cả lịch sử khi băng chuyền của tab không đủ chỗ. Dùng lại dữ liệu và thao tác của tab; không lưu thêm gì ngoài khung cửa sổ và cách hiển thị.
+
+- **Mở:** nút "Mở thư viện" ở hàng trên của tab (notch đóng theo), phím tắt `openLibrary` mặc định ⌃⌥⇧V (hiện trong mục phím tắt của Settings) và mục "Thư viện Clipboard…" đầu menu ở menu bar (qua `FeatureModule.menuItems`). Chỉ một cửa sổ: mở lại thì đưa ra trước. Khi cửa sổ mở app là `.regular` để nhận phím; đóng thì về `.accessory` nếu không còn cửa sổ có tiêu đề nào khác. Module dừng thì cửa sổ đóng.
+- **Cửa sổ:** ~980×640, tối thiểu 760×480, nhớ khung (`setFrameAutosaveName`), theo sáng/tối của hệ thống, thanh tiêu đề chuẩn có nút ẩn/hiện thanh bên. `NavigationSplitView`.
+- **Thanh bên:** "Tất cả"; "Boards" (từng board, nút + và kéo thẻ vào để ghim); "Loại" (Văn bản gồm rich text, Link, Ảnh, Màu, File); "Ứng dụng" (mỗi app nguồn có trong lịch sử, theo số mục giảm dần). Mỗi dòng kèm số mục, cập nhật ngay khi lịch sử đổi; số đếm tính trên cả lịch sử, không đổi theo tìm kiếm hay lọc.
+- **Thanh công cụ:** ô tìm kiếm (cùng `ClipboardSearchIndex` với tab), sắp xếp (Mới nhất, Cũ nhất, Theo ứng dụng, Theo loại), thanh trượt cỡ thẻ 3 mức, "Board mới", lưới/danh sách, lọc loại ("Tất cả loại" hoặc một loại, áp lên lựa chọn ở thanh bên). Tiêu đề phụ ghi tên lựa chọn và số mục.
+- **Nội dung:** chọn "Tất cả" thì hiện hàng tile Boards (kèm ô nét đứt "Board mới", ẩn khi đang tìm) rồi "Lịch sử"; chọn mục khác chỉ hiện thẻ. Thẻ giống thẻ của tab (xem trước theo loại, icon app, thời gian tương đối, dấu ghim) nhưng theo màu hệ thống; dạng danh sách là một dòng mỗi mục. Lưới và danh sách đều lazy, ảnh dùng thumbnail 400 px của `ClipboardThumbnailCache` riêng, giải mã ngoài main thread.
+- **Thao tác:** click chọn; ⌘-click thêm/bớt, ⇧-click chọn dải; double click hoặc Return = `clickAction`; ⌘C chép thẻ đang chọn; Delete xoá (có mục đã ghim thì hỏi); ⌘A chọn hết; mũi tên di chuyển (⇧ mở rộng); Esc bỏ chọn. Chuột phải: menu của tab (`ClipboardCardMenu`), hoặc ghim/xoá cả nhóm khi đang chọn nhiều mục. Kéo thẻ ra app khác dùng `ClipboardDragProvider`; kéo vào board ở thanh bên hoặc tile board thì ghim (nhóm đang chọn đi cùng).
+- **Dán từ cửa sổ:** `clickAction` là dán thì cửa sổ trả bàn phím cho app phía sau (`NSApp.deactivate()`) rồi ⌘V gửi sau 250 ms thay vì 80 ms.
+- **Hiệu năng và riêng tư:** model của thư viện chỉ tồn tại khi cửa sổ mở (đóng thì thôi theo dõi lịch sử, giải phóng view và thumbnail); không mạng; cài đặt thêm: `libraryLayout`, `librarySort`, `libraryCardSize`.
 
 ## 4. Xử lý lỗi
 

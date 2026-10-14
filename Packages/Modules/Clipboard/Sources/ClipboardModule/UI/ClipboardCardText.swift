@@ -56,7 +56,8 @@ enum ClipboardCardText {
         return parts.joined(separator: ", ")
     }
 
-    private static func summary(of content: ClipboardContent) -> String {
+    /// One line of what the item holds, for VoiceOver and the library's list rows.
+    static func summary(of content: ClipboardContent) -> String {
         switch content {
         case .text(let text), .richText(let text, _):
             return preview(of: text).prefix(200).split(whereSeparator: \.isNewline).joined(separator: " ")

@@ -11,6 +11,8 @@ final class StatusItemController: NSObject {
     private var item: NSStatusItem?
     private var visibilityItem: NSMenuItem?
     private var pauseItem: NSMenuItem?
+    /// What running modules added at the top, replaced each time the menu opens.
+    private var moduleItems: [NSMenuItem] = []
 
     init(settings: SettingsStore, registry: ModuleRegistry, screens: ScreenManager, openSettings: @escaping () -> Void) {
         self.settings = settings
@@ -63,11 +65,39 @@ final class StatusItemController: NSObject {
     @objc private func togglePause() {
         Task { [registry] in registry.isPaused ? await registry.resumeAll() : await registry.pauseAll() }
     }
+
+    /// Entries that running modules offer (`FeatureModule.menuItems`), above the app's own, with a separator.
+    private func refreshModuleItems(in menu: NSMenu) {
+        moduleItems.forEach(menu.removeItem)
+        let entries = registry.menuItems
+        moduleItems = entries.map { entry in
+            let item = NSMenuItem(title: entry.title, action: #selector(performModuleItem(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = ModuleMenuAction(entry.action)
+            return item
+        }
+        if !moduleItems.isEmpty { moduleItems.append(.separator()) }
+        for (index, item) in moduleItems.enumerated() { menu.insertItem(item, at: index) }
+    }
+
+    @objc private func performModuleItem(_ item: NSMenuItem) {
+        (item.representedObject as? ModuleMenuAction)?.run()
+    }
+}
+
+/// A module's menu action, boxed because `representedObject` holds objects.
+private final class ModuleMenuAction {
+    let run: @MainActor () -> Void
+
+    init(_ run: @escaping @MainActor () -> Void) {
+        self.run = run
+    }
 }
 
 extension StatusItemController: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         visibilityItem?.title = screens.isHiddenByUser ? "Show Notch" : "Hide Notch"
         pauseItem?.state = registry.isPaused ? .on : .off
+        refreshModuleItems(in: menu)
     }
 }

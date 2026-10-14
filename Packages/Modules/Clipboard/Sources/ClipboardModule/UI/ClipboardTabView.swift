@@ -30,6 +30,7 @@ struct ClipboardTabView: View {
                 )
                 .frame(minWidth: 140)
                 ClipboardKindChips(selection: queryBinding(\.kind))
+                libraryButton
             }
             HStack(spacing: 6) {
                 ClipboardBoardBar(
@@ -121,10 +122,32 @@ struct ClipboardTabView: View {
         .onTapGesture { activate(item) }
         .onDrag { startDrag(item) }
         .contextMenu {
-            ClipboardCardMenu(module: module, item: item) { startEditing(.create(pinning: item.id)) }
+            ClipboardCardMenu(module: module, item: item, shownBoardID: state.query.boardID) {
+                startEditing(.create(pinning: item.id))
+            }
         }
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction { activate(item) }
+    }
+
+    /// The notch closes behind it, since the window takes the keyboard.
+    private var libraryButton: some View {
+        Button {
+            module.openLibrary()
+            notch.close()
+        } label: {
+            Label("Mở thư viện", systemImage: "rectangle.grid.2x2")
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .foregroundStyle(NotchTokens.secondaryText)
+                .padding(.horizontal, 8)
+                .frame(height: 22)
+                .background(Color.white.opacity(0.06), in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .help("Mở thư viện clipboard trong một cửa sổ riêng")
     }
 
     private var emptyMessage: String {
@@ -187,14 +210,7 @@ struct ClipboardTabView: View {
             } while NSEvent.pressedMouseButtons & 1 != 0
             notch.setDragging(false)
         }
-        return ClipboardDragProvider.make(for: item.content, fileURLs: dragFileURLs(of: item))
-    }
-
-    /// A stored image is dragged as a copy, or not at all when copying fails: a drop must never move or rename it.
-    private func dragFileURLs(of item: ClipboardItem) -> [URL] {
-        let urls = module.fileURLs(of: item)
-        guard case .image = item.content else { return urls }
-        return urls.prefix(1).compactMap { try? ClipboardDragProvider.copyImage(at: $0, copiedAt: item.copiedAt) }
+        return module.dragProvider(for: item)
     }
 
     // MARK: Boards

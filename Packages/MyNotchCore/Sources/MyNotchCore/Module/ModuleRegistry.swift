@@ -129,6 +129,11 @@ public final class ModuleRegistry {
         await reconcile(modules)
     }
 
+    /// What the status-bar menu adds for the modules that run, in module order.
+    public var menuItems: [ModuleMenuItem] {
+        modules.filter { state(of: $0.descriptor.id) == .running }.flatMap(\.menuItems)
+    }
+
     /// Built whether or not the module runs, so it can be configured while disabled.
     public func settingsView(for id: ModuleID) -> AnyView? {
         guard let module = module(id), let environment = settingsEnvironment(for: id) else { return nil }

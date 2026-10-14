@@ -39,6 +39,10 @@ struct ClipboardSettingKeys {
     let closeAfterAction: SettingKey<Bool>
     let showCopiedActivity: SettingKey<Bool>
     let colorsWithoutHash: SettingKey<Bool>
+    /// How the library window looks; remembered between openings.
+    let libraryLayout: SettingKey<ClipboardLibraryLayout>
+    let librarySort: SettingKey<ClipboardLibrarySort>
+    let libraryCardSize: SettingKey<ClipboardLibraryCardSize>
 
     init(_ settings: ModuleSettings) {
         paused = settings.key("paused", default: false)
@@ -51,5 +55,8 @@ struct ClipboardSettingKeys {
         closeAfterAction = settings.key("closeAfterAction", default: true)
         showCopiedActivity = settings.key("showCopiedActivity", default: true)
         colorsWithoutHash = settings.key("colorsWithoutHash", default: true)
+        libraryLayout = settings.key("libraryLayout", default: .grid)
+        librarySort = settings.key("librarySort", default: .newest)
+        libraryCardSize = settings.key("libraryCardSize", default: .medium)
     }
 }

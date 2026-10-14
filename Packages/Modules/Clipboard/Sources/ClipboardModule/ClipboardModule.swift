@@ -15,9 +15,15 @@ public final class ClipboardModule: FeatureModule {
         order: 100
     )
 
+    /// How long a ⌘V waits after a paste from the library window, whose keyboard focus has to return to the app
+    /// behind it first (the notch needs 80 ms, but it closes at once).
+    static let libraryPasteDelay: Duration = .milliseconds(250)
+
     let state = ClipboardState()
     /// Kept by the module so image cards do not decode their thumbnails again each time the notch opens.
     let thumbnails = ClipboardThumbnailCache()
+    /// Set while the library window is open, and nil otherwise so a closed library costs nothing.
+    private(set) var library: ClipboardLibraryModel?
     /// Set while running; tests wait for its writes.
     private(set) var store: ClipboardStore?
     private let pasteboard: any PasteboardAccess
@@ -26,6 +32,8 @@ public final class ClipboardModule: FeatureModule {
     private let isTrusted: () -> Bool
     private let pasteboardAccessBehavior: () -> NSPasteboard.AccessBehavior
     private let now: () -> Date
+    /// nil in tests that never show it; the app passes the real window.
+    private let libraryWindow: (any ClipboardLibraryWindowing)?
     private var context: ModuleContext?
     private var keys: ClipboardSettingKeys?
     private var monitor: ClipboardMonitor?
@@ -46,7 +54,8 @@ public final class ClipboardModule: FeatureModule {
             },
             isTrusted: { AXIsProcessTrusted() },
             // Reading the behavior does not read the pasteboard, so it never prompts.
-            pasteboardAccessBehavior: { NSPasteboard.general.accessBehavior }
+            pasteboardAccessBehavior: { NSPasteboard.general.accessBehavior },
+            libraryWindow: ClipboardLibraryWindowController()
         )
     }
 
@@ -57,7 +66,8 @@ public final class ClipboardModule: FeatureModule {
         frontmostApp: @escaping () -> ClipboardMonitor.SourceApp,
         isTrusted: @escaping () -> Bool,
         pasteboardAccessBehavior: @escaping () -> NSPasteboard.AccessBehavior,
-        now: @escaping () -> Date = { .now }
+        now: @escaping () -> Date = { .now },
+        libraryWindow: (any ClipboardLibraryWindowing)? = nil
     ) {
         self.pasteboard = pasteboard
         self.keystrokes = keystrokes
@@ -65,6 +75,7 @@ public final class ClipboardModule: FeatureModule {
         self.isTrusted = isTrusted
         self.pasteboardAccessBehavior = pasteboardAccessBehavior
         self.now = now
+        self.libraryWindow = libraryWindow
     }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
@@ -114,6 +125,10 @@ public final class ClipboardModule: FeatureModule {
         context.hotkeys.register(
             "openClipboard", title: "Mở lịch sử clipboard", initial: KeyboardShortcuts.Shortcut(.v, modifiers: [.control, .option])
         ) { [weak self] in self?.openTab() }
+        context.hotkeys.register(
+            "openLibrary", title: "Mở thư viện clipboard",
+            initial: KeyboardShortcuts.Shortcut(.v, modifiers: [.control, .option, .shift])
+        ) { [weak self] in self?.openLibrary() }
         context.run { [weak self] in
             // The first value arrives at once and prunes nothing new; later ones apply a changed limit right away.
             for await _ in Observations({ (settings.value(keys.historyLimit), settings.value(keys.retention), settings.value(keys.imageStorageLimitMB)) }) {
@@ -124,6 +139,7 @@ public final class ClipboardModule: FeatureModule {
 
     /// Writes any unsaved change before returning, so quitting right after a copy keeps it.
     public func stop() async {
+        closeLibrary()
         keystrokeGate?.isOpen = false
         keystrokeGate = nil
         monitor?.stop()
@@ -161,9 +177,41 @@ public final class ClipboardModule: FeatureModule {
         ))
     }
 
+    public var menuItems: [ModuleMenuItem] {
+        [ModuleMenuItem(id: "openLibrary", title: "Thư viện Clipboard…") { [weak self] in self?.openLibrary() }]
+    }
+
     /// The ⌃⌥V shortcut.
     func openTab() {
         context?.presenter.open()
+    }
+
+    /// Opens the library window, or brings it forward when it is open. Does nothing while stopped. The library's
+    /// model exists only while the window does.
+    func openLibrary() {
+        guard let context, let keys, store != nil, let libraryWindow else { return }
+        if libraryWindow.isOpen {
+            libraryWindow.bringToFront()
+            return
+        }
+        let settings = context.settings
+        let model = ClipboardLibraryModel(
+            state: state, actions: self,
+            preferences: ClipboardLibraryPreferences(
+                layout: settings.value(keys.libraryLayout), sort: settings.value(keys.librarySort),
+                cardSize: settings.value(keys.libraryCardSize)
+            ),
+            now: now
+        )
+        model.onPreferencesChange = { preferences in
+            settings.set(preferences.layout, for: keys.libraryLayout)
+            settings.set(preferences.sort, for: keys.librarySort)
+            settings.set(preferences.cardSize, for: keys.libraryCardSize)
+        }
+        library = model
+        libraryWindow.show(AnyView(ClipboardLibraryView(module: self, model: model)), onClose: { [weak self] in
+            self?.libraryClosed(model)
+        })
     }
 
     /// A short message over the open tab, where activities stay hidden until the notch closes.
@@ -179,17 +227,20 @@ public final class ClipboardModule: FeatureModule {
 
     // MARK: Actions used by the tab
 
-    /// A click or Return on a card: the click action from Settings.
-    func activate(_ item: ClipboardItem) {
-        guard let context, let keys else { return }
-        put(item, paste: context.settings.value(keys.clickAction) == .paste)
+    /// A click or Return on a card: the click action from Settings. What happened; nil while stopped.
+    @discardableResult
+    func activate(_ item: ClipboardItem) -> ClipboardPaster.Outcome? {
+        guard let context, let keys else { return nil }
+        return put(item, paste: context.settings.value(keys.clickAction) == .paste)
     }
 
-    func copy(_ item: ClipboardItem, plainText: Bool = false) {
+    @discardableResult
+    func copy(_ item: ClipboardItem, plainText: Bool = false) -> ClipboardPaster.Outcome? {
         put(item, paste: false, plainTextOnly: plainText)
     }
 
-    func paste(_ item: ClipboardItem) {
+    @discardableResult
+    func paste(_ item: ClipboardItem) -> ClipboardPaster.Outcome? {
         put(item, paste: true)
     }
 
@@ -213,7 +264,12 @@ public final class ClipboardModule: FeatureModule {
     }
 
     func delete(_ item: ClipboardItem) {
-        update { $0.remove(ids: [item.id]) }
+        delete(ids: [item.id])
+    }
+
+    /// One change for all of them, so deleting a selection saves once.
+    func delete(ids: Set<UUID>) {
+        update { $0.remove(ids: ids) }
     }
 
     func clearHistory(_ range: ClipboardClearRange) {
@@ -279,6 +335,14 @@ public final class ClipboardModule: FeatureModule {
         }
     }
 
+    /// `ids` in the order the library shows them, which the board then lists too (the newest pin goes first).
+    func pin(ids: [UUID], to boardID: UUID) {
+        update { history in
+            for id in ids.reversed() { history.pin(itemID: id, to: boardID) }
+            return []
+        }
+    }
+
     func unpin(_ item: ClipboardItem, from boardID: UUID) {
         update { history in
             history.unpin(itemID: item.id, from: boardID)
@@ -312,7 +376,28 @@ public final class ClipboardModule: FeatureModule {
         return url
     }
 
+    /// What dragging a card out carries. A stored image is dragged as a copy, or not at all when copying fails: a drop
+    /// must never move or rename the stored file.
+    func dragProvider(for item: ClipboardItem) -> NSItemProvider {
+        var urls = fileURLs(of: item)
+        if case .image = item.content {
+            urls = urls.prefix(1).compactMap { try? ClipboardDragProvider.copyImage(at: $0, copiedAt: item.copiedAt) }
+        }
+        return ClipboardDragProvider.make(for: item.content, fileURLs: urls)
+    }
+
     // MARK: Private
+
+    /// Called by the library window closing, whether the user closed it or the module did.
+    private func libraryClosed(_ model: ClipboardLibraryModel) {
+        model.detach()
+        if library === model { library = nil }
+    }
+
+    private func closeLibrary() {
+        libraryWindow?.close()
+        if let library { libraryClosed(library) }
+    }
 
     /// Called by the monitor for each new copy.
     private func record(_ content: ClipboardContent, imageData: Data?, source: ClipboardMonitor.SourceApp) {
@@ -342,10 +427,16 @@ public final class ClipboardModule: FeatureModule {
 
     /// Puts the item on the pasteboard and moves it to the top. A paste always closes the notch, at once, so keyboard
     /// focus is back in the previous app before ⌘V is sent; a copy closes it when "close after action" is on.
-    /// A failed write changes nothing and keeps the notch open.
-    private func put(_ item: ClipboardItem, paste: Bool, plainTextOnly: Bool = false) {
-        guard let context, let keys, let paster else { return }
-        let outcome = paster.perform(item, imageURL: imageURL(of: item), paste: paste, plainTextOnly: plainTextOnly)
+    /// A failed write changes nothing and keeps the notch open. A paste from the library window hands the keyboard
+    /// back to the app behind it and waits longer for that before sending ⌘V.
+    @discardableResult
+    private func put(_ item: ClipboardItem, paste: Bool, plainTextOnly: Bool = false) -> ClipboardPaster.Outcome? {
+        guard let context, let keys, let paster else { return nil }
+        let fromLibrary = paste && libraryWindow?.isFrontmost == true
+        let outcome = paster.perform(
+            item, imageURL: imageURL(of: item), paste: paste, plainTextOnly: plainTextOnly,
+            delay: fromLibrary ? Self.libraryPasteDelay : nil
+        )
         let closeAfterAction = context.settings.value(keys.closeAfterAction)
         switch outcome {
         case .pasted:
@@ -366,12 +457,14 @@ public final class ClipboardModule: FeatureModule {
                 AnyView(ClipboardToast(text: "Không chép được mục này", systemImage: "exclamationmark.triangle.fill")),
                 duration: .seconds(2)
             )
-            return
+            return outcome
         }
+        if fromLibrary { libraryWindow?.yieldKeyboardFocus() }
         update { history in
             history.touch(id: item.id, at: now())
             return []
         }
+        return outcome
     }
 
     private func imageURL(of item: ClipboardItem) -> URL? {

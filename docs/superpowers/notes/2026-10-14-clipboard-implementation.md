@@ -10,7 +10,7 @@
 ## 1. Đã xây gì so với spec
 
 - Đủ phạm vi spec §1: ghi text, rich text (RTF), link, mã màu, ảnh, file; bỏ qua dữ liệu nhạy cảm, app bị loại trừ và trạng thái tạm dừng; lưu JSON cùng ảnh PNG riêng.
-- Tab có ô tìm kiếm, lọc theo loại, board, băng chuyền thẻ, điều khiển bàn phím, menu ngữ cảnh, kéo thẻ ra app khác. 12 phép biến đổi văn bản. ⌃⌥V mở tab. Dán trực tiếp bằng ⌘V giả (cần Accessibility, tuỳ chọn).
+- Tab có ô tìm kiếm, lọc theo loại, board, băng chuyền thẻ, điều khiển bàn phím, menu ngữ cảnh, kéo thẻ ra app khác. 12 phép biến đổi văn bản. ⌃⌥V mở tab. Dán trực tiếp bằng ⌘V giả (cần Accessibility, tuỳ chọn). Cửa sổ Thư viện (⌃⌥⇧V, nút trong tab, menu bar): mục 6.
 - Khớp spec: poll 0,3 s qua `context.scheduler`, chỉ đọc nội dung khi `changeCount` đổi, băm SHA-256 để khử trùng, 500 mục, giữ 1 tháng, ảnh 250 MB, mười khoá cài đặt `module.clipboard.*` đúng mặc định.
 - Tìm kiếm dùng chỉ mục đã gấp dấu (`ClipboardSearchIndex`), nên gõ không chậm với 5000 mục. Đ và đ được gấp thành d.
 - Không cần khoá Info.plist mới. Quyền tuỳ chọn duy nhất là `.accessibility`.
@@ -55,6 +55,17 @@ Ledger không có dòng `Ruling:` nào riêng cho Clipboard. Các điểm sau l�
 - §3.4: gợi ý khi thiếu Accessibility là activity `pasteHint` ("⌘V") 3 giây, không phải dòng chữ đầy đủ; thêm toast "Không chép được mục này" khi ghi pasteboard lỗi.
 - §3.5: tìm kiếm qua `ClipboardSearchIndex`, không qua `ClipboardSearch.filter` trực tiếp.
 
-## 6. Cần kiểm thử tay
+## 6. Cửa sổ Thư viện (C8, 2026-10-14)
+
+Người dùng bỏ "Cửa sổ Library riêng" khỏi danh sách ngoài phạm vi; spec §3.8 mô tả bản đã làm. Commit: `feat(clipboard): add the clipboard library window`. Mã nằm ở `Packages/Modules/Clipboard/Sources/ClipboardModule/Library/`.
+
+- Model thuần (`ClipboardLibraryModel`, `ClipboardLibraryContent`) theo dõi `ClipboardState` qua `observeHistory` chỉ khi cửa sổ mở; cửa sổ (`ClipboardLibraryWindowController`) tạo mới mỗi lần mở và bỏ view khi đóng. Test model bằng `ClipboardState` và `ClipboardLibraryActions` giả, không có pasteboard hay cửa sổ thật.
+- Menu bar: module chưa có cách thêm mục vào menu của status item, nên `FeatureModule` có thêm `menuItems` (mặc định rỗng; `ModuleRegistry.menuItems` chỉ lấy của module đang chạy) và `App/StatusItemController.swift` vẽ chúng đầu menu mỗi lần mở. Đây là thay đổi ở MyNotchCore và App duy nhất của C8.
+- Thanh bên là `List` của SwiftUI; bản dựng ngoài màn hình không vẽ được nó, nên chưa nhìn thấy kết quả.
+- Cửa sổ chứa `NavigationSplitView` trong `NSHostingController` (`sceneBridgingOptions = .all`). Khi dựng thử trong một cửa sổ trong suốt (không hiện ra màn hình), thanh công cụ và tiêu đề phụ vào được `NSWindow`, nhưng `navigationTitle` không đổi tiêu đề cửa sổ và `NSToolbar` không có nút ẩn/hiện thanh bên. Nên cửa sổ đặt tiêu đề "Thư viện Clipboard", tiêu đề phụ "<lựa chọn> · N mục" và tự thêm nút thanh bên (`.toolbar(removing: .sidebarToggle)` để không thành hai nút). Chưa nhìn thấy cửa sổ thật.
+- `ClipboardLibraryActivation` chép lại logic của `EditorActivation` (Screenshot) vì module không import nhau.
+- Dán từ cửa sổ dựa vào `NSApp.deactivate()` để app phía sau nhận lại phím trong 250 ms: chưa thử trên máy thật.
+
+## 7. Cần kiểm thử tay
 
 Xem [mục Clipboard trong checklist gộp](../../manual-test-checklist-all.html#clipboard). Các mục đụng quyền: hộp thoại "Dán từ app khác" của macOS, dán trực tiếp cần Accessibility.

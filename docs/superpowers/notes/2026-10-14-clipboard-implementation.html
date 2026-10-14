@@ -19,7 +19,7 @@ table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:b
 th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
 th{background:var(--card)}
 @media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
-</style></head><body><div class="layout"><nav><a class="h2" href="#1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</a><a class="h2" href="#2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</a><a class="h2" href="#3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</a><a class="h2" href="#4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</a><a class="h2" href="#5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</a><a class="h2" href="#6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</a></nav><main><h1 id="ghi-chú-triển-khai-clipboard">Ghi chú triển khai: Clipboard</h1>
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</a><a class="h2" href="#2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</a><a class="h2" href="#3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</a><a class="h2" href="#4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</a><a class="h2" href="#5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</a><a class="h2" href="#6-cửa-sổ-thư-viện-c8-2026-10-14">6. Cửa sổ Thư viện (C8, 2026-10-14)</a><a class="h2" href="#7-cần-kiểm-thử-tay">7. Cần kiểm thử tay</a></nav><main><h1 id="ghi-chú-triển-khai-clipboard">Ghi chú triển khai: Clipboard</h1>
 <ul>
 <li><strong>Ngày:</strong> 2026-10-14</li>
 <li><strong>Spec:</strong> <a href="../specs/2026-10-13-clipboard-design.html">Clipboard (dự án con 1)</a>. Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".</li>
@@ -31,7 +31,7 @@ th{background:var(--card)}
 <h2 id="1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</h2>
 <ul>
 <li>Đủ phạm vi spec §1: ghi text, rich text (RTF), link, mã màu, ảnh, file; bỏ qua dữ liệu nhạy cảm, app bị loại trừ và trạng thái tạm dừng; lưu JSON cùng ảnh PNG riêng.</li>
-<li>Tab có ô tìm kiếm, lọc theo loại, board, băng chuyền thẻ, điều khiển bàn phím, menu ngữ cảnh, kéo thẻ ra app khác. 12 phép biến đổi văn bản. ⌃⌥V mở tab. Dán trực tiếp bằng ⌘V giả (cần Accessibility, tuỳ chọn).</li>
+<li>Tab có ô tìm kiếm, lọc theo loại, board, băng chuyền thẻ, điều khiển bàn phím, menu ngữ cảnh, kéo thẻ ra app khác. 12 phép biến đổi văn bản. ⌃⌥V mở tab. Dán trực tiếp bằng ⌘V giả (cần Accessibility, tuỳ chọn). Cửa sổ Thư viện (⌃⌥⇧V, nút trong tab, menu bar): mục 6.</li>
 <li>Khớp spec: poll 0,3 s qua <code>context.scheduler</code>, chỉ đọc nội dung khi <code>changeCount</code> đổi, băm SHA-256 để khử trùng, 500 mục, giữ 1 tháng, ảnh 250 MB, mười khoá cài đặt <code>module.clipboard.*</code> đúng mặc định.</li>
 <li>Tìm kiếm dùng chỉ mục đã gấp dấu (<code>ClipboardSearchIndex</code>), nên gõ không chậm với 5000 mục. Đ và đ được gấp thành d.</li>
 <li>Không cần khoá Info.plist mới. Quyền tuỳ chọn duy nhất là <code>.accessibility</code>.</li>
@@ -74,7 +74,17 @@ th{background:var(--card)}
 <li>§3.4: gợi ý khi thiếu Accessibility là activity <code>pasteHint</code> ("⌘V") 3 giây, không phải dòng chữ đầy đủ; thêm toast "Không chép được mục này" khi ghi pasteboard lỗi.</li>
 <li>§3.5: tìm kiếm qua <code>ClipboardSearchIndex</code>, không qua <code>ClipboardSearch.filter</code> trực tiếp.</li>
 </ul>
-<h2 id="6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</h2>
+<h2 id="6-cửa-sổ-thư-viện-c8-2026-10-14">6. Cửa sổ Thư viện (C8, 2026-10-14)</h2>
+<p>Người dùng bỏ "Cửa sổ Library riêng" khỏi danh sách ngoài phạm vi; spec §3.8 mô tả bản đã làm. Commit: <code>feat(clipboard): add the clipboard library window</code>. Mã nằm ở <code>Packages/Modules/Clipboard/Sources/ClipboardModule/Library/</code>.</p>
+<ul>
+<li>Model thuần (<code>ClipboardLibraryModel</code>, <code>ClipboardLibraryContent</code>) theo dõi <code>ClipboardState</code> qua <code>observeHistory</code> chỉ khi cửa sổ mở; cửa sổ (<code>ClipboardLibraryWindowController</code>) tạo mới mỗi lần mở và bỏ view khi đóng. Test model bằng <code>ClipboardState</code> và <code>ClipboardLibraryActions</code> giả, không có pasteboard hay cửa sổ thật.</li>
+<li>Menu bar: module chưa có cách thêm mục vào menu của status item, nên <code>FeatureModule</code> có thêm <code>menuItems</code> (mặc định rỗng; <code>ModuleRegistry.menuItems</code> chỉ lấy của module đang chạy) và <code>App/StatusItemController.swift</code> vẽ chúng đầu menu mỗi lần mở. Đây là thay đổi ở MyNotchCore và App duy nhất của C8.</li>
+<li>Thanh bên là <code>List</code> của SwiftUI; bản dựng ngoài màn hình không vẽ được nó, nên chưa nhìn thấy kết quả.</li>
+<li>Cửa sổ chứa <code>NavigationSplitView</code> trong <code>NSHostingController</code> (<code>sceneBridgingOptions = .all</code>). Khi dựng thử trong một cửa sổ trong suốt (không hiện ra màn hình), thanh công cụ và tiêu đề phụ vào được <code>NSWindow</code>, nhưng <code>navigationTitle</code> không đổi tiêu đề cửa sổ và <code>NSToolbar</code> không có nút ẩn/hiện thanh bên. Nên cửa sổ đặt tiêu đề "Thư viện Clipboard", tiêu đề phụ "&lt;lựa chọn&gt; · N mục" và tự thêm nút thanh bên (<code>.toolbar(removing: .sidebarToggle)</code> để không thành hai nút). Chưa nhìn thấy cửa sổ thật.</li>
+<li><code>ClipboardLibraryActivation</code> chép lại logic của <code>EditorActivation</code> (Screenshot) vì module không import nhau.</li>
+<li>Dán từ cửa sổ dựa vào <code>NSApp.deactivate()</code> để app phía sau nhận lại phím trong 250 ms: chưa thử trên máy thật.</li>
+</ul>
+<h2 id="7-cần-kiểm-thử-tay">7. Cần kiểm thử tay</h2>
 <p>Xem <a href="../../manual-test-checklist-all.html#clipboard">mục Clipboard trong checklist gộp</a>. Các mục đụng quyền: hộp thoại "Dán từ app khác" của macOS, dán trực tiếp cần Accessibility.</p></main></div><script>
 document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
 b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});

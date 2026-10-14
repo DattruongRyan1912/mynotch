@@ -55,10 +55,10 @@ final class ClipboardPaster {
         self.pasteDelay = pasteDelay
     }
 
-    /// Always writes the item first, keeping its source app; with `paste`, ⌘V follows after `pasteDelay`
-    /// when Accessibility is granted.
+    /// Always writes the item first, keeping its source app; with `paste`, ⌘V follows after `pasteDelay` (or the
+    /// `delay` of this call, for a window that needs longer to give the keyboard back) when Accessibility is granted.
     @discardableResult
-    func perform(_ item: ClipboardItem, imageURL: URL?, paste: Bool, plainTextOnly: Bool = false) -> Outcome {
+    func perform(_ item: ClipboardItem, imageURL: URL?, paste: Bool, plainTextOnly: Bool = false, delay: Duration? = nil) -> Outcome {
         let written = pasteboard.write(
             item.content, imageURL: imageURL, plainTextOnly: plainTextOnly, sourceBundleID: item.sourceBundleID
         )
@@ -69,7 +69,7 @@ final class ClipboardPaster {
         guard paste else { return .copied }
         guard isTrusted() else { return .copiedNeedsPermission }
         let keystrokes = keystrokes
-        pendingPaste = scheduler.schedule(after: pasteDelay) { keystrokes.sendPaste() }
+        pendingPaste = scheduler.schedule(after: delay ?? pasteDelay) { keystrokes.sendPaste() }
         return .pasted
     }
 }

@@ -32,7 +32,7 @@ Mỗi tính năng là một package trong `Packages/Modules/`, bật/tắt trong
 
 | Module | Id | Mặc định | Làm gì |
 |---|---|---|---|
-| Clipboard | `clipboard` | Bật | Lịch sử clipboard (text, ảnh, file, màu), tìm kiếm, board, dán trực tiếp. ⌃⌥V |
+| Clipboard | `clipboard` | Bật | Lịch sử clipboard (text, ảnh, file, màu), tìm kiếm, board, dán trực tiếp, cửa sổ Thư viện. ⌃⌥V (tab), ⌃⌥⇧V (thư viện) |
 | Media | `media` | Bật | Bài đang phát của mọi app, điều khiển, cột sóng. Tắt sẵn: phổ âm thật; lời bài hát theo thứ tự phụ đề YouTube từ extension Chrome, Apple Music (bài của app Music, cần đăng nhập tài khoản của bạn), lrclib.net |
 | Dịch | `translation` | Bật | Dịch trên máy bằng framework Translation: tab, mục Services, ⌃⌥T |
 | Ảnh chụp | `screenshot` | Bật, cần Screen Recording | Chụp vùng, cửa sổ, màn hình, OCR, sửa ảnh. ⌃⌥S, ⌃⌥O |
@@ -70,7 +70,7 @@ Ghép một module cần hai chỗ: `project.yml` (mục `packages` và `depende
 3. Module cần quyền mới: thêm usage description và entitlement tương ứng vào `project.yml`.
 4. Thêm một dòng vào `App/ModuleList.swift`, rồi `xcodegen generate`. `verify.sh` tự test mọi package trong `Packages/Modules/`.
 
-Module dùng được: `context.storage`, `context.scheduler` (việc đã hẹn tự huỷ khi module dừng), `context.hotkeys` (đăng ký và `unregister` theo tên), `context.presenter` (`open()` mở tab của chính module, `showToast`, `close`), `context.activities` (live activity cập nhật tại chỗ, `raise`), `context.services` (macOS Services: cần thêm một mục `NSServices` trong `project.yml` và một phương thức trong `App/ServicesProvider.swift`, nếu không hệ thống không bao giờ gọi), `context.lockScreen` (view nhỏ không nhạy cảm cho màn hình khoá), `NotchTab(acceptsKeyboard:dropTypes:onDrop:)`, `@Environment(\.notch)` (ghim, báo đang kéo, đóng notch), `optionalPermissions` trong `ModuleDescriptor`. Sau khi module dừng, `scheduler`, `hotkeys`, `presenter`, `activities`, `services` và `lockScreen` không làm gì nữa. Test cần thư mục tạm thì dùng `ScratchFolders.shared.reserve("<nhãn>")` của `MyNotchTestSupport` (tự xoá khi tiến trình test thoát).
+Module dùng được: `context.storage`, `context.scheduler` (việc đã hẹn tự huỷ khi module dừng), `context.hotkeys` (đăng ký và `unregister` theo tên), `context.presenter` (`open()` mở tab của chính module, `showToast`, `close`), `context.activities` (live activity cập nhật tại chỗ, `raise`), `context.services` (macOS Services: cần thêm một mục `NSServices` trong `project.yml` và một phương thức trong `App/ServicesProvider.swift`, nếu không hệ thống không bao giờ gọi), `context.lockScreen` (view nhỏ không nhạy cảm cho màn hình khoá), `FeatureModule.menuItems` (mục thêm vào menu của icon menu bar, chỉ hiện khi module chạy), `NotchTab(acceptsKeyboard:dropTypes:onDrop:)`, `@Environment(\.notch)` (ghim, báo đang kéo, đóng notch), `optionalPermissions` trong `ModuleDescriptor`. Sau khi module dừng, `scheduler`, `hotkeys`, `presenter`, `activities`, `services` và `lockScreen` không làm gì nữa. Test cần thư mục tạm thì dùng `ScratchFolders.shared.reserve("<nhãn>")` của `MyNotchTestSupport` (tự xoá khi tiến trình test thoát).
 
 ## Tài liệu
 
