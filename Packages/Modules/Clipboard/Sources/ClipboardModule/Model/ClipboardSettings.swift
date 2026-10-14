@@ -43,6 +43,10 @@ struct ClipboardSettingKeys {
     let libraryLayout: SettingKey<ClipboardLibraryLayout>
     let librarySort: SettingKey<ClipboardLibrarySort>
     let libraryCardSize: SettingKey<ClipboardLibraryCardSize>
+    /// The floating panel stays open after an action and can be moved.
+    let panelPinned: SettingKey<Bool>
+    /// Where a pinned panel was left; nil until one is pinned.
+    let panelPosition: SettingKey<ClipboardPanelPosition?>
 
     init(_ settings: ModuleSettings) {
         paused = settings.key("paused", default: false)
@@ -58,5 +62,7 @@ struct ClipboardSettingKeys {
         libraryLayout = settings.key("libraryLayout", default: .grid)
         librarySort = settings.key("librarySort", default: .newest)
         libraryCardSize = settings.key("libraryCardSize", default: .medium)
+        panelPinned = settings.key("panelPinned", default: false)
+        panelPosition = settings.key("panelPosition", default: ClipboardPanelPosition?.none)
     }
 }

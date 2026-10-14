@@ -40,7 +40,7 @@ struct ClipboardSuggestionListView: View {
         case .notch:
             shape.fill(Color(white: 0.16)).overlay { shape.strokeBorder(Color.white.opacity(0.14)) }
                 .shadow(color: .black.opacity(0.5), radius: 8, y: 3)
-        case .library:
+        case .library, .panel:
             shape.fill(.regularMaterial).overlay { shape.strokeBorder(Color.primary.opacity(0.12)) }
                 .shadow(color: .black.opacity(0.2), radius: 8, y: 3)
         }
@@ -92,7 +92,7 @@ struct ClipboardSuggestionListView: View {
     private func foreground(isHighlighted: Bool) -> Color {
         switch look {
         case .notch: NotchTokens.primaryText
-        case .library: isHighlighted ? .white : .primary
+        case .library, .panel: isHighlighted ? .white : .primary
         }
     }
 }

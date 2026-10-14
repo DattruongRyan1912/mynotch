@@ -1,5 +1,6 @@
 import AppKit
 import MyNotchCore
+import NotchUI
 import Observation
 import SwiftUI
 
@@ -28,6 +29,8 @@ public final class ClipboardModule: FeatureModule {
     let thumbnails = ClipboardThumbnailCache()
     /// Set while the library window is open, and nil otherwise so a closed library costs nothing.
     private(set) var library: ClipboardLibraryModel?
+    /// Set while the floating panel is open, and nil otherwise so a closed panel costs nothing.
+    private(set) var panel: ClipboardPanelModel?
     /// Set while running; tests wait for its writes.
     private(set) var store: ClipboardStore?
     private let pasteboard: any PasteboardAccess
@@ -38,6 +41,8 @@ public final class ClipboardModule: FeatureModule {
     private let now: () -> Date
     /// nil in tests that never show it; the app passes the real window.
     private let libraryWindow: (any ClipboardLibraryWindowing)?
+    /// nil in tests that never show it; the app passes the real panel.
+    private let panelWindow: (any ClipboardPanelWindowing)?
     private var context: ModuleContext?
     private var keys: ClipboardSettingKeys?
     private var monitor: ClipboardMonitor?
@@ -49,6 +54,9 @@ public final class ClipboardModule: FeatureModule {
     var diskWork: Task<Void, Never>?
 
     public convenience init() {
+        // The app-wide "hide from screen recording" setting is not a module's own, so a module cannot read it through
+        // `ModuleSettings`; the app keeps it in the standard defaults.
+        let interfaceSettings = SettingsStore(defaults: .standard)
         self.init(
             pasteboard: SystemPasteboard(),
             keystrokes: CGEventKeystrokeSender(),
@@ -59,7 +67,8 @@ public final class ClipboardModule: FeatureModule {
             isTrusted: { AXIsProcessTrusted() },
             // Reading the behavior does not read the pasteboard, so it never prompts.
             pasteboardAccessBehavior: { NSPasteboard.general.accessBehavior },
-            libraryWindow: ClipboardLibraryWindowController()
+            libraryWindow: ClipboardLibraryWindowController(),
+            panelWindow: ClipboardPanelController(captureHiding: { interfaceSettings.value(InterfaceSettings.hideFromCapture) })
         )
     }
 
@@ -71,7 +80,8 @@ public final class ClipboardModule: FeatureModule {
         isTrusted: @escaping () -> Bool,
         pasteboardAccessBehavior: @escaping () -> NSPasteboard.AccessBehavior,
         now: @escaping () -> Date = { .now },
-        libraryWindow: (any ClipboardLibraryWindowing)? = nil
+        libraryWindow: (any ClipboardLibraryWindowing)? = nil,
+        panelWindow: (any ClipboardPanelWindowing)? = nil
     ) {
         self.pasteboard = pasteboard
         self.keystrokes = keystrokes
@@ -80,6 +90,7 @@ public final class ClipboardModule: FeatureModule {
         self.pasteboardAccessBehavior = pasteboardAccessBehavior
         self.now = now
         self.libraryWindow = libraryWindow
+        self.panelWindow = panelWindow
     }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
@@ -134,6 +145,9 @@ public final class ClipboardModule: FeatureModule {
             "openLibrary", title: "Mở thư viện clipboard",
             initial: KeyboardShortcuts.Shortcut(.v, modifiers: [.control, .option, .shift])
         ) { [weak self] in self?.openLibrary() }
+        context.hotkeys.register(
+            "openPanel", title: "Mở bảng clipboard nổi", initial: KeyboardShortcuts.Shortcut(.c, modifiers: [.command, .shift])
+        ) { [weak self] in self?.togglePanel() }
         context.run { [weak self] in
             // The first value arrives at once and prunes nothing new; later ones apply a changed limit right away.
             for await _ in Observations({ (settings.value(keys.historyLimit), settings.value(keys.retention), settings.value(keys.imageStorageLimitMB)) }) {
@@ -145,6 +159,7 @@ public final class ClipboardModule: FeatureModule {
     /// Writes any unsaved change before returning, so quitting right after a copy keeps it.
     public func stop() async {
         closeLibrary()
+        closePanel()
         keystrokeGate?.isOpen = false
         keystrokeGate = nil
         monitor?.stop()
@@ -217,6 +232,34 @@ public final class ClipboardModule: FeatureModule {
         libraryWindow.show(AnyView(ClipboardLibraryView(module: self, model: model)), onClose: { [weak self] in
             self?.libraryClosed(model)
         })
+    }
+
+    /// The ⇧⌘C shortcut: opens the floating panel beside the pointer, or closes it when it is open. A pinned panel that
+    /// lost the keyboard takes it back instead, since the shortcut then means "let me type there". Does nothing while
+    /// stopped. The panel's model exists only while the panel does.
+    func togglePanel() {
+        guard let context, let keys, store != nil, let panelWindow else { return }
+        if panelWindow.isOpen {
+            if panel?.isPinned == true, !panelWindow.isKey {
+                panelWindow.focus()
+            } else {
+                closePanel()
+            }
+            return
+        }
+        let settings = context.settings
+        let pinned = settings.value(keys.panelPinned)
+        let model = ClipboardPanelModel(state: state, actions: self, isPinned: pinned, now: now)
+        model.onClose = { [weak self] in self?.closePanel() }
+        model.onReturnKeyboard = { [weak panelWindow] in panelWindow?.returnKeyboard() }
+        model.onPinnedChange = { [weak self] pinned in self?.panelPinChanged(pinned) }
+        model.onMove = { origin in settings.set(ClipboardPanelPosition(origin), for: keys.panelPosition) }
+        panel = model
+        // Only a pinned panel is where it was left; an unpinned one is always beside the pointer.
+        let restoredOrigin = pinned ? settings.value(keys.panelPosition)?.point : nil
+        panelWindow.show(AnyView(ClipboardPanelView(module: self, model: model)), model: model, restoringOrigin: restoredOrigin) { [weak self] in
+            self?.panelClosed(model)
+        }
     }
 
     /// A short message over the open tab, where activities stay hidden until the notch closes.
@@ -420,6 +463,24 @@ public final class ClipboardModule: FeatureModule {
     private func libraryClosed(_ model: ClipboardLibraryModel) {
         model.detach()
         if library === model { library = nil }
+    }
+
+    /// The panel was pinned or unpinned: remembered for the next time, along with where it is when pinned.
+    private func panelPinChanged(_ pinned: Bool) {
+        guard let context, let keys else { return }
+        context.settings.set(pinned, for: keys.panelPinned)
+        if pinned, let origin = panelWindow?.origin { context.settings.set(ClipboardPanelPosition(origin), for: keys.panelPosition) }
+    }
+
+    /// Called by the panel window closing, whether the user closed it or the module did.
+    private func panelClosed(_ model: ClipboardPanelModel) {
+        model.detach()
+        if panel === model { panel = nil }
+    }
+
+    private func closePanel() {
+        panelWindow?.close()
+        if let panel { panelClosed(panel) }
     }
 
     private func closeLibrary() {

@@ -12,10 +12,11 @@ enum ClipboardCardText {
         return formatter
     }()
 
-    /// The start of the text without leading blank lines, which would waste the card's four lines.
-    static func preview(of text: String) -> String {
+    /// The start of the text without leading blank lines, which would waste the card's four lines. `limit` is for a
+    /// preview that shows more than a card, like the floating panel's.
+    static func preview(of text: String, limit: Int = previewCharacters) -> String {
         let start = text.firstIndex { !$0.isWhitespace } ?? text.endIndex
-        return String(text[start...].prefix(previewCharacters))
+        return String(text[start...].prefix(limit))
     }
 
     /// "2 phút trước"; anything under a minute (or in the future, after a clock change) is "Vừa xong", since the tab
@@ -54,6 +55,12 @@ enum ClipboardCardText {
         var parts = [item.content.kind.title, summary(of: item.content), relativeTime(item.copiedAt, now: now)]
         if isPinned { parts.append("đã ghim") }
         return parts.joined(separator: ", ")
+    }
+
+    /// What a list row calls the item: an image by its size, anything else by its summary.
+    static func rowTitle(of content: ClipboardContent) -> String {
+        if case .image(let image) = content { return "Ảnh \(image.pixelWidth) × \(image.pixelHeight)" }
+        return summary(of: content)
     }
 
     /// One line of what the item holds, for VoiceOver and the library's list rows.

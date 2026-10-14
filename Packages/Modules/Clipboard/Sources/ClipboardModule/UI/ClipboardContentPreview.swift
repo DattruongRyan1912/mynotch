@@ -3,7 +3,7 @@ import NotchUI
 import SwiftUI
 
 /// What a card shows for an item's content, by kind. The notch draws it light on black; the library in the system's
-/// colors and at the size its slider chose.
+/// colors and at the size its slider chose; the floating panel's preview pane in the system's colors, larger.
 struct ClipboardContentPreview: View {
     struct Style {
         var primary: Color
@@ -13,10 +13,18 @@ struct ClipboardContentPreview: View {
         var textSize: CGFloat
         var detailSize: CGFloat
         var fileIconSize: CGFloat
+        /// How much of a long text is laid out; the card's four lines never need more than a few hundred.
+        var textCharacters = ClipboardCardText.previewCharacters
 
         static let notch = Style(
             primary: NotchTokens.primaryText, secondary: NotchTokens.secondaryText, swatchBorder: .white.opacity(0.2),
             textLines: 4, textSize: 11, detailSize: 10, fileIconSize: 32
+        )
+
+        /// The floating panel's preview pane, which has the room for a longer excerpt.
+        static let panel = Style(
+            primary: .primary, secondary: .secondary, swatchBorder: .primary.opacity(0.2),
+            textLines: 14, textSize: 13, detailSize: 11, fileIconSize: 48, textCharacters: 1_500
         )
 
         static func library(_ size: ClipboardLibraryCardSize) -> Style {
@@ -36,7 +44,7 @@ struct ClipboardContentPreview: View {
     var body: some View {
         switch content {
         case .text(let text), .richText(let text, _):
-            Text(ClipboardCardText.preview(of: text))
+            Text(ClipboardCardText.preview(of: text, limit: style.textCharacters))
                 .font(.system(size: style.textSize))
                 .foregroundStyle(style.primary)
                 .lineLimit(style.textLines)

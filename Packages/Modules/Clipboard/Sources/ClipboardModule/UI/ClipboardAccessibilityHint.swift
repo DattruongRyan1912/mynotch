@@ -39,7 +39,7 @@ struct ClipboardAccessibilityHint: View {
                     .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-        case .library:
+        case .library, .panel:
             Button(Self.buttonTitle, action: onGrant)
                 .controlSize(.small)
         }

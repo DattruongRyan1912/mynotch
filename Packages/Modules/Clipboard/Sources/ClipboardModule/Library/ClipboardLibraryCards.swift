@@ -83,9 +83,9 @@ struct ClipboardLibraryRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            leading
+            ClipboardItemGlyph(item: item, imageURL: imageURL, thumbnails: thumbnails)
                 .frame(width: 40, height: 32)
-            Text(title)
+            Text(ClipboardCardText.rowTitle(of: item.content))
                 .font(.system(size: 13))
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -120,31 +120,6 @@ struct ClipboardLibraryRow: View {
         .onHover { isHovered = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
-    }
-
-    private var title: String {
-        if case .image(let image) = item.content { return "Ảnh \(image.pixelWidth) × \(image.pixelHeight)" }
-        return ClipboardCardText.summary(of: item.content)
-    }
-
-    @ViewBuilder private var leading: some View {
-        switch item.content {
-        case .image:
-            ClipboardThumbnailView(url: imageURL, cache: thumbnails, placeholder: .secondary, placeholderSize: 16)
-        case .color(let hex, _):
-            ClipboardColorSwatch(hex: hex, border: .primary.opacity(0.2))
-                .frame(width: 28, height: 28)
-        case .files(let urls):
-            if let first = urls.first {
-                Image(nsImage: ClipboardIcons.file(first))
-                    .resizable()
-                    .frame(width: 28, height: 28)
-            }
-        case .text, .richText, .link:
-            Image(systemName: item.content.kind.systemImage)
-                .font(.system(size: 15))
-                .foregroundStyle(.secondary)
-        }
     }
 }
 

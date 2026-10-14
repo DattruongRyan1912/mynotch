@@ -1,13 +1,14 @@
 import AppKit
 import SwiftUI
 
-/// The search field of the tab, and of the library's toolbar. AppKit rather than SwiftUI so arrows, Tab, Return and Esc
-/// are taken from the field editor before it uses them, which is how the suggestions for an `@` word are driven, and so
-/// the notch's field takes the keyboard exactly when the notch panel becomes key.
+/// The search field of the tab, of the library's toolbar and of the floating panel. AppKit rather than SwiftUI so arrows,
+/// Tab, Return and Esc are taken from the field editor before it uses them, which is how the suggestions for an `@` word
+/// are driven, and so the notch's and the panel's field take the keyboard exactly when their window becomes key.
 struct ClipboardSearchField: NSViewRepresentable {
     @Binding var text: String
-    /// The notch's field is dark with no focus ring and takes the keyboard when its panel becomes key; the library's follows
-    /// the system and takes it only when asked, through `focusRequest`.
+    /// The notch's field is dark with no focus ring and takes the keyboard when its panel becomes key; the floating panel's
+    /// is the same but follows the system's appearance; the library's follows the system and takes the keyboard only when
+    /// asked, through `focusRequest`.
     var look = ClipboardLook.notch
     /// False while another field of the tab (a board name) has the keyboard.
     var takesFocus: Bool
@@ -22,20 +23,18 @@ struct ClipboardSearchField: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WindowReportingSearchField {
         let field = WindowReportingSearchField()
+        field.placeholderString = look == .library ? "Tìm trong clipboard" : "Tìm trong lịch sử"
         if look == .notch {
-            field.placeholderString = "Tìm trong lịch sử"
             // The notch is always black, whatever the system appearance.
             field.appearance = NSAppearance(named: .darkAqua)
-            field.focusRingType = .none
-        } else {
-            field.placeholderString = "Tìm trong clipboard"
         }
+        if look.focusesWithWindow { field.focusRingType = .none }
         field.stringValue = text
         field.delegate = context.coordinator
         // The clear button changes the text without a text-change notification, only through the action.
         field.target = context.coordinator
         field.action = #selector(Coordinator.searchChanged(_:))
-        if look == .notch {
+        if look.focusesWithWindow {
             field.onWindowChange = { [weak coordinator = context.coordinator] window in coordinator?.watch(window) }
         }
         context.coordinator.field = field

@@ -72,4 +72,17 @@ import Testing
         #expect(ClipboardCardText.accessibilityLabel(for: item(.link(URL(string: "https://example.com/a")!)), isPinned: false, now: now)
             == "Link, example.com /a, 2 phút trước")
     }
+
+    @Test func thePreviewPaneCutsLongerThanACard() {
+        let long = String(repeating: "a", count: 10_000)
+        #expect(ClipboardCardText.preview(of: long, limit: 1_500).count == 1_500)
+        #expect(ClipboardCardText.preview(of: "  Xin chào", limit: 3) == "Xin")
+    }
+
+    @Test func rowsNameAnImageBySizeAndOtherContentBySummary() {
+        let image = ClipboardImage(fileName: "a.png", pixelWidth: 1920, pixelHeight: 1080, byteCount: 1)
+        #expect(ClipboardCardText.rowTitle(of: .image(image)) == "Ảnh 1920 × 1080")
+        #expect(ClipboardCardText.rowTitle(of: .text("\n Xin chào\nthế giới")) == "Xin chào thế giới")
+        #expect(ClipboardCardText.rowTitle(of: .color(hex: "#FF8800", original: "rgb(255, 136, 0)")) == "rgb(255, 136, 0)")
+    }
 }
