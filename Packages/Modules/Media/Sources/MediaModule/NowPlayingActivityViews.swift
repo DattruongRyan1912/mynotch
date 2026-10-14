@@ -29,6 +29,7 @@ struct NowPlayingBars: View {
         let isPlaying = store.activityIsPlaying
         let spectrum = store.spectrumBands
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isPlaying || spectrum != nil)) { timeline in
+            let _ = NotchPerf.count(.spectrumUpdates)
             let levels = Self.levels(spectrum: spectrum, isPlaying: isPlaying, at: timeline.date)
             HStack(spacing: 2) {
                 ForEach(levels.indices, id: \.self) { bar in

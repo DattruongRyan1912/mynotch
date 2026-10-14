@@ -46,7 +46,7 @@ public enum NotchPerf {
     }
 
     /// How often `counter` was counted since the last report.
-    static func counted(_ counter: Counter) -> Int { counts[counter, default: 0] }
+    public static func counted(_ counter: Counter) -> Int { counts[counter, default: 0] }
 
     /// Logs the counts since the last report as rates over `elapsed`, then starts counting again.
     static func report(over elapsed: Duration) {
