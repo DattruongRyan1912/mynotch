@@ -156,7 +156,7 @@ import Testing
     @Test func theCacheKeyIsVersioned() throws {
         let key = try #require(TrackKey(artist: "Artist", title: "Song", album: "Album", duration: 200))
         let unversioned = ["Artist", "Song", "Album", "200"].joined(separator: "\u{1F}")
-        let withVersion = [unversioned, "v5"].joined(separator: "\u{1F}")
+        let withVersion = [unversioned, "v6"].joined(separator: "\u{1F}")
         #expect(key.cacheKey == hash(withVersion))
         // Entries written before the version existed are never found again.
         #expect(key.cacheKey != hash(unversioned))
@@ -209,9 +209,9 @@ import Testing
         func hash(_ version: String) -> String {
             SHA256.hash(data: Data((fields + [version]).joined(separator: "\u{1F}").utf8)).map { String(format: "%02x", $0) }.joined()
         }
-        #expect(TrackKey.cacheVersion == "v5")
-        #expect(notAsked.cacheKey == hash("v5"))
-        #expect(asked.cacheKey == hash("v5+am"))
+        #expect(TrackKey.cacheVersion == "v6")
+        #expect(notAsked.cacheKey == hash("v6"))
+        #expect(asked.cacheKey == hash("v6+am"))
         #expect(asked.cacheKey != notAsked.cacheKey)
     }
 
