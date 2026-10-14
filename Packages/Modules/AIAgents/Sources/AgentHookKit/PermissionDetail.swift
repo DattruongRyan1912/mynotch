@@ -124,7 +124,7 @@ public enum HookText {
 
     /// Line endings as `\n`; every invisible character as U+FFFD; a run of combining marks cut after a few; the tab, the
     /// plain space and everything else as it came.
-    static func clean(_ text: String) -> String {
+    public static func clean(_ text: String) -> String {
         var result = String.UnicodeScalarView()
         var afterReturn = false
         var marks = 0
@@ -154,7 +154,7 @@ public enum HookText {
     }
 
     /// For what is shown on one line, a tool name or a folder: line breaks become spaces.
-    static func cleanLine(_ text: String) -> String {
+    public static func cleanLine(_ text: String) -> String {
         clean(text).replacingOccurrences(of: "\n", with: " ")
     }
 }

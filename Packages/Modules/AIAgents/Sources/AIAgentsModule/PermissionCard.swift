@@ -17,28 +17,33 @@ nonisolated enum PermissionCardText {
 
     /// Said when the helper gave nothing to show.
     static let placeholder = "(không có chi tiết)"
-    /// A tool name longer than this is also written at the head of the scrolling text, since the line it sits on cuts it.
+    /// A tool name longer than this is also written as the first line of the text, since the row it sits on cannot show more.
     static let longToolName = 22
 
-    /// What a card can do with a request: allow it, say that it is too much for this card, or say that it was not whole.
-    nonisolated enum Mode: Equatable, Sendable {
-        case allowable, tooLongHere, notWhole
+    /// What a card can do with a request at all: offer to allow it, or only to deny it and leave the rest to the terminal.
+    nonisolated enum Eligibility: Equatable, Sendable {
+        /// Whole and plain text: "Cho phép" is offered when the layout puts all of the text on the card.
+        case offerable
+        /// Something was cut, or the helper did not know the tool.
+        case notWhole
+        /// A character that is not printable ASCII: the card cannot promise to show it as it is.
+        case notPlain
     }
 
-    static func mode(for request: PermissionRequest, in placement: PermissionPlacement) -> Mode {
+    static func eligibility(of request: PermissionRequest) -> Eligibility {
         guard request.isWhole else { return .notWhole }
-        let fits = request.canAllow && PermissionFit.fits(scrolled(of: request), in: placement.limits)
-        return fits ? .allowable : .tooLongHere
+        return request.isPlain ? .offerable : .notPlain
     }
 
-    /// "Cho phép" only for a request whose whole text is on this card, without scrolling. A request that is whole but too
-    /// much for the strip can only be denied there, and is read in the AI tab; one too much for the tab, or not whole, is
-    /// answered where all of it is, in the terminal, and the notch can only deny.
-    static func buttons(for request: PermissionRequest, in placement: PermissionPlacement) -> [Button] {
-        switch mode(for: request, in: placement) {
-        case .allowable: [Button("Cho phép", .allow), Button("Từ chối", .deny), Button("Hỏi trong terminal", .ask)]
-        case .tooLongHere where placement == .strip: [Button("Từ chối", .deny)]
-        case .tooLongHere, .notWhole: [Button("Từ chối", .deny), Button("Trả lời trong terminal", .ask)]
+    /// "Cho phép" only for a whole, plain request whose whole text is on this card; `fits` is the layout's to say. A request
+    /// that is plain and whole but too much for the strip can only be denied there, and is read in the AI tab; one too much
+    /// for the tab, or not whole or not plain, is answered where all of it is shown as it is, in the terminal, and the
+    /// notch can only deny.
+    static func buttons(for request: PermissionRequest, fits: Bool, in placement: PermissionPlacement) -> [Button] {
+        switch eligibility(of: request) {
+        case .offerable where fits: [Button("Cho phép", .allow), Button("Từ chối", .deny), Button("Hỏi trong terminal", .ask)]
+        case .offerable where placement == .strip: [Button("Từ chối", .deny)]
+        case .offerable, .notWhole, .notPlain: [Button("Từ chối", .deny), Button("Trả lời trong terminal", .ask)]
         }
     }
 
@@ -80,11 +85,12 @@ nonisolated enum PermissionCardText {
     }
 
     /// Said beside the buttons of a request that cannot be allowed on this card.
-    static func notice(of request: PermissionRequest, in placement: PermissionPlacement) -> String? {
-        switch mode(for: request, in: placement) {
-        case .allowable: nil
-        case .tooLongHere: placement == .strip ? "Mở tab AI để xem đủ" : "Quá dài để cho phép tại đây"
+    static func notice(of request: PermissionRequest, fits: Bool, in placement: PermissionPlacement) -> String? {
+        switch eligibility(of: request) {
+        case .offerable where fits: nil
+        case .offerable: placement == .strip ? "Mở tab AI để xem đủ" : "Quá dài để cho phép tại đây"
         case .notWhole: "Chưa đủ chi tiết để cho phép tại đây"
+        case .notPlain: "Có ký tự ngoài ASCII: trả lời trong terminal"
         }
     }
 
@@ -100,16 +106,41 @@ nonisolated enum PermissionCardText {
     }
 }
 
+/// Where a permission card is drawn.
+nonisolated enum PermissionPlacement: Equatable, Sendable {
+    /// Under the closed notch.
+    case strip
+    /// At the top of the AI tab.
+    case tab
+
+    /// How many lines of a text that does not fit are shown, ending in an ellipsis. It only sets what the preview looks
+    /// like: whether "Cho phép" is offered is the layout's to say.
+    var previewLines: Int {
+        switch self {
+        case .strip: 2
+        case .tab: 6
+        }
+    }
+}
+
 /// The request an agent waits on, with its answers. The same card sits in the strip under the closed notch and at the top
-/// of the AI tab. The text of what is asked is drawn in full, never in a scroll view, and "Cho phép" is offered only when
-/// all of it fits (see `PermissionFit`); what does not fit is cut with an ellipsis and the card says where to read it. A card
-/// that has just come up, or that took the place of the one before it, takes no answer until its delay is over, and changes
-/// visibly when it is replaced, so a click that began on the previous one does not land on this one.
+/// of the AI tab.
+///
+/// "Cho phép" is on the card only when all of the request's text is on it, and the card knows that from the layout it is
+/// drawn in: of two versions, the first has all of the text and the button, the second a preview with an ellipsis and no
+/// button, and `ViewThatFits` takes the first whose height is no more than the room the card is given, at the width it is
+/// given. Nothing about the width, the padding or the font is written down for this, so a change to the notch's padding or
+/// size cannot make it wrong. A request that is not whole or not plain text gets only the second.
+///
+/// A card that has just come up, or that took the place of the one before it, takes no answer until its delay is over, and
+/// changes visibly when it is replaced, so a click that began on the previous one does not land on this one.
 struct PermissionCard: View {
     /// The strip under the closed notch: it can be at most `NotchGeometry.maxBottomHeight` (80) tall.
     static let stripHeight: CGFloat = 80
     /// The card's padding on each side in the AI tab.
     static let tabInset: CGFloat = 8
+    /// The most the card takes of the AI tab, which has the session list under it. A text that does not fit this is not allowed.
+    static let tabBudget: CGFloat = 140
 
     typealias Placement = PermissionPlacement
 
@@ -122,25 +153,53 @@ struct PermissionCard: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            card(isArmed: queue.armedID == request.id)
+            content
                 .id(request.id)
                 .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)), removal: .opacity))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: placement == .tab ? Self.tabBudget : nil, alignment: .topLeading)
         .animation(.easeInOut(duration: 0.2), value: request.id)
     }
 
-    private func card(isArmed: Bool) -> some View {
+    @ViewBuilder private var content: some View {
+        if PermissionCardText.eligibility(of: request) == .offerable {
+            ViewThatFits(in: .vertical) {
+                layout(fits: true)
+                layout(fits: false)
+            }
+        } else {
+            layout(fits: false)
+        }
+    }
+
+    private func layout(fits: Bool) -> some View {
+        PermissionCardLayout(request: request, others: others, queue: queue, placement: placement, fits: fits, decide: decide)
+    }
+}
+
+/// One version of the card: `fits` says whether it has all of the text, and so the "Cho phép" button, or a preview of the
+/// text and no such button.
+struct PermissionCardLayout: View {
+    let request: PermissionRequest
+    let others: Int
+    let queue: PermissionQueue
+    let placement: PermissionPlacement
+    let fits: Bool
+    let decide: (String, PermissionAnswer) -> Void
+
+    var body: some View {
+        let isArmed = queue.armedID == request.id
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 Image(systemName: request.source.systemImage)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.orange)
+                // Never cut: a name of more than `longToolName` characters is in the text, and one of fewer takes less than the row.
                 Text(PermissionCardText.toolName(of: request))
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(NotchTokens.primaryText)
                     .lineLimit(1)
-                    .layoutPriority(1)
+                    .fixedSize()
                 Text(PermissionCardText.title(of: request))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(NotchTokens.secondaryText)
@@ -151,24 +210,23 @@ struct PermissionCard: View {
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(NotchTokens.secondaryText)
                         .lineLimit(1)
-                        .layoutPriority(1)
                 }
             }
-            // All of it, in as many lines as it takes; what is more than the card shows ends in an ellipsis, and is not allowed.
+            // All of it, in as many lines as it takes, or a preview that ends in an ellipsis.
             Text(PermissionCardText.scrolled(of: request))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(NotchTokens.secondaryText)
-                .lineLimit(placement.limits.lines)
+                .lineLimit(fits ? nil : placement.previewLines)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 6) {
-                ForEach(PermissionCardText.buttons(for: request, in: placement), id: \.answer) { button in
+                ForEach(PermissionCardText.buttons(for: request, fits: fits, in: placement), id: \.answer) { button in
                     Button(button.label) { decide(request.id, button.answer) }
                         .buttonStyle(PermissionButtonStyle(tint: Self.tint(of: button.answer)))
                         // The short answers keep their width; the long one gives way first.
                         .layoutPriority(button.answer == .ask ? 0 : 1)
                 }
-                if let notice = PermissionCardText.notice(of: request, in: placement) {
+                if let notice = PermissionCardText.notice(of: request, fits: fits, in: placement) {
                     Text(notice)
                         .font(.system(size: 10))
                         .foregroundStyle(Color.orange)

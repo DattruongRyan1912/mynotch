@@ -23,11 +23,21 @@ nonisolated struct PermissionRequest: Identifiable, Equatable, Sendable {
         guard let detail else { return false }
         return detail.isComplete && detail.hiddenLines == 0 && !detail.text.isEmpty
     }
-    /// True only when the request is whole and its whole text fits the AI tab, the card that shows the most, without
-    /// scrolling. Only then can it be allowed from the notch; otherwise the agent asks in the terminal, where all of it is.
-    var canAllow: Bool {
-        isWhole && PermissionFit.fits(PermissionCardText.scrolled(of: self), in: PermissionPlacement.tab.limits)
+    /// True when the tool name and the text are only printable ASCII and line feeds, after cleaning. Anything else (an
+    /// accent, a script the font draws wide or in pieces, an emoji, a character that looks like another) is not something
+    /// the card can promise to show as it is, so it is answered in the terminal, where the agent's prompt shows it.
+    var isPlain: Bool {
+        guard let detail else { return false }
+        return Self.isPlain(tool) && Self.isPlain(detail.text)
     }
+    /// True when the request may be allowed from the notch at all: whole, and plain. Whether all of its text fits the card
+    /// that shows it is the layout's to say, and the card offers "Cho phép" only when it does.
+    var canAllow: Bool { isWhole && isPlain }
+
+    private static func isPlain(_ text: String) -> Bool {
+        text.unicodeScalars.allSatisfy { ($0.value >= 0x20 && $0.value <= 0x7E) || $0 == "\n" }
+    }
+
     /// The last component of the working directory.
     var project: String? {
         guard let name = cwd.map({ ($0 as NSString).lastPathComponent }), !name.isEmpty else { return nil }
@@ -38,10 +48,11 @@ nonisolated struct PermissionRequest: Identifiable, Equatable, Sendable {
         guard let source = AgentSource(rawValue: payload.source), let tool = payload.tool, !tool.isEmpty else { return nil }
         self.id = id
         key = AgentSessionKey(source: source, sessionID: payload.sessionID)
-        cwd = payload.cwd
-        self.tool = tool
-        summary = payload.summary
-        detail = payload.detail
+        // Everything that is shown is cleaned here too, whatever sent it: the helper cleans, and an older one does not.
+        cwd = payload.cwd.map(HookText.cleanLine)
+        self.tool = HookText.cleanLine(tool)
+        summary = payload.summary.map(HookText.cleanLine)
+        detail = payload.detail.map { PermissionDetail(text: HookText.clean($0.text), hiddenLines: $0.hiddenLines, isComplete: $0.isComplete) }
     }
 }
 
