@@ -9,6 +9,12 @@ extension HookPayload {
         return [AgentEvent(source: source, sessionID: sessionID, timestamp: timestamp, kind: kind)]
     }
 
+    /// The agent went on after asking for permission: the tool ran (the user allowed it in the terminal), the turn ended,
+    /// a new prompt began or the session ended. A permission request still waiting on the notch is then over.
+    var settlesPermissionRequests: Bool {
+        ["PostToolUse", "Stop", "StopFailure", "UserPromptSubmit", "SessionEnd"].contains(event)
+    }
+
     private var kind: AgentEvent.Kind? {
         switch event {
         case "UserPromptSubmit": .turnStarted

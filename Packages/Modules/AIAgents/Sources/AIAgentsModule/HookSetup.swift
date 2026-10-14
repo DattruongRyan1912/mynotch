@@ -75,6 +75,7 @@ final class HookSetupModel {
         return """
         Thêm một hook cho các sự kiện: \(events.joined(separator: ", ")).
         Lệnh: \(command)
+        \(HookInstaller.permissionExplanation)
         Một bản sao lưu \(target.fileName).mynotch-<thời gian>.bak được tạo cạnh file trước khi sửa. Hook của công cụ khác và mọi khoá khác được giữ nguyên.
         """
     }
@@ -106,7 +107,7 @@ final class HookSetupModel {
             didInstall()
             return lines
         } done: { lines in
-            lines.isEmpty ? "Đã cài từ trước, không có gì thay đổi." : "Đã thêm \(lines.count) hook vào \(target.fileName)."
+            Self.mergeMessage(lines, fileName: target.fileName)
         }
     }
 
@@ -119,6 +120,15 @@ final class HookSetupModel {
         } done: { lines in
             lines.isEmpty ? "Không có hook của MyNotch trong \(target.fileName)." : "Đã gỡ hook khỏi \(target.fileName)."
         }
+    }
+
+    /// The installer lists an added hook as "<event>: + <command>" and a raised timeout as "<event>: ~ …".
+    private static func mergeMessage(_ lines: [String], fileName: String) -> String {
+        guard !lines.isEmpty else { return "Đã cài từ trước, không có gì thay đổi." }
+        let added = lines.filter { $0.contains(": + ") }.count
+        let updated = lines.count - added
+        guard updated > 0 else { return "Đã thêm \(added) hook vào \(fileName)." }
+        return added > 0 ? "Đã thêm \(added) hook, cập nhật \(updated) hook trong \(fileName)." : "Đã cập nhật \(updated) hook trong \(fileName)."
     }
 
     private func report(_ verb: String, work: () throws -> [String], done: ([String]) -> String) {

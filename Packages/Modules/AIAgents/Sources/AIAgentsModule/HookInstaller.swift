@@ -1,3 +1,4 @@
+import AgentHookKit
 import Foundation
 
 /// Registers the `mynotch-hook` helper with Claude Code and Codex. It works on the file URLs it is given and
@@ -22,6 +23,17 @@ struct HookInstaller {
     static let pluginUninstallCommand = "claude plugin uninstall \(pluginName)@\(marketplaceName)"
     /// A hook that has not answered by then is killed, so a stuck helper never holds up the agent.
     static let hookTimeoutSeconds = 5
+    /// The permission hook waits for the user, up to `PermissionClient.defaultTimeout`. The agent gives it a little
+    /// longer than that, so the helper always ends first and quietly, and the agent never reports a killed hook.
+    static let permissionHookTimeoutSeconds = Int(PermissionClient.defaultTimeout) + 10
+    /// What the Settings page and the confirmation say the permission hook does.
+    static let permissionExplanation = "Khi Claude Code hoặc Codex xin quyền dùng một công cụ, hook PermissionRequest cho notch hiện thẻ "
+        + "với nút Cho phép, Từ chối và Hỏi trong terminal, và chờ câu trả lời tối đa 60 giây. Hết giờ, không có MyNotch, "
+        + "hay chọn Hỏi trong terminal thì agent tự hỏi trong terminal như thường."
+
+    static func timeoutSeconds(for event: String) -> Int {
+        event == PermissionWire.eventName ? permissionHookTimeoutSeconds : hookTimeoutSeconds
+    }
 
     var now: () -> Date = { Date() }
     var calendar: Calendar = .autoupdatingCurrent
@@ -43,7 +55,7 @@ struct HookInstaller {
             "plugins": [["name": Self.pluginName, "source": "./", "description": description]],
         ], to: metadata.appending(path: "marketplace.json"))
         var events: [String: Any] = [:]
-        for event in Self.claudeEvents { events[event] = [Self.group(helperPath: helperPath, source: "claude")] }
+        for event in Self.claudeEvents { events[event] = [Self.group(helperPath: helperPath, source: "claude", event: event)] }
         try Self.write(["hooks": events], to: hooks.appending(path: "hooks.json"))
         return [
             "claude plugin marketplace add \(Self.shellQuoted(directory.path))",
@@ -80,8 +92,14 @@ struct HookInstaller {
         for event in events {
             if let existing = hooks[event], !(existing is [Any]) { throw InstallError.hooksNotAnArray(event: event) }
             var groups = hooks[event] as? [Any] ?? []
-            guard !groups.contains(where: { Self.commands(in: $0).contains { Self.runsHelper($0, helperPath: helperPath) } }) else { continue }
-            groups.append(Self.group(helperPath: helperPath, source: source))
+            if groups.contains(where: { Self.commands(in: $0).contains { Self.runsHelper($0, helperPath: helperPath) } }) {
+                if let line = Self.raiseTimeout(in: &groups, event: event, helperPath: helperPath) {
+                    hooks[event] = groups
+                    added.append(line)
+                }
+                continue
+            }
+            groups.append(Self.group(helperPath: helperPath, source: source, event: event))
             hooks[event] = groups
             added.append("\(event): + \(Self.command(helperPath: helperPath, source: source))")
         }
@@ -174,8 +192,35 @@ struct HookInstaller {
 
     // MARK: Hook entries
 
-    private static func group(helperPath: String, source: String) -> [String: Any] {
-        ["hooks": [["type": "command", "command": command(helperPath: helperPath, source: source), "timeout": hookTimeoutSeconds]]]
+    private static func group(helperPath: String, source: String, event: String) -> [String: Any] {
+        ["hooks": [["type": "command", "command": command(helperPath: helperPath, source: source), "timeout": timeoutSeconds(for: event)]]]
+    }
+
+    /// An install made before the permission hook existed gave it the 5 seconds of the others, which would end the wait
+    /// for the user long before the helper does. Raises the timeout of our own entry only, and only a shorter one: a longer
+    /// timeout is the user's. Returns the line for the summary, nil when nothing was changed.
+    private static func raiseTimeout(in groups: inout [Any], event: String, helperPath: String) -> String? {
+        guard event == PermissionWire.eventName else { return nil }
+        let wanted = timeoutSeconds(for: event)
+        var previous: Int?
+        for index in groups.indices {
+            guard var group = groups[index] as? [String: Any], var entries = group["hooks"] as? [Any] else { continue }
+            var changed = false
+            for position in entries.indices {
+                guard var entry = entries[position] as? [String: Any], let command = entry["command"] as? String,
+                      runsHelper(command, helperPath: helperPath), let current = entry["timeout"] as? Int, current < wanted
+                else { continue }
+                entry["timeout"] = wanted
+                entries[position] = entry
+                previous = previous ?? current
+                changed = true
+            }
+            if changed {
+                group["hooks"] = entries
+                groups[index] = group
+            }
+        }
+        return previous.map { "\(event): ~ timeout \($0) → \(wanted) s" }
     }
 
     /// Runs the helper only while it is there: a moved or trashed app would otherwise make the shell exit 127, which

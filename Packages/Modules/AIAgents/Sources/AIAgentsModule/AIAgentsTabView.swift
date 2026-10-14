@@ -2,9 +2,11 @@ import AppKit
 import NotchUI
 import SwiftUI
 
-/// The "AI" tab: one row per session, newest activity first, and today's usage and Codex's limits below.
+/// The "AI" tab: the permission request waiting for an answer, then one row per session, newest activity first, and
+/// today's usage and Codex's limits below.
 struct AIAgentsTabView: View {
     let store: AgentSessionStore
+    let permissions: PermissionQueue
     let actions: AgentTabActions
 
     @Environment(\.notch) private var notch
@@ -17,6 +19,11 @@ struct AIAgentsTabView: View {
         TimelineView(.periodic(from: .now, by: 30)) { _ in
             let state = AgentTabState(store: store, now: .now)
             VStack(alignment: .leading, spacing: 6) {
+                if let request = permissions.pending.first {
+                    PermissionCard(request: request, others: permissions.pending.count - 1, decide: actions.decide)
+                        .padding(.horizontal, 8)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
+                }
                 if state.isEmpty {
                     EmptyState()
                 } else {

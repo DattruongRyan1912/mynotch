@@ -6,6 +6,10 @@ import SwiftUI
 import Testing
 @testable import AIAgentsModule
 
+final class AlertCounter {
+    var count = 0
+}
+
 /// Records what the tab asked the system to do, so no test opens Terminal or touches the pasteboard.
 final class FakeOpener {
     var terminal: [URL] = []
@@ -29,6 +33,8 @@ final class FakeOpener {
     let fileSystem = FakeAgentFileSystem()
     let opener = FakeOpener()
     let hookInstaller = FakeHookInstaller()
+    /// How often the module played the alert sound, which no test makes audible.
+    let alerts = AlertCounter()
     let module: AIAgentsModule
     let harness: RegistryHarness
     /// Unix socket paths are short, so this is outside the sandboxed temporary directory.
@@ -42,7 +48,8 @@ final class FakeOpener {
         fileSystem.setAlive(4242)
         module = AIAgentsModule(
             fileSystem: fileSystem, claudeRoot: sandbox.claude, codexRoot: sandbox.codex, opener: opener.opener,
-            hookSetup: hookInstaller.setup(in: sandbox.directory), socketPath: socketDirectory.appending(path: "agent.sock").path
+            hookSetup: hookInstaller.setup(in: sandbox.directory), socketPath: socketDirectory.appending(path: "agent.sock").path,
+            alert: { [alerts] in alerts.count += 1 }
         )
         harness = RegistryHarness([module])
     }

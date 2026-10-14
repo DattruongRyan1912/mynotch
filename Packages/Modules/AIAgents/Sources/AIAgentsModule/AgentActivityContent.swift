@@ -12,14 +12,24 @@ nonisolated struct AgentActivityContent: Equatable, Sendable {
         case finished
     }
 
+    /// The permission request on screen and how many wait behind it.
+    nonisolated struct Ask: Equatable, Sendable {
+        var request: PermissionRequest
+        var others: Int
+    }
+
     var kind: Kind
     /// The agent the glyph shows: the one whose turn the activity is about.
     var source: AgentSource
+    /// Set while a request waits for the user's answer: the activity is then a card with the buttons.
+    var ask: Ask?
 
-    /// A session waiting for the user outranks other activities. Working can go on for hours in the background, so
-    /// it yields the notch to whatever else is live, such as playing media, and shows as a bubble beside it.
+    /// A session waiting for the user outranks other activities, and a request with its buttons outranks that: it is time
+    /// limited and only the notch can answer it. Working can go on for hours in the background, so it yields the notch to
+    /// whatever else is live, such as playing media, and shows as a bubble beside it.
     var priority: ActivityPriority {
-        switch kind {
+        if ask != nil { return .critical }
+        return switch kind {
         case .waitingForInput: .high
         case .working: .low
         case .finished: .normal
@@ -28,21 +38,30 @@ nonisolated struct AgentActivityContent: Equatable, Sendable {
 
     /// For VoiceOver.
     var accessibilityLabel: String {
-        switch kind {
+        if let request = ask?.request {
+            return "\(source.displayName) xin quyền dùng \(request.tool)" + (request.summary.map { ": \($0)" } ?? "")
+        }
+        return switch kind {
         case .working: "\(source.displayName) đang chạy"
         case .waitingForInput: "\(source.displayName) đang chờ bạn"
         case .finished: "\(source.displayName) đã xong"
         }
     }
 
-    init(kind: Kind, source: AgentSource) {
+    init(kind: Kind, source: AgentSource, ask: Ask? = nil) {
         self.kind = kind
         self.source = source
+        self.ask = ask
     }
 
-    /// Waiting beats working, which beats finished. Nil when there is nothing to show. With `showWorking` off
-    /// only the working activity is left out: being asked something, or told it is done, still shows.
-    init?(sessions: some Sequence<AgentSession>, showWorking: Bool) {
+    /// A pending request beats everything; then waiting beats working, which beats finished. Nil when there is nothing
+    /// to show. With `showWorking` off only the working activity is left out: being asked something, or told it is
+    /// done, still shows.
+    init?(sessions: some Sequence<AgentSession>, showWorking: Bool, pending: [PermissionRequest] = []) {
+        if let request = pending.first {
+            self.init(kind: .waitingForInput, source: request.source, ask: Ask(request: request, others: pending.count - 1))
+            return
+        }
         var waiting: AgentSession?
         var working: AgentSession?
         var finished: AgentSession?

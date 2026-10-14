@@ -1,3 +1,4 @@
+import AgentHookKit
 import Foundation
 import Testing
 @testable import AIAgentsModule
@@ -78,7 +79,7 @@ import Testing
         for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Notification", "Stop", "StopFailure", "SessionEnd"] {
             #expect(ours(merged, event).count == 1, "\(event)")
             #expect(commands(ours(merged, event)[0]) == [HookInstaller.command(helperPath: helper, source: "claude")], "\(event)")
-            #expect(firstHook(ours(merged, event)[0])?["timeout"] as? Int == 5, "\(event)")
+            #expect(firstHook(ours(merged, event)[0])?["timeout"] as? Int == HookInstaller.timeoutSeconds(for: event), "\(event)")
         }
         #expect(groups(merged, "PreToolUse").count == 2)
         #expect(groups(merged, "Stop").count == 2)
@@ -225,7 +226,7 @@ import Testing
         for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd"] {
             #expect(ours(merged, event).count == 1, "\(event)")
             #expect(commands(ours(merged, event)[0]) == [HookInstaller.command(helperPath: helper, source: "codex")], "\(event)")
-            #expect(firstHook(ours(merged, event)[0])?["timeout"] as? Int == 5, "\(event)")
+            #expect(firstHook(ours(merged, event)[0])?["timeout"] as? Int == HookInstaller.timeoutSeconds(for: event), "\(event)")
         }
         #expect(groups(merged, "PreToolUse").count == 2)
         #expect(try installer.mergeCodexHooks(hooksURL: url, helperPath: helper).isEmpty)
@@ -267,7 +268,7 @@ import Testing
         for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Notification", "Stop", "StopFailure", "SessionEnd"] {
             #expect(ours(hooks, event).count == 1, "\(event)")
             #expect(commands(ours(hooks, event)[0]) == [HookInstaller.command(helperPath: helper, source: "claude")], "\(event)")
-            #expect(firstHook(ours(hooks, event)[0])?["timeout"] as? Int == 5, "\(event)")
+            #expect(firstHook(ours(hooks, event)[0])?["timeout"] as? Int == HookInstaller.timeoutSeconds(for: event), "\(event)")
         }
         #expect(commandsToShow == [
             "claude plugin marketplace add '\(plugin.path)'",
@@ -306,5 +307,78 @@ import Testing
     @Test func shellQuotingSurvivesASingleQuoteInThePath() {
         defer { cleanUp() }
         #expect(HookInstaller.shellQuoted("/a b/it's") == "'/a b/it'\\''s'")
+    }
+
+    // MARK: Permission hook
+
+    /// The helper waits up to 60 s for the user, so the agent must not stop the hook before that.
+    @Test func thePermissionHookIsGivenMoreTimeThanTheHelperWaitsAndTheOthersFive() {
+        #expect(HookInstaller.timeoutSeconds(for: "PermissionRequest") == 70)
+        #expect(Double(HookInstaller.timeoutSeconds(for: "PermissionRequest")) > PermissionClient.defaultTimeout)
+        for event in HookInstaller.claudeEvents where event != "PermissionRequest" {
+            #expect(HookInstaller.timeoutSeconds(for: event) == 5, "\(event)")
+        }
+    }
+
+    @Test func aSettingsFileInstalledBeforeThePermissionHookGetsItsTimeoutRaisedAndNothingElse() throws {
+        defer { cleanUp() }
+        let command = HookInstaller.command(helperPath: helper, source: "claude")
+        let before: [String: Any] = [
+            "theme": "dark",
+            "hooks": [
+                "PermissionRequest": [
+                    ["matcher": "Bash", "hooks": [["type": "command", "command": "/opt/other/audit", "timeout": 5]]],
+                    ["hooks": [["type": "command", "command": command, "timeout": 5]]],
+                ],
+                "Stop": [["hooks": [["type": "command", "command": command, "timeout": 5]]]],
+            ],
+        ]
+        let url = try write(String(decoding: try JSONSerialization.data(withJSONObject: before), as: UTF8.self), to: "settings.json")
+        let original = try object(at: url)
+        let summary = try installer.mergeClaudeSettings(settingsURL: url, helperPath: helper)
+
+        let merged = try object(at: url)
+        #expect(firstHook(ours(merged, "PermissionRequest")[0])?["timeout"] as? Int == 70)
+        let others = groups(merged, "PermissionRequest").filter { commands($0) == ["/opt/other/audit"] }
+        #expect(others.count == 1)
+        #expect(firstHook(others[0])?["timeout"] as? Int == 5)
+        #expect(others[0]["matcher"] as? String == "Bash")
+        #expect(merged["theme"] as? String == "dark")
+        #expect(groups(merged, "Stop") == groups(original, "Stop"))
+        // One line for the raised timeout and one for each event that was missing.
+        #expect(summary.contains { $0.hasPrefix("PermissionRequest: ~") })
+        #expect(summary.filter { $0.contains(": + ") }.count == HookInstaller.claudeEvents.count - 2)
+        #expect(try object(at: directory.appending(path: "settings.json.mynotch-20261014-120709.bak")) == original)
+        #expect(try installer.mergeClaudeSettings(settingsURL: url, helperPath: helper).isEmpty)
+    }
+
+    @Test func aTimeoutShorterThanTheWaitIsRaisedAndALongerOneIsTheUsers() throws {
+        defer { cleanUp() }
+        let command = HookInstaller.command(helperPath: helper, source: "claude")
+        let cases: [(timeout: Int?, expected: Int?)] = [(5, 70), (30, 70), (70, 70), (120, 120), (nil, nil)]
+        for (index, entry) in cases.enumerated() {
+            var hook: [String: Any] = ["type": "command", "command": command]
+            hook["timeout"] = entry.timeout
+            let json = try JSONSerialization.data(withJSONObject: ["hooks": ["PermissionRequest": [["hooks": [hook]]]]])
+            let url = try write(String(decoding: json, as: UTF8.self), to: "settings-\(index).json")
+            _ = try installer.mergeClaudeSettings(settingsURL: url, helperPath: helper)
+            #expect(firstHook(ours(try object(at: url), "PermissionRequest")[0])?["timeout"] as? Int == entry.expected, "\(entry)")
+        }
+    }
+
+    @Test func removingAfterTheTimeoutWasRaisedStillRestoresTheOriginal() throws {
+        defer { cleanUp() }
+        let command = HookInstaller.command(helperPath: helper, source: "codex")
+        let json = try JSONSerialization.data(withJSONObject: ["hooks": ["PermissionRequest": [["hooks": [["type": "command", "command": command, "timeout": 5]]]]]])
+        let url = try write(String(decoding: json, as: UTF8.self), to: "hooks.json")
+        _ = try installer.mergeCodexHooks(hooksURL: url, helperPath: helper)
+        #expect(firstHook(ours(try object(at: url), "PermissionRequest")[0])?["timeout"] as? Int == 70)
+        _ = try installer.removeCodex(hooksURL: url, helperPath: helper)
+        #expect(groups(try object(at: url), "PermissionRequest").isEmpty)
+    }
+
+    @Test func theSettingsExplanationSaysWhatThePermissionHookDoes() {
+        let text = HookInstaller.permissionExplanation
+        for part in ["PermissionRequest", "Cho phép", "Từ chối", "Hỏi trong terminal", "60 giây"] { #expect(text.contains(part), "\(part)") }
     }
 }

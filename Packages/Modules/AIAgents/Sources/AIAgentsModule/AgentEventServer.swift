@@ -1,6 +1,5 @@
 import AgentHookKit
 import Foundation
-import Synchronization
 
 /// Listens on a Unix datagram socket for what the `mynotch-hook` helper sends. A datagram is one whole message,
 /// so there is no framing and a slow or absent reader never blocks the helper.
@@ -13,20 +12,13 @@ final class AgentEventServer {
         case directoryNotOwned
     }
 
-    /// A counter shared with the closures that run on the private queue.
-    private nonisolated final class Generation: Sendable {
-        private let value = Mutex(0)
-        var current: Int { value.withLock { $0 } }
-        func advance() { value.withLock { $0 += 1 } }
-    }
-
     let directory: URL
     var socketPath: String { directory.appending(path: "agent.sock").path }
     /// Runs on the main actor, in the order the datagrams were read.
     private let onPayload: @MainActor @Sendable (HookPayload) -> Void
     /// The datagrams are queued for the main thread from the private queue, so `stop` cannot recall them; it
     /// changes this instead, and a queued one that finds another value is dropped.
-    private let generation = Generation()
+    private let generation = ServerGeneration()
     private var source: DispatchSourceRead?
 
     init(directory: URL, onPayload: @escaping @MainActor @Sendable (HookPayload) -> Void) {
@@ -38,7 +30,7 @@ final class AgentEventServer {
     func start() throws {
         stop()
         guard let address = SocketAddress(path: socketPath) else { throw StartError.pathTooLong }
-        try preparePrivateDirectory()
+        try PrivateDirectory.prepare(directory)
         unlink(socketPath)
         let fd = socket(AF_UNIX, SOCK_DGRAM, 0)
         guard fd >= 0 else { throw StartError.socket(errno: errno) }
@@ -77,17 +69,6 @@ final class AgentEventServer {
         var length = socklen_t(MemoryLayout<Int32>.size)
         guard getsockopt(Int32(source.handle), SOL_SOCKET, SO_RCVBUF, &size, &length) == 0 else { return nil }
         return Int(size)
-    }
-
-    /// The folder is the user's own and closed to everyone else. One that exists is checked before anything is
-    /// created or changed in it: `/tmp/mynotch-<uid>` is in a folder every user can write to, so someone else may
-    /// have made it first.
-    private func preparePrivateDirectory() throws {
-        var info = stat()
-        if stat(directory.path, &info) == 0, info.st_uid != geteuid() { throw StartError.directoryNotOwned }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        // `attributes` of `createDirectory` apply only to a directory it creates.
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
     }
 
     /// Closes the socket and removes its file.

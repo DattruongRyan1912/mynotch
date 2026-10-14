@@ -167,6 +167,33 @@ final class FakeHookInstaller: HookInstalling {
         #expect(codex.contains("hooks.json.mynotch-<thời gian>.bak"))
     }
 
+    @Test func theConfirmationSaysWhatThePermissionHookDoes() {
+        let model = model()
+        #expect(model.preview(of: .claude).contains(HookInstaller.permissionExplanation))
+        #expect(model.preview(of: .codex).contains(HookInstaller.permissionExplanation))
+    }
+
+    @Test func aMergeThatOnlyRaisedATimeoutSaysItUpdatedAndAddedNothing() {
+        let model = model()
+        installer.result = ["PermissionRequest: ~ timeout 5 → 70 s"]
+        model.merge(.claude)
+        #expect(model.message == "Đã cập nhật 1 hook trong settings.json.")
+    }
+
+    @Test func aMergeThatAddedAndRaisedSaysBoth() {
+        let model = model()
+        installer.result = ["Stop: + command", "PermissionRequest: ~ timeout 5 → 70 s", "SessionEnd: + command"]
+        model.merge(.codex)
+        #expect(model.message == "Đã thêm 2 hook, cập nhật 1 hook trong hooks.json.")
+    }
+
+    @Test func aMergeThatOnlyAddedKeepsTheEarlierWording() {
+        let model = model()
+        installer.result = ["Stop: + command", "SessionEnd: + command"]
+        model.merge(.claude)
+        #expect(model.message == "Đã thêm 2 hook vào settings.json.")
+    }
+
     @Test func thePluginRouteSaysHowToUninstallIt() {
         let model = model()
         model.installClaudePlugin()

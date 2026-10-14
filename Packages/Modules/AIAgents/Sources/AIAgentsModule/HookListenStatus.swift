@@ -6,6 +6,8 @@ import Observation
 final class HookListenStatus {
     static let failureMessage = "Không mở được socket nhận hook nên trạng thái chính xác chưa hoạt động. Tắt rồi bật lại để thử lại."
 
+    static let permissionFailureMessage = "Không mở được socket duyệt quyền nên nút Cho phép và Từ chối chưa hoạt động. Tắt rồi bật lại \"Trạng thái chính xác\" để thử lại."
+
     /// Set while the socket is wanted but could not be opened; nil otherwise.
     var failure: String?
 }
