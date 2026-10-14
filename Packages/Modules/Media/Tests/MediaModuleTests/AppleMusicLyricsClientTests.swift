@@ -160,12 +160,21 @@ enum AppleReplies {
 
     // MARK: failures
 
-    @Test(arguments: [429, 500, 502, 503, 400])
+    @Test(arguments: [408, 429, 500, 502, 503])
     func otherStatusesAreUnavailableAndNothingMoreIsAsked(status: Int) async {
         http.reply(HTTPReply(status: status, body: Data("busy".utf8), retryAfter: "30"))
         let result = await ask()
         #expect(result.isUnavailable)
         #expect(http.requests.count == 1)
+        #expect(account.status == .connected(storefront: "vn"))
+    }
+
+    @Test(arguments: [400, 405, 410, 422, 451])
+    func otherClientErrorsAreNoLyricsRatherThanTrouble(status: Int) async {
+        // An id Apple answers like this every time must not cost a full lookup at each replay: it is "not found", which is cached.
+        http.reply(HTTPReply(status: status, body: Data("no".utf8)))
+        #expect(await ask() == .notFound)
+        #expect(calls == ["\(Self.api)/syllable-lyrics", "\(Self.api)/lyrics"])
         #expect(account.status == .connected(storefront: "vn"))
     }
 

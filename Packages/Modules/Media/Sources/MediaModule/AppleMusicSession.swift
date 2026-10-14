@@ -1,12 +1,17 @@
 import Foundation
 
 /// What identifies the user to Apple Music's web API: the web player's developer token, the user's own token and the
-/// store the account belongs to (a two-letter country code such as "vn"). These are credentials: never logged or shown.
-nonisolated struct AppleMusicCredentials: Equatable, Sendable {
+/// store the account belongs to (a two-letter country code such as "vn"). These are credentials: never logged or shown,
+/// so printing one (a log line, a failed expectation, `dump`) leaves the tokens out.
+nonisolated struct AppleMusicCredentials: Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     var developerToken: String
     var userToken: String
     /// nil when the web page did not say; the client asks Apple then.
     var storefront: String?
+
+    var description: String { "AppleMusicCredentials(tokens redacted, storefront: \(storefront ?? "nil"))" }
+    var debugDescription: String { description }
+    var customMirror: Mirror { Mirror(self, children: ["storefront": storefront as Any], displayStyle: .struct) }
 }
 
 /// Finds the credentials in what the sign-in window can see: the web player's MusicKit and its cookies.

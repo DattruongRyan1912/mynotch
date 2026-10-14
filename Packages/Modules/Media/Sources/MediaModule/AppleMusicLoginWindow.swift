@@ -4,15 +4,16 @@ import WebKit
 /// What the module needs from the sign-in window. A protocol so tests never open a web view or touch web data.
 protocol AppleMusicSignIn {
     /// Shows the window, or brings the open one forward. `connect` is called with the credentials once the page has them,
-    /// and the window closes when it answers.
-    func open(connect: @escaping (AppleMusicCredentials) async -> Bool)
+    /// and the window closes when it answers. `closed` is called once when the window is gone, whoever closed it.
+    func open(connect: @escaping (AppleMusicCredentials) async -> Bool, closed: @escaping () async -> Void)
     func close()
     /// Deletes the cookies and everything else the window's web view stored.
     func removeWebsiteData() async
 }
 
 /// A window with the Apple Music web player, where the user signs in themselves: the app never sees the password,
-/// only the tokens the page ends up with. AppKit glue; what is read from the page is decided by `AppleMusicSessionReader`.
+/// only the tokens the page ends up with. AppKit glue; what is read from the page is decided by `AppleMusicSessionReader`,
+/// and what happens to the web session afterwards by the module (it asks for it to be wiped when the window is gone).
 final class AppleMusicLoginWindow: NSObject, AppleMusicSignIn, NSWindowDelegate {
     static let title = "Đăng nhập Apple Music"
     static let startURL = URL(string: "https://music.apple.com/")!
@@ -25,8 +26,9 @@ final class AppleMusicLoginWindow: NSObject, AppleMusicSignIn, NSWindowDelegate 
     private var window: NSWindow?
     private var webView: WKWebView?
     private var polling: Task<Void, Never>?
+    private var closed: (() async -> Void)?
 
-    func open(connect: @escaping (AppleMusicCredentials) async -> Bool) {
+    func open(connect: @escaping (AppleMusicCredentials) async -> Bool, closed: @escaping () async -> Void) {
         if let window {
             NSApp.activate()
             window.makeKeyAndOrderFront(nil)
@@ -37,7 +39,6 @@ final class AppleMusicLoginWindow: NSObject, AppleMusicSignIn, NSWindowDelegate 
         // Without a Safari-like name the page may take this for an unsupported browser.
         configuration.applicationNameForUserAgent = "Version/26.0 Safari/605.1.15"
         let webView = WKWebView(frame: NSRect(origin: .zero, size: Self.contentSize), configuration: configuration)
-        webView.load(URLRequest(url: Self.startURL))
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: Self.contentSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false
@@ -49,14 +50,19 @@ final class AppleMusicLoginWindow: NSObject, AppleMusicSignIn, NSWindowDelegate 
         window.center()
         self.window = window
         self.webView = webView
+        self.closed = closed
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
 
-        // The page gives no signal when the user is done, so look about once a second until both tokens are there.
         polling = Task { [weak self] in
+            // A session an earlier window left (the app quit with it open) is not reused: every sign-in starts clean.
+            await self?.removeWebsiteData()
+            self?.webView?.load(URLRequest(url: Self.startURL))
+            // The page gives no signal when the user is done, so look about once a second until both tokens are there.
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.pollInterval)
-                guard let self, !Task.isCancelled, let credentials = await credentialsOnThePage() else { continue }
+                guard let self else { return }
+                guard !Task.isCancelled, let credentials = await credentialsOnThePage(), !Task.isCancelled else { continue }
                 _ = await connect(credentials)
                 close()
                 return
@@ -80,6 +86,9 @@ final class AppleMusicLoginWindow: NSObject, AppleMusicSignIn, NSWindowDelegate 
         webView?.stopLoading()
         webView = nil
         window = nil
+        let closed = closed
+        self.closed = nil
+        if let closed { Task { await closed() } }
     }
 
     private func credentialsOnThePage() async -> AppleMusicCredentials? {

@@ -468,6 +468,59 @@ import Testing
         #expect(module.appleAccount.status == .notConnected)
     }
 
+    // The web session is only how the tokens are found, so none of it stays once the window is gone (the Settings rows
+    // offer no way to clear it while the status is "Chưa kết nối").
+
+    @Test func theWebSessionStaysWhileTheWindowIsOpen() async {
+        tokens.failsToSave = true
+        module.connectAppleMusic()
+        _ = await signIn.found(credentials)
+        #expect(signIn.removeCount == 0)
+    }
+
+    @Test func afterAFailedSignInTheWebSessionIsWiped() async {
+        tokens.failsToSave = true
+        module.connectAppleMusic()
+        #expect(!(await signIn.found(credentials)))
+        await signIn.windowClosed()
+        #expect(signIn.removeCount == 1)
+        #expect(module.appleAccount.status == .notConnected)
+        #expect(tokens.values.isEmpty)
+    }
+
+    @Test func afterASignInWithoutAStorefrontThatCannotBeFetchedTheWebSessionIsWiped() async {
+        client.reply(AppleReplies.rejected)
+        module.connectAppleMusic()
+        #expect(!(await signIn.found(AppleMusicCredentials(developerToken: "dev-token-fake", userToken: "user-token-fake", storefront: nil))))
+        await signIn.windowClosed()
+        #expect(signIn.removeCount == 1)
+        #expect(module.appleAccount.problem == AppleMusicLyricsClient.storefrontProblem)
+    }
+
+    @Test func afterASuccessfulSignInTheTokensAreKeptAndTheWebSessionIsWiped() async {
+        module.connectAppleMusic()
+        #expect(await signIn.found(credentials))
+        await signIn.windowClosed()
+        #expect(signIn.removeCount == 1)
+        #expect(module.appleAccount.status == .connected(storefront: "vn"))
+        #expect(tokens.values.count == 3)
+    }
+
+    @Test func aWindowClosedWithoutSigningInIsWipedToo() async {
+        module.connectAppleMusic()
+        await signIn.windowClosed()
+        #expect(signIn.removeCount == 1)
+        #expect(module.appleAccount.status == .notConnected)
+    }
+
+    @Test func stoppingTheModuleWithTheWindowOpenWipesTheWebSession() async {
+        await harness.registry.bootstrap()
+        module.connectAppleMusic()
+        await harness.registry.setEnabled(false, for: "media")
+        await settle { signIn.removeCount == 1 }
+        #expect(signIn.removeCount == 1)
+    }
+
     @Test func disconnectingClearsTheStoreTheWebDataAndTheStatus() async {
         storeSignIn()
         await harness.registry.bootstrap()

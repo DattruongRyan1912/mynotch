@@ -7,15 +7,23 @@ final class FakeAppleMusicSignIn: AppleMusicSignIn {
     private(set) var closeCount = 0
     private(set) var removeCount = 0
     private var connect: ((AppleMusicCredentials) async -> Bool)?
+    private var closed: (() async -> Void)?
 
-    func open(connect: @escaping (AppleMusicCredentials) async -> Bool) {
+    var isOpen: Bool { connect != nil }
+
+    func open(connect: @escaping (AppleMusicCredentials) async -> Bool, closed: @escaping () async -> Void) {
         openCount += 1
         self.connect = connect
+        self.closed = closed
     }
 
+    /// The module closes the window; like the real one, it then reports that it is gone.
     func close() {
         closeCount += 1
+        let closed = closed
         connect = nil
+        self.closed = nil
+        if let closed { Task { await closed() } }
     }
 
     func removeWebsiteData() async {
@@ -25,5 +33,13 @@ final class FakeAppleMusicSignIn: AppleMusicSignIn {
     /// The user signed in and the window found these; whether the app accepted them.
     func found(_ credentials: AppleMusicCredentials) async -> Bool {
         await connect?(credentials) ?? false
+    }
+
+    /// The user closes the window, or it closes itself after `found`.
+    func windowClosed() async {
+        let closed = closed
+        connect = nil
+        self.closed = nil
+        await closed?()
     }
 }

@@ -150,6 +150,10 @@ final class AppleMusicLyricsClient {
             return .notFound
         case 401, 403:
             return .rejected
+        case 400..<500 where reply.status != 408 && reply.status != 429:
+            // Apple has no lyrics to give for this song (an id that is no catalog song, say): remembered like a 404, not
+            // retried at every replay. A timeout or a rate limit says nothing about the song.
+            return .notFound
         default:
             return .unavailable("HTTP \(reply.status)")
         }

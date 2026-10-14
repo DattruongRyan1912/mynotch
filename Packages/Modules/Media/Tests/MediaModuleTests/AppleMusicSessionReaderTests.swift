@@ -104,4 +104,21 @@ import Testing
             #expect(script.contains(name), "\(name)")
         }
     }
+
+    // MARK: no printing of tokens
+
+    @Test func credentialsNeverPrintTheirTokens() {
+        let credentials = AppleMusicCredentials(developerToken: "dev-token-fake", userToken: "user-token-fake", storefront: "vn")
+        var dumped = ""
+        dump(credentials, to: &dumped)
+        let texts = [
+            String(describing: credentials), String(reflecting: credentials), "\(credentials)", dumped,
+            "\([credentials])", String(describing: Optional(credentials)), "\(Mirror(reflecting: credentials).children.map { "\($0.label ?? "") \($0.value)" })",
+        ]
+        for text in texts {
+            #expect(!text.contains("dev-token-fake"))
+            #expect(!text.contains("user-token-fake"))
+        }
+        #expect(String(describing: credentials).contains("vn"))
+    }
 }

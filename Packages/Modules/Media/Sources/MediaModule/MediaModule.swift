@@ -262,9 +262,14 @@ public final class MediaModule: FeatureModule {
         return youtubeBridge
     }
 
-    /// Opens the sign-in window; the account is connected once the window has found the tokens.
+    /// Opens the sign-in window; the account is connected once the window has found the tokens. The page is only how
+    /// they are found: when the window is gone (signed in, failed, or given up) the tokens are in the Keychain or
+    /// never will be, so nothing of the web session stays behind, where the Settings rows offer no way to clear it.
     func connectAppleMusic() {
-        signIn.open { [appleClient] credentials in await appleClient.connect(credentials) }
+        signIn.open(
+            connect: { [appleClient] credentials in await appleClient.connect(credentials) },
+            closed: { [signIn] in await signIn.removeWebsiteData() }
+        )
     }
 
     /// Forgets the sign-in: the tokens in the Keychain and everything the sign-in window's web view stored.
