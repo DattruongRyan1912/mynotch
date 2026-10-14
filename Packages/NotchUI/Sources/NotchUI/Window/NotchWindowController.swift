@@ -28,8 +28,8 @@ final class NotchWindowController {
     private var occlusionObserver: NSObjectProtocol?
     /// Last keyboard focus decision; the panel makes itself key only when it turns true.
     private var lastFocus = false
-    /// Created on the first hand-back; see `KeyboardReturn`.
-    private var keySink: KeySinkPanel?
+    /// Hands the keyboard back to the app in front; see `KeyboardReturn`.
+    private let keyboardHandBack = KeyboardHandBack()
     /// Strip height seen by the last observation, so only a show or hide is logged.
     private var lastStripHeight: CGFloat = 0
     /// Which activities were primary and in bubbles at the last observation, so only a change is logged.
@@ -206,9 +206,7 @@ final class NotchWindowController {
         panel.allowsKeyStatus = false
         orderOut("controller closed")
         panel.close()
-        keySink?.orderOut(nil)
-        keySink?.close()
-        keySink = nil
+        keyboardHandBack.close()
     }
 
     private func orderFront(_ reason: String) {
@@ -250,38 +248,12 @@ final class NotchWindowController {
             NotchLog.record("keyboard allowsKey=\(plan.allowsKeyStatus) isKey=\(panel.isKeyWindow)")
             panel.allowsKeyStatus = plan.allowsKeyStatus
         }
-        if plan.handBack { handBackKeyboard() }
+        if plan.handBack { keyboardHandBack.returnKeyboard(from: panel) }
         if plan.makeKey {
             NotchLog.record("keyboard makeKey")
             panel.makeKey()
         }
         lastFocus = focuses
-    }
-
-    private func handBackKeyboard() {
-        let strategy = KeyboardReturn.current
-        let front = NSWorkspace.shared.frontmostApplication
-        let frontIsOtherApp = front.map { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier } ?? false
-        let steps = strategy.steps(frontIsOtherApp: frontIsOtherApp)
-        NotchLog.record("keyboard hand-back strategy=\(strategy.rawValue) steps=\(steps.map(\.rawValue)) frontIsOtherApp=\(frontIsOtherApp) \(panel.logSummary)")
-        for step in steps { perform(step, front: front) }
-        NotchLog.record("keyboard hand-back done \(panel.logSummary)")
-    }
-
-    private func perform(_ step: KeyboardReturn.Step, front: NSRunningApplication?) {
-        switch step {
-        case .showSink:
-            let sink = keySink ?? KeySinkPanel()
-            keySink = sink
-            // Inside the notch panel at the top edge, where nothing can be seen of a clear 1 pt window.
-            sink.setFrame(CGRect(x: panel.frame.midX - 0.5, y: panel.frame.maxY - 1, width: 1, height: 1), display: false)
-            sink.orderFrontRegardless()
-        case .makeSinkKey: keySink?.makeKey()
-        case .hideSink: keySink?.orderOut(nil)
-        case .activateFrontApp: _ = front?.activate()
-        case .orderNotchOut: orderOut("hand keyboard back")
-        case .orderNotchIn: orderFront("hand keyboard back")
-        }
     }
 
     /// The user moved the keyboard elsewhere (another app or another MyNotch window): treated like a click outside,
