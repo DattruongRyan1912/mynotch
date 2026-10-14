@@ -14,37 +14,24 @@ struct NowPlayingActivityArtwork: View {
 
 /// Bars that move while music plays and rest while it is paused: right side of the closed notch, and in the tab.
 /// They show the real spectrum while the system audio tap delivers it, and a made-up motion otherwise.
-/// They animate inside the view from `store`, so the activity is never re-published per frame.
+/// They are drawn in layers and moved straight from `store` (see `SpectrumBars`), so the activity is never re-published
+/// per frame and SwiftUI never redraws the notch for them.
 struct NowPlayingBars: View {
     nonisolated static let barCount = 4
     static let barWidth: CGFloat = 3
+    static let spacing: CGFloat = 2
     static let minHeight: CGFloat = 3
     static let maxHeight: CGFloat = 14
+    /// Every bar side by side, as tall as the tallest one can get.
+    static let size = CGSize(width: CGFloat(barCount) * barWidth + CGFloat(barCount - 1) * spacing, height: maxHeight)
 
     let store: NowPlayingStore
 
     var body: some View {
-        // Only these properties: the body must not re-run for every position update of `store.state`.
-        // The bands change about 30 times a second while the tap runs, which is when the bars must redraw anyway.
-        let isPlaying = store.activityIsPlaying
-        let spectrum = store.spectrumBands
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isPlaying || spectrum != nil)) { timeline in
-            let _ = NotchPerf.count(.spectrumUpdates)
-            let levels = Self.levels(spectrum: spectrum, isPlaying: isPlaying, at: timeline.date)
-            HStack(spacing: 2) {
-                ForEach(levels.indices, id: \.self) { bar in
-                    Capsule()
-                        .fill(NotchTokens.accent)
-                        .frame(width: Self.barWidth, height: Self.minHeight + (Self.maxHeight - Self.minHeight) * levels[bar])
-                }
-            }
-            .frame(height: Self.maxHeight)
-            .animation(.easeOut(duration: 0.3), value: isPlaying)
-        }
-        .accessibilityHidden(true)
-        // Lets the module run the tap only while some bars are on screen.
-        .onAppear { store.spectrumViewAppeared() }
-        .onDisappear { store.spectrumViewDisappeared() }
+        SpectrumBars(store: store)
+            .frame(width: Self.size.width, height: Self.size.height)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 
     /// One level in 0…1 per bar: the tap's bands while there are some, the made-up motion otherwise, 0 while paused.
@@ -76,10 +63,11 @@ struct NowPlayingLyricStrip: View {
     let store: NowPlayingStore
 
     var body: some View {
-        // Four times a second is fine-grained enough for lines that last seconds; the clock itself is exact.
-        TimelineView(.periodic(from: .now, by: 0.25)) { timeline in
+        // Four times a second is fine-grained enough for lines that last seconds; the clock itself is exact. Not at all while the
+        // notch is hidden.
+        NotchTimeline(every: 0.25) { date in
             // The note alone while the lyrics are gone and the new ones are not there yet (between two tracks).
-            let strip = store.lyricStrip(at: timeline.date) ?? .waiting
+            let strip = store.lyricStrip(at: date) ?? .waiting
             ZStack {
                 rows(strip)
                     // A new pair of lines slides up into place while the old one leaves.

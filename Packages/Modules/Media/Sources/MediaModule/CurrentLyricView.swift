@@ -23,8 +23,8 @@ struct CurrentLyricView: View {
             Color.clear.frame(height: Self.height)
         case .synced:
             // Four times a second is fine-grained enough for lines that last seconds; the clock itself is exact.
-            TimelineView(.periodic(from: .now, by: 0.25)) { timeline in
-                let text = store.lyric(at: timeline.date)?.text ?? ""
+            NotchTimeline(every: 0.25) { date in
+                let text = store.lyric(at: date)?.text ?? ""
                 row(text)
                     .foregroundStyle(NotchTokens.primaryText.opacity(0.9))
                     .contentTransition(.opacity)

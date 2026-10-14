@@ -19,8 +19,11 @@ final class NowPlayingStore {
     private(set) var activityAppIcon: NSImage?
     private(set) var activityIsPlaying = false
 
-    /// Levels from the system audio tap (0…1, low to high) while it runs; nil keeps the bars' made-up motion.
-    private(set) var spectrumBands: [Float]?
+    /// Levels from the system audio tap (0…1, low to high) while it runs; nil keeps the bars' made-up motion. Not observable: the
+    /// bars follow it through `observeSpectrum`, so a set of levels every 33 ms never invalidates a SwiftUI view.
+    @ObservationIgnored private(set) var spectrumBands: [Float]?
+    @ObservationIgnored private var spectrumObservers: [Int: @MainActor ([Float]?) -> Void] = [:]
+    @ObservationIgnored private var nextSpectrumObserverID = 0
     /// The tap has heard only silence while music played: the Settings rows explain how to grant the permission.
     private(set) var spectrumPermissionLikelyDenied = false
     /// Bars on screen right now (beside the notch, in the tab, one per screen); the tap only runs while there are some.
@@ -75,7 +78,17 @@ final class NowPlayingStore {
 
     /// Assigns only real changes: the bars redraw for every assignment, about 30 times a second.
     func showSpectrum(_ bands: [Float]?) {
-        if bands != spectrumBands { spectrumBands = bands }
+        guard bands != spectrumBands else { return }
+        spectrumBands = bands
+        for observer in spectrumObservers.values { observer(bands) }
+    }
+
+    /// Calls `observer` with every change of `spectrumBands`, until the returned closure is called.
+    func observeSpectrum(_ observer: @escaping @MainActor ([Float]?) -> Void) -> () -> Void {
+        let id = nextSpectrumObserverID
+        nextSpectrumObserverID += 1
+        spectrumObservers[id] = observer
+        return { [weak self] in self?.spectrumObservers[id] = nil }
     }
 
     func setSpectrumPermissionLikelyDenied(_ likelyDenied: Bool) {
