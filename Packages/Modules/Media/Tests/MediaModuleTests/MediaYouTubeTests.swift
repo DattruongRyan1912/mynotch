@@ -697,6 +697,124 @@ import Testing
         #expect(module.skipRoute(at: Date().addingTimeInterval(SkipRoute.liveWindow + 5)) == .mediaRemote)
     }
 
+    // MARK: a quick second press
+
+    /// A press the extension took and answered, which is what makes the title of what plays change a moment later.
+    func skipThroughTheExtension(_ host: YouTubeTestClient, _ command: MediaCommand = .nextTrack) {
+        module.send(command)
+        #expect(host.receiveFrames(count: 1).count == 1)
+        answer(command == .nextTrack ? "next" : "previous")
+    }
+
+    @Test func aSecondPressWhileOnlyTheSystemKnowsTheNewTitleStillGoesToTheExtension() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        let host = try await connectHost()
+        skipThroughTheExtension(host)
+        // MediaRemote's title moves first; the page has not said the new video yet.
+        playInChrome(title: "Next video")
+        #expect(module.skipRoute() == .bridge)
+        module.send(.nextTrack)
+        #expect(host.receiveFrames(count: 1) == [YouTubeCommand.next.json])
+        #expect(source.sent.isEmpty, "MediaRemote would do nothing for a video in Chrome")
+    }
+
+    @Test func aSecondPressWhileOnlyThePageKnowsTheNewTitleStillGoesToTheExtension() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        let host = try await connectHost()
+        skipThroughTheExtension(host)
+        // The page moves first; the system still says the old title.
+        receive(YouTubeTestMessages.playback("bbbbbbbbbbb", title: "Next video"))
+        #expect(module.skipRoute() == .bridge)
+        module.send(.previousTrack)
+        #expect(host.receiveFrames(count: 1) == [YouTubeCommand.previous.json])
+        #expect(source.sent.isEmpty)
+    }
+
+    @Test func theSessionStaysMatchedThroughAWholeRunOfPresses() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        let host = try await connectHost()
+        for index in 1...4 {
+            skipThroughTheExtension(host)
+            playInChrome(title: "Video \(index)")
+        }
+        #expect(source.sent.isEmpty)
+        #expect(fallbacks.isEmpty)
+    }
+
+    @Test func theTitleIsForgivenOnlyForAFewSecondsAfterThePress() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        let host = try await connectHost()
+        skipThroughTheExtension(host)
+        playInChrome(title: "Next video")
+        #expect(module.skipRoute(at: Date().addingTimeInterval(3)) == .bridge)
+        #expect(module.skipRoute(at: Date().addingTimeInterval(30)) == .mediaRemote, "the title that differs is no longer the skip's doing")
+    }
+
+    @Test func aStateEmptyForAMomentBetweenTwoVideosStillGoesToTheExtensionAfterAPress() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        let host = try await connectHost()
+        skipThroughTheExtension(host)
+        source.emit(AdapterLines.empty)
+        module.send(.nextTrack)
+        #expect(host.receiveFrames(count: 1) == [YouTubeCommand.next.json])
+        #expect(source.sent.isEmpty)
+    }
+
+    @Test func nothingIsForgivenWithoutAPressTheExtensionTook() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        _ = try await connectHost()
+        playInChrome(title: "Another video")
+        source.emit(AdapterLines.empty)
+        #expect(module.skipRoute() == .mediaRemote)
+        playInChrome(title: "Another video")
+        #expect(module.skipRoute() == .mediaRemote)
+    }
+
+    @Test func aPressThatFellBackToMediaRemoteDoesNotForgiveTheNextTitle() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        let host = try await connectHost()
+        module.send(.nextTrack)
+        #expect(host.receiveFrames(count: 1).count == 1)
+        harness.scheduler.advance(by: .seconds(1))
+        #expect(source.sent == [.nextTrack])
+        playInChrome(title: "Next video")
+        #expect(module.skipRoute() == .mediaRemote, "the extension did nothing, so its title change was not expected")
+    }
+
+    @Test func theForgivenessStaysWithThePlayerThatWasSkipped() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        let host = try await connectHost()
+        skipThroughTheExtension(host)
+        playInChrome(title: "Next video", bundle: "com.spotify.client")
+        #expect(module.skipRoute() == .mediaRemote)
+        playInChrome(title: "Next video", bundle: "com.apple.Safari")
+        #expect(module.skipRoute() == .mediaRemote)
+        playInChrome(title: "Next video")
+        #expect(module.skipRoute() == .bridge)
+    }
+
+    @Test func turningTheSettingOffForgetsThePress() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        let host = try await connectHost()
+        skipThroughTheExtension(host)
+        harness.settings.set(false, for: keys.youtubeCaptions)
+        await settle { !FileManager.default.fileExists(atPath: socketPath) }
+        enableCaptions()
+        await settle { FileManager.default.fileExists(atPath: socketPath) }
+        _ = try await connectHost(title: "Next video")
+        playInChrome()
+        #expect(module.skipRoute() == .mediaRemote, "the page's title is another one and nothing was skipped since")
+    }
+
     // MARK: the extension's answer, and what happens without one
 
     @Test func whenTheExtensionAnswersNothingElseHappens() async throws {
@@ -778,16 +896,28 @@ import Testing
         withExtendedLifetime(host) {}
     }
 
-    @Test func theServiceWorkersOwnAnswersCountToo() async throws {
+    @Test func aServiceWorkerAnswerMeansNothingWasDeliveredSoThatPressGoesToMediaRemote() async throws {
         await bootstrapWithCaptions()
         playInChrome()
         let host = try await connectHost()
         module.send(.nextTrack)
         module.send(.previousTrack)
         #expect(host.receiveFrames(count: 2).count == 2)
+        // The worker does not say which command it could not hand over: it is the oldest press still waiting.
         receive(YouTubeTestMessages.diag("sw-command-no-tab"))
+        #expect(source.sent == [.nextTrack])
         receive(YouTubeTestMessages.diag("sw-reject invalid command"))
+        #expect(source.sent == [.nextTrack, .previousTrack])
+        #expect(fallbacks == Array(repeating: "skip fallback=mediaremote reason=worker", count: 2))
         harness.scheduler.advance(by: .seconds(5))
+        #expect(source.sent == [.nextTrack, .previousTrack], "answered presses leave no timer to fall back a second time")
+    }
+
+    @Test func aServiceWorkerAnswerWithNoPressWaitingDoesNothing() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        _ = try await connectHost()
+        receive(YouTubeTestMessages.diag("sw-command-no-tab"))
         #expect(source.sent.isEmpty)
         #expect(fallbacks.isEmpty)
     }

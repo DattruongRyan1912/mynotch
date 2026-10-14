@@ -21,16 +21,36 @@ nonisolated enum SkipRoute: Equatable {
     /// How long the app waits for the extension to answer a command before it uses MediaRemote for that press.
     static let answerTimeout: Duration = .seconds(1)
 
-    /// The route for the track `state` describes, given what the extension has sent: the bridge for a live session that
-    /// belongs to the track, MediaRemote otherwise.
-    static func decide(for state: NowPlayingState, in store: YouTubeCaptionStore, now: Date) -> SkipRoute {
-        hasLiveSession(for: state, in: store, now: now) ? .bridge : .mediaRemote
+    /// How long after a skip the extension took the title of what plays may differ from the extension's. YouTube changes
+    /// the page's title and Chrome's now-playing title one to three seconds after the click, each at its own moment.
+    static let titleChangeWindow: TimeInterval = 5
+
+    /// A next or previous that went to the extension: the title it will change is the skip's doing, not another video's.
+    struct BridgedSkip: Equatable {
+        var at: Date
+        /// The app that played it (`NowPlayingState.playerBundleIdentifier`).
+        var player: String?
     }
 
-    private static func hasLiveSession(for state: NowPlayingState, in store: YouTubeCaptionStore, now: Date) -> Bool {
-        guard case .success = YouTubeCaptionMatcher.playback(for: state, in: store), let heard = store.lastPageMessageAt else { return false }
-        return now.timeIntervalSince(heard) <= liveWindow
+    /// The route for the track `state` describes, given what the extension has sent: the bridge for a live session that
+    /// belongs to the track, MediaRemote otherwise. Right after a `skip` the extension took, the session also belongs to
+    /// whatever the same player shows next, so a quick second press is not turned away by a title that is changing.
+    static func decide(for state: NowPlayingState, in store: YouTubeCaptionStore, now: Date, after skip: BridgedSkip? = nil) -> SkipRoute {
+        hasLiveSession(for: state, in: store, now: now, after: skip) ? .bridge : .mediaRemote
     }
+
+    private static func hasLiveSession(for state: NowPlayingState, in store: YouTubeCaptionStore, now: Date, after skip: BridgedSkip?) -> Bool {
+        guard let heard = store.lastPageMessageAt, now.timeIntervalSince(heard) <= liveWindow else { return false }
+        if case .success = YouTubeCaptionMatcher.playback(for: state, in: store) { return true }
+        // The title rule gives way to the player: the one that was skipped, or none for a moment between two videos.
+        guard let skip, now.timeIntervalSince(skip.at) <= titleChangeWindow else { return false }
+        return state.playerBundleIdentifier == nil || state.playerBundleIdentifier == skip.player
+    }
+}
+
+nonisolated extension NowPlayingState {
+    /// The app the user knows as the player: a browser's media helper counts as the browser.
+    var playerBundleIdentifier: String? { parentApplicationBundleIdentifier ?? bundleIdentifier }
 }
 
 nonisolated extension MediaCommand {

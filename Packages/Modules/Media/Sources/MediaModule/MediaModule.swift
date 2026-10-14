@@ -129,6 +129,8 @@ public final class MediaModule: FeatureModule {
     /// Skips sent to the extension and not answered yet, oldest first.
     private var unansweredSkips: [UnansweredSkip] = []
     private var unansweredSkipCount = 0
+    /// The latest press the extension took; it explains a title that is about to change (see `SkipRoute.titleChangeWindow`).
+    private var bridgedSkip: SkipRoute.BridgedSkip?
     /// Whether the lock screen view is on offer; its view reads `store`, so it is set once and cleared once.
     private var lockScreenOffered = false
     private var deadlineTimer: ScheduledAction?
@@ -359,7 +361,7 @@ public final class MediaModule: FeatureModule {
 
     /// Where Next and Previous go for what plays now.
     func skipRoute(at now: Date = Date()) -> SkipRoute {
-        SkipRoute.decide(for: store.state, in: captionStore, now: now)
+        SkipRoute.decide(for: store.state, in: captionStore, now: now, after: bridgedSkip)
     }
 
     /// The hosts connected to the socket (for tests).
@@ -367,14 +369,17 @@ public final class MediaModule: FeatureModule {
 
     /// Writes the command to the host and waits `SkipRoute.answerTimeout` for the extension to answer it (it does, with a
     /// diagnostic, whether or not it could do it). Nothing answers when the host or the extension is of a version that does not
-    /// know commands, which an app update can leave behind; that press goes to MediaRemote instead. An answer of any kind,
-    /// "unavailable" included, ends it: nothing else is tried.
+    /// know commands, which an app update can leave behind; that press goes to MediaRemote instead. So does a press the
+    /// extension's service worker could not hand to a tab, since nothing was done. Any other answer, "unavailable" included,
+    /// ends it: nothing else is tried.
     private func sendToExtension(_ command: MediaCommand, as action: YouTubeCommand) {
         guard let youtubeServer, youtubeServer.send(action) else {
             fallBackToMediaRemote(command, reason: "no-host")
             return
         }
         youtubeLog("command sent action=\(action.rawValue)")
+        // The state can be empty between two videos, when the player is the one of the press before.
+        bridgedSkip = SkipRoute.BridgedSkip(at: Date(), player: store.state.playerBundleIdentifier ?? bridgedSkip?.player)
         guard let context else { return }
         unansweredSkipCount += 1
         let id = unansweredSkipCount
@@ -388,23 +393,29 @@ public final class MediaModule: FeatureModule {
         fallBackToMediaRemote(skip.command, reason: "no-answer")
     }
 
+    /// MediaRemote does what the extension did not, so no title change of the extension's is expected any more.
     private func fallBackToMediaRemote(_ command: MediaCommand, reason: String) {
+        bridgedSkip = nil
         youtubeLog("skip fallback=mediaremote reason=\(reason)")
         source?.send(command)
     }
 
-    /// The extension answered a command: the oldest press waiting for that answer is done.
+    /// The extension answered a command: the oldest press waiting for that answer is done. A worker's answer says that the
+    /// command was not delivered, so that press goes to MediaRemote, which cannot double a skip nothing performed.
     private func commandAnswered(_ answer: YouTubeDiag.CommandAnswer) {
         let index = unansweredSkips.firstIndex { skip in
             if case .content(let action, _) = answer { skip.action == action } else { true }
         }
         guard let index else { return }
-        unansweredSkips.remove(at: index).timer.cancel()
+        let skip = unansweredSkips.remove(at: index)
+        skip.timer.cancel()
+        if case .worker = answer { fallBackToMediaRemote(skip.command, reason: "worker") }
     }
 
     private func dropUnansweredSkips() {
         for skip in unansweredSkips { skip.timer.cancel() }
         unansweredSkips = []
+        bridgedSkip = nil
     }
 
     func seek(toSeconds seconds: Double) {

@@ -19,8 +19,13 @@ import YouTubeBridgeKit
         return store
     }
 
-    func route(_ state: NowPlayingState, _ store: YouTubeCaptionStore) -> SkipRoute {
-        SkipRoute.decide(for: state, in: store, now: now)
+    func route(_ state: NowPlayingState, _ store: YouTubeCaptionStore, after skip: SkipRoute.BridgedSkip? = nil) -> SkipRoute {
+        SkipRoute.decide(for: state, in: store, now: now, after: skip)
+    }
+
+    /// A press the extension took `age` seconds before `now`, while Chrome played.
+    func skip(age: TimeInterval = 1, player: String? = "com.google.Chrome") -> SkipRoute.BridgedSkip {
+        SkipRoute.BridgedSkip(at: now - age, player: player)
     }
 
     // MARK: the bridge
@@ -92,5 +97,48 @@ import YouTubeBridgeKit
             #expect(route(state(bundle), YouTubeCaptionStore()) == .mediaRemote, "\(bundle)")
             #expect(route(state(bundle, title: "Another video"), store()) == .mediaRemote, "\(bundle)")
         }
+    }
+
+    // MARK: right after a skip the extension took
+
+    @Test func aTitleThatChangedBecauseOfTheSkipKeepsTheBridgeWhicheverSideMovedFirst() {
+        // The system has the new title and the page the old one, or the other way round.
+        #expect(route(state("com.google.Chrome", title: "Next video"), store(), after: skip()) == .bridge)
+        #expect(route(state("com.google.Chrome"), store(title: "Next video"), after: skip()) == .bridge)
+        #expect(route(state("com.google.Chrome", title: "Next video"), store()) == .mediaRemote, "without a skip the titles must agree")
+    }
+
+    @Test func theTitleIsForgivenForAFewSecondsAfterTheSkip() {
+        #expect(SkipRoute.titleChangeWindow == 5, "YouTube changes the title one to three seconds after the click")
+        let next = state("com.google.Chrome", title: "Next video")
+        #expect(route(next, store(), after: skip(age: SkipRoute.titleChangeWindow)) == .bridge)
+        #expect(route(next, store(), after: skip(age: SkipRoute.titleChangeWindow + 0.1)) == .mediaRemote)
+    }
+
+    @Test func theSkipsPlayerIsTheBrowserEvenWhenAHelperProcessPlays() {
+        let helper = state("com.google.Chrome.helper", parent: "com.google.Chrome", title: "Next video")
+        #expect(route(helper, store(), after: skip()) == .bridge)
+        #expect(SkipRoute.BridgedSkip(at: now, player: helper.playerBundleIdentifier).player == "com.google.Chrome")
+        #expect(state("com.google.Chrome").playerBundleIdentifier == "com.google.Chrome")
+        #expect(NowPlayingState.empty.playerBundleIdentifier == nil)
+    }
+
+    @Test func anotherPlayerIsNotForgiven() {
+        for bundle in ["com.spotify.client", "com.apple.Safari", "com.google.Chrome.canary"] {
+            #expect(route(state(bundle, title: "Next video"), store(), after: skip()) == .mediaRemote, "\(bundle)")
+        }
+        #expect(route(state("com.google.Chrome", title: "Next video"), store(), after: skip(player: nil)) == .mediaRemote)
+    }
+
+    @Test func aStateEmptyForAMomentBetweenTwoVideosKeepsTheBridgeToo() {
+        #expect(route(NowPlayingState.empty, store(), after: skip()) == .bridge)
+        #expect(route(NowPlayingState.empty, store()) == .mediaRemote)
+    }
+
+    @Test func onlyTheTitleIsForgivenTheSessionMustStillBeLive() {
+        let next = state("com.google.Chrome", title: "Next video")
+        #expect(route(next, YouTubeCaptionStore(), after: skip()) == .mediaRemote, "the extension has said nothing")
+        #expect(route(next, store(playbackAge: SkipRoute.liveWindow + 0.1), after: skip()) == .mediaRemote)
+        #expect(route(NowPlayingState.empty, YouTubeCaptionStore(), after: skip()) == .mediaRemote)
     }
 }
