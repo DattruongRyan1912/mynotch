@@ -18,7 +18,7 @@ nonisolated enum Retention: String, Codable, Sendable, CaseIterable {
     }
 }
 
-/// What clicking a card (or pressing Return) does.
+/// What clicking a card (or pressing Return) does. Paste is the default; a value stored by a user who chose copy is kept.
 nonisolated enum ClickAction: String, Codable, Sendable, CaseIterable {
     case copy, paste
 }
@@ -51,7 +51,7 @@ struct ClipboardSettingKeys {
         imageStorageLimitMB = settings.key("imageStorageLimitMB", default: 250, clampedTo: Self.imageStorageLimitMBRange)
         ignoreSensitive = settings.key("ignoreSensitive", default: true)
         excludedBundleIDs = settings.key("excludedBundleIDs", default: [])
-        clickAction = settings.key("clickAction", default: .copy)
+        clickAction = settings.key("clickAction", default: .paste)
         closeAfterAction = settings.key("closeAfterAction", default: true)
         showCopiedActivity = settings.key("showCopiedActivity", default: true)
         colorsWithoutHash = settings.key("colorsWithoutHash", default: true)

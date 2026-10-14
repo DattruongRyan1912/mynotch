@@ -37,6 +37,15 @@ struct ClipboardTabView: View {
                     boards: state.history.boards, selection: queryBinding(\.boardID), editing: boardEditing, name: $boardName,
                     onEdit: startEditing, onFinish: finishEditing, onDelete: { module.deleteBoard($0) }
                 )
+                // Beside the boards, where there is room: the tab's content height is used up by the rows and the cards.
+                if state.needsAccessibility {
+                    ClipboardAccessibilityHint(look: .notch) {
+                        module.requestAccessibility()
+                        // The system's dialog and System Settings come up over the notch, which would close on its own anyway.
+                        notch.close()
+                    }
+                    .fixedSize()
+                }
                 // With no cards, the empty message already explains it.
                 if state.pasteboardDenied, !state.visibleItems.isEmpty {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -69,6 +78,13 @@ struct ClipboardTabView: View {
         }
         .onDisappear {
             if needsPin { notch.setPinned(false) }
+        }
+        // While the tab is shown: when it appears, then every 2 s, so the hint goes by itself once Accessibility is allowed.
+        .task {
+            while !Task.isCancelled {
+                module.refreshAccessibility()
+                try? await Task.sleep(for: .seconds(2))
+            }
         }
     }
 

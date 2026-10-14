@@ -126,6 +126,7 @@ th{background:var(--card)}
 <ul>
 <li><strong>Dán trực tiếp:</strong> ghi pasteboard, đóng notch, đợi 80 ms để bàn phím về app trước, rồi gửi ⌘V (CGEvent, key code 9, cờ Command).</li>
 <li><strong>Chưa có quyền Accessibility:</strong> chỉ copy và hiện activity "Đã chép — nhấn ⌘V để dán".</li>
+<li><strong>Gợi ý quyền (thêm 2026-10-14):</strong> <code>clickAction</code> mặc định là <code>paste</code>, nên khi nó là <code>paste</code> mà chưa có Accessibility (<code>isTrusted()</code>, chỉ đọc, không hỏi), tab hiện một dòng "Cần quyền Accessibility để dán trực tiếp" kèm nút "Cấp quyền" cạnh hàng board (cửa sổ Thư viện: dải ngay dưới thanh công cụ). Nút gọi lời nhắc của hệ thống (<code>PermissionCenter.request(.accessibility)</code>, tức <code>AXIsProcessTrustedWithOptions</code> với tuỳ chọn prompt) rồi mở ngăn Accessibility trong System Settings nếu vẫn chưa được phép. Dòng tự biến mất khi đã có quyền: kiểm tra lúc tab hoặc cửa sổ hiện, rồi mỗi 2 giây trong lúc còn hiện; ẩn thì ngừng.</li>
 <li><strong>Đánh dấu:</strong> mọi lần MyNotch ghi pasteboard đều kèm type đánh dấu <code>io.lucasvu.mynotch.clipboard</code>, nên monitor không ghi lại chính nó. Mục được dùng lại được đưa lên đầu lịch sử.</li>
 </ul>
 <h3 id="3-5-giao-diện">3.5 Giao diện</h3>
@@ -150,7 +151,7 @@ th{background:var(--card)}
 <tr><td><code>imageStorageLimitMB</code></td><td>250</td><td>50…2000</td></tr>
 <tr><td><code>ignoreSensitive</code></td><td>true</td><td></td></tr>
 <tr><td><code>excludedBundleIDs</code></td><td>[]</td><td>Chọn app qua bảng chọn file <code>.app</code></td></tr>
-<tr><td><code>clickAction</code></td><td><code>copy</code></td><td><code>copy</code>, <code>paste</code></td></tr>
+<tr><td><code>clickAction</code></td><td><code>paste</code> (đổi từ <code>copy</code> ngày 2026-10-14; ai đã chọn rõ <code>copy</code> vẫn giữ)</td><td><code>copy</code>, <code>paste</code></td></tr>
 <tr><td><code>closeAfterAction</code></td><td>true</td><td></td></tr>
 <tr><td><code>showCopiedActivity</code></td><td>true</td><td></td></tr>
 <tr><td><code>colorsWithoutHash</code></td><td>true</td><td></td></tr>

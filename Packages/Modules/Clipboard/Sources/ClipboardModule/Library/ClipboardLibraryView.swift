@@ -15,6 +15,7 @@ struct ClipboardLibraryView: View {
                 .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 320)
         } detail: {
             ClipboardLibraryContentView(module: module, model: model, requestName: startNaming)
+                .safeAreaInset(edge: .top, spacing: 0) { accessibilityHint }
                 .navigationSubtitle("\(model.title) · \(model.items.count) mục")
         }
         // The toolbar of a window hosted like this showed no sidebar toggle when inspected off screen, so it gets its
@@ -23,6 +24,13 @@ struct ClipboardLibraryView: View {
         .searchable(text: $model.searchText, placement: .toolbar, prompt: "Tìm trong clipboard")
         .toolbar { toolbarContent }
         .frame(minWidth: 760, minHeight: 480)
+        // While the window is open: when it appears, then every 2 s, so the hint goes by itself once it is allowed.
+        .task {
+            while !Task.isCancelled {
+                module.refreshAccessibility()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
         // The alerts' own dismissal is ignored: their buttons change the state they show, so the answer is never
         // lost to the order in which SwiftUI runs a button and dismisses the alert.
         .alert(namingTitle, isPresented: Binding(get: { naming != nil }, set: { _ in })) {
@@ -35,6 +43,20 @@ struct ClipboardLibraryView: View {
             Button("Huỷ", role: .cancel) { model.cancelDelete() }
         } message: {
             Text("\(model.pendingDeletion?.count ?? 0) mục sẽ bị xoá khỏi lịch sử và khỏi mọi board.")
+        }
+    }
+
+    /// Under the toolbar while a click would paste without Accessibility.
+    @ViewBuilder private var accessibilityHint: some View {
+        if module.state.needsAccessibility {
+            VStack(spacing: 0) {
+                ClipboardAccessibilityHint(look: .library) { module.requestAccessibility() }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+                Divider()
+            }
+            .background(.bar)
         }
     }
 

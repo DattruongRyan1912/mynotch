@@ -66,6 +66,15 @@ Người dùng bỏ "Cửa sổ Library riêng" khỏi danh sách ngoài phạm 
 - `ClipboardLibraryActivation` chép lại logic của `EditorActivation` (Screenshot) vì module không import nhau.
 - Dán từ cửa sổ dựa vào `NSApp.deactivate()` để app phía sau nhận lại phím trong 250 ms: chưa thử trên máy thật.
 
-## 7. Cần kiểm thử tay
+## 7. Dán là mặc định và gợi ý quyền (2026-10-14)
+
+Commit: `feat(clipboard): paste by default and show how to allow it`.
+
+- `clickAction` mặc định đổi từ `copy` sang `paste` (spec §3.6). Chỉ đổi giá trị mặc định: ai đã lưu `copy` thì vẫn là `copy`, và Settings vẫn có cả hai lựa chọn.
+- Gợi ý quyền (spec §3.4): `ClipboardState.needsAccessibility` do `ClipboardModule.refreshAccessibility()` đặt (click là dán và `isTrusted()` sai); `ClipboardAccessibilityHint` hiện ở tab và ở cửa sổ Thư viện, nút "Cấp quyền" đi qua `requestAccessibility()` và `context.permissions` (`request(.accessibility)` rồi `openSystemSettings(for:)`), nên test dùng `FakePermissionCenter`, không có hộp thoại hay URL thật.
+- Vị trí ở tab: cạnh hàng board, không phải một dòng riêng ở trên cùng. Vùng nội dung của tab 230 pt chỉ có 186 pt (trừ đệm 14 pt và thanh tab 30 pt) và hàng tìm kiếm, hàng board, thẻ đã dùng hết; dựng thử ngoài màn hình cho thấy thêm một dòng nữa làm thẻ bị cắt. Chiều cao của tab là hằng số nên chưa thể co giãn theo gợi ý.
+- Kiểm tra lại mỗi 2 giây chỉ khi view còn hiện (`.task` của tab và của cửa sổ); quyền được cấp trong System Settings thì dòng biến mất trong tối đa 2 giây.
+
+## 8. Cần kiểm thử tay
 
 Xem [mục Clipboard trong checklist gộp](../../manual-test-checklist-all.html#clipboard). Các mục đụng quyền: hộp thoại "Dán từ app khác" của macOS, dán trực tiếp cần Accessibility.

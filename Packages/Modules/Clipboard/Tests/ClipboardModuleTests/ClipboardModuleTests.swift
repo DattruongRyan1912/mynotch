@@ -287,6 +287,7 @@ final class FakeSystem {
 
     @Test func activateWithCopyMovesTheItemUpAndClosesOnlyWhenSet() async throws {
         let (settings, keys) = try settings()
+        settings.set(.copy, for: keys.clickAction)
         settings.set(false, for: keys.closeAfterAction)
         await start()
         copy("one")

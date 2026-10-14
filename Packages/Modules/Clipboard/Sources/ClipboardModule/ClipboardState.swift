@@ -20,6 +20,8 @@ final class ClipboardState {
     var selectedID: UUID?
     /// Pasteboard access is set to "always deny", so the tab explains how to allow it instead of showing an empty history.
     var pasteboardDenied = false
+    /// A click pastes, but Accessibility is not allowed, so the tab and the library say how to allow it.
+    var needsAccessibility = false
     /// Items matching `query`: newest first, or in pin order when a board is selected.
     private(set) var visibleItems: [ClipboardItem] = []
     /// Kept across changes so typing and new copies fold only the items that are new or changed. Filtering with
@@ -46,6 +48,7 @@ final class ClipboardState {
         query = ClipboardQuery()
         selectedID = nil
         pasteboardDenied = false
+        needsAccessibility = false
     }
 
     /// Drops a board filter or selection whose board or item is gone.

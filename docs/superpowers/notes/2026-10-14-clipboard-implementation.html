@@ -19,7 +19,7 @@ table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:b
 th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
 th{background:var(--card)}
 @media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
-</style></head><body><div class="layout"><nav><a class="h2" href="#1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</a><a class="h2" href="#2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</a><a class="h2" href="#3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</a><a class="h2" href="#4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</a><a class="h2" href="#5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</a><a class="h2" href="#6-cửa-sổ-thư-viện-c8-2026-10-14">6. Cửa sổ Thư viện (C8, 2026-10-14)</a><a class="h2" href="#7-cần-kiểm-thử-tay">7. Cần kiểm thử tay</a></nav><main><h1 id="ghi-chú-triển-khai-clipboard">Ghi chú triển khai: Clipboard</h1>
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</a><a class="h2" href="#2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</a><a class="h2" href="#3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</a><a class="h2" href="#4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</a><a class="h2" href="#5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</a><a class="h2" href="#6-cửa-sổ-thư-viện-c8-2026-10-14">6. Cửa sổ Thư viện (C8, 2026-10-14)</a><a class="h2" href="#7-dán-là-mặc-định-và-gợi-ý-quyền-2026-10-14">7. Dán là mặc định và gợi ý quyền (2026-10-14)</a><a class="h2" href="#8-cần-kiểm-thử-tay">8. Cần kiểm thử tay</a></nav><main><h1 id="ghi-chú-triển-khai-clipboard">Ghi chú triển khai: Clipboard</h1>
 <ul>
 <li><strong>Ngày:</strong> 2026-10-14</li>
 <li><strong>Spec:</strong> <a href="../specs/2026-10-13-clipboard-design.html">Clipboard (dự án con 1)</a>. Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".</li>
@@ -84,7 +84,15 @@ th{background:var(--card)}
 <li><code>ClipboardLibraryActivation</code> chép lại logic của <code>EditorActivation</code> (Screenshot) vì module không import nhau.</li>
 <li>Dán từ cửa sổ dựa vào <code>NSApp.deactivate()</code> để app phía sau nhận lại phím trong 250 ms: chưa thử trên máy thật.</li>
 </ul>
-<h2 id="7-cần-kiểm-thử-tay">7. Cần kiểm thử tay</h2>
+<h2 id="7-dán-là-mặc-định-và-gợi-ý-quyền-2026-10-14">7. Dán là mặc định và gợi ý quyền (2026-10-14)</h2>
+<p>Commit: <code>feat(clipboard): paste by default and show how to allow it</code>.</p>
+<ul>
+<li><code>clickAction</code> mặc định đổi từ <code>copy</code> sang <code>paste</code> (spec §3.6). Chỉ đổi giá trị mặc định: ai đã lưu <code>copy</code> thì vẫn là <code>copy</code>, và Settings vẫn có cả hai lựa chọn.</li>
+<li>Gợi ý quyền (spec §3.4): <code>ClipboardState.needsAccessibility</code> do <code>ClipboardModule.refreshAccessibility()</code> đặt (click là dán và <code>isTrusted()</code> sai); <code>ClipboardAccessibilityHint</code> hiện ở tab và ở cửa sổ Thư viện, nút "Cấp quyền" đi qua <code>requestAccessibility()</code> và <code>context.permissions</code> (<code>request(.accessibility)</code> rồi <code>openSystemSettings(for:)</code>), nên test dùng <code>FakePermissionCenter</code>, không có hộp thoại hay URL thật.</li>
+<li>Vị trí ở tab: cạnh hàng board, không phải một dòng riêng ở trên cùng. Vùng nội dung của tab 230 pt chỉ có 186 pt (trừ đệm 14 pt và thanh tab 30 pt) và hàng tìm kiếm, hàng board, thẻ đã dùng hết; dựng thử ngoài màn hình cho thấy thêm một dòng nữa làm thẻ bị cắt. Chiều cao của tab là hằng số nên chưa thể co giãn theo gợi ý.</li>
+<li>Kiểm tra lại mỗi 2 giây chỉ khi view còn hiện (<code>.task</code> của tab và của cửa sổ); quyền được cấp trong System Settings thì dòng biến mất trong tối đa 2 giây.</li>
+</ul>
+<h2 id="8-cần-kiểm-thử-tay">8. Cần kiểm thử tay</h2>
 <p>Xem <a href="../../manual-test-checklist-all.html#clipboard">mục Clipboard trong checklist gộp</a>. Các mục đụng quyền: hộp thoại "Dán từ app khác" của macOS, dán trực tiếp cần Accessibility.</p></main></div><script>
 document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
 b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});

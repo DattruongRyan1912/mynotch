@@ -109,6 +109,7 @@ Package `Packages/Modules/Clipboard`, product `ClipboardModule`, chỉ phụ thu
 
 - **Dán trực tiếp:** ghi pasteboard, đóng notch, đợi 80 ms để bàn phím về app trước, rồi gửi ⌘V (CGEvent, key code 9, cờ Command).
 - **Chưa có quyền Accessibility:** chỉ copy và hiện activity "Đã chép — nhấn ⌘V để dán".
+- **Gợi ý quyền (thêm 2026-10-14):** `clickAction` mặc định là `paste`, nên khi nó là `paste` mà chưa có Accessibility (`isTrusted()`, chỉ đọc, không hỏi), tab hiện một dòng "Cần quyền Accessibility để dán trực tiếp" kèm nút "Cấp quyền" cạnh hàng board (cửa sổ Thư viện: dải ngay dưới thanh công cụ). Nút gọi lời nhắc của hệ thống (`PermissionCenter.request(.accessibility)`, tức `AXIsProcessTrustedWithOptions` với tuỳ chọn prompt) rồi mở ngăn Accessibility trong System Settings nếu vẫn chưa được phép. Dòng tự biến mất khi đã có quyền: kiểm tra lúc tab hoặc cửa sổ hiện, rồi mỗi 2 giây trong lúc còn hiện; ẩn thì ngừng.
 - **Đánh dấu:** mọi lần MyNotch ghi pasteboard đều kèm type đánh dấu `io.lucasvu.mynotch.clipboard`, nên monitor không ghi lại chính nó. Mục được dùng lại được đưa lên đầu lịch sử.
 
 ### 3.5 Giao diện
@@ -135,7 +136,7 @@ Package `Packages/Modules/Clipboard`, product `ClipboardModule`, chỉ phụ thu
 | `imageStorageLimitMB` | 250 | 50…2000 |
 | `ignoreSensitive` | true | |
 | `excludedBundleIDs` | [] | Chọn app qua bảng chọn file `.app` |
-| `clickAction` | `copy` | `copy`, `paste` |
+| `clickAction` | `paste` (đổi từ `copy` ngày 2026-10-14; ai đã chọn rõ `copy` vẫn giữ) | `copy`, `paste` |
 | `closeAfterAction` | true | |
 | `showCopiedActivity` | true | |
 | `colorsWithoutHash` | true | |

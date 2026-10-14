@@ -101,6 +101,7 @@ public final class ClipboardModule: FeatureModule {
         store.deleteImages(for: removed)
         if history != loaded { store.scheduleSave(history) }
         refreshPasteboardAccess()
+        refreshAccessibility()
 
         let keystrokeGate = KeystrokeGate(keystrokes)
         self.keystrokeGate = keystrokeGate
@@ -223,6 +224,29 @@ public final class ClipboardModule: FeatureModule {
     func refreshPasteboardAccess() {
         let denied = pasteboardAccessBehavior() == .alwaysDeny
         if state.pasteboardDenied != denied { state.pasteboardDenied = denied }
+    }
+
+    /// Whether a click would paste without the permission pasting needs. Reading trust never prompts. The tab and the
+    /// library check when they appear and every 2 s while shown, so the hint goes by itself once it is granted.
+    func refreshAccessibility() {
+        var needs = false
+        if let context, let keys {
+            needs = context.settings.value(keys.clickAction) == .paste && !isTrusted()
+        }
+        if state.needsAccessibility != needs { state.needsAccessibility = needs }
+    }
+
+    /// The hint's button: the system's prompt (which lists MyNotch in the Accessibility pane), then that pane when the
+    /// prompt alone did not allow it. nil while stopped; await the task for completion.
+    @discardableResult
+    func requestAccessibility() -> Task<Void, Never>? {
+        guard let context else { return nil }
+        return Task { [weak self] in
+            if await context.permissions.request(.accessibility) != .granted {
+                context.permissions.openSystemSettings(for: .accessibility)
+            }
+            self?.refreshAccessibility()
+        }
     }
 
     // MARK: Actions used by the tab
@@ -449,6 +473,9 @@ public final class ClipboardModule: FeatureModule {
                 leading: AnyView(ClipboardActivityIcon(systemImage: "doc.on.clipboard.fill")),
                 trailing: AnyView(ClipboardPasteKeyHint())
             ))
+            // A newcomer no longer takes the notch from an activity of the same priority that is already live (the
+            // "copied" one, or music), but the user has to see this one to know ⌘V is theirs to press.
+            context.activities.raise(id: "pasteHint")
         case .copied:
             if closeAfterAction { context.presenter.close() }
         case .failed:

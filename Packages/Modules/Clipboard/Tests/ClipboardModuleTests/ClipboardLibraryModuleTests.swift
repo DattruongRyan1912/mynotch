@@ -187,6 +187,7 @@ extension ClipboardModuleTests {
     /// The whole path from a double click: the library's model, the module, the click action from Settings.
     @Test func theLibraryActivatesWithTheClickActionFromSettings() async throws {
         let (settings, keys) = try settings()
+        settings.set(.copy, for: keys.clickAction)
         await start()
         copy("Xin chào")
         module.openLibrary()
