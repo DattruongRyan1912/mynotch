@@ -4,8 +4,10 @@ import CoreGraphics
 /// A window that records what it was asked, so no real window is ever moved. Frames are in Accessibility coordinates.
 final class FakeWindow: SnapWindow {
     var current: CGRect?
-    private(set) var setFrames: [CGRect] = []
-    /// What `setFrame` answers: an app that refuses to be moved.
+    private(set) var placements: [SnapPlacement] = []
+    /// Where the zones were, one per placement asked for.
+    var setFrames: [CGRect] { placements.map(\.frame) }
+    /// What `place` answers: an app that refuses to be moved.
     var accepts = true
 
     init(frame: CGRect? = CGRect(x: 100, y: 100, width: 800, height: 600)) {
@@ -14,10 +16,10 @@ final class FakeWindow: SnapWindow {
 
     func frame() -> CGRect? { current }
 
-    func setFrame(_ frame: CGRect) -> Bool {
-        setFrames.append(frame)
+    func place(_ placement: SnapPlacement) -> Bool {
+        placements.append(placement)
         guard accepts else { return false }
-        current = frame
+        current = placement.frame
         return true
     }
 
@@ -96,5 +98,56 @@ final class FakePreview: SnapPreview {
     func dismiss() {
         frame = nil
         isDismissed = true
+    }
+}
+
+
+/// A window's Accessibility attributes with the habits of real apps: a window that has a smallest size or a largest size
+/// keeps it whatever it is told, a fixed-size window refuses a size, and an app may refuse to move. Every write is
+/// recorded in order, so tests also see how many calls into the app were made.
+final class FakeWindowAttributes: WindowAttributes {
+    var origin: CGPoint
+    private(set) var windowSize: CGSize
+    var minimum = CGSize.zero
+    var maximum: CGSize?
+    /// A fixed-size window: the app answers that it cannot be resized.
+    var isResizable = true
+    var isMovable = true
+    /// The room of the display the window is on until it has been moved: apps clamp a size to it, so a window placed on a
+    /// larger display only gets its size once it is there.
+    var sizeLimitUntilMoved: CGSize?
+    var canReadSize = true
+    private var hasMoved = false
+    private(set) var calls: [String] = []
+
+    init(frame: CGRect = CGRect(x: 100, y: 100, width: 800, height: 600)) {
+        origin = frame.origin
+        windowSize = frame.size
+    }
+
+    var frame: CGRect { CGRect(origin: origin, size: windowSize) }
+
+    func position() -> CGPoint? { origin }
+
+    func size() -> CGSize? { canReadSize ? windowSize : nil }
+
+    func setPosition(_ position: CGPoint) -> Bool {
+        calls.append("position")
+        guard isMovable else { return false }
+        origin = position
+        hasMoved = true
+        return true
+    }
+
+    func setSize(_ requested: CGSize) -> Bool {
+        calls.append("size")
+        guard isResizable else { return false }
+        var granted = CGSize(width: max(requested.width, minimum.width), height: max(requested.height, minimum.height))
+        if let maximum { granted = CGSize(width: min(granted.width, maximum.width), height: min(granted.height, maximum.height)) }
+        if !hasMoved, let limit = sizeLimitUntilMoved {
+            granted = CGSize(width: max(min(granted.width, limit.width), minimum.width), height: max(min(granted.height, limit.height), minimum.height))
+        }
+        windowSize = granted
+        return true
     }
 }

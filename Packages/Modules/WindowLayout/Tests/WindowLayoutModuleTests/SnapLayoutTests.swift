@@ -179,6 +179,38 @@ import Testing
         #expect(SnapSpace.accessibilityFrame(of: appKit, primaryHeight: 982) == CGRect(x: 0, y: 1082, width: 1440, height: 900))
     }
 
+    // MARK: anchors
+
+    @Test func eachZoneIsAnchoredToTheEdgesItTouchesAndCentredBetweenThem() {
+        func anchors(_ layout: SnapLayout) -> [SnapAnchor] { layout.zones.map(\.anchor) }
+        #expect(anchors(.leftHalf) == [SnapAnchor(horizontal: .leading, vertical: .top)])
+        #expect(anchors(.rightHalf) == [SnapAnchor(horizontal: .trailing, vertical: .top)])
+        #expect(anchors(.fullScreen) == [SnapAnchor(horizontal: .leading, vertical: .top)])
+        #expect(anchors(.quarters) == [
+            SnapAnchor(horizontal: .leading, vertical: .top), SnapAnchor(horizontal: .trailing, vertical: .top),
+            SnapAnchor(horizontal: .leading, vertical: .bottom), SnapAnchor(horizontal: .trailing, vertical: .bottom),
+        ])
+        #expect(anchors(.thirds) == [
+            SnapAnchor(horizontal: .leading, vertical: .top), SnapAnchor(horizontal: .centre, vertical: .top),
+            SnapAnchor(horizontal: .trailing, vertical: .top),
+        ])
+        #expect(anchors(.focus) == [SnapAnchor(horizontal: .centre, vertical: .top)])
+    }
+
+    @Test func aPlacementKeepsAnyWindowInsideTheAreaAlignedToItsAnchor() {
+        let area = CGRect(x: 0, y: 37, width: 1512, height: 945)
+        let frame = CGRect(x: 1008, y: 37, width: 504, height: 945)
+        let right = SnapPlacement(frame: frame, area: area, anchor: SnapAnchor(horizontal: .trailing, vertical: .top))
+        #expect(right.origin(for: CGSize(width: 715, height: 945)) == CGPoint(x: 797, y: 37))
+        #expect(right.origin(for: frame.size) == frame.origin)
+        let centre = SnapPlacement(frame: frame, area: area, anchor: SnapAnchor(horizontal: .centre, vertical: .bottom))
+        // Centred on x 1260 would reach past the right edge, so it stops against it.
+        #expect(centre.origin(for: CGSize(width: 600, height: 400)) == CGPoint(x: 912, y: 582))
+        #expect(centre.origin(for: CGSize(width: 300, height: 400)) == CGPoint(x: 1110, y: 582))
+        // Too big for the area: the top left, never a negative share of it.
+        #expect(right.origin(for: CGSize(width: 2000, height: 2000)) == area.origin)
+    }
+
     // MARK: settings
 
     @Test func theLayoutsTheUserKeptAreInTheOrderOfTheTiles() {

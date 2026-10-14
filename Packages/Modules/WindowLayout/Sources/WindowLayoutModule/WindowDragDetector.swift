@@ -1,13 +1,14 @@
 import CoreGraphics
 import Foundation
 
-/// A window of another app, as far as the module needs to know it. `frame` and `setFrame` use Accessibility coordinates:
+/// A window of another app, as far as the module needs to know it. `frame` and `place` use Accessibility coordinates:
 /// the origin is the top left of the primary display and y grows down.
 protocol SnapWindow: AnyObject {
     /// Position and size, or nil when the app does not answer.
     func frame() -> CGRect?
-    /// Moves and resizes the window. False when the app refused.
-    @discardableResult func setFrame(_ frame: CGRect) -> Bool
+    /// Moves and resizes the window to the placement, and keeps it inside the placement's visible area when the app does not
+    /// take the size. False when the app refused to move.
+    @discardableResult func place(_ placement: SnapPlacement) -> Bool
     func isSame(as other: any SnapWindow) -> Bool
 }
 

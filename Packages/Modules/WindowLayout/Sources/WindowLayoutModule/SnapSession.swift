@@ -54,8 +54,6 @@ final class SnapTilesModel {
 /// Follows one window drag from the first press to the release: recognises it, opens the tiles in the notch when the
 /// pointer comes near, previews the target and, on a release over a tile, moves the window there.
 final class SnapSession {
-    /// How close the pointer must come to the notch for the tiles to open.
-    static let openDistance = NotchGeometry.dragHitPadding
     /// How far around the open tiles the pointer may stray before they close, so the way to a tile is not a tightrope.
     static let keepOpenMargin: CGFloat = 24
     /// The window is moved this long after the release. The app that owns it is still tracking the drag when the button
@@ -232,6 +230,10 @@ final class SnapSession {
         let screens = environment.screens()
         guard let area = screens.screens.first(where: { $0.id == notch.id })?.visibleFrame else { return }
         let frame = target.frame(in: area, gap: gap.points)
-        window.setFrame(SnapSpace.accessibilityFrame(of: frame, primaryHeight: screens.primaryHeight))
+        window.place(SnapPlacement(
+            frame: SnapSpace.accessibilityFrame(of: frame, primaryHeight: screens.primaryHeight),
+            area: SnapSpace.accessibilityFrame(of: area, primaryHeight: screens.primaryHeight),
+            anchor: target.layout.zones[target.zone].anchor
+        ))
     }
 }

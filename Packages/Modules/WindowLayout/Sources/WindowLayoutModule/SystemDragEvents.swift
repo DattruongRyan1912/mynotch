@@ -13,19 +13,12 @@ final class SystemDragEvents: DragEventSource {
         stop()
         self.handler = handler
         let mask: NSEvent.EventTypeMask = [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
-        // Global monitors see the events of other apps, local ones those of MyNotch's own windows (Settings can be dragged too).
+        // Global monitors only see the events of other apps: MyNotch's own windows are never snapped (the probe skips them).
         if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] event in
             let (type, time) = (event.type, event.timestamp)
             MainActor.assumeIsolated { self?.mouse(type, at: time) }
         }) {
             mouseMonitors.append(global)
-        }
-        if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
-            let (type, time) = (event.type, event.timestamp)
-            MainActor.assumeIsolated { self?.mouse(type, at: time) }
-            return event
-        }) {
-            mouseMonitors.append(local)
         }
     }
 
@@ -44,13 +37,6 @@ final class SystemDragEvents: DragEventSource {
             MainActor.assumeIsolated { self?.key(code) }
         }) {
             keyMonitors.append(global)
-        }
-        if let local = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
-            let code = event.keyCode
-            MainActor.assumeIsolated { self?.key(code) }
-            return event
-        }) {
-            keyMonitors.append(local)
         }
     }
 

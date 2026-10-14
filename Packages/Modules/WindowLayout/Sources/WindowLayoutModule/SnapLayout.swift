@@ -85,6 +85,16 @@ nonisolated struct SnapZone: Equatable, Sendable {
     /// Sides where another window sits when the layout is used fully, so a gap is left between them.
     let shares: Sides
 
+    /// The edges a window that does not fit this zone stays against: the one the zone touches, or the middle for a zone
+    /// that touches neither side. A zone that touches both sides (the whole width) counts as leading, where the title bar is.
+    var anchor: SnapAnchor {
+        let epsilon: CGFloat = 1e-9
+        return SnapAnchor(
+            horizontal: unit.minX < epsilon ? .leading : (unit.maxX > 1 - epsilon ? .trailing : .centre),
+            vertical: unit.minY < epsilon ? .top : (unit.maxY > 1 - epsilon ? .bottom : .centre)
+        )
+    }
+
     init(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat, shares: Sides = []) {
         unit = CGRect(x: x, y: y, width: width, height: height)
         self.shares = shares
@@ -111,6 +121,48 @@ nonisolated struct SnapOptions: Equatable, Sendable {
         let chosen = SnapLayout.allCases.filter { storedLayouts.contains($0.rawValue) }
         layouts = chosen.isEmpty ? SnapLayout.allCases : chosen
         self.gap = gap
+    }
+}
+
+/// Which edges of its zone a window is kept against when it turns out bigger (or smaller) than the zone.
+nonisolated struct SnapAnchor: Equatable, Sendable {
+    enum Horizontal: Sendable { case leading, centre, trailing }
+    enum Vertical: Sendable { case top, centre, bottom }
+
+    let horizontal: Horizontal
+    let vertical: Vertical
+}
+
+/// Where a window goes: its zone, the visible area of its display and the edges it is anchored to, all in Accessibility
+/// coordinates (y grows down). The size is only a request: an app may keep a smallest or a fixed size, so where the window
+/// really goes is decided once its size is known (`origin(for:)`).
+nonisolated struct SnapPlacement: Equatable, Sendable {
+    let frame: CGRect
+    /// What the display leaves visible once the menu bar and the Dock are out.
+    let area: CGRect
+    let anchor: SnapAnchor
+
+    /// Where a window of `size` goes: against the anchored edges of the zone, then moved back inside the visible area if
+    /// it sticks out of it. A window too big for the area starts at its top left corner, where its title bar is.
+    func origin(for size: CGSize) -> CGPoint {
+        let x = switch anchor.horizontal {
+        case .leading: frame.minX
+        case .centre: frame.midX - size.width / 2
+        case .trailing: frame.maxX - size.width
+        }
+        let y = switch anchor.vertical {
+        case .top: frame.minY
+        case .centre: frame.midY - size.height / 2
+        case .bottom: frame.maxY - size.height
+        }
+        return CGPoint(
+            x: Self.inside(x.rounded(), length: size.width, from: area.minX, to: area.maxX),
+            y: Self.inside(y.rounded(), length: size.height, from: area.minY, to: area.maxY)
+        )
+    }
+
+    private static func inside(_ start: CGFloat, length: CGFloat, from low: CGFloat, to high: CGFloat) -> CGFloat {
+        length >= high - low ? low : min(max(start, low), high - length)
     }
 }
 

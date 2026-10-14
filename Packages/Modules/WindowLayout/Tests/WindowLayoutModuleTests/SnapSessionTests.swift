@@ -221,6 +221,21 @@ final class SessionFixture {
         #expect(fixture.window.setFrames == [CGRect(x: 0, y: 37, width: 756, height: 945)])
     }
 
+    @Test func theWindowIsToldWhereTheZoneIsWhereTheDisplayIsVisibleAndWhichEdgeItIsAnchoredTo() {
+        fixture.openTiles()
+        let tile = SnapTiles.frames(count: 6, in: SessionFixture.macBookContent)[4]
+        let glyph = SnapTiles.glyphFrame(in: tile)
+        let rightThird = CGPoint(x: glyph.minX + glyph.width * 0.9, y: glyph.midY)
+        fixture.drag(to: rightThird)
+        fixture.release(at: rightThird)
+        fixture.settle()
+        let placement = fixture.window.placements.first
+        // In Accessibility coordinates: below the 37 pt menu bar of the 982 pt display, y counted from the top.
+        #expect(placement?.frame == CGRect(x: 1008, y: 37, width: 504, height: 945))
+        #expect(placement?.area == CGRect(x: 0, y: 37, width: 1512, height: 945))
+        #expect(placement?.anchor == SnapAnchor(horizontal: .trailing, vertical: .top))
+    }
+
     @Test func theReleasePointDecidesNotTheLastDragPoint() {
         fixture.openTiles()
         fixture.drag(to: fixture.tilePoint(0))
