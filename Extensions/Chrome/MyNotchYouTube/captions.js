@@ -1,0 +1,337 @@
+/*
+ * MyNotch YouTube Bridge: caption parsing and message validation.
+ *
+ * Pure functions only: no DOM, no chrome.* and no network. The same file is loaded as a
+ * classic script by the page (MAIN world) script, the content script and the service
+ * worker, and is required directly by the Node tests.
+ *
+ * Message shapes and limits follow the shared MyNotch protocol (version 1).
+ */
+(function (root) {
+  "use strict";
+
+  var SOURCE = "mynotch-yt";
+  var MAX_EVENTS = 5000;
+  var MAX_TEXT = 500;
+  var MAX_TITLE = 300;
+  // The native host drops frames above 4 MiB, so stay well below that (JSON escapes included).
+  var MAX_MESSAGE_BYTES = 3000000;
+  var MAX_RATE = 16;
+  var VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
+  var LANG = /^[A-Za-z0-9]{1,8}(?:[-_][A-Za-z0-9]{1,8}){0,3}$/;
+
+  function isNumber(value) {
+    return typeof value === "number" && isFinite(value);
+  }
+
+  function isObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+
+  /** Control characters and every kind of whitespace become one space; the result is trimmed. */
+  function normalizeText(value) {
+    if (typeof value !== "string") return "";
+    return value.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  /** Cuts to at most `max` UTF-16 units without splitting a surrogate pair. */
+  function truncate(text, max) {
+    if (text.length <= max) return text;
+    var cut = text.slice(0, max);
+    var last = cut.charCodeAt(max - 1);
+    if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, max - 1);
+    return cut.replace(/\s+$/, "");
+  }
+
+  /** Rough UTF-8 size of the text once JSON-escaped (quotes and backslashes count double). */
+  function jsonBytes(text) {
+    var bytes = 0;
+    for (var i = 0; i < text.length; i++) {
+      var c = text.charCodeAt(i);
+      if (c === 34 || c === 92) bytes += 2;
+      else if (c < 0x80) bytes += 1;
+      else if (c < 0x800) bytes += 2;
+      else if (c >= 0xd800 && c <= 0xdbff) {
+        bytes += 4;
+        i++;
+      } else bytes += 3;
+    }
+    return bytes;
+  }
+
+  /** One protocol event from millisecond timing and raw text; null when it has no usable text or time. */
+  function makeEvent(startMs, durationMs, rawText) {
+    if (!isNumber(startMs) || startMs < 0) return null;
+    var text = truncate(normalizeText(rawText), MAX_TEXT);
+    if (!text) return null;
+    return {
+      t: Math.round(startMs) / 1000,
+      d: isNumber(durationMs) && durationMs > 0 ? Math.round(durationMs) / 1000 : 0,
+      text: text
+    };
+  }
+
+  /** Sorts by start time and applies the event-count and size limits. */
+  function finalizeEvents(list) {
+    list.sort(function (a, b) {
+      return a.t - b.t;
+    });
+    var out = [];
+    var bytes = 0;
+    for (var i = 0; i < list.length && out.length < MAX_EVENTS; i++) {
+      bytes += jsonBytes(list[i].text) + 48;
+      if (bytes > MAX_MESSAGE_BYTES) break;
+      out.push(list[i]);
+    }
+    return out;
+  }
+
+  /** json3 body (string or already parsed object) to protocol events. */
+  function eventsFromJson3(data) {
+    var parsed = data;
+    if (typeof data === "string") {
+      try {
+        parsed = JSON.parse(data);
+      } catch (e) {
+        return [];
+      }
+    }
+    var raw = parsed && Array.isArray(parsed.events) ? parsed.events : [];
+    var out = [];
+    for (var i = 0; i < raw.length; i++) {
+      var ev = raw[i];
+      if (!ev || typeof ev !== "object" || !Array.isArray(ev.segs)) continue;
+      var text = "";
+      for (var j = 0; j < ev.segs.length; j++) {
+        var seg = ev.segs[j];
+        if (seg && typeof seg.utf8 === "string") text += seg.utf8;
+      }
+      var event = makeEvent(ev.tStartMs, ev.dDurationMs, text);
+      if (event) out.push(event);
+    }
+    return finalizeEvents(out);
+  }
+
+  var NAMED_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+
+  function decodeEntities(text) {
+    return text.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[A-Za-z]+);/g, function (whole, body) {
+      if (body.charAt(0) === "#") {
+        var code = body.charAt(1) === "x" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+        var valid = code >= 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff);
+        return valid ? String.fromCodePoint(code) : "";
+      }
+      return Object.prototype.hasOwnProperty.call(NAMED_ENTITIES, body) ? NAMED_ENTITIES[body] : whole;
+    });
+  }
+
+  function parseAttributes(source) {
+    var attributes = {};
+    var re = /([A-Za-z_][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+    var match;
+    while ((match = re.exec(source)) !== null) {
+      attributes[match[1]] = match[2] !== undefined ? match[2] : match[3];
+    }
+    return attributes;
+  }
+
+  function numberAttribute(value) {
+    return typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value) ? Number(value) : NaN;
+  }
+
+  /** srv3 XML body (`<p t="ms" d="ms">` with optional `<s>` children) to protocol events. */
+  function eventsFromSrv3(xml) {
+    if (typeof xml !== "string") return [];
+    var out = [];
+    var re = /<p\b([^>]*?)(?:\/>|>([\s\S]*?)<\/p>)/g;
+    var match;
+    while ((match = re.exec(xml)) !== null) {
+      if (match[2] === undefined) continue;
+      var attributes = parseAttributes(match[1]);
+      var text = decodeEntities(match[2].replace(/<[^>]*>/g, ""));
+      var event = makeEvent(numberAttribute(attributes.t), numberAttribute(attributes.d), text);
+      if (event) out.push(event);
+    }
+    return finalizeEvents(out);
+  }
+
+  /** Picks the parser from the first non-space character of the body. */
+  function eventsFromBody(body) {
+    if (body !== null && typeof body === "object") return eventsFromJson3(body);
+    if (typeof body !== "string") return [];
+    var i = 0;
+    while (i < body.length && i < 64 && /[\s﻿]/.test(body.charAt(i))) i++;
+    var first = body.charAt(i);
+    if (first === "{") return eventsFromJson3(i > 0 ? body.slice(i) : body);
+    if (first === "<") return eventsFromSrv3(body);
+    return [];
+  }
+
+  function normalizeLang(value) {
+    return typeof value === "string" && LANG.test(value) ? value : "und";
+  }
+
+  /**
+   * Reads the track identity from a timedtext request URL. Returns null for any other URL.
+   * The URL itself is never kept or forwarded; only these three small fields leave this function.
+   */
+  function parseTimedTextUrl(raw, base) {
+    var url;
+    try {
+      url = new URL(raw, base);
+    } catch (e) {
+      return null;
+    }
+    if (url.pathname !== "/api/timedtext") return null;
+    var query = url.searchParams;
+    return {
+      videoId: query.get("v") || "",
+      lang: query.get("tlang") || query.get("lang") || "",
+      kind: query.get("kind") === "asr" ? "asr" : "standard"
+    };
+  }
+
+  /** A protocol `captions` message, or null when there is nothing valid to send. */
+  function buildCaptionsMessage(info) {
+    if (!info || typeof info.videoId !== "string" || !VIDEO_ID.test(info.videoId)) return null;
+    if (!Array.isArray(info.events) || info.events.length === 0) return null;
+    return {
+      v: 1,
+      type: "captions",
+      videoId: info.videoId,
+      lang: normalizeLang(info.lang),
+      kind: info.kind === "asr" ? "asr" : "standard",
+      events: info.events
+    };
+  }
+
+  /** Video id of a watch, shorts or live URL; null for anything else. */
+  function videoIdFromUrl(href) {
+    var url;
+    try {
+      url = new URL(String(href));
+    } catch (e) {
+      return null;
+    }
+    if (url.pathname === "/watch") {
+      var id = url.searchParams.get("v");
+      return id && VIDEO_ID.test(id) ? id : null;
+    }
+    var match = /^\/(?:shorts|live)\/([A-Za-z0-9_-]{11})\/?$/.exec(url.pathname);
+    return match ? match[1] : null;
+  }
+
+  /** Document title without the notification counter prefix and the " - YouTube" suffix. */
+  function cleanTitle(raw) {
+    var title = normalizeText(raw);
+    title = title.replace(/^\(\d+\+?\)\s+/, "").replace(/\s+-\s+YouTube$/, "");
+    return truncate(title, MAX_TITLE);
+  }
+
+  function validVideoId(value) {
+    return typeof value === "string" && VIDEO_ID.test(value);
+  }
+
+  function round3(value) {
+    return Math.round(value * 1000) / 1000;
+  }
+
+  function validateCaptions(message) {
+    if (!validVideoId(message.videoId)) return null;
+    if (typeof message.lang !== "string" || !LANG.test(message.lang)) return null;
+    if (message.kind !== "standard" && message.kind !== "asr") return null;
+    if (!Array.isArray(message.events) || message.events.length === 0) return null;
+    if (message.events.length > MAX_EVENTS) return null;
+    var events = [];
+    for (var i = 0; i < message.events.length; i++) {
+      var ev = message.events[i];
+      if (!isObject(ev) || !isNumber(ev.t) || ev.t < 0 || !isNumber(ev.d) || ev.d < 0) return null;
+      if (typeof ev.text !== "string") return null;
+      var event = makeEvent(ev.t * 1000, ev.d * 1000, ev.text);
+      if (event) events.push(event);
+    }
+    events = finalizeEvents(events);
+    if (events.length === 0) return null;
+    return { v: 1, type: "captions", videoId: message.videoId, lang: message.lang, kind: message.kind, events: events };
+  }
+
+  function validatePlayback(message) {
+    if (!validVideoId(message.videoId)) return null;
+    if (typeof message.title !== "string") return null;
+    var title = truncate(normalizeText(message.title), MAX_TITLE);
+    if (!title) return null;
+    if (!isNumber(message.time) || message.time < 0) return null;
+    if (typeof message.playing !== "boolean") return null;
+    if (!isNumber(message.rate) || message.rate <= 0 || message.rate > MAX_RATE) return null;
+    return {
+      v: 1,
+      type: "playback",
+      videoId: message.videoId,
+      title: title,
+      time: round3(message.time),
+      playing: message.playing,
+      rate: round3(message.rate)
+    };
+  }
+
+  function validateClear(message) {
+    if (!validVideoId(message.videoId)) return null;
+    return { v: 1, type: "clear", videoId: message.videoId };
+  }
+
+  /**
+   * Validates a protocol message and returns a fresh object holding only the protocol fields
+   * (so nothing extra, such as a URL, can ride along), or null when the message is not valid.
+   */
+  function validateMessage(message) {
+    if (!isObject(message) || message.v !== 1) return null;
+    switch (message.type) {
+      case "captions":
+        return validateCaptions(message);
+      case "playback":
+        return validatePlayback(message);
+      case "clear":
+        return validateClear(message);
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Content-script gate for window "message" events: only `captions` messages that this very
+   * window posted to its own origin with the bridge's source tag are accepted, and they are
+   * re-validated before they go any further.
+   */
+  function acceptPageMessage(event, win, origin) {
+    if (!event || event.source !== win || event.origin !== origin) return null;
+    var data = event.data;
+    if (!isObject(data) || data.source !== SOURCE || data.type !== "captions") return null;
+    return validateMessage(data);
+  }
+
+  var api = {
+    SOURCE: SOURCE,
+    MAX_EVENTS: MAX_EVENTS,
+    MAX_TEXT: MAX_TEXT,
+    MAX_TITLE: MAX_TITLE,
+    MAX_MESSAGE_BYTES: MAX_MESSAGE_BYTES,
+    normalizeText: normalizeText,
+    eventsFromJson3: eventsFromJson3,
+    eventsFromSrv3: eventsFromSrv3,
+    eventsFromBody: eventsFromBody,
+    parseTimedTextUrl: parseTimedTextUrl,
+    buildCaptionsMessage: buildCaptionsMessage,
+    videoIdFromUrl: videoIdFromUrl,
+    cleanTitle: cleanTitle,
+    validateMessage: validateMessage,
+    acceptPageMessage: acceptPageMessage
+  };
+
+  if (typeof module === "object" && module !== null && module.exports) {
+    module.exports = api;
+  } else {
+    // Handed to the next script of the same world (page.js, content.js, bridge users) through a
+    // hidden global; page.js removes it again so the YouTube page never sees it.
+    Object.defineProperty(root, "__mynotchCaptions", { value: api, configurable: true, writable: true });
+  }
+})(typeof globalThis !== "undefined" ? globalThis : self);
