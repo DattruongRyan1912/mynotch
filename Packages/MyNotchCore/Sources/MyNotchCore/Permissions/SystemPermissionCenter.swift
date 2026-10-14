@@ -6,6 +6,7 @@ import CoreGraphics
 import EventKit
 
 /// Real permission checks backed by the system frameworks. Only `request` prompts.
+/// System audio and the folders have no status that can be read without prompting, so they stay `.unknown`.
 public final class SystemPermissionCenter: PermissionCenter {
     public init() {}
 
@@ -20,19 +21,15 @@ public final class SystemPermissionCenter: PermissionCenter {
         case .reminders:
             return Self.map(EKEventStore.authorizationStatus(for: .reminder))
         case .bluetooth:
-            switch CBManager.authorization {
-            case .allowedAlways: return .granted
-            case .notDetermined: return .notDetermined
-            default: return .denied
-            }
+            return Self.status(forBluetooth: CBManager.authorization)
         case .automation(let bundleID):
             return Self.automationStatus(bundleID: bundleID, askUserIfNeeded: false)
         case .microphone:
-            switch AVCaptureDevice.authorizationStatus(for: .audio) {
-            case .authorized: return .granted
-            case .notDetermined: return .notDetermined
-            default: return .denied
-            }
+            return Self.status(forMicrophone: AVCaptureDevice.authorizationStatus(for: .audio))
+        case .pasteboard:
+            return Self.status(forPasteboard: NSPasteboard.general.accessBehavior)
+        case .systemAudio, .downloadsFolder, .desktopFolder:
+            return .unknown
         }
     }
 
@@ -55,6 +52,13 @@ public final class SystemPermissionCenter: PermissionCenter {
             return await Task.detached { Self.automationStatus(bundleID: bundleID, askUserIfNeeded: true) }.value
         case .microphone:
             _ = await AVCaptureDevice.requestAccess(for: .audio)
+        case .downloadsFolder:
+            return await Self.listFolder(.downloadsDirectory)
+        case .desktopFolder:
+            return await Self.listFolder(.desktopDirectory)
+        case .systemAudio, .pasteboard:
+            // No API prompts for these: the user switches them on in System Settings.
+            break
         }
         return status(of: permission)
     }
@@ -72,19 +76,70 @@ public final class SystemPermissionCenter: PermissionCenter {
         }
     }
 
+    nonisolated static func status(forBluetooth authorization: CBManagerAuthorization) -> PermissionStatus {
+        switch authorization {
+        case .allowedAlways: .granted
+        case .notDetermined: .notDetermined
+        default: .denied
+        }
+    }
+
+    nonisolated static func status(forMicrophone authorization: AVAuthorizationStatus) -> PermissionStatus {
+        switch authorization {
+        case .authorized: .granted
+        case .notDetermined: .notDetermined
+        default: .denied
+        }
+    }
+
+    /// `.default` and `.ask` both mean the system asks on programmatic access, so reading would not go through silently.
+    nonisolated static func status(forPasteboard behavior: NSPasteboard.AccessBehavior) -> PermissionStatus {
+        switch behavior {
+        case .alwaysAllow: .granted
+        case .alwaysDeny: .denied
+        default: .notDetermined
+        }
+    }
+
+    /// A target that is not running cannot be asked about, so that stays `.unknown` rather than "not asked".
+    nonisolated static func status(forAutomation result: OSStatus) -> PermissionStatus {
+        switch result {
+        case noErr: .granted
+        case OSStatus(errAEEventNotPermitted): .denied
+        case OSStatus(errAEEventWouldRequireUserConsent): .notDetermined
+        default: .unknown
+        }
+    }
+
     nonisolated private static func automationStatus(bundleID: String, askUserIfNeeded: Bool) -> PermissionStatus {
         var target = AEAddressDesc()
         let created = bundleID.withCString { pointer in
             AECreateDesc(DescType(typeApplicationBundleID), pointer, strlen(pointer), &target)
         }
-        guard created == noErr else { return .notDetermined }
+        guard created == noErr else { return .unknown }
         defer { AEDisposeDesc(&target) }
         let result = AEDeterminePermissionToAutomateTarget(&target, AEEventClass(typeWildCard), AEEventID(typeWildCard), askUserIfNeeded)
-        switch result {
-        case noErr: return .granted
-        case OSStatus(errAEEventNotPermitted): return .denied
-        default: return .notDetermined   // not running yet, or consent not requested
-        }
+        return status(forAutomation: result)
+    }
+
+    /// Listing the folder is what makes macOS ask, and it waits for the answer, so it must not run on the main actor.
+    private static func listFolder(_ directory: FileManager.SearchPathDirectory) async -> PermissionStatus {
+        await Task.detached {
+            guard let url = FileManager.default.urls(for: directory, in: .userDomainMask).first else { return .unknown }
+            do {
+                _ = try FileManager.default.contentsOfDirectory(atPath: url.path)
+                return status(afterListing: nil)
+            } catch {
+                return status(afterListing: error)
+            }
+        }.value
+    }
+
+    /// Only a refusal is certain; any other failure (the folder moved, say) says nothing about the permission.
+    nonisolated static func status(afterListing error: (any Error)?) -> PermissionStatus {
+        guard let error else { return .granted }
+        let nsError = error as NSError
+        return nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoPermissionError ? .denied : .unknown
     }
 }
 

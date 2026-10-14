@@ -68,7 +68,7 @@ Ghép một module cần hai chỗ: `project.yml` (mục `packages` và `depende
 
 1. Tạo package `Packages/Modules/<Tên>/`; chép `Packages/Modules/Battery/Package.swift` làm mẫu (macOS 26, phụ thuộc đường dẫn tới MyNotchCore và NotchUI, `.defaultIsolation(MainActor.self)`, test dùng `MyNotchTestSupport`). Viết một class theo `FeatureModule`.
 2. Khai báo package trong `project.yml`.
-3. Module cần quyền mới: thêm usage description và entitlement tương ứng vào `project.yml`.
+3. Module cần quyền mới: thêm usage description và entitlement tương ứng vào `project.yml`, và khai báo quyền trong descriptor (`permissions` là bắt buộc, `optionalPermissions` là tuỳ chọn, `permissionReasons` là một dòng lý do cho mỗi quyền) để trang Quyền trong Settings hiện nó.
 4. Thêm một dòng vào `App/ModuleList.swift`, rồi `xcodegen generate`. `verify.sh` tự test mọi package trong `Packages/Modules/`.
 
 Module dùng được: `context.storage`, `context.scheduler` (việc đã hẹn tự huỷ khi module dừng), `context.hotkeys` (đăng ký và `unregister` theo tên), `context.presenter` (`open()` mở tab của chính module, `showToast`, `close`), `context.activities` (live activity cập nhật tại chỗ, `raise`), `context.services` (macOS Services: cần thêm một mục `NSServices` trong `project.yml` và một phương thức trong `App/ServicesProvider.swift`, nếu không hệ thống không bao giờ gọi), `context.lockScreen` (view nhỏ không nhạy cảm cho màn hình khoá), `FeatureModule.menuItems` (mục thêm vào menu của icon menu bar, chỉ hiện khi module chạy), `NotchTab(acceptsKeyboard:dropTypes:onDrop:)`, `@Environment(\.notch)` (ghim, báo đang kéo, đóng notch), `optionalPermissions` trong `ModuleDescriptor`. Sau khi module dừng, `scheduler`, `hotkeys`, `presenter`, `activities`, `services` và `lockScreen` không làm gì nữa. Test cần thư mục tạm thì dùng `ScratchFolders.shared.reserve("<nhãn>")` của `MyNotchTestSupport` (tự xoá khi tiến trình test thoát).
@@ -105,4 +105,4 @@ Chứng chỉ Apple Development của Apple ID miễn phí có hạn (thường 
 
 - `cannot find '<Tên>' in scope` cho symbol nằm ở một package local khác: xoá thư mục `.build` của package đang build rồi chạy lại.
 - Notch chồng nhau hoặc không nhận chuột: thoát các app notch khác (OneNotch, boring.notch…) đang chạy, và chỉ chạy một bản MyNotch.
-- Quyền bị quên sau khi build: xem mục "Ký app". Muốn thử lại hộp thoại quyền từ đầu: `tccutil reset All io.lucasvu.mynotch`.
+- Quyền bị quên sau khi build: xem mục "Ký app". Cấp lại bằng Settings → Quyền → “Cấp lần lượt” (trang này tự mở khi app lần đầu chạy hoặc khi chứng chỉ ký đổi). Muốn thử lại hộp thoại quyền từ đầu: `tccutil reset All io.lucasvu.mynotch`.

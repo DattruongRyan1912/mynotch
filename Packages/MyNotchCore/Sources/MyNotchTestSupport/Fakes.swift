@@ -9,11 +9,14 @@ public final class FakePermissionCenter: PermissionCenter {
     public var requestResult: PermissionStatus = .granted
     public private(set) var requested: [Permission] = []
     public private(set) var openedSettings: [Permission] = []
+    /// Awaited by every `request` before the user "answers", so a test can keep a prompt open.
+    public var awaitAnswer: (@MainActor () async -> Void)?
     public init() {}
     public func status(of permission: Permission) -> PermissionStatus { statuses[permission] ?? .denied }
 
     public func request(_ permission: Permission) async -> PermissionStatus {
         requested.append(permission)
+        await awaitAnswer?()
         statuses[permission] = requestResult
         return requestResult
     }

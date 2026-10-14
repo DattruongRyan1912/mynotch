@@ -22,11 +22,11 @@ final class FakeModule: FeatureModule {
 
     init(
         _ id: ModuleID, order: Int = 0, defaultEnabled: Bool = true,
-        permissions: [Permission] = [], optionalPermissions: [Permission] = []
+        permissions: [Permission] = [], optionalPermissions: [Permission] = [], permissionReasons: [Permission: String] = [:]
     ) {
         descriptor = ModuleDescriptor(
             id: id, displayName: id.rawValue, systemImage: "circle", defaultEnabled: defaultEnabled,
-            permissions: permissions, optionalPermissions: optionalPermissions, order: order
+            permissions: permissions, optionalPermissions: optionalPermissions, permissionReasons: permissionReasons, order: order
         )
     }
 

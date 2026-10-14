@@ -100,6 +100,41 @@ import MyNotchTestSupport
         #expect(module.startCount == 1)
     }
 
+    @Test func grantRequestsAFolderWhoseStatusIsUnknownAndOpensSettingsWhenItStaysUngranted() async {
+        let harness = Harness([FakeModule("m", optionalPermissions: [.downloadsFolder])])
+        harness.permissions.statuses[.downloadsFolder] = .unknown
+        harness.permissions.requestResult = .unknown
+        await harness.registry.grant(.downloadsFolder)
+        #expect(harness.permissions.requested == [.downloadsFolder])
+        #expect(harness.permissions.openedSettings == [.downloadsFolder])
+    }
+
+    @Test func grantSkipsSettingsWhenAnUnknownFolderIsAllowed() async {
+        let harness = Harness([FakeModule("m", optionalPermissions: [.desktopFolder])])
+        harness.permissions.statuses[.desktopFolder] = .unknown
+        await harness.registry.grant(.desktopFolder)
+        #expect(harness.permissions.requested == [.desktopFolder])
+        #expect(harness.permissions.openedSettings.isEmpty)
+    }
+
+    @Test func grantOnlyOpensSettingsForAPermissionWithoutARequest() async {
+        let harness = Harness([FakeModule("m", optionalPermissions: [.systemAudio, .pasteboard])])
+        harness.permissions.statuses[.systemAudio] = .unknown
+        harness.permissions.statuses[.pasteboard] = .notDetermined
+        await harness.registry.grant(.systemAudio)
+        await harness.registry.grant(.pasteboard)
+        #expect(harness.permissions.requested.isEmpty)
+        #expect(harness.permissions.openedSettings == [.systemAudio, .pasteboard])
+    }
+
+    @Test func aRequiredPermissionWithNoReadableStatusDoesNotBlockStart() async {
+        let module = FakeModule("m", permissions: [.systemAudio])
+        let harness = Harness([module])
+        harness.permissions.statuses[.systemAudio] = .unknown
+        await harness.registry.bootstrap()
+        #expect(harness.registry.state(of: "m") == .running)
+    }
+
     @Test func deniedOptionalPermissionsDoNotBlockStart() async {
         let module = FakeModule("m", optionalPermissions: [.microphone, .bluetooth])
         let harness = Harness([module])

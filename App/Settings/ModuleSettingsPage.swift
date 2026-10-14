@@ -71,6 +71,7 @@ private struct PermissionRow: View {
                     case .granted: Text("Đã cấp").foregroundStyle(.green)
                     case .denied: Text("Chưa cấp").foregroundStyle(.orange)
                     case .notDetermined: Text("Chưa xin").foregroundStyle(.secondary)
+                    case .unknown: Text("Chưa kiểm tra được").foregroundStyle(.secondary)
                     }
                     if status != .granted {
                         Button("Cấp quyền") {

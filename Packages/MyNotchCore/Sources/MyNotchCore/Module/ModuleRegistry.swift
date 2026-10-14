@@ -97,16 +97,20 @@ public final class ModuleRegistry {
     /// TCC sends no notification when a permission changes, so the app polls `refreshPermissions()` while this is true.
     public var needsPermissionPolling: Bool { modules.contains(where: waitsForPermission) }
 
-    /// Prompts while the system still can; after an answer only System Settings can change it.
+    /// What the permission center reports now; never prompts.
+    public func permissionStatus(of permission: Permission) -> PermissionStatus { permissions.status(of: permission) }
+
+    /// Prompts while the system still can; after an answer only System Settings can change it (`Permission.grantAction`).
     /// Settings-only permissions always request first, which also lists the app in System Settings.
     public func grant(_ permission: Permission) async {
         let before = permissions.status(of: permission)
-        if before == .notDetermined || permission.isSettingsOnly {
+        switch permission.grantAction(for: before) {
+        case .request:
             let after = await permissions.request(permission)
             if before != .notDetermined && after != .granted {
                 permissions.openSystemSettings(for: permission)
             }
-        } else {
+        case .openSettings:
             permissions.openSystemSettings(for: permission)
         }
         await refreshPermissions()
@@ -192,7 +196,7 @@ public final class ModuleRegistry {
         let descriptor = module.descriptor
         let id = descriptor.id
         guard state(of: id) != .running else { return }
-        if let missing = descriptor.permissions.first(where: { permissions.status(of: $0) != .granted }) {
+        if let missing = descriptor.permissions.first(where: { permissions.status(of: $0).isMissing }) {
             states[id] = .needsPermission(missing)
             return
         }
