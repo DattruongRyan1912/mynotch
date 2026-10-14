@@ -20,12 +20,26 @@ nonisolated enum PermissionCardText {
     /// A tool name longer than this is also written at the head of the scrolling text, since the line it sits on cuts it.
     static let longToolName = 22
 
-    /// "Cho phép" only for a request whose whole text is on the card. Otherwise the answer is given where the whole request
-    /// is, in the terminal, and the notch can only deny.
-    static func buttons(for request: PermissionRequest) -> [Button] {
-        request.canAllow
-            ? [Button("Cho phép", .allow), Button("Từ chối", .deny), Button("Hỏi trong terminal", .ask)]
-            : [Button("Từ chối", .deny), Button("Trả lời trong terminal", .ask)]
+    /// What a card can do with a request: allow it, say that it is too much for this card, or say that it was not whole.
+    nonisolated enum Mode: Equatable, Sendable {
+        case allowable, tooLongHere, notWhole
+    }
+
+    static func mode(for request: PermissionRequest, in placement: PermissionPlacement) -> Mode {
+        guard request.isWhole else { return .notWhole }
+        let fits = request.canAllow && PermissionFit.fits(scrolled(of: request), in: placement.limits)
+        return fits ? .allowable : .tooLongHere
+    }
+
+    /// "Cho phép" only for a request whose whole text is on this card, without scrolling. A request that is whole but too
+    /// much for the strip can only be denied there, and is read in the AI tab; one too much for the tab, or not whole, is
+    /// answered where all of it is, in the terminal, and the notch can only deny.
+    static func buttons(for request: PermissionRequest, in placement: PermissionPlacement) -> [Button] {
+        switch mode(for: request, in: placement) {
+        case .allowable: [Button("Cho phép", .allow), Button("Từ chối", .deny), Button("Hỏi trong terminal", .ask)]
+        case .tooLongHere where placement == .strip: [Button("Từ chối", .deny)]
+        case .tooLongHere, .notWhole: [Button("Từ chối", .deny), Button("Trả lời trong terminal", .ask)]
+        }
     }
 
     /// The agent and, when the request knows it, the project.
@@ -65,9 +79,13 @@ nonisolated enum PermissionCardText {
         request.tool.count > longToolName ? request.tool + "\n" + shown(of: request) : shown(of: request)
     }
 
-    /// Said beside the buttons of a request that cannot be allowed here.
-    static func notice(of request: PermissionRequest) -> String? {
-        request.canAllow ? nil : "Chưa đủ chi tiết để cho phép tại đây"
+    /// Said beside the buttons of a request that cannot be allowed on this card.
+    static func notice(of request: PermissionRequest, in placement: PermissionPlacement) -> String? {
+        switch mode(for: request, in: placement) {
+        case .allowable: nil
+        case .tooLongHere: placement == .strip ? "Mở tab AI để xem đủ" : "Quá dài để cho phép tại đây"
+        case .notWhole: "Chưa đủ chi tiết để cho phép tại đây"
+        }
     }
 
     /// For VoiceOver: the tool, then every line of what is asked, then how much was left out.
@@ -83,25 +101,17 @@ nonisolated enum PermissionCardText {
 }
 
 /// The request an agent waits on, with its answers. The same card sits in the strip under the closed notch and at the top
-/// of the AI tab. The text of what is asked is in a scroll view, whole, and when it cannot be shown whole the card says so
-/// and offers no "Cho phép". A card that has just come up, or that took the place of the one before it, takes no answer
-/// until its delay is over, and changes visibly when it is replaced, so a click that began on the previous one does not
-/// land on this one.
+/// of the AI tab. The text of what is asked is drawn in full, never in a scroll view, and "Cho phép" is offered only when
+/// all of it fits (see `PermissionFit`); what does not fit is cut with an ellipsis and the card says where to read it. A card
+/// that has just come up, or that took the place of the one before it, takes no answer until its delay is over, and changes
+/// visibly when it is replaced, so a click that began on the previous one does not land on this one.
 struct PermissionCard: View {
     /// The strip under the closed notch: it can be at most `NotchGeometry.maxBottomHeight` (80) tall.
     static let stripHeight: CGFloat = 80
+    /// The card's padding on each side in the AI tab.
+    static let tabInset: CGFloat = 8
 
-    enum Placement {
-        case strip, tab
-
-        /// Two lines of the text show in the strip, which has no room for more; the tab shows four. The rest scrolls.
-        var textHeight: CGFloat {
-            switch self {
-            case .strip: 27
-            case .tab: 54
-            }
-        }
-    }
+    typealias Placement = PermissionPlacement
 
     let request: PermissionRequest
     let others: Int
@@ -144,25 +154,21 @@ struct PermissionCard: View {
                         .layoutPriority(1)
                 }
             }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(PermissionCardText.scrolled(of: request))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(NotchTokens.secondaryText)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-            }
-            .scrollIndicators(.visible)
-            .frame(height: placement.textHeight)
+            // All of it, in as many lines as it takes; what is more than the card shows ends in an ellipsis, and is not allowed.
+            Text(PermissionCardText.scrolled(of: request))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(NotchTokens.secondaryText)
+                .lineLimit(placement.limits.lines)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 6) {
-                ForEach(PermissionCardText.buttons(for: request), id: \.answer) { button in
+                ForEach(PermissionCardText.buttons(for: request, in: placement), id: \.answer) { button in
                     Button(button.label) { decide(request.id, button.answer) }
                         .buttonStyle(PermissionButtonStyle(tint: Self.tint(of: button.answer)))
                         // The short answers keep their width; the long one gives way first.
                         .layoutPriority(button.answer == .ask ? 0 : 1)
                 }
-                if let notice = PermissionCardText.notice(of: request) {
+                if let notice = PermissionCardText.notice(of: request, in: placement) {
                     Text(notice)
                         .font(.system(size: 10))
                         .foregroundStyle(Color.orange)

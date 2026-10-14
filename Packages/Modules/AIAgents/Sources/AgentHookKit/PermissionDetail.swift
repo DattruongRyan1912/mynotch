@@ -98,28 +98,55 @@ public struct PermissionDetail: Codable, Equatable, Sendable {
 }
 
 /// What the helper does to text before it is shown: the characters that could make it read differently from what a
-/// shell or a file system sees are replaced by a visible one, so they cannot hide anything.
-enum HookText {
+/// shell or a file system sees, or draw nothing at all, are replaced by a visible one, so they cannot hide anything.
+public enum HookText {
     private static let replacement: Unicode.Scalar = "\u{FFFD}"
+    /// A run of combining marks longer than this is cut: a few are a letter with accents, hundreds smear the lines around.
+    static let maxMarksInARun = 3
 
-    /// Line endings as `\n`; control and format characters (an escape, a direction override, a zero-width space) as
-    /// U+FFFD, except the tab; everything else as it came.
+    /// True for a character that draws nothing or something else than it is, other than the plain space, the tab and
+    /// the line feed: control and format characters (an escape, a direction override, a zero-width space), every space
+    /// but the plain one (no-break space, em space, ideographic space), the characters that Unicode says are ignorable
+    /// when drawn (the Hangul fillers, variation selectors, combining grapheme joiner), the Braille blank, and the code
+    /// points that mean nothing in themselves (private use, unassigned, surrogates).
+    public static func isInvisible(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar {
+        case "\n", "\t", " ": return false
+        case "\u{2800}": return true
+        default: break
+        }
+        if scalar.properties.isDefaultIgnorableCodePoint { return true }
+        switch scalar.properties.generalCategory {
+        case .control, .format, .spaceSeparator, .lineSeparator, .paragraphSeparator, .privateUse, .surrogate, .unassigned: return true
+        default: return false
+        }
+    }
+
+    /// Line endings as `\n`; every invisible character as U+FFFD; a run of combining marks cut after a few; the tab, the
+    /// plain space and everything else as it came.
     static func clean(_ text: String) -> String {
         var result = String.UnicodeScalarView()
         var afterReturn = false
+        var marks = 0
         for scalar in text.unicodeScalars {
             defer { afterReturn = scalar == "\r" }
             switch scalar {
             case "\r", "\u{2028}", "\u{2029}", "\u{85}":
                 result.append("\n")
+                marks = 0
             case "\n":
                 if !afterReturn { result.append("\n") }
-            case "\t":
-                result.append(scalar)
+                marks = 0
             default:
-                switch scalar.properties.generalCategory {
-                case .control, .format: result.append(replacement)
-                default: result.append(scalar)
+                if isInvisible(scalar) {
+                    result.append(replacement)
+                    marks = 0
+                } else if scalar.properties.generalCategory == .nonspacingMark || scalar.properties.generalCategory == .enclosingMark {
+                    marks += 1
+                    result.append(marks > maxMarksInARun ? replacement : scalar)
+                } else {
+                    result.append(scalar)
+                    marks = 0
                 }
             }
         }

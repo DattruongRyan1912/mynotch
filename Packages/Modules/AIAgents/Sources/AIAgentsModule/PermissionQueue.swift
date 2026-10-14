@@ -18,11 +18,15 @@ nonisolated struct PermissionRequest: Identifiable, Equatable, Sendable {
     let detail: PermissionDetail?
 
     var source: AgentSource { key.source }
-    /// True only when everything the request asks for is on the card: nothing was cut, and the helper knew the tool. Only
-    /// then can it be allowed from the notch; otherwise the agent asks in the terminal, where the whole request is.
-    var canAllow: Bool {
+    /// True when everything the request asks for is there to be shown: nothing was cut, and the helper knew the tool.
+    var isWhole: Bool {
         guard let detail else { return false }
         return detail.isComplete && detail.hiddenLines == 0 && !detail.text.isEmpty
+    }
+    /// True only when the request is whole and its whole text fits the AI tab, the card that shows the most, without
+    /// scrolling. Only then can it be allowed from the notch; otherwise the agent asks in the terminal, where all of it is.
+    var canAllow: Bool {
+        isWhole && PermissionFit.fits(PermissionCardText.scrolled(of: self), in: PermissionPlacement.tab.limits)
     }
     /// The last component of the working directory.
     var project: String? {
