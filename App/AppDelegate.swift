@@ -1,4 +1,7 @@
 import AppKit
+#if DEBUG
+import DebugTools
+#endif
 import KeyboardShortcuts
 import MyNotchCore
 import NotchUI
@@ -66,6 +69,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The deadline is a run-loop timer in `.common` modes, not a Swift task: if `terminate` is ever called from a
     /// main-queue task, AppKit's modal wait for the reply starves Swift tasks, while run-loop timers still fire.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        #if DEBUG
+        debugActivities?.stop()
+        #endif
         let deadline = Timer(timeInterval: 3, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.replyToTerminate() }
         }

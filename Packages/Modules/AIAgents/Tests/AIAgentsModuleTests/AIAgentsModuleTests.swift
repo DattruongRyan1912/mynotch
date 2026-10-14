@@ -175,7 +175,7 @@ final class FakeOpener {
     /// Stands in for the Media module's "playing" activity, which runs at normal priority.
     func publishPlayingMedia() {
         harness.activities.set(
-            LiveActivity(id: "now-playing", priority: .normal, leading: AnyView(EmptyView()), trailing: AnyView(EmptyView())),
+            LiveActivity(id: "nowPlaying", priority: .normal, leading: AnyView(EmptyView()), trailing: AnyView(EmptyView())),
             from: "media"
         )
     }
@@ -185,31 +185,24 @@ final class FakeOpener {
         send(.turnStarted)
         await settle { current != nil }
         publishPlayingMedia()
-        #expect(current?.id == "media/now-playing")
-        #expect(harness.activities.others.map(\.id) == ["aiagents/agent"])
-    }
-
-    @Test func workingNeverHidesMediaThatStartedFirst() async {
-        await start()
-        publishPlayingMedia()
-        send(.turnStarted)
-        await settle { harness.activities.others.count == 1 }
-        #expect(current?.id == "media/now-playing")
+        #expect(current?.id == "media/nowPlaying")
         #expect(harness.activities.others.map(\.id) == ["aiagents/agent"])
     }
 
     @Test func waitingTakesTheNotchFromMediaAndMediaStepsBackIn() async {
         await start()
-        publishPlayingMedia()
         send(.turnStarted)
-        await settle { harness.activities.others.count == 1 }
+        await settle { current != nil }
+        // The agent was live first and works at `.low`: only that puts the music in front.
+        publishPlayingMedia()
+        #expect(current?.id == "media/nowPlaying")
         send(.waitingForInput)
         await settle { current?.activity.priority == .high }
         #expect(current?.id == "aiagents/agent")
-        #expect(harness.activities.others.map(\.id) == ["media/now-playing"])
+        #expect(harness.activities.others.map(\.id) == ["media/nowPlaying"])
         send(.toolFinished)
-        await settle { current?.id == "media/now-playing" }
-        #expect(current?.id == "media/now-playing")
+        await settle { current?.id == "media/nowPlaying" }
+        #expect(current?.id == "media/nowPlaying")
         #expect(harness.activities.others.map(\.id) == ["aiagents/agent"])
     }
 

@@ -27,7 +27,7 @@ xcodegen generate --quiet
 # removed from MyNotchCore/NotchUI breaks the dependents' incremental builds. Drop their .build when that list changes.
 shared_sources=$(find Packages/MyNotchCore Packages/NotchUI -path '*/.build' -prune -o -type f \( -path '*/Sources/*' -o -name Package.swift \) -print | LC_ALL=C sort | shasum | cut -d' ' -f1)
 
-for manifest in Packages/MyNotchCore/Package.swift Packages/NotchUI/Package.swift Packages/Modules/*/Package.swift; do
+for manifest in Packages/MyNotchCore/Package.swift Packages/NotchUI/Package.swift Packages/DebugTools/Package.swift Packages/Modules/*/Package.swift; do
     package=$(dirname "$manifest")
     if [ "$package" != Packages/MyNotchCore ] && [ "$(cat "$package/.build/mynotch-shared-sources" 2>/dev/null)" != "$shared_sources" ]; then
         rm -rf "$package/.build"

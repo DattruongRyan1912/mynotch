@@ -24,6 +24,8 @@ packages:
     path: Packages/MyNotchCore
   NotchUI:
     path: Packages/NotchUI
+  DebugTools:
+    path: Packages/DebugTools
   AIAgentsModule:
     path: Packages/Modules/AIAgents
   BatteryModule:
@@ -71,6 +73,7 @@ targets:
     dependencies:
       - package: MyNotchCore
       - package: NotchUI
+      - package: DebugTools
       - package: AIAgentsModule
       - package: BatteryModule
       - package: CalendarModule

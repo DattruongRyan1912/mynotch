@@ -54,6 +54,7 @@ Phím tắt chung: ⌃⌥N mở/đóng notch. Dữ liệu của module nằm ở
 | `App/` | Target app: khởi động, menu bar, Settings. `ModuleList.swift` là nơi **duy nhất** ghép module vào app. Icon app là `App/Icon/MyNotch.icon` (Icon Composer) |
 | `Packages/MyNotchCore` | Hợp đồng module, registry, settings, quyền, phím tắt, live activity, Services |
 | `Packages/NotchUI` | Cửa sổ notch, hình học, state machine, đa màn hình, thả file, SkyLight shim |
+| `Packages/DebugTools` | Chỉ có trong bản Debug (ở Release biên dịch thành rỗng): kích hoạt live activity giả qua distributed notification để thử notch mà không cần app thật |
 | `Packages/Modules/*` | Mỗi tính năng một package; chỉ phụ thuộc MyNotchCore và NotchUI, không module nào import module khác |
 | `Tools/mynotch-hook` | Helper CLI của AI agents, được nhúng vào `Contents/MacOS` |
 | `Tools/mynotch-youtube-host` | Helper Native Messaging cho extension Chrome (mã nằm ở thư viện `YouTubeBridgeKit` của package Media), nhúng vào `Contents/MacOS` |

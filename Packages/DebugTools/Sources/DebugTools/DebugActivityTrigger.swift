@@ -9,7 +9,7 @@ import SwiftUI
 /// activities come from this publisher, which belongs to the app and not to a module, under the module id "debug"; one
 /// command per second is taken, the rest are dropped. Every change of the primary activity or of the bubbles is logged
 /// (category `activities`, notice level) as ids and counts, never content.
-final class DebugActivityTrigger {
+public final class DebugActivityTrigger {
     static let notificationName = Notification.Name("io.lucasvu.mynotch.debug.activities")
     static let module: ModuleID = "debug"
 
@@ -18,12 +18,31 @@ final class DebugActivityTrigger {
     typealias Observe = (_ handler: @escaping @MainActor (String?) -> Void) -> (() -> Void)
 
     /// The real thing: the distributed notification center, which also hears other processes (the shell).
-    static let systemObserve: Observe = { handler in
-        let token = DistributedNotificationCenter.default().addObserver(forName: notificationName, object: nil, queue: .main) { notification in
-            let object = notification.object as? String
-            MainActor.assumeIsolated { handler(object) }
+    static let systemObserve: Observe = observeSystem(named: notificationName)
+
+    /// MyNotch is an agent app and almost never the active one, so the observer asks for delivery while inactive. That is
+    /// why it is the selector form: the block form has no suspension behavior to give.
+    static func observeSystem(named name: Notification.Name) -> Observe {
+        { handler in
+            let observer = DistributedObserver(handler: handler)
+            DistributedNotificationCenter.default().addObserver(
+                observer, selector: #selector(DistributedObserver.receive(_:)), name: name, object: nil,
+                suspensionBehavior: .deliverImmediately
+            )
+            return { DistributedNotificationCenter.default().removeObserver(observer) }
         }
-        return { DistributedNotificationCenter.default().removeObserver(token) }
+    }
+
+    private final class DistributedObserver: NSObject {
+        private let handler: @MainActor (String?) -> Void
+
+        init(handler: @escaping @MainActor (String?) -> Void) {
+            self.handler = handler
+        }
+
+        @objc func receive(_ notification: Notification) {
+            handler(notification.object as? String)
+        }
     }
 
     private static let logger = Log.logger(category: "activities")
@@ -38,9 +57,12 @@ final class DebugActivityTrigger {
 
     var isObserving: Bool { removeObserver != nil }
 
+    public convenience init(activities: ActivityCenter) {
+        self.init(activities: activities, observe: Self.systemObserve)
+    }
+
     init(
-        activities: ActivityCenter, observe: @escaping Observe = DebugActivityTrigger.systemObserve,
-        now: @escaping () -> ContinuousClock.Instant = { .now },
+        activities: ActivityCenter, observe: @escaping Observe, now: @escaping () -> ContinuousClock.Instant = { .now },
         log: @escaping (String) -> Void = { DebugActivityTrigger.logger.notice("\($0, privacy: .public)") }
     ) {
         center = activities
@@ -49,7 +71,7 @@ final class DebugActivityTrigger {
         self.log = log
     }
 
-    func start() {
+    public func start() {
         guard removeObserver == nil else { return }
         removeObserver = observe { [weak self] object in self?.receive(object) }
         changeLog = Task { [center, log] in
@@ -61,16 +83,25 @@ final class DebugActivityTrigger {
         }
     }
 
-    /// What the observer calls: whether the command was carried out. Not carried out: an object that is no command
-    /// (never logged, it can be anything) or a command less than a second after the one before (which does not count).
+    /// Takes the observer off and ends the change log; what was published stays. For quitting, and safe to call twice.
+    public func stop() {
+        removeObserver?()
+        removeObserver = nil
+        changeLog?.cancel()
+        changeLog = nil
+    }
+
+    /// What the observer calls: whether the command was carried out. Not carried out: a command less than a second
+    /// after the one before (invalid ones count, so a flood is dropped before it is read), or an object that is no
+    /// command (never logged, it can be anything). A dropped one does not push the next back.
     @discardableResult
     func receive(_ object: String?) -> Bool {
-        guard let command = DebugActivityCommand(object) else {
-            log("command ignored: not a command")
-            return false
-        }
         guard limiter.accept(at: now()) else {
             log("command ignored: one per second")
+            return false
+        }
+        guard let command = DebugActivityCommand(object) else {
+            log("command ignored: not a command")
             return false
         }
         switch command {
