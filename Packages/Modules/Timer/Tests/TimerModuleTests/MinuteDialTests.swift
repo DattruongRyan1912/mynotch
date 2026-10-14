@@ -109,8 +109,8 @@ import Testing
     }
 
     @Test func aPreciseScrollMovesInSmallStepsAndAWheelNotchInWholeOnes() {
-        #expect(DialScroll.ticks(forDelta: 16, isPrecise: true) == 2)
-        #expect(DialScroll.ticks(forDelta: -4, isPrecise: true) == -0.5)
+        #expect(DialScroll.ticks(forDelta: 24, isPrecise: true) == 2)
+        #expect(DialScroll.ticks(forDelta: -6, isPrecise: true) == -0.5)
         #expect(DialScroll.ticks(forDelta: 3, isPrecise: false) == 3)
     }
 

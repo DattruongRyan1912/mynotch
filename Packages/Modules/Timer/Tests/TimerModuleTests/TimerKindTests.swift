@@ -116,6 +116,34 @@ import Testing
         #expect(try JSONDecoder().decode(StoredTimer.self, from: json) == StoredTimer(model: .countdownPaused(remaining: 9), session: .plain))
     }
 
+    @Test func aDamagedSessionKeepsTheTimerAndOnlyLosesTheType() throws {
+        let model = try JSONEncoder().encode(TimerModel.countdown(endDate: t0))
+        func stored(session: String) -> Data { Data(#"{"model":"#.utf8) + model + Data(#","session":"#.utf8) + Data(session.utf8) + Data("}".utf8) }
+
+        let unknownKind = try JSONDecoder().decode(StoredTimer.self, from: stored(session: #"{"kind":"pomodoro","label":"x"}"#))
+        #expect(unknownKind == StoredTimer(model: .countdown(endDate: t0), session: .plain))
+        let notAnObject = try JSONDecoder().decode(StoredTimer.self, from: stored(session: "7"))
+        #expect(notAnObject == StoredTimer(model: .countdown(endDate: t0), session: .plain))
+    }
+
+    @Test func aDamagedLabelKeepsTheKind() throws {
+        let model = try JSONEncoder().encode(TimerModel.countdown(endDate: t0))
+        let json = Data(#"{"model":"#.utf8) + model + Data(#","session":{"kind":"task","label":5}}"#.utf8)
+        #expect(try JSONDecoder().decode(StoredTimer.self, from: json) == StoredTimer(model: .countdown(endDate: t0), session: TimerSession(kind: .task, label: "")))
+    }
+
+    // MARK: Lengths beyond the dial
+
+    @Test func aMenuOffersWhatTheDialCannotHold() {
+        #expect(TimerLength.longer.map(\.title) == ["1 giờ", "90 phút", "2 giờ", "3 giờ"])
+        #expect(TimerLength.longer.map(\.minutes) == [60, 90, 120, 180])
+    }
+
+    @Test func theQuickLengthsAreTheOldPresetsWithoutTheMinute() {
+        #expect(TimerLength.quick.map(\.title) == ["5 phút", "10 phút", "25 phút"])
+        #expect(TimerLength.quick.map(\.minutes) == [5, 10, 25])
+    }
+
     @Test func garbageIsStillRejected() {
         #expect(throws: (any Error).self) { try JSONDecoder().decode(StoredTimer.self, from: Data("nope".utf8)) }
         #expect(throws: (any Error).self) { try JSONDecoder().decode(StoredTimer.self, from: Data(#"{"model":{"bogus":1}}"#.utf8)) }

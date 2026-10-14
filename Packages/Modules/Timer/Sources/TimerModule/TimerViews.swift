@@ -19,6 +19,7 @@ struct TimerTabView: View {
     let state: TimerState
     let module: TimerModule
 
+    @Environment(\.notch) private var notch
     @FocusState private var dialFocused: Bool
 
     var body: some View {
@@ -70,18 +71,33 @@ struct TimerTabView: View {
                     TextField("Nhắc việc gì?", text: $state.reminderLabel)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 180)
-                        .onSubmit { start(kind, minutes: minutes) }
+                        .onSubmit { module.startFromTab(kind, minutes: minutes) }
                 }
-                Button("Bắt đầu") { start(kind, minutes: minutes) }
-                    .disabled(minutes == 0)
+                // The quick lengths go when the open notch is too narrow for them.
+                ViewThatFits(in: .horizontal) {
+                    startRow(kind, minutes: minutes, showsQuickLengths: true)
+                    startRow(kind, minutes: minutes, showsQuickLengths: false)
+                }
             }
         }
         .frame(height: Self.dialSize)
     }
 
-    private func start(_ kind: TimerKind, minutes: Int) {
-        module.startCountdown(minutes: minutes, kind: kind, label: state.reminderLabel)
-        if kind == .reminder { state.reminderLabel = "" }
+    private func startRow(_ kind: TimerKind, minutes: Int, showsQuickLengths: Bool) -> some View {
+        HStack(spacing: 8) {
+            Button("Bắt đầu") { module.startFromTab(kind, minutes: minutes) }
+                .disabled(minutes == 0)
+            if showsQuickLengths {
+                ForEach(TimerLength.quick, id: \.minutes) { length in
+                    Button(length.title) { module.startFromTab(kind, minutes: length.minutes) }
+                        .controlSize(.small)
+                }
+            }
+            Button("Dài hơn \(Image(systemName: "chevron.down"))") {
+                TimerLengthMenu.show(TimerLength.longer, notch: notch) { module.startFromTab(kind, minutes: $0.minutes) }
+            }
+        }
+        .fixedSize()
     }
 
     private var stopwatchStart: some View {

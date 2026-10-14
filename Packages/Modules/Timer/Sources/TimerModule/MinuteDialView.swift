@@ -38,8 +38,6 @@ struct MinuteSettingDial: View {
     var focus: FocusState<Bool>.Binding
     let set: (Int) -> Void
 
-    @State private var scroll = DialScroll()
-
     var body: some View {
         ZStack {
             DialRing(fraction: Double(minutes) / 60, tint: kind.accent, showsKnob: true)
@@ -56,7 +54,7 @@ struct MinuteSettingDial: View {
         .frame(width: size, height: size)
         .overlay(Circle().stroke(kind.accent.opacity(0.4), lineWidth: 1).opacity(focus.wrappedValue ? 1 : 0))
         .contentShape(Circle())
-        .overlay { ScrollWheelCatcher { scrolled($0) } }
+        .overlay { ScrollWheelCatcher { step($0) } }
         .gesture(DragGesture(minimumDistance: 0).onChanged { drag(to: $0.location) })
         .focusable()
         .focused(focus)
@@ -87,23 +85,21 @@ struct MinuteSettingDial: View {
     private func step(_ delta: Int) {
         set(MinuteDial.stepped(minutes, by: delta))
     }
-
-    private func scrolled(_ ticks: Double) {
-        let delta = scroll.minutes(forTicks: ticks)
-        if delta != 0 { step(delta) }
-    }
 }
 
 /// The dial while a countdown runs or is paused: the same ring, now showing the time left, with the clock in its middle.
 struct RunningDial: View {
+    static let ringInterval: TimeInterval = 5
+
     let model: TimerModel
     let session: TimerSession
     let size: CGFloat
 
     var body: some View {
         if case .countdown = model {
-            // Redrawn once a second only while this is on screen; the clock inside counts by itself.
-            TimelineView(.periodic(from: .now, by: 1)) { dial(remaining: model.remaining(now: $0.date)) }
+            // The ring moves a tenth of a point a second and the clock inside counts by itself, so a few seconds
+            // between redraws is enough, and none at all while the notch is off screen.
+            NotchTimeline(every: Self.ringInterval) { dial(remaining: model.remaining(now: $0)) }
         } else {
             dial(remaining: model.remaining(now: .now))
         }
@@ -138,24 +134,33 @@ struct RunningDial: View {
     }
 }
 
-/// Hands the scroll wheel over the dial to `onScroll`, as minutes of scrolling. It takes only scroll events: every
-/// click and drag falls through to the SwiftUI dial beneath it, and a scroll anywhere else still swipes between tabs.
+/// Hands the scroll over the dial to `onScroll`, as whole minutes. It takes only scroll events, and of those only the up
+/// and down ones (`DialScrollGate`): every click and drag falls through to the SwiftUI dial beneath it, and the rest of
+/// the scrolling goes on up the responder chain, where the notch turns a sideways swipe into a tab change.
 struct ScrollWheelCatcher: NSViewRepresentable {
-    let onScroll: (Double) -> Void
+    let onScroll: (Int) -> Void
 
     func makeNSView(context: Context) -> CatcherView { CatcherView() }
 
     func updateNSView(_ view: CatcherView, context: Context) { view.onScroll = onScroll }
 
     final class CatcherView: NSView {
-        var onScroll: ((Double) -> Void)?
+        var onScroll: ((Int) -> Void)?
+        private var gate = DialScrollGate()
 
         override func hitTest(_ point: NSPoint) -> NSView? {
-            NSApp.currentEvent?.type == .scrollWheel ? super.hitTest(point) : nil
+            NSApp?.currentEvent?.type == .scrollWheel ? super.hitTest(point) : nil
         }
 
         override func scrollWheel(with event: NSEvent) {
-            onScroll?(DialScroll.ticks(forDelta: event.scrollingDeltaY, isPrecise: event.hasPreciseScrollingDeltas))
+            let action = gate.feed(
+                phase: event.phase, momentumPhase: event.momentumPhase, deltaX: event.scrollingDeltaX,
+                deltaY: event.scrollingDeltaY, isPrecise: event.hasPreciseScrollingDeltas)
+            switch action {
+            case .forward: super.scrollWheel(with: event)
+            case .consume: break
+            case .minutes(let minutes): onScroll?(minutes)
+            }
         }
     }
 }

@@ -56,3 +56,20 @@ nonisolated struct TimerSuggestion: Equatable {
         }
     }
 }
+
+/// A length shown by name rather than by minutes, for what the dial cannot hold or sets in one click.
+nonisolated struct TimerLength: Equatable {
+    let title: String
+    let minutes: Int
+
+    /// Past the dial's hour: the menu next to "Bắt đầu", each starting a timer straight away.
+    static let longer = [
+        TimerLength(title: "1 giờ", minutes: 60), TimerLength(title: "90 phút", minutes: 90),
+        TimerLength(title: "2 giờ", minutes: 120), TimerLength(title: "3 giờ", minutes: 180),
+    ]
+
+    /// The old presets: small buttons that start at once, when the row has room for them.
+    static let quick = [
+        TimerLength(title: "5 phút", minutes: 5), TimerLength(title: "10 phút", minutes: 10), TimerLength(title: "25 phút", minutes: 25),
+    ]
+}

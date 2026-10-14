@@ -66,8 +66,9 @@ nonisolated enum MinuteDial {
 /// Turns a stream of scroll deltas into whole minutes, carrying the fraction over so a slow trackpad swipe still gets
 /// there.
 nonisolated struct DialScroll {
-    /// A trackpad reports points, a wheel reports notches: a minute is this many points, or one notch.
-    static let pointsPerMinute = 8.0
+    /// A trackpad reports points, a wheel reports notches: a minute is this many points, or one notch. A light flick
+    /// of two fingers is a few dozen points, so this keeps it to a few minutes.
+    static let pointsPerMinute = 12.0
 
     private var carried = 0.0
 

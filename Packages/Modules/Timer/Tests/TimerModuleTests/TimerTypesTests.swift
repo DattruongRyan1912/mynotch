@@ -45,6 +45,48 @@ import Testing
         #expect(fixture.harness.scheduler.pendingCount == 0)
     }
 
+    @Test func aTimerLongerThanTheDialCanBeStartedDirectly() async throws {
+        let fixture = TimerFixture()
+        await fixture.start()
+        for length in TimerLength.longer {
+            fixture.module.startCountdown(minutes: length.minutes, kind: .reminder, label: "Gọi mẹ")
+            #expect(fixture.module.state.model == .countdown(endDate: fixture.clock.date.addingTimeInterval(TimeInterval(length.minutes) * 60)))
+            #expect(fixture.module.state.session == reminder)
+        }
+        fixture.advance(180 * 60)
+        #expect(fixture.module.state.model == .finished)
+        #expect(fixture.sound.played == ["Glass"])
+    }
+
+    @Test func startingFromTheTabUsesTheTypedLabelAndClearsIt() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.state.reminderLabel = " Gọi mẹ "
+        fixture.module.startFromTab(.reminder, minutes: 15)
+        #expect(fixture.module.state.session == reminder)
+        #expect(fixture.module.state.model == .countdown(endDate: fixture.clock.date.addingTimeInterval(900)))
+        #expect(fixture.module.state.reminderLabel == "")
+    }
+
+    @Test func returnInTheReminderFieldWithTheDialAtZeroStartsNothingAndKeepsTheLabel() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.state.reminderLabel = "Gọi mẹ"
+        fixture.module.startFromTab(.reminder, minutes: 0)
+        #expect(fixture.module.state.model == .idle)
+        #expect(fixture.module.state.reminderLabel == "Gọi mẹ")
+        #expect(fixture.harness.activities.current == nil)
+    }
+
+    @Test func aTaskStartedFromTheTabLeavesTheReminderFieldAlone() async {
+        let fixture = TimerFixture()
+        await fixture.start()
+        fixture.module.state.reminderLabel = "Gọi mẹ"
+        fixture.module.startFromTab(.task, minutes: 25)
+        #expect(fixture.module.state.session == TimerSession(kind: .task, label: ""))
+        #expect(fixture.module.state.reminderLabel == "Gọi mẹ")
+    }
+
     @Test func startingANewTypeReplacesTheOneThatRuns() async {
         let fixture = TimerFixture()
         await fixture.start()
@@ -258,6 +300,19 @@ import Testing
         #expect(fixture.module.state.session.kind == .rest)
         #expect(fixture.module.state.model == .countdownPaused(remaining: 77))
         #expect(fixture.harness.activities.current == nil)
+    }
+
+    @Test func aDamagedSessionDoesNotDiscardARunningTimer() async throws {
+        let fixture = TimerFixture()
+        let model = try JSONEncoder().encode(TimerModel.countdown(endDate: fixture.clock.date.addingTimeInterval(400)))
+        try FileManager.default.createDirectory(at: fixture.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try (Data(#"{"model":"#.utf8) + model + Data(#","session":{"kind":"pomodoro"}}"#.utf8)).write(to: fixture.fileURL)
+        await fixture.start()
+        #expect(fixture.module.state.model.remaining(now: fixture.clock.date) == 400)
+        #expect(fixture.module.state.session == .plain)
+        fixture.advance(400)
+        #expect(fixture.module.state.model == .finished)
+        #expect(fixture.sound.played == ["Glass"])
     }
 
     @Test func aFileFromBeforeTheTypesResumesAsAPlainTimer() async throws {

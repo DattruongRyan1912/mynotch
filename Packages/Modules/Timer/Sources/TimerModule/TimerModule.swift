@@ -93,6 +93,14 @@ public final class TimerModule: FeatureModule {
         mutate(starting: TimerSession(kind: kind, label: label)) { $0.startCountdown(minutes: minutes, now: $1) }
     }
 
+    /// What "Bắt đầu", a quick length and Return in the reminder field do: a reminder takes the label typed so far and
+    /// empties the field for the next one. At 0 minutes nothing starts, and the label stays.
+    func startFromTab(_ kind: TimerKind, minutes: Int) {
+        guard minutes > 0 else { return }
+        startCountdown(minutes: minutes, kind: kind, label: state.reminderLabel)
+        if kind == .reminder { state.reminderLabel = "" }
+    }
+
     func startStopwatch() { mutate { $0.startStopwatch(now: $1) } }
     func pause() { mutate { $0.pause(now: $1) } }
     func resume() { mutate { $0.resume(now: $1) } }

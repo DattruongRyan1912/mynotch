@@ -19,10 +19,12 @@ nonisolated struct TimerSession: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey { case kind, label }
 
-    /// Goes through `init(kind:label:)`, so a file edited by hand cannot give a task a label.
+    /// Goes through `init(kind:label:)`, so a file edited by hand cannot give a task a label. A label that cannot be
+    /// read is dropped rather than failing the whole session, so the type survives it.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(kind: try container.decode(TimerKind.self, forKey: .kind), label: try container.decodeIfPresent(String.self, forKey: .label) ?? "")
+        let label = (try? container.decodeIfPresent(String.self, forKey: .label)) ?? nil
+        self.init(kind: try container.decode(TimerKind.self, forKey: .kind), label: label ?? "")
     }
 
     /// One line saying what is running, for the live activity's list row and VoiceOver.
@@ -45,7 +47,8 @@ nonisolated struct TimerSession: Codable, Equatable, Sendable {
 }
 
 /// What `timer.json` holds: the model plus its session. A file written before the types existed holds the bare model
-/// and loads as a plain timer, so a countdown running through the update is not lost.
+/// and loads as a plain timer, so a countdown running through the update is not lost. A session that cannot be read (a
+/// type from a later version, a hand edit) costs the type, never the timer.
 nonisolated struct StoredTimer: Codable, Equatable {
     var model: TimerModel
     var session: TimerSession
@@ -61,7 +64,7 @@ nonisolated struct StoredTimer: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         if container.contains(.model) {
             model = try container.decode(TimerModel.self, forKey: .model)
-            session = try container.decodeIfPresent(TimerSession.self, forKey: .session) ?? .plain
+            session = (try? container.decodeIfPresent(TimerSession.self, forKey: .session)) ?? nil ?? .plain
         } else {
             model = try TimerModel(from: decoder)
             session = .plain
