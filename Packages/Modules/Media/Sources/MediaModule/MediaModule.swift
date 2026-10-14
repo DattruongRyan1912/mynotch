@@ -274,7 +274,7 @@ public final class MediaModule: FeatureModule {
 
     public func makeTab() -> NotchTab? {
         NotchTab(
-            id: descriptor.id, title: "Media", systemImage: "music.note", preferredHeight: 150,
+            id: descriptor.id, title: "Media", systemImage: "music.note", preferredHeight: MediaTabView.preferredHeight,
             content: AnyView(MediaTabView(store: store, actions: actions))
         )
     }
@@ -380,6 +380,7 @@ public final class MediaModule: FeatureModule {
         lyricsEnabled = settings.value(keys.lyrics)
         lyricsUnderNotch = settings.value(keys.lyricsUnderNotch)
         youtubeCaptionsEnabled = settings.value(keys.youtubeCaptions)
+        store.setLyricsOn(lyricsEnabled || youtubeCaptionsEnabled)
         updateYouTubeBridge()
     }
 

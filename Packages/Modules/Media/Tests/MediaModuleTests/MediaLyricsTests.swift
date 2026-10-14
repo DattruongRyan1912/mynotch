@@ -85,6 +85,17 @@ import Testing
         #expect(client.requests.count == 1)
     }
 
+    @Test func theLyricRowIsReservedOnlyWhileTheSettingIsOn() async {
+        await harness.registry.bootstrap()
+        #expect(store.lyricRow == .absent)
+        enableLyrics()
+        await settle { store.lyricsAreOn }
+        #expect(store.lyricRow == .reserved)
+        harness.settings.set(false, for: keys.lyrics)
+        await settle { !store.lyricsAreOn }
+        #expect(store.lyricRow == .absent)
+    }
+
     // MARK: fetching
 
     @Test func fetchesWhenTheTrackStartsAndShowsTheSyncedLines() async throws {

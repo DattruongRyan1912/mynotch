@@ -30,6 +30,9 @@ final class NowPlayingStore {
     private(set) var syncedLyrics: [LyricLine]?
     /// lrclib has the words of the current track but no timing: the lyric row says so instead of following along.
     private(set) var lyricsAreUnsynced = false
+    /// A lyrics source (lrclib and Apple, or YouTube captions) is turned on. The lyric row then keeps its place under
+    /// the controls while there is nothing to show in it yet, so the player does not move as lyrics come and go.
+    private(set) var lyricsAreOn = false
 
     @ObservationIgnored private var reducer = NowPlayingReducer()
     @ObservationIgnored private let lookUpApp: @MainActor (String) -> PlayerApp?
@@ -88,6 +91,17 @@ final class NowPlayingStore {
     func showUnsyncedLyrics() {
         showLyrics(nil)
         lyricsAreUnsynced = true
+    }
+
+    func setLyricsOn(_ isOn: Bool) {
+        if isOn != lyricsAreOn { lyricsAreOn = isOn }
+    }
+
+    /// What the lyric row under the controls holds now.
+    var lyricRow: LyricRow {
+        if syncedLyrics != nil { return .synced }
+        if lyricsAreUnsynced { return .unsynced }
+        return lyricsAreOn ? .reserved : .absent
     }
 
     /// The lyric line being sung at `date`, by the playback clock; nil before the first line or without lyrics.

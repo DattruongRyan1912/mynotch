@@ -110,6 +110,17 @@ import Testing
         #expect(!module.youtubeBridge.listenFailed)
     }
 
+    @Test func theLyricRowIsReservedWhileCaptionsAreOnEvenWithLyricsOff() async {
+        await harness.registry.bootstrap()
+        #expect(store.lyricRow == .absent)
+        enableCaptions()
+        await settle { store.lyricsAreOn }
+        #expect(store.lyricRow == .reserved)
+        harness.settings.set(false, for: keys.youtubeCaptions)
+        await settle { !store.lyricsAreOn }
+        #expect(store.lyricRow == .absent)
+    }
+
     // MARK: showing captions
 
     @Test func captionsOfTheVideoInChromeBecomeTheLyrics() async {

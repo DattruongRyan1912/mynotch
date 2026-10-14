@@ -1,9 +1,16 @@
 import NotchUI
 import SwiftUI
 
-/// The "Media" tab: cover, track, a seekable progress bar and the transport buttons.
+/// The "Media" tab: cover, track, a seekable progress bar and the transport buttons, and under them the lyric line,
+/// centred across the tab.
 struct MediaTabView: View {
     static let artworkSize: CGFloat = 96
+    /// Between the cover and controls and the lyric row under them.
+    static let lyricGap: CGFloat = 6
+    /// The tab bar's height when there are two or more tabs; `NotchTab.preferredHeight` includes it.
+    static let tabBarHeight: CGFloat = 30
+    /// The tab's declared height: the player with its lyric row, plus what the notch adds around a tab's content.
+    static let preferredHeight = artworkSize + lyricGap + CurrentLyricView.height + NotchTokens.padding + tabBarHeight
 
     let store: NowPlayingStore
     let actions: MediaActions
@@ -22,6 +29,15 @@ struct MediaTabView: View {
     }
 
     private var player: some View {
+        // The lyric row is its own row at the bottom, across the whole tab, so the cover and the controls above it
+        // stay where they are whether it holds a line, the note or nothing.
+        VStack(spacing: Self.lyricGap) {
+            coverAndControls
+            CurrentLyricView(store: store)
+        }
+    }
+
+    private var coverAndControls: some View {
         HStack(spacing: 14) {
             ArtworkView(artwork: store.artworkImage, icon: store.appIcon, size: Self.artworkSize, cornerRadius: 12)
             VStack(alignment: .leading, spacing: 0) {
@@ -41,15 +57,14 @@ struct MediaTabView: View {
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 PlaybackProgressView(store: store, seek: actions.seek)
-                CurrentLyricView(store: store)
                 Spacer(minLength: 2)
                 TransportControls(isPlaying: store.state.isPlaying, send: actions.send)
                     .frame(maxWidth: .infinity)
                     // An overlay, so the buttons stay centred under the progress bar.
                     .overlay(alignment: .trailing) { NowPlayingBars(store: store) }
             }
-            // The cover's height, or a little more when the lyric row is there. Not stretched to the space
-            // available, which would pull the column out of line with the cover.
+            // The cover's height. Not stretched to the space available, which would pull the column out of line
+            // with the cover.
             .frame(minHeight: Self.artworkSize)
             .fixedSize(horizontal: false, vertical: true)
         }

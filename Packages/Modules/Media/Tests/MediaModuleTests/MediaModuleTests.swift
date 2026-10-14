@@ -59,7 +59,7 @@ import Testing
         let tab = try #require(harness.registry.tabs.first)
         #expect(tab.title == "Media")
         #expect(tab.systemImage == "music.note")
-        #expect(tab.preferredHeight == 150)
+        #expect(tab.preferredHeight == 160)
         #expect(!tab.acceptsKeyboard)
     }
 
