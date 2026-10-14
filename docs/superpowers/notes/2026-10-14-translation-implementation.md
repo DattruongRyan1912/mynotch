@@ -3,9 +3,9 @@
 - **Ngày:** 2026-10-14
 - **Spec:** [Dịch (dự án con 4)](../specs/2026-10-13-translation-design.html). Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".
 - **Package:** `Packages/Modules/Translation`, product `TranslationModule`. Module id `translation`, tab "Dịch" (order 400, cao 220 pt, nhận bàn phím), bật mặc định. Không có quyền bắt buộc; `optionalPermissions: [.accessibility]`.
-- **Điểm nối Core và app:** `ServiceRegistry` và `ModuleServices` trong MyNotchCore, `App/ServicesProvider.swift`, mục `NSServices` trong `project.yml` ("Dịch bằng MyNotch").
-- **Commit chính:** `41a6f5d` và `a75ea22` engine, detector, selection reader; `af75ff2` Services trong Core và app; `57d1a85` và `2bd557a` module; `3fc9482` hàng đợi Services 10 giây; `2655167` gắn vào app (cùng Media).
-- **Test tự động:** 82 test theo báo cáo L1 (`verify.sh` qua ở `8a2b842`). Test không gọi framework Translation thật. Chưa chạy lại khi viết tài liệu này.
+- **Điểm nối Core và app:** `ServiceRegistry` (có `finishStartup()`) và `ModuleServices` trong MyNotchCore, `App/ServicesProvider.swift`, mục `NSServices` trong `project.yml` ("Dịch bằng MyNotch"). Module mở tab của chính nó qua `context.presenter.open()` (`ModulePresenter`, xem [ghi chú nền tảng](2026-10-14-platform-foundation-implementation.html)).
+- **Commit chính:** `41a6f5d` và `a75ea22` engine, detector, selection reader; `af75ff2` Services trong Core và app; `57d1a85` và `2bd557a` module; `3fc9482` hàng đợi Services 10 giây; `2655167` gắn vào app (cùng Media); `2b613fe` từ chối yêu cầu Services khi module tắt và báo cho người dùng; `009871c` `context.presenter` thành facade theo module (`open()` thay `open(tab:)`).
+- **Test tự động:** 82 test (báo cáo L1 và báo cáo vòng sửa cuối; Translation chạy lại sau `009871c` và qua). Test không gọi framework Translation thật. Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Dịch trong checklist gộp](../../manual-test-checklist-all.html#translation)
 
 ## 1. Đã xây gì so với spec
@@ -21,18 +21,17 @@
 ## 2. Sai khác so với spec và lý do
 
 - **Dịch khi gõ:** ngoài Return, tab còn dịch sau 600 ms ngừng gõ (`typingDelay`, qua `context.scheduler`). Spec chỉ nêu Return. Thêm theo brief T3.
-- **Hàng đợi Services (P9, `3fc9482`):** chọn dịch vụ làm MyNotch khởi động, hệ thống gửi yêu cầu trong lúc module chưa chạy. `ServiceRegistry` giữ yêu cầu mới nhất của mỗi tên trong 10 giây và giao cho handler đầu tiên đăng ký. Spec §2.1 không có hàng đợi.
+- **Hàng đợi Services (P9, `3fc9482`) và giai đoạn khởi động (`2b613fe`):** chọn dịch vụ làm MyNotch khởi động, hệ thống gửi yêu cầu trong lúc module chưa chạy. `ServiceRegistry` giữ yêu cầu mới nhất của mỗi tên trong 10 giây và giao cho handler đầu tiên đăng ký, nhưng chỉ cho tới `finishStartup()`, mà `AppDelegate` gọi sau `registry.bootstrap()`. Từ đó, yêu cầu không ai xử lý bị từ chối (`handle` trả `false`, không xếp hàng), và một yêu cầu đang chờ cho module chưa bao giờ đăng ký (tắt hoặc lỗi) bị bỏ. Module Dịch đăng ký đồng bộ trong `start`, nên không có handler nào đến sau khi giai đoạn này đóng. Spec §2.1 không có hàng đợi lẫn giai đoạn khởi động.
 - Dịch tuần tự và báo huỷ rõ ràng (`a75ea22`); nhận diện ngôn ngữ trên toàn bộ danh sách hỗ trợ, cặp ưa thích luôn đứng đầu danh sách ứng viên để "en" không thành "en-AU".
 
 ## 3. Giới hạn đã chấp nhận (Ruling)
 
-Ledger không có dòng `Ruling:` nào riêng cho Dịch. Điểm đã biết từ `HANDOFF.md` mục 5:
+Ledger không có dòng `Ruling:` nào riêng cho Dịch. Điểm đã biết từ `HANDOFF.md` mục 5 (Services bị bỏ im lặng khi module tắt) đã được sửa ở `2b613fe`; review lại vòng sửa cuối duyệt (Approved). Còn lại:
 
-- Ở commit `8a2b842`, khi module Dịch đang tắt, yêu cầu từ menu Services bị giữ 10 giây rồi bỏ im lặng, người dùng không thấy lỗi. Chi phí: bấm "Dịch bằng MyNotch" khi module tắt thì không có phản hồi nào. Một bản sửa đang được làm riêng và **chưa commit** khi viết tài liệu này: `ServiceRegistry.finishStartup()` kết thúc giai đoạn khởi động, sau đó yêu cầu không ai xử lý bị từ chối và menu Services hiện "Mô-đun Dịch của MyNotch chưa chạy. Hãy bật mô-đun Dịch trong Cài đặt MyNotch." Nếu bản sửa đó vào, mục này và mục 5 cần cập nhật.
+- **Khởi động nguội qua Service khi module Dịch tắt vẫn im lặng.** Ứng dụng chưa chạy, người dùng chọn "Dịch bằng MyNotch": yêu cầu đã được trả lời "đã xử lý" từ lúc đến, và hệ thống không có cách báo lỗi sau đó. Hiếm (cần app đã thoát và module đang tắt). **Chi phí nếu sai:** một lần chọn Services không có phản hồi nào. Reviewer ghi chú một lối sửa (`finishStartup()` biết tên các yêu cầu đã bỏ, trả về cho `AppDelegate` hiện `NSAlert`, khoảng 6 dòng), chưa làm.
 
 ## 4. Khoảng trống đã biết
 
-- Ở `8a2b842`, `App/ServicesProvider.swift` có nhánh báo lỗi "Mô-đun Dịch của MyNotch chưa chạy." khi `registry.handle` trả `false`, nhưng `ServiceRegistry.handle` luôn trả `true` (đưa vào hàng đợi), nên nhánh này không bao giờ chạy: mâu thuẫn giữa code app và Core. Bản sửa chưa commit ở mục 3 làm nhánh này chạy được sau giai đoạn khởi động.
 - Fallback ⌘C để đọc vùng chọn không làm, vì nó phải sửa clipboard của người dùng và cần cổng chặn trong Core để Clipboard bỏ qua lần copy giả.
 - Chromium: bật AX có thể thất bại với `kAXErrorAttributeUnsupported`, và editor kiểu Monaco vẫn thường không trả gì (research). Bật AX cho Chromium có tác dụng phụ (Chrome chuyển chế độ trình đọc màn hình); có tuỳ chọn tắt.
 - Sheet tải gói ngôn ngữ có thể không hiện khi app ở dạng accessory; lối dự phòng là System Settings.
@@ -41,7 +40,8 @@ Ledger không có dòng `Ruling:` nào riêng cho Dịch. Điểm đã biết t�
 ## 5. Sửa lại spec (Spec corrections)
 
 - **§2, hàng "Tab"**: thêm dịch khi gõ sau 600 ms ngừng gõ.
-- **§2.1, `ServiceRegistry`**: thêm hàng đợi một yêu cầu mới nhất cho mỗi tên trong 10 giây; ở `8a2b842` `handle` luôn trả `true` (bản sửa chưa commit: chỉ trả `true` trong giai đoạn khởi động, sau `finishStartup()` trả `false` cho yêu cầu không ai xử lý).
+- **§2.1, `ServiceRegistry`**: thêm hàng đợi một yêu cầu mới nhất cho mỗi tên trong 10 giây, chỉ trong giai đoạn khởi động; `finishStartup()` đóng giai đoạn này, sau đó `handle` trả `false` cho yêu cầu không ai xử lý và `ServicesProvider` báo "Mô-đun Dịch của MyNotch chưa chạy. Hãy bật mô-đun Dịch trong Cài đặt MyNotch." bằng hộp thoại hệ thống.
+- **§2, module**: mở tab bằng `context.presenter.open()` (chỉ tab của chính module), không phải `open(tab:)`.
 - **§2, hàng `LanguageInstaller`**: là cửa sổ regular chứa `.translationTask`; trả về `.accessory` chỉ khi không còn cửa sổ titled nào khác.
 - **§2.2**: cài đặt có thêm danh sách trạng thái gói theo cặp trong Settings.
 - **Dòng trạng thái** "Thiết kế, triển khai sau Screenshot" đã lỗi thời: module đã triển khai và gắn vào app.

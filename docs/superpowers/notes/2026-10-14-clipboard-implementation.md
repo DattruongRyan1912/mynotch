@@ -3,7 +3,7 @@
 - **Ngày:** 2026-10-14
 - **Spec:** [Clipboard (dự án con 1)](../specs/2026-10-13-clipboard-design.html). Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".
 - **Package:** `Packages/Modules/Clipboard`, product `ClipboardModule`. Module id `clipboard`, tab "Clipboard" (order 100, cao 230 pt, nhận bàn phím), bật mặc định.
-- **Commit chính:** `4aa8577` model và classifier, `6146cf6` lịch sử và tìm kiếm, `8ebf5af` lưu trữ, `ea56f9e` pasteboard và dán, `d80c169` module, `54dda24` tab, `c37957c` gắn vào app, `1798f76` sửa chọn thẻ khi tìm.
+- **Commit chính:** `4aa8577` model và classifier, `6146cf6` lịch sử và tìm kiếm, `8ebf5af` lưu trữ, `ea56f9e` pasteboard và dán, `d80c169` module, `54dda24` tab, `c37957c` gắn vào app, `1798f76` sửa chọn thẻ khi tìm, `009871c` mở tab qua `context.presenter.open()` (một dòng trong `ClipboardModule.swift`).
 - **Test tự động:** 196 test theo báo cáo L1 (`verify.sh` qua ở `8a2b842`). Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Clipboard trong checklist gộp](../../manual-test-checklist-all.html#clipboard)
 
@@ -40,7 +40,8 @@ Ledger không có dòng `Ruling:` nào riêng cho Clipboard. Các điểm sau l�
 
 ## 4. Khoảng trống đã biết
 
-- Mẫu kéo thẻ `.onDrag` kèm dò nút chuột (poll) để báo hết kéo vẫn đang dùng, chưa có `NSDraggingSource`. Ledger ghi việc này là "shared helper, later" chung với Screenshot và Shelf.
+- Mẫu kéo thẻ `.onDrag` kèm dò nút chuột (poll) để báo hết kéo vẫn đang dùng, chưa có `NSDraggingSource`. Khay đã chuyển sang nguồn kéo AppKit (`ShelfDragSource.swift`, `a21e9a6`) vì cần biết kéo có hoàn tất không; Clipboard và Screenshot không xoá gì sau khi kéo nên chưa cần, nhưng helper đó có thể tái dùng.
+- Bản sao ảnh và file tạo khi kéo thẻ ra (`$TMPDIR/MyNotch Clipboard Drags/<uuid>/`) không bao giờ được quét: hệ thống dọn thư mục tạm (khoảng 3 ngày) và "xoá lịch sử", tắt module hay thoát app không xoá chúng (review tích hợp, Minor, hoãn). Screenshot chỉ quét thư mục tương tự ở lần khởi động kế tiếp.
 - Brief C7 yêu cầu thêm mục "Ghi chú triển khai" vào spec và mục Clipboard vào checklist. Việc đó chưa bao giờ được làm; tài liệu này và checklist gộp thay thế.
 - Phần giao diện chưa có kết quả kiểm thử tay nào được ghi lại: phím, focus, menu ngữ cảnh ghim notch, kéo thả. Toàn bộ nằm trong checklist.
 

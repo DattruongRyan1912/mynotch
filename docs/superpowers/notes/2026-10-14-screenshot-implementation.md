@@ -44,6 +44,7 @@ Ledger không gắn nhãn `Ruling:` cho Screenshot; bản ghi là "DONE_WITH_CON
 - Ký ad-hoc làm macOS quên quyền sau mỗi lần build lại. Xem README mục "Ký app".
 - Một reviewer thấy một lần process test Screenshot crash (signal 11) dưới tải nặng, chạy lại thì qua. Chưa tái hiện được nên chưa xác định nguyên nhân.
 - Khung đóng băng màn 6K tốn khoảng 80 MB; chỉ giữ trong lúc overlay mở (`detachedCrop` để không giữ cả khung).
+- Bản sao ảnh tạo khi kéo ảnh ra (`$TMPDIR/MyNotch Screenshot Drags/`, hard link, dự phòng là copy) chỉ được quét ở lần khởi động kế tiếp, nên "xoá" hay tắt module không xoá chúng ngay (review tích hợp, Minor, hoãn).
 
 ## 5. Sửa lại spec (Spec corrections)
 

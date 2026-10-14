@@ -54,7 +54,7 @@ th{background:var(--card)}
 <h2 id="4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</h2>
 <ul>
 <li>Chuỗi đếm ngược thật sự hiển thị (<code>Text(timerInterval:)</code>) không đọc được khi chạy không giao diện; mới đo bằng <code>NSHostingView</code> rằng kích thước vừa khớp giống nhau (84 x 45 ở cỡ chữ 38) cho ba dạng cận dưới. Chuỗi thật chỉ "được kỳ vọng đúng".</li>
-<li><code>RegistryHarness</code> để lại các thư mục tạm <code>MyNotchTests-&lt;uuid&gt;</code> (hỗ trợ test dùng chung ở MyNotchCore, không riêng Timer).</li>
+<li>Thư mục tạm của test: <code>RegistryHarness</code> từng để lại 25 thư mục <code>MyNotchTests-&lt;uuid&gt;</code> mỗi lần chạy test Timer. Đã sửa ở <code>2bb5fc1</code> (<code>ScratchFolders</code> trong <code>MyNotchTestSupport</code>, xoá khi tiến trình test thoát); <code>verify.sh</code> vẫn quét phần còn lại của một lần chạy bị crash.</li>
 <li>Chưa có kết quả kiểm thử tay được ghi lại cho: mẫu 1, 5, 10, 25 phút, hết giờ và âm Glass, hẹn giờ qua lúc máy ngủ, thoát và mở lại.</li>
 </ul>
 <h2 id="5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</h2>

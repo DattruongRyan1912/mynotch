@@ -17,7 +17,7 @@ xcodegen generate
 open MyNotch.xcodeproj
 ```
 
-Chọn scheme **MyNotch** rồi Run (⌘R). App chạy trên menu bar; icon Dock chỉ hiện khi cửa sổ Settings đang mở.
+Chọn scheme **MyNotch** rồi Run (⌘R). App chạy trên menu bar; icon Dock chỉ hiện khi một cửa sổ của MyNotch đang mở (Settings, trình sửa ảnh, trình cài gói ngôn ngữ).
 
 ```bash
 ./scripts/verify.sh                     # xcodegen, test mọi package, build Debug; phải kết thúc bằng "All checks passed."
@@ -68,7 +68,7 @@ Ghép một module cần hai chỗ: `project.yml` (mục `packages` và `depende
 3. Module cần quyền mới: thêm usage description và entitlement tương ứng vào `project.yml`.
 4. Thêm một dòng vào `App/ModuleList.swift`, rồi `xcodegen generate`. `verify.sh` tự test mọi package trong `Packages/Modules/`.
 
-Module dùng được: `context.storage`, `context.scheduler` (việc đã hẹn tự huỷ khi module dừng), `context.services` (macOS Services), `context.lockScreen` (view nhỏ không nhạy cảm cho màn hình khoá), `NotchTab(acceptsKeyboard:dropTypes:onDrop:)`, `@Environment(\.notch)` (ghim, báo đang kéo, đóng notch), `optionalPermissions` trong `ModuleDescriptor`.
+Module dùng được: `context.storage`, `context.scheduler` (việc đã hẹn tự huỷ khi module dừng), `context.hotkeys` (đăng ký và `unregister` theo tên), `context.presenter` (`open()` mở tab của chính module, `showToast`, `close`), `context.activities` (live activity cập nhật tại chỗ, `raise`), `context.services` (macOS Services: cần thêm một mục `NSServices` trong `project.yml` và một phương thức trong `App/ServicesProvider.swift`, nếu không hệ thống không bao giờ gọi), `context.lockScreen` (view nhỏ không nhạy cảm cho màn hình khoá), `NotchTab(acceptsKeyboard:dropTypes:onDrop:)`, `@Environment(\.notch)` (ghim, báo đang kéo, đóng notch), `optionalPermissions` trong `ModuleDescriptor`. Sau khi module dừng, `scheduler`, `hotkeys`, `presenter`, `activities`, `services` và `lockScreen` không làm gì nữa. Test cần thư mục tạm thì dùng `ScratchFolders.shared.reserve("<nhãn>")` của `MyNotchTestSupport` (tự xoá khi tiến trình test thoát).
 
 ## Tài liệu
 

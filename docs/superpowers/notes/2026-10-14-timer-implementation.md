@@ -34,7 +34,7 @@ Ledger không có dòng `Ruling:` riêng cho Timer; vòng sửa H1/H3/H4 là "DO
 ## 4. Khoảng trống đã biết
 
 - Chuỗi đếm ngược thật sự hiển thị (`Text(timerInterval:)`) không đọc được khi chạy không giao diện; mới đo bằng `NSHostingView` rằng kích thước vừa khớp giống nhau (84 x 45 ở cỡ chữ 38) cho ba dạng cận dưới. Chuỗi thật chỉ "được kỳ vọng đúng".
-- `RegistryHarness` để lại các thư mục tạm `MyNotchTests-<uuid>` (hỗ trợ test dùng chung ở MyNotchCore, không riêng Timer).
+- Thư mục tạm của test: `RegistryHarness` từng để lại 25 thư mục `MyNotchTests-<uuid>` mỗi lần chạy test Timer. Đã sửa ở `2bb5fc1` (`ScratchFolders` trong `MyNotchTestSupport`, xoá khi tiến trình test thoát); `verify.sh` vẫn quét phần còn lại của một lần chạy bị crash.
 - Chưa có kết quả kiểm thử tay được ghi lại cho: mẫu 1, 5, 10, 25 phút, hết giờ và âm Glass, hẹn giờ qua lúc máy ngủ, thoát và mở lại.
 
 ## 5. Sửa lại spec (Spec corrections)

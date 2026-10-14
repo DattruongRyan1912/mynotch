@@ -24,7 +24,7 @@ th{background:var(--card)}
 <li><strong>Ngày:</strong> 2026-10-14</li>
 <li><strong>Spec:</strong> <a href="../specs/2026-10-13-clipboard-design.html">Clipboard (dự án con 1)</a>. Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".</li>
 <li><strong>Package:</strong> <code>Packages/Modules/Clipboard</code>, product <code>ClipboardModule</code>. Module id <code>clipboard</code>, tab "Clipboard" (order 100, cao 230 pt, nhận bàn phím), bật mặc định.</li>
-<li><strong>Commit chính:</strong> <code>4aa8577</code> model và classifier, <code>6146cf6</code> lịch sử và tìm kiếm, <code>8ebf5af</code> lưu trữ, <code>ea56f9e</code> pasteboard và dán, <code>d80c169</code> module, <code>54dda24</code> tab, <code>c37957c</code> gắn vào app, <code>1798f76</code> sửa chọn thẻ khi tìm.</li>
+<li><strong>Commit chính:</strong> <code>4aa8577</code> model và classifier, <code>6146cf6</code> lịch sử và tìm kiếm, <code>8ebf5af</code> lưu trữ, <code>ea56f9e</code> pasteboard và dán, <code>d80c169</code> module, <code>54dda24</code> tab, <code>c37957c</code> gắn vào app, <code>1798f76</code> sửa chọn thẻ khi tìm, <code>009871c</code> mở tab qua <code>context.presenter.open()</code> (một dòng trong <code>ClipboardModule.swift</code>).</li>
 <li><strong>Test tự động:</strong> 196 test theo báo cáo L1 (<code>verify.sh</code> qua ở <code>8a2b842</code>). Chưa chạy lại khi viết tài liệu này.</li>
 <li><strong>Kiểm thử tay:</strong> <a href="../../manual-test-checklist-all.html#clipboard">mục Clipboard trong checklist gộp</a></li>
 </ul>
@@ -59,7 +59,8 @@ th{background:var(--card)}
 </ul>
 <h2 id="4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</h2>
 <ul>
-<li>Mẫu kéo thẻ <code>.onDrag</code> kèm dò nút chuột (poll) để báo hết kéo vẫn đang dùng, chưa có <code>NSDraggingSource</code>. Ledger ghi việc này là "shared helper, later" chung với Screenshot và Shelf.</li>
+<li>Mẫu kéo thẻ <code>.onDrag</code> kèm dò nút chuột (poll) để báo hết kéo vẫn đang dùng, chưa có <code>NSDraggingSource</code>. Khay đã chuyển sang nguồn kéo AppKit (<code>ShelfDragSource.swift</code>, <code>a21e9a6</code>) vì cần biết kéo có hoàn tất không; Clipboard và Screenshot không xoá gì sau khi kéo nên chưa cần, nhưng helper đó có thể tái dùng.</li>
+<li>Bản sao ảnh và file tạo khi kéo thẻ ra (<code>$TMPDIR/MyNotch Clipboard Drags/&lt;uuid&gt;/</code>) không bao giờ được quét: hệ thống dọn thư mục tạm (khoảng 3 ngày) và "xoá lịch sử", tắt module hay thoát app không xoá chúng (review tích hợp, Minor, hoãn). Screenshot chỉ quét thư mục tương tự ở lần khởi động kế tiếp.</li>
 <li>Brief C7 yêu cầu thêm mục "Ghi chú triển khai" vào spec và mục Clipboard vào checklist. Việc đó chưa bao giờ được làm; tài liệu này và checklist gộp thay thế.</li>
 <li>Phần giao diện chưa có kết quả kiểm thử tay nào được ghi lại: phím, focus, menu ngữ cảnh ghim notch, kéo thả. Toàn bộ nằm trong checklist.</li>
 </ul>

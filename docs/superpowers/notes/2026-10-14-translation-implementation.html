@@ -24,9 +24,9 @@ th{background:var(--card)}
 <li><strong>Ngày:</strong> 2026-10-14</li>
 <li><strong>Spec:</strong> <a href="../specs/2026-10-13-translation-design.html">Dịch (dự án con 4)</a>. Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".</li>
 <li><strong>Package:</strong> <code>Packages/Modules/Translation</code>, product <code>TranslationModule</code>. Module id <code>translation</code>, tab "Dịch" (order 400, cao 220 pt, nhận bàn phím), bật mặc định. Không có quyền bắt buộc; <code>optionalPermissions: [.accessibility]</code>.</li>
-<li><strong>Điểm nối Core và app:</strong> <code>ServiceRegistry</code> và <code>ModuleServices</code> trong MyNotchCore, <code>App/ServicesProvider.swift</code>, mục <code>NSServices</code> trong <code>project.yml</code> ("Dịch bằng MyNotch").</li>
-<li><strong>Commit chính:</strong> <code>41a6f5d</code> và <code>a75ea22</code> engine, detector, selection reader; <code>af75ff2</code> Services trong Core và app; <code>57d1a85</code> và <code>2bd557a</code> module; <code>3fc9482</code> hàng đợi Services 10 giây; <code>2655167</code> gắn vào app (cùng Media).</li>
-<li><strong>Test tự động:</strong> 82 test theo báo cáo L1 (<code>verify.sh</code> qua ở <code>8a2b842</code>). Test không gọi framework Translation thật. Chưa chạy lại khi viết tài liệu này.</li>
+<li><strong>Điểm nối Core và app:</strong> <code>ServiceRegistry</code> (có <code>finishStartup()</code>) và <code>ModuleServices</code> trong MyNotchCore, <code>App/ServicesProvider.swift</code>, mục <code>NSServices</code> trong <code>project.yml</code> ("Dịch bằng MyNotch"). Module mở tab của chính nó qua <code>context.presenter.open()</code> (<code>ModulePresenter</code>, xem <a href="2026-10-14-platform-foundation-implementation.html">ghi chú nền tảng</a>).</li>
+<li><strong>Commit chính:</strong> <code>41a6f5d</code> và <code>a75ea22</code> engine, detector, selection reader; <code>af75ff2</code> Services trong Core và app; <code>57d1a85</code> và <code>2bd557a</code> module; <code>3fc9482</code> hàng đợi Services 10 giây; <code>2655167</code> gắn vào app (cùng Media); <code>2b613fe</code> từ chối yêu cầu Services khi module tắt và báo cho người dùng; <code>009871c</code> <code>context.presenter</code> thành facade theo module (<code>open()</code> thay <code>open(tab:)</code>).</li>
+<li><strong>Test tự động:</strong> 82 test (báo cáo L1 và báo cáo vòng sửa cuối; Translation chạy lại sau <code>009871c</code> và qua). Test không gọi framework Translation thật. Chưa chạy lại khi viết tài liệu này.</li>
 <li><strong>Kiểm thử tay:</strong> <a href="../../manual-test-checklist-all.html#translation">mục Dịch trong checklist gộp</a></li>
 </ul>
 <h2 id="1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</h2>
@@ -42,17 +42,16 @@ th{background:var(--card)}
 <h2 id="2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</h2>
 <ul>
 <li><strong>Dịch khi gõ:</strong> ngoài Return, tab còn dịch sau 600 ms ngừng gõ (<code>typingDelay</code>, qua <code>context.scheduler</code>). Spec chỉ nêu Return. Thêm theo brief T3.</li>
-<li><strong>Hàng đợi Services (P9, <code>3fc9482</code>):</strong> chọn dịch vụ làm MyNotch khởi động, hệ thống gửi yêu cầu trong lúc module chưa chạy. <code>ServiceRegistry</code> giữ yêu cầu mới nhất của mỗi tên trong 10 giây và giao cho handler đầu tiên đăng ký. Spec §2.1 không có hàng đợi.</li>
+<li><strong>Hàng đợi Services (P9, <code>3fc9482</code>) và giai đoạn khởi động (<code>2b613fe</code>):</strong> chọn dịch vụ làm MyNotch khởi động, hệ thống gửi yêu cầu trong lúc module chưa chạy. <code>ServiceRegistry</code> giữ yêu cầu mới nhất của mỗi tên trong 10 giây và giao cho handler đầu tiên đăng ký, nhưng chỉ cho tới <code>finishStartup()</code>, mà <code>AppDelegate</code> gọi sau <code>registry.bootstrap()</code>. Từ đó, yêu cầu không ai xử lý bị từ chối (<code>handle</code> trả <code>false</code>, không xếp hàng), và một yêu cầu đang chờ cho module chưa bao giờ đăng ký (tắt hoặc lỗi) bị bỏ. Module Dịch đăng ký đồng bộ trong <code>start</code>, nên không có handler nào đến sau khi giai đoạn này đóng. Spec §2.1 không có hàng đợi lẫn giai đoạn khởi động.</li>
 <li>Dịch tuần tự và báo huỷ rõ ràng (<code>a75ea22</code>); nhận diện ngôn ngữ trên toàn bộ danh sách hỗ trợ, cặp ưa thích luôn đứng đầu danh sách ứng viên để "en" không thành "en-AU".</li>
 </ul>
 <h2 id="3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</h2>
-<p>Ledger không có dòng <code>Ruling:</code> nào riêng cho Dịch. Điểm đã biết từ <code>HANDOFF.md</code> mục 5:</p>
+<p>Ledger không có dòng <code>Ruling:</code> nào riêng cho Dịch. Điểm đã biết từ <code>HANDOFF.md</code> mục 5 (Services bị bỏ im lặng khi module tắt) đã được sửa ở <code>2b613fe</code>; review lại vòng sửa cuối duyệt (Approved). Còn lại:</p>
 <ul>
-<li>Ở commit <code>8a2b842</code>, khi module Dịch đang tắt, yêu cầu từ menu Services bị giữ 10 giây rồi bỏ im lặng, người dùng không thấy lỗi. Chi phí: bấm "Dịch bằng MyNotch" khi module tắt thì không có phản hồi nào. Một bản sửa đang được làm riêng và <strong>chưa commit</strong> khi viết tài liệu này: <code>ServiceRegistry.finishStartup()</code> kết thúc giai đoạn khởi động, sau đó yêu cầu không ai xử lý bị từ chối và menu Services hiện "Mô-đun Dịch của MyNotch chưa chạy. Hãy bật mô-đun Dịch trong Cài đặt MyNotch." Nếu bản sửa đó vào, mục này và mục 5 cần cập nhật.</li>
+<li><strong>Khởi động nguội qua Service khi module Dịch tắt vẫn im lặng.</strong> Ứng dụng chưa chạy, người dùng chọn "Dịch bằng MyNotch": yêu cầu đã được trả lời "đã xử lý" từ lúc đến, và hệ thống không có cách báo lỗi sau đó. Hiếm (cần app đã thoát và module đang tắt). <strong>Chi phí nếu sai:</strong> một lần chọn Services không có phản hồi nào. Reviewer ghi chú một lối sửa (<code>finishStartup()</code> biết tên các yêu cầu đã bỏ, trả về cho <code>AppDelegate</code> hiện <code>NSAlert</code>, khoảng 6 dòng), chưa làm.</li>
 </ul>
 <h2 id="4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</h2>
 <ul>
-<li>Ở <code>8a2b842</code>, <code>App/ServicesProvider.swift</code> có nhánh báo lỗi "Mô-đun Dịch của MyNotch chưa chạy." khi <code>registry.handle</code> trả <code>false</code>, nhưng <code>ServiceRegistry.handle</code> luôn trả <code>true</code> (đưa vào hàng đợi), nên nhánh này không bao giờ chạy: mâu thuẫn giữa code app và Core. Bản sửa chưa commit ở mục 3 làm nhánh này chạy được sau giai đoạn khởi động.</li>
 <li>Fallback ⌘C để đọc vùng chọn không làm, vì nó phải sửa clipboard của người dùng và cần cổng chặn trong Core để Clipboard bỏ qua lần copy giả.</li>
 <li>Chromium: bật AX có thể thất bại với <code>kAXErrorAttributeUnsupported</code>, và editor kiểu Monaco vẫn thường không trả gì (research). Bật AX cho Chromium có tác dụng phụ (Chrome chuyển chế độ trình đọc màn hình); có tuỳ chọn tắt.</li>
 <li>Sheet tải gói ngôn ngữ có thể không hiện khi app ở dạng accessory; lối dự phòng là System Settings.</li>
@@ -61,7 +60,8 @@ th{background:var(--card)}
 <h2 id="5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</h2>
 <ul>
 <li><strong>§2, hàng "Tab"</strong>: thêm dịch khi gõ sau 600 ms ngừng gõ.</li>
-<li><strong>§2.1, <code>ServiceRegistry</code></strong>: thêm hàng đợi một yêu cầu mới nhất cho mỗi tên trong 10 giây; ở <code>8a2b842</code> <code>handle</code> luôn trả <code>true</code> (bản sửa chưa commit: chỉ trả <code>true</code> trong giai đoạn khởi động, sau <code>finishStartup()</code> trả <code>false</code> cho yêu cầu không ai xử lý).</li>
+<li><strong>§2.1, <code>ServiceRegistry</code></strong>: thêm hàng đợi một yêu cầu mới nhất cho mỗi tên trong 10 giây, chỉ trong giai đoạn khởi động; <code>finishStartup()</code> đóng giai đoạn này, sau đó <code>handle</code> trả <code>false</code> cho yêu cầu không ai xử lý và <code>ServicesProvider</code> báo "Mô-đun Dịch của MyNotch chưa chạy. Hãy bật mô-đun Dịch trong Cài đặt MyNotch." bằng hộp thoại hệ thống.</li>
+<li><strong>§2, module</strong>: mở tab bằng <code>context.presenter.open()</code> (chỉ tab của chính module), không phải <code>open(tab:)</code>.</li>
 <li><strong>§2, hàng <code>LanguageInstaller</code></strong>: là cửa sổ regular chứa <code>.translationTask</code>; trả về <code>.accessory</code> chỉ khi không còn cửa sổ titled nào khác.</li>
 <li><strong>§2.2</strong>: cài đặt có thêm danh sách trạng thái gói theo cặp trong Settings.</li>
 <li><strong>Dòng trạng thái</strong> "Thiết kế, triển khai sau Screenshot" đã lỗi thời: module đã triển khai và gắn vào app.</li>

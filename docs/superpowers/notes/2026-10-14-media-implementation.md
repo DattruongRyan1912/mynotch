@@ -4,7 +4,7 @@
 - **Spec:** [Media (dự án con 2)](../specs/2026-10-13-media-design.html). Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".
 - **Package:** `Packages/Modules/Media`, product `MediaModule`. Module id `media`, tab "Media" (order 200, cao 150 pt), live activity `nowPlaying`, bật mặc định, không có quyền bắt buộc.
 - **Commit chính:** `0fe9b1c` nhúng adapter, `6851842` model và reducer, `595cccc` tiến trình adapter, `6446581` module, `21b983f` phổ âm, `70d95cb` sửa phổ âm, `21d81e6` lời bài hát, `cac1e37` chuỗi tra lời (M7), `e8a9b20`, `ba6695c`, `ff26aae` ba vòng sửa M7.
-- **Test tự động:** 300 test theo báo cáo L1 (`verify.sh` qua ở `8a2b842`); riêng chuỗi lời đã review hai vòng, vòng cuối "Approved" (293/293 trước khi thêm 7 test màn hình khoá). Chưa chạy lại khi viết tài liệu này.
+- **Test tự động:** 300 test (báo cáo L1 và báo cáo vòng sửa cuối, `verify.sh` qua); riêng chuỗi lời đã review hai vòng, vòng cuối "Approved" (293/293 trước khi thêm 7 test màn hình khoá). Từ `8a2b842` package không đổi, trừ một dòng trong test dùng `ScratchFolders` (`2bb5fc1`). Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Media trong checklist gộp](../../manual-test-checklist-all.html#media)
 
 ## 1. Đã xây gì so với spec
@@ -29,7 +29,7 @@ Quy tắc chọn kết quả:
 
 - **Quy tắc stub:** kết quả đồng bộ chỉ dùng được khi có ít nhất 4 dòng (`minSyncedLines = 4`), hoặc là bài không lời (instrumental). Bản ghi 1 đến 3 dòng, hay chỉ có lời không đồng bộ, không kết thúc chuỗi: nó được giữ làm phương án dự phòng và chuỗi đi tiếp.
 - Ở bước search: chọn bản đồng bộ dùng được có chênh lệch thời lượng nhỏ nhất, nhưng không quá 3 giây; bằng nhau thì chọn bản nhiều dòng hơn. Bản không có `duration` hoặc `instrumental` bị bỏ qua.
-- Hết chuỗi: trả phương án dự phòng (ưu tiên nhiều dòng đồng bộ hơn, rồi lời thuần), không có thì `.notFound`. Kết quả cuối được cache.
+- Hết chuỗi: trả phương án dự phòng, không có thì `.notFound`. Dự phòng xếp hạng theo số dòng đồng bộ trước rồi số từ của lời thuần, hoà thì giữ bản đến trước (nên một stub đồng bộ thắng một bản lời thuần); một stub đồng bộ tìm thấy ở bước search cũng là ứng viên dự phòng, như stub của `/api/get`. Kết quả cuối được cache.
 - 429 hoặc 503 ở bất kỳ bước nào kết thúc chuỗi bằng `.unavailable` kèm thời gian chờ (`Retry-After`, kẹp 1 đến 3600 s, mặc định 60 s). Không cache. Module thử lại bài đang phát đúng một lần khi hết thời gian chờ. Phương án dự phòng không bao giờ được trả sau 429/503.
 - Hàng đợi yêu cầu tuần tự. Huỷ hoặc tắt module giữa các bước thì rời hàng ngay, không đợi nốt 300 ms. Sửa vòng 2 chặn một lần huỷ trễ làm đứng hàng đợi (guard nằm trong `endStepWait()`).
 

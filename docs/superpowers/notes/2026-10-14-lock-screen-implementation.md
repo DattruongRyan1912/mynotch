@@ -1,11 +1,11 @@
 # Ghi chú triển khai: Widget trên màn hình khoá (thử nghiệm)
 
 - **Ngày:** 2026-10-14
-- **Trạng thái:** **thử nghiệm, dùng API riêng của macOS (SkyLight), chưa được kiểm chứng trên màn hình khoá thật.** Module tắt mặc định. Vòng sửa L1 đã vào code (`8a2b842`) và review lại phạm vi hẹp (`re-review-L1-r1.md`, xuất hiện trong lúc viết tài liệu này) kết luận **Approved**, không có Critical hay Important; mô tả dưới đây dựa trên báo cáo `L1-report.md` (kể cả "Fix round 1"). Review đó đọc mã và chạy test, không chạy trên màn hình khoá thật.
+- **Trạng thái:** **thử nghiệm, dùng API riêng của macOS (SkyLight), chưa được kiểm chứng trên màn hình khoá thật.** Module tắt mặc định. Vòng sửa L1 đã vào code (`8a2b842`) và review lại phạm vi hẹp (`re-review-L1-r1.md`) kết luận **Approved**, không có Critical hay Important; mô tả dưới đây khớp mã ở HEAD (đã đối chiếu `LockStateObserver`, `LockScreenModule`, `TimerModule`) và báo cáo `L1-report.md` (kể cả "Fix round 1"). Review đó đọc mã và chạy test, không chạy trên màn hình khoá thật. Không có commit nào đụng module này kể từ `8a2b842`; review cuối cùng (`final/review-core.md`, `review-integration.md`) duyệt phần Core, NotchUI và việc gắn vào app.
 - **Spec:** [Widget trên màn hình khoá (dự án con 9)](../specs/2026-10-13-lock-screen-design.html). Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".
 - **Package:** `Packages/Modules/LockScreen`, product `LockScreenModule`. Module id `lockscreen` ("Màn hình khoá", order 990), không có tab, **tắt mặc định**, không có quyền. Chạm cả `Packages/MyNotchCore`, `Packages/NotchUI`, và thêm view cho Media, Timer, Battery.
 - **Commit chính:** `5a1362a` triển khai, `8a2b842` sửa sau review.
-- **Test tự động:** MyNotchCore 105, NotchUI 77 (trong đó 10 test shim), LockScreen 41, Timer 36, Battery 23, Media 300 theo báo cáo L1 (`verify.sh` qua ở `8a2b842`). Không test nào khoá màn hình thật, cho màn hình ngủ, gửi thông báo hệ thống thật, tạo space SkyLight, gọi `CGSessionCopyCurrentDictionary` hay gọi hàm SLS thật. Chưa chạy lại khi viết tài liệu này.
+- **Test tự động:** LockScreen 41, NotchUI 77 (trong đó 10 test shim), Timer 36, Battery 23, Media 300, MyNotchCore 119 (105 ở `8a2b842`; phần thêm không thuộc màn hình khoá) theo báo cáo L1 và các báo cáo sau (`verify.sh` qua ở `8a2b842` và ở `a8025b2`). Không test nào khoá màn hình thật, cho màn hình ngủ, gửi thông báo hệ thống thật, tạo space SkyLight, gọi `CGSessionCopyCurrentDictionary` hay gọi hàm SLS thật. Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Màn hình khoá trong checklist gộp](../../manual-test-checklist-all.html#lock-screen)
 
 ## 1. Đã xây gì so với spec

@@ -25,7 +25,7 @@ th{background:var(--card)}
 <li><strong>Spec:</strong> <a href="../specs/2026-10-13-media-design.html">Media (dự án con 2)</a>. Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".</li>
 <li><strong>Package:</strong> <code>Packages/Modules/Media</code>, product <code>MediaModule</code>. Module id <code>media</code>, tab "Media" (order 200, cao 150 pt), live activity <code>nowPlaying</code>, bật mặc định, không có quyền bắt buộc.</li>
 <li><strong>Commit chính:</strong> <code>0fe9b1c</code> nhúng adapter, <code>6851842</code> model và reducer, <code>595cccc</code> tiến trình adapter, <code>6446581</code> module, <code>21b983f</code> phổ âm, <code>70d95cb</code> sửa phổ âm, <code>21d81e6</code> lời bài hát, <code>cac1e37</code> chuỗi tra lời (M7), <code>e8a9b20</code>, <code>ba6695c</code>, <code>ff26aae</code> ba vòng sửa M7.</li>
-<li><strong>Test tự động:</strong> 300 test theo báo cáo L1 (<code>verify.sh</code> qua ở <code>8a2b842</code>); riêng chuỗi lời đã review hai vòng, vòng cuối "Approved" (293/293 trước khi thêm 7 test màn hình khoá). Chưa chạy lại khi viết tài liệu này.</li>
+<li><strong>Test tự động:</strong> 300 test (báo cáo L1 và báo cáo vòng sửa cuối, <code>verify.sh</code> qua); riêng chuỗi lời đã review hai vòng, vòng cuối "Approved" (293/293 trước khi thêm 7 test màn hình khoá). Từ <code>8a2b842</code> package không đổi, trừ một dòng trong test dùng <code>ScratchFolders</code> (<code>2bb5fc1</code>). Chưa chạy lại khi viết tài liệu này.</li>
 <li><strong>Kiểm thử tay:</strong> <a href="../../manual-test-checklist-all.html#media">mục Media trong checklist gộp</a></li>
 </ul>
 <h2 id="1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</h2>
@@ -49,7 +49,7 @@ th{background:var(--card)}
 <ul>
 <li><strong>Quy tắc stub:</strong> kết quả đồng bộ chỉ dùng được khi có ít nhất 4 dòng (<code>minSyncedLines = 4</code>), hoặc là bài không lời (instrumental). Bản ghi 1 đến 3 dòng, hay chỉ có lời không đồng bộ, không kết thúc chuỗi: nó được giữ làm phương án dự phòng và chuỗi đi tiếp.</li>
 <li>Ở bước search: chọn bản đồng bộ dùng được có chênh lệch thời lượng nhỏ nhất, nhưng không quá 3 giây; bằng nhau thì chọn bản nhiều dòng hơn. Bản không có <code>duration</code> hoặc <code>instrumental</code> bị bỏ qua.</li>
-<li>Hết chuỗi: trả phương án dự phòng (ưu tiên nhiều dòng đồng bộ hơn, rồi lời thuần), không có thì <code>.notFound</code>. Kết quả cuối được cache.</li>
+<li>Hết chuỗi: trả phương án dự phòng, không có thì <code>.notFound</code>. Dự phòng xếp hạng theo số dòng đồng bộ trước rồi số từ của lời thuần, hoà thì giữ bản đến trước (nên một stub đồng bộ thắng một bản lời thuần); một stub đồng bộ tìm thấy ở bước search cũng là ứng viên dự phòng, như stub của <code>/api/get</code>. Kết quả cuối được cache.</li>
 <li>429 hoặc 503 ở bất kỳ bước nào kết thúc chuỗi bằng <code>.unavailable</code> kèm thời gian chờ (<code>Retry-After</code>, kẹp 1 đến 3600 s, mặc định 60 s). Không cache. Module thử lại bài đang phát đúng một lần khi hết thời gian chờ. Phương án dự phòng không bao giờ được trả sau 429/503.</li>
 <li>Hàng đợi yêu cầu tuần tự. Huỷ hoặc tắt module giữa các bước thì rời hàng ngay, không đợi nốt 300 ms. Sửa vòng 2 chặn một lần huỷ trễ làm đứng hàng đợi (guard nằm trong <code>endStepWait()</code>).</li>
 </ul>

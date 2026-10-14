@@ -3,25 +3,25 @@
 - **Ngày:** 2026-10-14
 - **Spec:** [Live activity hệ thống + HUD âm lượng (dự án con 7)](../specs/2026-10-13-system-activities-design.html). Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".
 - **Package:** `Packages/Modules/SystemActivities`, product `SystemActivitiesModule`. **Module id là `system`** ("Hệ thống", order 700), không có tab, bật mặc định, không có quyền bắt buộc, quyền tuỳ chọn `.bluetooth`.
-- **Commit chính:** `7bc718c` các monitor và nhận biết tải xong, `4aad00f` module, `956f5fb` sửa sau review, `e2b0586` gắn vào app (cùng Shortcuts, Timer, Shelf).
-- **Test tự động:** 77 test theo báo cáo `Y-fix-report` và báo cáo L1 (`verify.sh` qua ở `8a2b842`). Không chạm Bluetooth, CoreAudio hay thư mục Downloads thật trong test (có một thử nghiệm FSEvents thật trong thư mục tạm, đã xoá). Chưa chạy lại khi viết tài liệu này.
+- **Commit chính:** `7bc718c` các monitor và nhận biết tải xong, `4aad00f` module, `956f5fb` sửa sau review (tải nhỏ, đọc lại pin), `e2b0586` gắn vào app (cùng Shortcuts, Timer, Shelf), `5552a84` đầu dò quyền Downloads và Bluetooth chạy ngoài main thread.
+- **Test tự động:** 83 test theo báo cáo vòng sửa cuối (`fix-report`, `verify.sh` qua). Không chạm Bluetooth, CoreAudio hay thư mục Downloads thật trong test (có một thử nghiệm FSEvents thật trong thư mục tạm, đã xoá). Phần gọi IOBluetooth thật không có test tự động. Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Hệ thống trong checklist gộp](../../manual-test-checklist-all.html#system-activities)
 
 ## 1. Đã xây gì so với spec
 
 Mỗi loại sự kiện có công tắc riêng, hiện thành live activity ngắn bên cạnh notch (mỗi loại một `id` cố định, cập nhật tại chỗ, vừa 64 pt mỗi bên). Mọi monitor đứng sau protocol để test bằng nguồn giả.
 
-- **Bluetooth** (`bluetooth`): `BluetoothMonitor` (IOBluetooth) báo kết nối và ngắt, loại thiết bị (tai nghe, bàn phím, chuột, khác), pin qua selector riêng `batteryPercentSingle/Left/Right/Case` chỉ gọi sau `responds(to:)`. Không hiện "đã kết nối" cho thiết bị đã kết nối từ trước khi monitor chạy. Pin chưa đọc được thì đọc lại sau 0,5, 1 và 2 giây (`BluetoothBatteryRetry`) để bản cập nhật rơi vào trong thời gian activity còn hiện.
+- **Bluetooth** (`bluetooth`): `BluetoothMonitor` (IOBluetooth) báo kết nối và ngắt, loại thiết bị (tai nghe, bàn phím, chuột, khác), pin qua selector riêng `batteryPercentSingle/Left/Right/Case` chỉ gọi sau `responds(to:)`. Không hiện "đã kết nối" cho thiết bị đã kết nối từ trước khi monitor chạy. Pin chưa đọc được thì đọc lại sau 0,5, 1 và 2 giây (`BluetoothBatteryRetry`) để bản cập nhật rơi vào trong thời gian activity còn hiện. `start` trả về ngay; lệnh IOBluetooth đầu tiên (`pairedDevices()`, nơi hộp thoại quyền được cho là hiện) chạy ngoài main thread qua `@concurrent`, rồi `register()` (thông báo kết nối và ngắt, danh sách thiết bị đã ghép) chạy trên main actor vì `register(forConnectNotifications:)` cần run loop. `stop()` huỷ lần khởi động đang chờ.
 - **Mạng** (`network`): `NWPathMonitor`, bỏ lần báo đầu, debounce 1 giây, "Đã kết nối" hoặc "Mất mạng". Mất mạng ưu tiên `.high` và không hết hạn cho tới khi có mạng lại.
 - **Caps Lock** (`capslock`): poll `CGEventSource.flagsState` 4 lần mỗi giây, chỉ phát khi đổi, không cần quyền.
-- **Tải xong** (`download`): FSEvents trên `~/Downloads` kèm `DownloadCompletionRule` (Safari `.download`, Chrome `.crdownload`, Firefox `.part` kèm file 0 byte), gom 300 ms, bỏ file ẩn và thư mục.
+- **Tải xong** (`download`): FSEvents trên `~/Downloads` kèm `DownloadCompletionRule` (Safari `.download`, Chrome `.crdownload`, Firefox `.part` kèm file 0 byte), gom 300 ms, bỏ file ẩn và thư mục. `DownloadsWatching.start` là `async -> Bool`: một lần liệt kê thư mục (đầu dò) chạy trong `Task.detached`, rồi luồng FSEvents được tạo trên main actor, nên file đã có sẵn không sinh activity.
 - **Âm lượng** (`volume`): listener CoreAudio trên thiết bị ra mặc định (`VirtualMainVolume`, `Mute`, thử kênh 1 nếu kênh chính không có mute), gắn lại khi đổi thiết bị; thanh mức và biểu tượng tắt tiếng. Chạy song song với HUD hệ thống, không chặn nó.
 - **Cài đặt `module.system.*`:** `bluetooth`, `network`, `capsLock`, `downloads`, `volume` (đều true) và `durationSeconds` (2,5; từ 1 đến 6). Monitor chỉ chạy cho loại đang bật và khởi động lại khi công tắc đổi.
 
 ## 2. Sai khác so với spec và lý do
 
 - **Id module là `system`, không phải `systemactivities`**, nên khoá là `module.system.*`. Brief là nguồn đúng, spec chưa được cập nhật.
-- **Chỉ có quyền tuỳ chọn `.bluetooth`.** Không có case `Permission.downloadsFolder` trong Core. Thư mục Downloads do macOS tự hỏi khi bắt đầu theo dõi; `DownloadsWatcher.start()` liệt kê thư mục một lần trước khi tạo luồng FSEvents để ép hộp thoại xuất hiện, và trả về false khi bị từ chối (ghi log "Downloads folder cannot be watched").
+- **Chỉ có quyền tuỳ chọn `.bluetooth`.** Không có case `Permission.downloadsFolder` trong Core. Thư mục Downloads do macOS tự hỏi khi bắt đầu theo dõi; `DownloadsWatcher.start()` liệt kê thư mục một lần trước khi tạo luồng FSEvents để ép hộp thoại xuất hiện, và trả về false khi bị từ chối hoặc thư mục không có (module ghi log "Downloads folder cannot be watched"). Lần liệt kê chặn tới khi người dùng trả lời hộp thoại, nên nó chạy ngoài main thread: module chạy `start` trong một task (`downloadsStart`), loại Downloads được tính là đang chạy ngay, tắt công tắc thì task bị huỷ, và một lần bị từ chối đến muộn từ một lần khởi động đã huỷ không bị tính vào lần bật mới. Bị từ chối thì chỉ thử lại khi chính công tắc tắt rồi bật.
 - **Quy tắc tải xong chặt hơn spec** (để file cũ có thuộc tính cách ly không bị coi là tải mới khi Gatekeeper, Spotlight hay đổi tên chạm vào): ứng viên chỉ có thuộc tính nguồn gốc (không thấy file tạm) phải có ngày file trong vòng khoảng 10 giây; ứng viên không bao giờ hoàn tất hết hạn sau 10 phút; `hadPartial` cũng được ghi khi file tạm chỉ được thấy lúc bị xoá (tải nhỏ đổi tên ngay trong một lô FSEvents); các bản đồ trạng thái có giới hạn.
 - Bluetooth: `BluetoothConnectionTracker` ghi nhớ thiết bị đã thông báo (không thông báo lại khi macOS báo kết nối lặp), và mỗi lần đọc pin thay thế lần đọc trước của cùng thiết bị.
 - Một loại khởi động lỗi (Downloads) chỉ được thử lại khi chính công tắc của nó đổi, không thử lại mỗi khi bất kỳ công tắc nào đổi.
@@ -29,7 +29,7 @@ Mỗi loại sự kiện có công tắc riêng, hiện thành live activity ng�
 
 ## 3. Giới hạn đã chấp nhận (Ruling)
 
-- **Đầu dò quyền Downloads chạy trên main thread.** Notch bị đơ trong lúc hộp thoại đầu tiên của macOS đang mở. Chấp nhận: chỉ một lần, chỉ khi người dùng bật Downloads. **Cần người kiểm tra** (reset TCC, thử Cho phép và Không cho phép). **Chi phí nếu sai:** vài giây notch đơ ở lần bật đầu tiên; cách sửa là `start` bất đồng bộ.
+- **Ruling cũ đã được thay: đầu dò quyền Downloads trên main thread.** Ledger ghi chấp nhận việc notch đơ trong lúc hộp thoại macOS đầu tiên mở (một lần, chỉ khi bật Downloads; chi phí nếu sai là vài giây đơ, cách sửa là `start` bất đồng bộ). Review cuối nâng nó thành Important cùng với đầu dò Bluetooth, và `5552a84` đã làm đúng cách sửa đó cho cả hai. Không còn là giới hạn; phần chưa kiểm chứng nằm ở mục 4.
 - Spec còn ghi `module.systemactivities.*` và `.downloadsFolder`: gộp vào mục "Sửa lại spec" dưới đây.
 
 Các mục đã bỏ qua trong vòng sửa (Minor): listener của `VolumeMonitor` giữ thiết bị đã gắn (chỉ hình thức); tham số `interval:` thừa của `CapsLockMonitor`; `CapsLockMonitor` thiếu `isolated deinit` (tick giữ `self` yếu); guard của callback FSEvents chỉ chặn sau `stop()`, chưa chặn callback đến sau khi watcher đã bị giải phóng (không dùng retain/release vì khi đó luồng giữ watcher và `deinit` không bao giờ chạy).
@@ -37,17 +37,19 @@ Các mục đã bỏ qua trong vòng sửa (Minor): listener của `VolumeMonito
 ## 4. Khoảng trống đã biết
 
 - Các mốc đọc pin lại 0,5, 1 và 2 giây là suy đoán từ review, chưa đo trên tai nghe thật.
+- **Chưa xác minh phần Bluetooth của việc đưa đầu dò ra khỏi main thread.** Không ai chứng minh lệnh IOBluetooth nào gây hộp thoại. Nếu `pairedDevices()` không gây mà `register(forConnectNotifications:)` mới gây, notch vẫn đơ khi hộp thoại Bluetooth đầu tiên mở (không tệ hơn trước). Việc gọi IOBluetooth ngoài main thread cũng là giả định an toàn luồng chưa kiểm: cần thử nhiều lần khởi động. Một cổng chắc chắn hơn nếu cần: chờ `context.permissions.request(.bluetooth)` (hộp thoại CoreBluetooth không chặn) trước khi chạm IOBluetooth.
 - Không có Focus (không có API công khai), tên Wi-Fi (cần quyền Vị trí), độ sáng (chỉ có API riêng), và không thay thế HUD hệ thống (muốn chặn phải nuốt phím media bằng event tap, cần Accessibility).
-- Chưa có kết quả kiểm thử tay được ghi lại cho: tai nghe hay AirPods, rút cáp mạng, Caps Lock, tải file nhỏ bằng Safari, Chrome và Firefox, phím âm lượng, hộp thoại Downloads.
+- Chưa có kết quả kiểm thử tay được ghi lại cho: tai nghe hay AirPods, rút cáp mạng, Caps Lock, tải file nhỏ bằng Safari, Chrome và Firefox, phím âm lượng, hộp thoại Downloads và Bluetooth lần đầu (notch và các monitor khác phải còn phản hồi trong lúc hộp thoại mở).
+- Callback FSEvents chỉ được chặn sau `stop()`, không chặn callback đến sau khi watcher đã bị giải phóng; `DownloadsWatcher.stop()` một mình không huỷ lần khởi động đang chờ (người gọi phải huỷ task, module làm vậy).
 
 ## 5. Sửa lại spec (Spec corrections)
 
 - **§2.1**: khoá cài đặt là `module.system.*` (không phải `module.systemactivities.*`).
-- **§2, dòng quyền**: chỉ `.bluetooth` là quyền tuỳ chọn; không thêm case `.downloadsFolder` vào `Permission` và không kiểm trạng thái bằng liệt kê thư mục; hộp thoại do đầu dò `start()` gây ra.
+- **§2, dòng quyền**: chỉ `.bluetooth` là quyền tuỳ chọn; không thêm case `.downloadsFolder` vào `Permission` và không kiểm trạng thái bằng liệt kê thư mục; hộp thoại do đầu dò trong `start()` gây ra, và `start` của Downloads là `async` (đầu dò chạy ngoài main thread) còn của Bluetooth trả về ngay rồi gọi IOBluetooth ngoài main thread.
 - **§1, bảng sự kiện, dòng tải xuống**: thêm các điều kiện tươi 10 giây, hết hạn 10 phút và ghi nhận file tạm bị xoá.
 - **§1, dòng pin**: thêm đọc lại sau 0,5, 1 và 2 giây. **§2, hàng `NetworkMonitor`**: debounce 1 giây, mất mạng ưu tiên `.high` và không hết hạn.
 - **§2, hàng `SystemActivitiesModule`**: id activity là `bluetooth`, `network`, `capslock`, `download`, `volume`.
 
 ## 6. Cần kiểm thử tay
 
-Xem [mục Hệ thống trong checklist gộp](../../manual-test-checklist-all.html#system-activities). Các mục đụng quyền hoặc API riêng: Bluetooth (kèm selector pin riêng), thư mục Downloads (reset TCC `SystemPolicyDownloadsFolder`).
+Xem [mục Hệ thống trong checklist gộp](../../manual-test-checklist-all.html#system-activities). Các mục đụng quyền hoặc API riêng: Bluetooth (kèm selector pin riêng; hộp thoại lần đầu chưa được xác minh có làm notch đơ không), thư mục Downloads (reset TCC `SystemPolicyDownloadsFolder`).
