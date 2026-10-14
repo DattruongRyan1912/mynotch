@@ -2,6 +2,7 @@ import AgentHookKit
 import Foundation
 import MyNotchCore
 import MyNotchTestSupport
+import SwiftUI
 import Testing
 @testable import AIAgentsModule
 
@@ -144,7 +145,7 @@ final class FakeOpener {
         send(.turnStarted, at: began)
         await settle { current != nil }
         #expect(current?.id == "aiagents/agent")
-        #expect(current?.activity.priority == .normal)
+        #expect(current?.activity.priority == .low)
         #expect(module.publishedActivity == AgentActivityContent(kind: .working(since: began), source: .claude))
     }
 
@@ -167,8 +168,49 @@ final class FakeOpener {
         #expect(module.publishedActivity?.kind == .waitingForInput)
         // Back to work once the user has answered.
         send(.toolFinished)
-        await settle { current?.activity.priority == .normal }
-        #expect(current?.activity.priority == .normal)
+        await settle { current?.activity.priority == .low }
+        #expect(current?.activity.priority == .low)
+    }
+
+    /// Stands in for the Media module's "playing" activity, which runs at normal priority.
+    func publishPlayingMedia() {
+        harness.activities.set(
+            LiveActivity(id: "now-playing", priority: .normal, leading: AnyView(EmptyView()), trailing: AnyView(EmptyView())),
+            from: "media"
+        )
+    }
+
+    @Test func workingNeverHidesMediaThatStartedLater() async {
+        await start()
+        send(.turnStarted)
+        await settle { current != nil }
+        publishPlayingMedia()
+        #expect(current?.id == "media/now-playing")
+        #expect(harness.activities.others.map(\.id) == ["aiagents/agent"])
+    }
+
+    @Test func workingNeverHidesMediaThatStartedFirst() async {
+        await start()
+        publishPlayingMedia()
+        send(.turnStarted)
+        await settle { harness.activities.others.count == 1 }
+        #expect(current?.id == "media/now-playing")
+        #expect(harness.activities.others.map(\.id) == ["aiagents/agent"])
+    }
+
+    @Test func waitingTakesTheNotchFromMediaAndMediaStepsBackIn() async {
+        await start()
+        publishPlayingMedia()
+        send(.turnStarted)
+        await settle { harness.activities.others.count == 1 }
+        send(.waitingForInput)
+        await settle { current?.activity.priority == .high }
+        #expect(current?.id == "aiagents/agent")
+        #expect(harness.activities.others.map(\.id) == ["media/now-playing"])
+        send(.toolFinished)
+        await settle { current?.id == "media/now-playing" }
+        #expect(current?.id == "media/now-playing")
+        #expect(harness.activities.others.map(\.id) == ["aiagents/agent"])
     }
 
     @Test func aWaitingSessionOutranksOtherAgentsActivities() async {

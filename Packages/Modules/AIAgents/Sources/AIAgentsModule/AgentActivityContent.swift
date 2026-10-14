@@ -16,8 +16,15 @@ nonisolated struct AgentActivityContent: Equatable, Sendable {
     /// The agent the glyph shows: the one whose turn the activity is about.
     var source: AgentSource
 
-    /// A session waiting for the user outranks other activities; the rest take turns as usual.
-    var priority: ActivityPriority { kind == .waitingForInput ? .high : .normal }
+    /// A session waiting for the user outranks other activities. Working can go on for hours in the background, so
+    /// it yields the notch to whatever else is live, such as playing media, and shows as a bubble beside it.
+    var priority: ActivityPriority {
+        switch kind {
+        case .waitingForInput: .high
+        case .working: .low
+        case .finished: .normal
+        }
+    }
 
     /// For VoiceOver.
     var accessibilityLabel: String {

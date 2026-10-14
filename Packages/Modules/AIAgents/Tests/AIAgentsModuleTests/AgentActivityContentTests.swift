@@ -58,8 +58,8 @@ import Testing
         #expect(result?.priority == .high)
     }
 
-    @Test func workingAndFinishedRunAtNormalPriority() {
-        #expect(content([session(.working(tool: nil, summary: nil), id: "a", started: -5)])?.priority == .normal)
+    @Test func workingRunsAtLowPriorityAndFinishedAtNormal() {
+        #expect(content([session(.working(tool: nil, summary: nil), id: "a", started: -5)])?.priority == .low)
         #expect(content([session(.finished, id: "a")])?.priority == .normal)
     }
 
