@@ -5,7 +5,8 @@ import SwiftUI
 
 /// "Dịch" tab: on-device translation of typed text, of the selection (⌃⌥T, through Accessibility) and of text sent
 /// through the "Dịch bằng MyNotch" service. Either text can be read aloud, and a translation of a selection can replace
-/// it in the app it was selected in.
+/// it in the app it was selected in. A text that is a quantity (a unit, a time, an expression, an amount of money) is
+/// converted above its translation, or instead of one when it is nothing else.
 public final class TranslationModule: FeatureModule {
     public let descriptor = ModuleDescriptor(
         id: "translation",
@@ -30,6 +31,7 @@ public final class TranslationModule: FeatureModule {
     private let installer: any LanguageInstalling
     private let replacer: SelectionReplacer
     private let pasteboard: NSPasteboard
+    private let conversion: ConversionSetup
     private let shortcut: KeyboardShortcuts.Shortcut?
     private var context: ModuleContext?
     /// The shortcut's selection read; tests await it. A new press, Services text or stopping supersedes it.
@@ -52,6 +54,7 @@ public final class TranslationModule: FeatureModule {
             pasteboard: .general,
             speech: SpeechPlayer(synthesizer: SystemSpeechSynthesizer()),
             replacer: SelectionReplacer(accessibility: accessibility, pasteboard: .general),
+            conversion: ConversionSetup(),
             shortcut: Self.defaultShortcut
         )
     }
@@ -66,6 +69,7 @@ public final class TranslationModule: FeatureModule {
         pasteboard: NSPasteboard,
         speech: SpeechPlayer,
         replacer: SelectionReplacer,
+        conversion: ConversionSetup,
         shortcut: KeyboardShortcuts.Shortcut?
     ) {
         self.engine = engine
@@ -75,13 +79,22 @@ public final class TranslationModule: FeatureModule {
         self.pasteboard = pasteboard
         self.speech = speech
         self.replacer = replacer
+        self.conversion = conversion
         self.shortcut = shortcut
     }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
         self.context = context
+        let rates = ExchangeRateService(
+            client: conversion.rates, cacheFile: context.storage.cachesDirectory.appending(path: "exchange-rates.json"),
+            now: conversion.environment.now
+        )
+        let converter = QuickConverter(
+            settings: context.settings, keys: TranslationKeys(context.settings), rates: rates, environment: conversion.environment
+        )
         translator = Translator(
-            state: state, engine: engine, scheduler: context.scheduler, settings: context.settings, pasteboard: pasteboard
+            state: state, engine: engine, converter: converter, scheduler: context.scheduler, settings: context.settings,
+            pasteboard: pasteboard
         )
         context.hotkeys.register("translateSelection", title: "Dịch đoạn chữ đang chọn", initial: shortcut) { [weak self] in
             self?.selectionShortcutPressed()
@@ -128,6 +141,8 @@ public final class TranslationModule: FeatureModule {
         state.pairStatus = nil
         state.isTranslating = false
         state.error = nil
+        state.conversions = []
+        state.showsConversionsOnly = false
         state.isReadingSelection = false
         state.selectionSource = nil
         state.isReplacing = false
@@ -162,6 +177,10 @@ public final class TranslationModule: FeatureModule {
             autoTranslateOnOpen: settings.binding(keys.autoTranslateOnOpen),
             useChromiumAccessibility: settings.binding(keys.useChromiumAccessibility),
             showReplaceButton: settings.binding(keys.showReplaceButton),
+            convertCurrency: settings.binding(keys.convertCurrency),
+            currencyTarget: settings.binding(keys.currencyTarget),
+            firstZone: settings.binding(keys.firstZone),
+            secondZone: settings.binding(keys.secondZone),
             languages: languages,
             status: { [engine] pair in await engine.status(from: pair.source, to: pair.target) },
             install: { [weak self, installer] pair in

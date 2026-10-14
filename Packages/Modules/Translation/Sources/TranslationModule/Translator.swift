@@ -9,8 +9,11 @@ final class Translator {
     let state: TranslationState
     /// The newest translation; tests await it.
     private(set) var translation: Task<Void, Never>?
+    /// The wait for exchange rates after the newest request, if its text had an amount of money; tests await it.
+    private(set) var conversion: Task<Void, Never>?
 
     private let engine: any TranslationEngine
+    private let converter: QuickConverter
     private let detector = LanguageDetector()
     private let scheduler: any Scheduler
     private let settings: ModuleSettings
@@ -27,9 +30,13 @@ final class Translator {
     private var appliedTarget: String
     private var isStopped = false
 
-    init(state: TranslationState, engine: any TranslationEngine, scheduler: any Scheduler, settings: ModuleSettings, pasteboard: NSPasteboard) {
+    init(
+        state: TranslationState, engine: any TranslationEngine, converter: QuickConverter, scheduler: any Scheduler,
+        settings: ModuleSettings, pasteboard: NSPasteboard
+    ) {
         self.state = state
         self.engine = engine
+        self.converter = converter
         self.scheduler = scheduler
         self.settings = settings
         self.pasteboard = pasteboard
@@ -75,6 +82,16 @@ final class Translator {
             clearResult()
             return
         }
+        let plan = converter.plan(for: text)
+        state.conversions = plan.conversions
+        state.showsConversionsOnly = plan.isPure
+        let request = generation
+        resolveMoney(of: plan, for: request)
+        // A text that is nothing but quantities has nothing to translate.
+        guard !plan.isPure else {
+            showNoTranslation()
+            return
+        }
         let pair = direction(for: text)
         state.detectedSource = state.source == nil ? pair.source : nil
         state.target = pair.target
@@ -82,7 +99,6 @@ final class Translator {
         // Same direction: keep the banner up while retranslating, so it doesn't flicker with every pause in typing.
         if pair != statusPair { state.pairStatus = nil }
         state.isTranslating = true
-        let request = generation
         translation = Task { [weak self, engine] in
             let result: Result<String, TranslationFailure>
             do throws(TranslationFailure) {
@@ -128,9 +144,14 @@ final class Translator {
     }
 
     func copyOutput() {
-        guard !state.output.isEmpty else { return }
+        copy(state.output)
+    }
+
+    /// The copy button of a translation or of one conversion result.
+    func copy(_ text: String) {
+        guard !text.isEmpty else { return }
         pasteboard.clearContents()
-        pasteboard.setString(state.output, forType: .string)
+        pasteboard.setString(text, forType: .string)
     }
 
     /// A language pack may have been installed: translate again, which also re-checks the pair.
@@ -177,7 +198,28 @@ final class Translator {
     private func supersede() {
         generation += 1
         translation?.cancel()
+        conversion?.cancel()
         state.isTranslating = false
+    }
+
+    /// Fills in the amounts of money once the rates are there, unless newer text took over meanwhile.
+    private func resolveMoney(of plan: ConversionPlan, for request: Int) {
+        guard !plan.pending.isEmpty else { return }
+        conversion = Task { [weak self, converter] in
+            let resolved = await converter.resolve(plan)
+            guard let self, request == generation, !Task.isCancelled else { return }
+            state.conversions = resolved
+        }
+    }
+
+    /// Nothing is translated: whatever an earlier translation left is gone.
+    private func showNoTranslation() {
+        state.output = ""
+        state.error = nil
+        state.detectedSource = nil
+        state.pairStatus = nil
+        statusPair = nil
+        state.replaceFailure = nil
     }
 
     private func show(_ result: Result<String, TranslationFailure>, for pair: LanguagePair) {
@@ -209,6 +251,8 @@ final class Translator {
     }
 
     private func clearResult() {
+        state.conversions = []
+        state.showsConversionsOnly = false
         state.output = ""
         state.error = nil
         state.detectedSource = nil

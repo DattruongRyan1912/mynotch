@@ -22,6 +22,13 @@ struct TranslationKeys {
     let useChromiumAccessibility: SettingKey<Bool>
     /// Offer "Thay vào chỗ đang chọn" on a result that came from a selection in another app.
     let showReplaceButton: SettingKey<Bool>
+    /// Convert amounts of money, which needs the day's rates from the internet, so it starts off.
+    let convertCurrency: SettingKey<Bool>
+    /// ISO code of the currency amounts are converted into.
+    let currencyTarget: SettingKey<String>
+    /// The two time zones a time is also shown in, as IANA identifiers.
+    let firstZone: SettingKey<String>
+    let secondZone: SettingKey<String>
 
     init(_ settings: ModuleSettings) {
         preferredPair = settings.key("preferredPair", default: PreferredPair(first: "vi", second: "en"))
@@ -29,5 +36,9 @@ struct TranslationKeys {
         autoTranslateOnOpen = settings.key("autoTranslateOnOpen", default: true)
         useChromiumAccessibility = settings.key("useChromiumAccessibility", default: true)
         showReplaceButton = settings.key("showReplaceButton", default: true)
+        convertCurrency = settings.key("convertCurrency", default: false)
+        currencyTarget = settings.key("currencyTarget", default: "VND")
+        firstZone = settings.key("conversionZoneFirst", default: "America/Los_Angeles")
+        secondZone = settings.key("conversionZoneSecond", default: "Europe/London")
     }
 }

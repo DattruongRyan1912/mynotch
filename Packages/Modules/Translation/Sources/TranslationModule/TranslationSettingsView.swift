@@ -7,6 +7,10 @@ struct TranslationSettingsView: View {
     @Binding var autoTranslateOnOpen: Bool
     @Binding var useChromiumAccessibility: Bool
     @Binding var showReplaceButton: Bool
+    @Binding var convertCurrency: Bool
+    @Binding var currencyTarget: String
+    @Binding var firstZone: String
+    @Binding var secondZone: String
     let languages: SupportedLanguages
     let status: (LanguagePair) async -> PairStatus
     let install: (LanguagePair) -> Void
@@ -32,6 +36,18 @@ struct TranslationSettingsView: View {
                 Text("Hiện nút thay vào chỗ đang chọn")
                 Text("Dưới bản dịch của đoạn chữ đọc bằng phím tắt. Cần quyền Accessibility.")
             }
+            Toggle(isOn: $convertCurrency) {
+                Text("Quy đổi tiền tệ")
+                Text("Đổi số tiền như $12 hay 100.000đ sang tiền của bạn bằng tỷ giá hằng ngày lấy từ internet (Exchange Rate API). Khi tắt, MyNotch không gửi yêu cầu mạng nào.")
+            }
+            Picker("Đổi sang tiền", selection: $currencyTarget) {
+                ForEach(Self.currencyOptions(including: currencyTarget), id: \.code) { option in
+                    Text("\(option.code) · \(option.name)").tag(option.code)
+                }
+            }
+            .disabled(!convertCurrency)
+            zonePicker("Quy đổi giờ: múi giờ 1", selection: $firstZone)
+            zonePicker("Quy đổi giờ: múi giờ 2", selection: $secondZone)
             ForEach(pairs, id: \.self) { pair in
                 LabeledContent("\(SupportedLanguages.name(of: pair.source)) → \(SupportedLanguages.name(of: pair.target))") {
                     statusView(for: pair)
@@ -84,12 +100,27 @@ struct TranslationSettingsView: View {
         }
     }
 
+    /// A time such as "3pm PST" or "9h sáng giờ Tokyo" is also shown in the Mac's zone and these two.
+    private func zonePicker(_ title: String, selection: Binding<String>) -> some View {
+        Picker(title, selection: selection) {
+            ForEach(TimeZoneCatalog.pickerOptions(including: selection.wrappedValue), id: \.id) { option in
+                Text(option.title).tag(option.id)
+            }
+        }
+    }
+
     private func languagePicker(_ title: String, selection: Binding<String>, excluding excluded: String? = nil) -> some View {
         Picker(title, selection: selection) {
             ForEach(Self.options(available: available, including: selection.wrappedValue, excluding: excluded), id: \.self) { identifier in
                 Text(SupportedLanguages.name(of: Locale.Language(identifier: identifier))).tag(identifier)
             }
         }
+    }
+
+    /// The currencies to convert into, by code. The current value stays listed even if it is not one of the usual ones.
+    static func currencyOptions(including current: String) -> [(code: String, name: String)] {
+        let codes = CurrencyCatalog.codes.contains(current) ? CurrencyCatalog.codes : [current] + CurrencyCatalog.codes
+        return codes.map { ($0, CurrencyCatalog.name(of: $0)) }
     }
 
     /// Translation's languages by identifier, without `excluded`. The current value stays listed while they load.

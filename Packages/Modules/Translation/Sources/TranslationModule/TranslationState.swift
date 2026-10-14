@@ -20,6 +20,10 @@ final class TranslationState {
     /// Of the direction last translated; nil until a translation of it finished.
     var pairStatus: PairStatus?
     var isTranslating = false
+    /// What the quick convert found in `input`: units, times, expressions and amounts of money, shown above the translation.
+    var conversions: [Conversion] = []
+    /// `input` is nothing but quantities that were converted, so it is not translated and `output` stays empty.
+    var showsConversionsOnly = false
     /// Why the last translation failed, other than a missing or unsupported language pack.
     var error: String?
     /// Every language Translation supports, for the menus; empty until loaded.
@@ -52,6 +56,9 @@ final class TranslationState {
         case .installed, nil: nil
         }
     }
+
+    /// There is a translation, a language-pack banner or an error to show under the conversions.
+    var hasTranslationContent: Bool { banner != nil || error != nil || !output.isEmpty }
 
     /// Swapping needs a source, so it waits for the first detection when the source is automatic.
     var canSwap: Bool { currentPair != nil }

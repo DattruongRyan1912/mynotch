@@ -144,21 +144,27 @@ struct TranslationTabView: View {
 
     private var outputBox: some View {
         ZStack(alignment: .bottomTrailing) {
-            Group {
-                if let banner = state.banner {
-                    bannerView(banner)
-                } else if let error = state.error {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                } else {
-                    ScrollView {
-                        Text(state.output)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !state.conversions.isEmpty {
+                        ConversionListView(
+                            conversions: state.conversions,
+                            isCompact: !state.showsConversionsOnly,
+                            copy: translator.copy
+                        )
                     }
-                    .scrollIndicators(.automatic)
+                    if !state.showsConversionsOnly {
+                        if !state.conversions.isEmpty, state.hasTranslationContent {
+                            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+                        }
+                        translationContent
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                // Room to scroll the last line clear of the speak and copy buttons.
+                .padding(.bottom, state.output.isEmpty ? 0 : 26)
             }
+            .scrollIndicators(.automatic)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             if !state.output.isEmpty, state.banner == nil {
                 HStack(spacing: 4) {
@@ -170,6 +176,19 @@ struct TranslationTabView: View {
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder private var translationContent: some View {
+        if let banner = state.banner {
+            bannerView(banner)
+        } else if let error = state.error {
+            Label(error, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+        } else {
+            Text(state.output)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     @ViewBuilder private func bannerView(_ banner: TranslationState.Banner) -> some View {

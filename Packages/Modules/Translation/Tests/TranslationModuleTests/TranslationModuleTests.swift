@@ -18,6 +18,10 @@ struct ModuleFixture {
     let keystroke = FakeKeystroke()
     let synthesizer = FakeSynthesizer()
     let installer = FakeInstaller()
+    /// The network: nothing in the tests reaches it, and rates are only asked for when the text has an amount of money.
+    let ratesClient = FakeRatesClient()
+    /// 15 January 2026, noon UTC: winter in the northern hemisphere and 19:00 in Hanoi.
+    let clock = TestClock("2026-01-15T12:00:00Z")
     let pasteboard = NSPasteboard(name: NSPasteboard.Name("MyNotchTests.\(UUID().uuidString)"))
     let module: TranslationModule
     let harness: RegistryHarness
@@ -35,6 +39,13 @@ struct ModuleFixture {
             ) { [replacePauses, handBackPauses] duration in
                 try await (duration == .milliseconds(500) ? replacePauses : handBackPauses).pause()
             },
+            conversion: ConversionSetup(
+                rates: ratesClient,
+                // Hanoi and a metric region, whatever the Mac running the tests is set to.
+                environment: ConversionEnvironment(
+                    now: { [clock] in clock.now }, localZone: { TimeZone(identifier: "Asia/Ho_Chi_Minh")! }, system: { .metric }
+                )
+            ),
             shortcut: nil
         )
         harness = RegistryHarness([module])
@@ -360,5 +371,20 @@ struct ModuleFixture {
         #expect(TranslationSettingsView.options(available: [.vi, .en, .ja], including: "en", excluding: "vi") == ["en", "ja"])
         // A saved value stays listed while the languages load, or if Translation dropped it.
         #expect(TranslationSettingsView.options(available: [.vi, .en], including: "de", excluding: "vi") == ["de", "en"])
+    }
+
+    @Test func quickConvertSettingsStartOffAndInVietnam() {
+        #expect(fixture.keys.convertCurrency.defaultValue == false)
+        #expect(fixture.keys.currencyTarget.defaultValue == "VND")
+        #expect(fixture.keys.firstZone.defaultValue == "America/Los_Angeles")
+        #expect(fixture.keys.secondZone.defaultValue == "Europe/London")
+        #expect(fixture.keys.convertCurrency.name == "module.translation.convertCurrency")
+    }
+
+    @Test func currencyPickerOffersTheUsualOnesAndKeepsTheSavedOne() {
+        let usual = TranslationSettingsView.currencyOptions(including: "VND")
+        #expect(usual.map(\.code) == CurrencyCatalog.codes)
+        #expect(usual.first?.name == "Đồng Việt Nam")
+        #expect(TranslationSettingsView.currencyOptions(including: "CLP").map(\.code) == ["CLP"] + CurrencyCatalog.codes)
     }
 }
