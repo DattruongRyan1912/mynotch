@@ -5,7 +5,7 @@ import Observation
 import SwiftUI
 
 /// The bars of `NowPlayingBars`, drawn as one `CALayer` each and moved straight from the store. Nothing here is SwiftUI state, so
-/// new levels, 30 times a second, change layers and never make the notch's hosting view evaluate or lay out its views.
+/// new levels, about 30 times a second, change layers and never make the notch's hosting view evaluate or lay out its views.
 struct SpectrumBars: NSViewRepresentable {
     let store: NowPlayingStore
 

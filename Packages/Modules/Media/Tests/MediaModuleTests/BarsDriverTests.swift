@@ -81,7 +81,7 @@ import Testing
         #expect(frames.all.last?.levels == [0.25, 0.5, 0.75, 1])
     }
 
-    @Test func aFasterSourceStillRedrawsAtMostThirtyTimesASecond() {
+    @Test func aFasterSourceIsThinnedToAtMostFortyRedrawsASecond() {
         let driver = makePlayingDriver(spectrum: [0, 0, 0, 0])
         frames.all = []
         // 120 sets a second, each different.
@@ -91,23 +91,29 @@ import Testing
         }
         advance(by: .milliseconds(100))
         let inFirstSecond = frames.all.filter { $0.time < 1 }
-        #expect(inFirstSecond.count <= 31)
+        #expect(inFirstSecond.count <= 41)
         #expect(inFirstSecond.count >= 28)
         // The last set is not lost: it is the last picture.
         #expect(frames.all.last?.levels == [Double(Float(120) / 200), 0.5, 0.5, 0.5])
         #expect(scheduler.pendingCount == 0)
     }
 
-    /// The tap's timer jitters around 30 Hz, so some sets arrive a little early and have to wait for their slot; none is lost.
-    @Test func aSourceThatJittersAroundThirtyHertzLosesNothing() {
+    /// The tap's timer is allowed 5 ms of leeway, so its sets come 28 to 38 ms apart. Each is drawn the moment it arrives,
+    /// with nothing scheduled: a timer per set cost a `Task.sleep` and a main-actor hop each, and drift took the rate to 28.
+    @Test func aSourceThatJittersAroundThirtyHertzIsDrawnOnArrivalWithoutATimer() {
         let driver = makePlayingDriver(spectrum: [0, 0, 0, 0])
         frames.all = []
+        let gaps: [Int] = [28, 38, 31, 35, 29, 37, 30, 36, 28, 38]
         for step in 1...60 {
-            advance(by: step.isMultiple(of: 2) ? .microseconds(34_667) : .milliseconds(32))
+            advance(by: .milliseconds(gaps[step % gaps.count]))
             driver.setSpectrum([Float(step) / 100, 0, 0, 0])
+            #expect(frames.all.count == step, "set \(step) was drawn at once")
+            #expect(scheduler.pendingCount == 0, "nothing waits for a slot after set \(step)")
         }
-        advance(by: .milliseconds(100))
         #expect(frames.all.compactMap { $0.levels.first } == (1...60).map { Double(Float($0) / 100) })
+        // Drawn on arrival: 60 sets over about two seconds, 30 a second.
+        let span = (frames.all.last?.time ?? 0) - (frames.all.first?.time ?? 0)
+        #expect(abs(span / 59 - 1.0 / 30) < 0.002)
     }
 
     @Test func identicalLevelsAreNotDrawnAgain() {

@@ -1,16 +1,18 @@
 import Foundation
 import MyNotchCore
 
-/// Decides what the bars show and when it is drawn, so the bars' view only draws what it is handed. The bars redraw at most
-/// 30 times a second, and only while they are on screen with something playing: new bands from the tap draw as they come,
-/// without a timer, and the made-up motion steps on a timer of its own. Time comes from the scheduler and `now`, so tests
-/// move it by hand.
+/// Decides what the bars show and when it is drawn, so the bars' view only draws what it is handed. The bars draw only while
+/// they are on screen with something playing. New bands from the tap draw the moment they arrive, with no timer: the tap
+/// delivers about 30 sets a second, and a source faster than that is thinned to at most 40 draws a second. The made-up motion
+/// steps 30 times a second on a timer of its own. Time comes from the scheduler and `now`, so tests move it by hand.
 final class BarsDriver {
     /// Time between two redraws: the tap delivers about 30 sets a second, and the made-up motion steps at this rate.
     static let interval: Duration = .nanoseconds(33_333_333)
     private static let intervalSeconds: TimeInterval = 0.033_333_333
-    /// A set that arrives this much short of a full interval, as the tap's timer jitters, is drawn at once instead of waiting.
-    private static let tolerance: TimeInterval = 0.0005
+    /// The least time between two draws of tap bands. The tap's timer has 5 ms of leeway, so its sets come 28 to 38 ms apart;
+    /// holding back the early ones for a full interval cost a `Task.sleep` and a main-actor hop each and drifted the rate to
+    /// 28 a second. A quarter of an interval short is drawn on arrival; only a faster source waits for its slot.
+    private static let minimumGap: TimeInterval = intervalSeconds * 0.75
 
     private let scheduler: any Scheduler
     private let now: () -> Date
@@ -78,10 +80,10 @@ final class BarsDriver {
         step = scheduler.schedule(after: Self.interval) { [weak self] in self?.tick() }
     }
 
-    /// Draws now, or in the slot after the last draw when it came too soon.
+    /// Draws now, or in the slot after the last draw when the set came much too soon.
     private func requestDraw() {
         let elapsed = lastDraw.map { now().timeIntervalSince($0) } ?? .infinity
-        if elapsed >= Self.intervalSeconds - Self.tolerance {
+        if elapsed >= Self.minimumGap {
             cancelPending()
             drawNow()
         } else if pending == nil {

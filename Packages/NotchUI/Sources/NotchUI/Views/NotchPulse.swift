@@ -6,10 +6,10 @@ import SwiftUI
 /// symbol at the display's refresh rate for as long as it runs, which keeps the notch's whole hosting view laying out and committing
 /// continuously. The content is drawn once, in a hosting view of its own, and again only when it changes.
 public struct NotchPulse<Content: View>: NSViewRepresentable {
-    /// Opacity at the dimmest point of a pulse.
-    public static var dimmedOpacity: Float { 0.35 }
-    /// Time from full to dimmed, and again from dimmed to full.
-    public static var halfPeriod: CFTimeInterval { 0.8 }
+    /// Opacity at the dimmest point of a pulse; what a repeating pulse symbol effect reaches, measured offscreen.
+    public static var dimmedOpacity: Float { 0.3 }
+    /// Time from full to dimmed, and again from dimmed to full: the symbol effect's period is 2 s.
+    public static var halfPeriod: CFTimeInterval { 1.0 }
 
     let isActive: Bool
     let content: Content
