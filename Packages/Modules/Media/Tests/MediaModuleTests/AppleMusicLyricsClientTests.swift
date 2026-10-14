@@ -288,6 +288,40 @@ enum AppleReplies {
         #expect(log.messages(at: .default).contains("Apple Music account storefront: id=vn stored=us language=- changed=true"))
     }
 
+    @Test func aRefreshedStorefrontStaysInUseForTheRunWhenTheKeychainRefusesIt() async {
+        let store = FakeTokenStore.connected(storefront: "us")
+        let account = AppleMusicAccount(tokens: store)
+        account.load()
+        let log = FakeAppleMusicLog()
+        let client = AppleMusicLyricsClient(client: http, account: account, log: log)
+        store.failsToSave = true
+        route(storefront: AppleReplies.storefront("vn", language: "vi"), syllable: found)
+        #expect(await client.lyrics(forSongID: "1856960468", pace: { true }) == .synced(AppleReplies.lines()))
+        #expect(await client.lyrics(forSongID: "42", pace: { true }) == .synced(AppleReplies.lines()))
+        #expect(await client.lyrics(forSongID: "7", pace: { true }) == .synced(AppleReplies.lines()))
+        // Every lookup is in the account's store, not the stale one the Keychain still holds, and the answer is not asked for again.
+        let paths = http.requests.map { $0.url!.path() }.filter { $0.contains("/catalog/") }
+        #expect(paths.count == 6)
+        #expect(paths.allSatisfy { $0.hasPrefix("/v1/catalog/vn/") })
+        #expect(http.requests.filter { $0.url!.path() == Self.storefrontPath }.count == 1)
+        #expect(http.requests.last?.url?.query == "l%5Blyrics%5D=vi&extend=ttmlLocalizations&l%5Bscript%5D=vi-Latn")
+        #expect(store.values[.storefront] == "us")
+        // The failure is logged, once, with no secret.
+        let errors = log.messages(at: .error)
+        #expect(errors == ["Apple Music could not keep the account storefront in the Keychain: it is used for this run only"])
+    }
+
+    @Test func aStorefrontTheKeychainTookIsNotReportedAsAFailure() async {
+        route(storefront: AppleReplies.storefront("us"), syllable: found)
+        let other = FakeTokenStore.connected(storefront: "vn")
+        let account = AppleMusicAccount(tokens: other)
+        account.load()
+        let client = AppleMusicLyricsClient(client: http, account: account, log: log)
+        _ = await client.lyrics(forSongID: "1856960468", pace: { true })
+        #expect(other.values[.storefront] == "us")
+        #expect(log.messages(at: .error).isEmpty)
+    }
+
     @Test func theSameStorefrontIsNotStoredAgain() async {
         route(storefront: AppleReplies.storefront("vn", language: "vi"), syllable: found)
         _ = await ask()
@@ -309,14 +343,50 @@ enum AppleReplies {
         #expect(tokens.values[.storefront] == "vn")
     }
 
-    @Test func aStorefrontThatIsRefusedIsLoggedAndNotAskedAgainThisRun() async {
+    @Test func aStorefrontThatIsRefusedNeedsASignInLikeARefusedLyricsRequest() async {
+        // 403 40300 is Apple's answer to a user token it does not accept; for lyrics it answers 404, so this is the one signal.
         route(storefront: AppleReplies.forbidden, syllable: found)
-        #expect(await ask() == .synced(AppleReplies.lines()))
-        // A refusal does not need a sign-in by itself: the lyrics decide that.
-        #expect(account.status == .connected(storefront: "vn"))
+        let result = await ask()
+        #expect(result == .unavailable("Apple Music sign-in expired"))
+        #expect(account.status == .needsReauth)
+        #expect(!client.isAvailable)
+        // Nothing of the lookup itself was asked (the developer token was renewed once, which is all a refusal allows).
+        #expect(lookupRequests.allSatisfy { $0.url!.host() == "music.apple.com" })
         #expect(log.messages(at: .default).contains { $0.hasPrefix(#"Apple Music storefront: status=403 error="-" code=40300 storefront=vn"#) })
-        _ = await ask("42")
-        #expect(calls.filter { $0 == Self.storefrontCall }.count == 1)
+        let before = http.requests.count
+        #expect(await ask("42").isUnavailable)
+        #expect(http.requests.count == before)
+    }
+
+    @Test func aStorefrontRefusedTwiceByAnExpiredDeveloperTokenNeedsASignInToo() async {
+        http.handler = { request in
+            switch request.url!.host() {
+            case "music.apple.com": request.url!.path() == "/" ? AppleReplies.page : AppleReplies.bundle(containing: [AppleReplies.freshToken])
+            default: AppleReplies.rejected
+            }
+        }
+        #expect(await ask() == .unavailable("Apple Music sign-in expired"))
+        #expect(calls == [Self.storefrontCall, "music.apple.com/", "music.apple.com/assets/index-a1b2c3.js", Self.storefrontCall])
+        #expect(account.status == .needsReauth)
+    }
+
+    @Test func aStorefrontRefusalWhoseRenewalCouldNotReachTheWebPageIsNoReasonToSignInAgain() async {
+        http.handler = { request in
+            if request.url!.host() == "music.apple.com" { throw URLError(.notConnectedToInternet) }
+            return AppleReplies.forbidden
+        }
+        #expect(await ask().isUnavailable)
+        #expect(account.status == .connected(storefront: "vn"))
+    }
+
+    @Test func aRefusalAtConnectIsLeftToTheLogAndTheStoredStorefrontIsKept() async {
+        let store = FakeTokenStore()
+        let account = AppleMusicAccount(tokens: store)
+        let client = AppleMusicLyricsClient(client: http, account: account, log: log)
+        http.reply(AppleReplies.forbidden)
+        #expect(await client.connect(AppleMusicCredentials(developerToken: "dev-token-fake", userToken: "user-token-fake", storefront: "us")))
+        #expect(account.status == .connected(storefront: "us"))
+        #expect(log.messages(at: .default).contains { $0.hasPrefix("Apple Music storefront: status=403") })
     }
 
     @Test(arguments: [500, 503, 429])
@@ -337,15 +407,64 @@ enum AppleReplies {
         #expect(await ask() == .synced(AppleReplies.lines()))
         _ = await ask("42")
         #expect(calls.filter { $0 == Self.storefrontCall }.count == 2)
-        #expect(log.messages(at: .default).contains("Apple Music storefront: failed=Request failed (NSURLErrorDomain -1001) storefront=vn userToken=attached length=15 userAgent=system default"))
+        #expect(log.messages(at: .default).contains("Apple Music storefront: failed=Request failed (NSURLErrorDomain -1001) storefront=vn userToken=attached length=15"))
     }
 
     @Test func theStorefrontStepIsLoggedAtNoticeLevelWithItsStatusAndTheIdItReturned() async {
         route(storefront: AppleReplies.storefront("vn", language: "vi"), syllable: found)
         _ = await ask()
         let notice = log.messages(at: .default)
-        #expect(notice.contains("Apple Music storefront: status=200 storefront=vn userToken=attached length=15 userAgent=system default"))
+        #expect(notice.contains("Apple Music storefront: status=200 storefront=vn userToken=attached length=15"))
         #expect(notice.contains("Apple Music account storefront: id=vn stored=vn language=vi changed=false"))
+    }
+
+    // MARK: a new sign-in starts the run over
+
+    @Test func connectingAgainForgetsWhatTheRunLearnedAboutTheOldAccount() async throws {
+        let store = FakeTokenStore()
+        let client = await clientAfterConnecting(page: "us", account: "vn", store: store)
+        // A probe finds that the MusicKit storefront works for the old account, and that variant is remembered.
+        http.handler = { request in
+            let path = request.url!.path()
+            if path == Self.storefrontPath { return AppleReplies.storefront("vn") }
+            if path.hasSuffix("/lyrics") || path.hasSuffix("/syllable-lyrics") {
+                return path.contains("/catalog/us/") && request.url!.query != nil ? AppleReplies.lyrics(ttml: AppleReplies.ttml()) : AppleReplies.noRelatedResources
+            }
+            return AppleReplies.catalog()
+        }
+        #expect(await client.lyrics(forSongID: "1856960468", pace: { true }) == .synced(AppleReplies.lines()))
+        http.forgetRequests()
+
+        // The user signs in again, as a Thai account.
+        http.reply(AppleReplies.storefront("th", language: "th"))
+        #expect(await client.connect(AppleMusicCredentials(developerToken: "dev-token-fake", userToken: "user-token-fake", storefront: "th")))
+        http.forgetRequests()
+        route(storefront: AppleReplies.storefront("th", language: "th"), syllable: AppleReplies.noRelatedResources, lyrics: AppleReplies.noRelatedResources)
+        #expect(await client.lyrics(forSongID: "1856960468", pace: { true }) == .unavailable(AppleMusicLyricsClient.missingLyricsReason))
+        try #require(http.requests.count == 4)
+        // The new account's store and language, with the parameters, and the probe runs again.
+        #expect(http.requests.map { $0.url!.path() } == [
+            "/v1/catalog/th/songs/1856960468", "/v1/catalog/th/songs/1856960468/syllable-lyrics",
+            "/v1/catalog/th/songs/1856960468/lyrics", "/v1/catalog/th/songs/1856960468/lyrics",
+        ])
+        #expect(http.requests[1].url?.query == "l%5Blyrics%5D=th&extend=ttmlLocalizations&l%5Bscript%5D=th-Thai")
+        #expect(http.requests[3].url?.query == nil)
+        #expect(store.values[.storefront] == "th")
+    }
+
+    @Test func theStorefrontIsAskedAgainAfterANewSignIn() async {
+        let store = FakeTokenStore()
+        let client = await clientAfterConnecting(page: "us", account: "vn", store: store)
+        route(storefront: AppleReplies.storefront("vn"), syllable: found)
+        _ = await client.lyrics(forSongID: "1856960468", pace: { true })
+        #expect(!calls.contains(Self.storefrontCall))
+        // A sign-in whose storefront request failed leaves the next lookup to ask.
+        http.forgetRequests()
+        http.reply(HTTPReply(status: 503))
+        #expect(await client.connect(AppleMusicCredentials(developerToken: "dev-token-fake", userToken: "user-token-fake", storefront: "vn")))
+        route(storefront: AppleReplies.storefront("vn"), syllable: found)
+        _ = await client.lyrics(forSongID: "1856960468", pace: { true })
+        #expect(calls.filter { $0 == Self.storefrontCall }.count == 2)
     }
 
     // MARK: the catalog
@@ -413,6 +532,22 @@ enum AppleReplies {
     }
 
     // MARK: ttmlLocalizations
+
+    @Test func theLogSaysWhichAttributeSuppliedTheLyrics() async {
+        route(syllable: AppleReplies.lyrics(ttml: AppleReplies.ttml(count: 3, tag: "plainttml"), localizations: AppleReplies.localizedTTML(count: 5, tag: "local")))
+        _ = await ask()
+        #expect(log.messages(at: .default).contains("Apple Music syllable-lyrics: lyrics from ttmlLocalizations"))
+
+        route(syllable: AppleReplies.lyrics(ttml: AppleReplies.ttml(count: 3, tag: "plainttml"), localizations: nil))
+        _ = await ask("42")
+        #expect(log.messages(at: .default).contains("Apple Music syllable-lyrics: lyrics from ttml"))
+
+        route(syllable: AppleReplies.lyrics(ttml: AppleReplies.ttml(count: 3, tag: "plainttml"), localizations: "<tt><unclosed>"))
+        _ = await ask("7")
+        #expect(log.messages(at: .default).filter { $0 == "Apple Music syllable-lyrics: lyrics from ttml" }.count == 2)
+        // Nothing of the lyrics themselves.
+        #expect(log.messages.allSatisfy { !$0.contains("plainttml") && !$0.contains("local 1") })
+    }
 
     @Test func theLocalizationsAreReadBeforeTheTTML() async {
         route(syllable: AppleReplies.lyrics(ttml: AppleReplies.ttml(count: 3, tag: "plainttml"), localizations: AppleReplies.localizedTTML(count: 5, tag: "local")))
@@ -556,8 +691,8 @@ enum AppleReplies {
         _ = await client.lyrics(forSongID: "1856960468", pace: { true })
         let notice = log.messages(at: .default)
         #expect(notice.contains("Apple Music lyrics-probe(params+account-storefront): skipped, the same as the normal request"))
-        #expect(notice.contains(#"Apple Music lyrics-probe(params+musickit-storefront): status=404 error="No related resources" code=40403 storefront=us userToken=attached length=15 userAgent=system default query=\#(Self.query)"#))
-        #expect(notice.contains(#"Apple Music lyrics-probe(no-params+account-storefront): status=404 error="No related resources" code=40403 storefront=vn userToken=attached length=15 userAgent=system default"#))
+        #expect(notice.contains(#"Apple Music lyrics-probe(params+musickit-storefront): status=404 error="No related resources" code=40403 storefront=us userToken=attached length=15 query=\#(Self.query)"#))
+        #expect(notice.contains(#"Apple Music lyrics-probe(no-params+account-storefront): status=404 error="No related resources" code=40403 storefront=vn userToken=attached length=15"#))
         #expect(log.messages(at: .error).contains { $0.contains("probe") && $0.contains("params+account-storefront=skipped params+musickit-storefront=404 no-params+account-storefront=404") })
     }
 
@@ -581,13 +716,11 @@ enum AppleReplies {
     }
 
     @Test func aStorefrontThatCouldNotBeAskedLeavesOnlyTheBareVariantAgainstTheStoredOne() async {
-        route(storefront: AppleReplies.forbidden, syllable: AppleReplies.noRelatedResources, lyrics: AppleReplies.noRelatedResources)
+        route(storefront: HTTPReply(status: 503), syllable: AppleReplies.noRelatedResources, lyrics: AppleReplies.noRelatedResources)
         #expect(await ask() == .unavailable(AppleMusicLyricsClient.missingLyricsReason))
         #expect(log.messages(at: .default).contains("Apple Music lyrics-probe(params+account-storefront): skipped, the account's storefront is not known"))
-        // The refusal made the lookup try to renew the developer token (the web page is asked, and says nothing useful).
-        let apple = lookupRequests.filter { $0.url!.host() == "amp-api.music.apple.com" }
-        #expect(apple.count == 4)
-        #expect(apple.last?.url?.query == nil)
+        #expect(lookupRequests.count == 4)
+        #expect(lookupRequests.last?.url?.query == nil)
     }
 
     @Test func theMusicKitStorefrontThatWorksIsTheAnswerAndIsUsedFromThenOn() async throws {
@@ -603,7 +736,7 @@ enum AppleReplies {
         }
         #expect(await client.lyrics(forSongID: "1856960468", pace: { true }) == .synced(AppleReplies.lines(count: 5, tag: "apple")))
         #expect(http.requests.count == 4)
-        #expect(log.messages(at: .default).contains { $0.hasPrefix("Apple lyrics variant that works: params+musickit-storefront") && $0.contains("storefront=us") })
+        #expect(log.messages(at: .default).contains { $0.hasPrefix("Apple lyrics variant that works: params+musickit-storefront") && $0.contains("storefront=us") && $0.hasSuffix("source=ttml") })
 
         // The next song is asked the way that works, in the MusicKit storefront, with the parameters.
         #expect(await client.lyrics(forSongID: "42", pace: { true }) == .synced(AppleReplies.lines(count: 5, tag: "apple")))
@@ -655,26 +788,47 @@ enum AppleReplies {
         #expect(http.requests.count == 4)
     }
 
+    @Test func aProbeThatWasCutShortIsNotSpent() async {
+        route(syllable: AppleReplies.noRelatedResources, lyrics: AppleReplies.noRelatedResources)
+        var paced = 0
+        _ = await client.lyrics(forSongID: "1856960468", pace: { paced += 1; return paced <= 4 })
+        #expect(http.requests.count == 4)
+        // The next mismatch probes: the catalog, both endpoints, and the bare variant.
+        #expect(await ask() == .unavailable(AppleMusicLyricsClient.missingLyricsReason))
+        #expect(http.requests.count == 8)
+        #expect(lookupRequests.last?.url?.query == nil)
+        // And that one is the run's probe.
+        #expect(await ask() == .unavailable(AppleMusicLyricsClient.missingLyricsReason))
+        #expect(http.requests.count == 11)
+    }
+
     // MARK: log
 
     @Test func everyStepIsLoggedAtNoticeLevelWithItsStatusAndAppleSError() async {
         route(syllable: AppleReplies.noRelatedResources, lyrics: AppleReplies.noRelatedResources)
         _ = await ask()
         let steps = log.messages(at: .default)
-        #expect(steps.contains("Apple Music storefront: status=200 storefront=vn userToken=attached length=15 userAgent=system default"))
-        #expect(steps.contains("Apple Music catalog-song: status=200 storefront=vn userToken=attached length=15 userAgent=system default"))
-        #expect(steps.contains(#"Apple Music syllable-lyrics: status=404 error="No related resources" code=40400 storefront=vn userToken=attached length=15 userAgent=system default query=\#(Self.query)"#))
-        #expect(steps.contains(#"Apple Music lyrics: status=404 error="No related resources" code=40400 storefront=vn userToken=attached length=15 userAgent=system default query=\#(Self.query)"#))
+        #expect(steps.contains("Apple Music storefront: status=200 storefront=vn userToken=attached length=15"))
+        #expect(steps.contains("Apple Music catalog-song: status=200 storefront=vn userToken=attached length=15"))
+        #expect(steps.contains(#"Apple Music syllable-lyrics: status=404 error="No related resources" code=40400 storefront=vn userToken=attached length=15 query=\#(Self.query)"#))
+        #expect(steps.contains(#"Apple Music lyrics: status=404 error="No related resources" code=40400 storefront=vn userToken=attached length=15 query=\#(Self.query)"#))
         #expect(steps.contains { $0.hasPrefix(#"Apple Music lyrics-probe(no-params+account-storefront): status=404"#) })
         #expect(log.messages(at: .info).isEmpty)
+    }
+
+    @Test func noUserAgentIsLoggedWhereNoneIsSet() async {
+        route(syllable: AppleReplies.noRelatedResources, lyrics: AppleReplies.noRelatedResources)
+        _ = await ask()
+        #expect(!log.messages.isEmpty)
+        #expect(log.messages.allSatisfy { !$0.contains("userAgent") })
     }
 
     @Test func aStepThatNeverGotAnAnswerIsLogged() async {
         http.handler = { _ in throw URLError(.notConnectedToInternet) }
         _ = await ask()
         #expect(log.messages(at: .default) == [
-            "Apple Music storefront: failed=Request failed (NSURLErrorDomain -1009) storefront=vn userToken=attached length=15 userAgent=system default",
-            "Apple Music catalog-song: failed=Request failed (NSURLErrorDomain -1009) storefront=vn userToken=attached length=15 userAgent=system default",
+            "Apple Music storefront: failed=Request failed (NSURLErrorDomain -1009) storefront=vn userToken=attached length=15",
+            "Apple Music catalog-song: failed=Request failed (NSURLErrorDomain -1009) storefront=vn userToken=attached length=15",
         ])
     }
 
@@ -688,8 +842,8 @@ enum AppleReplies {
         #expect(await ask() == .notFound)
         let steps = log.messages(at: .default)
         #expect(steps.contains { $0.hasPrefix("Apple Music storefront: status=401") && $0.contains("code=40100") })
-        #expect(steps.contains("Apple Music token-refresh(page): status=200 storefront=- userToken=none userAgent=system default"))
-        #expect(steps.contains("Apple Music token-refresh(script): status=200 storefront=- userToken=none userAgent=system default"))
+        #expect(steps.contains("Apple Music token-refresh(page): status=200 storefront=- userToken=none"))
+        #expect(steps.contains("Apple Music token-refresh(script): status=200 storefront=- userToken=none"))
     }
 
     @Test func noLogLineEverHoldsASecretOrALyric() async {
@@ -830,7 +984,7 @@ enum AppleReplies {
         }
         let result = await ask()
         #expect(result.isUnavailable)
-        #expect(calls == [Self.storefrontCall, "music.apple.com/", "music.apple.com/assets/index-a1b2c3.js", Self.storefrontCall, Self.api])
+        #expect(calls == [Self.storefrontCall, "music.apple.com/", "music.apple.com/assets/index-a1b2c3.js", Self.storefrontCall])
         #expect(account.status == .needsReauth)
         #expect(!client.isAvailable)
 
@@ -864,7 +1018,7 @@ enum AppleReplies {
     @Test func aPageWithoutAScriptNeedsASignIn() async {
         http.handler = { request in request.url!.host() == "music.apple.com" ? HTTPReply(status: 200, body: Data("<html><body>no scripts</body></html>".utf8)) : AppleReplies.rejected }
         #expect(await ask().isUnavailable)
-        #expect(calls == [Self.storefrontCall, "music.apple.com/", Self.api])
+        #expect(calls == [Self.storefrontCall, "music.apple.com/"])
         #expect(account.status == .needsReauth)
     }
 

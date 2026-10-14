@@ -6,7 +6,9 @@ import os
 /// caller decides when each one may go out.
 ///
 /// The account's own storefront is asked once per run (`/v1/me/storefront`): MusicKit's `storefrontId` can say "us" for
-/// an account whose lyrics are licensed in another country, and the lyrics are asked in the account's. The lyrics requests
+/// an account whose lyrics are licensed in another country, and the lyrics are asked in the account's (kept for the run
+/// even when the Keychain will not take it). A refusal there is Apple saying it does not accept the user token, which a
+/// lyrics request says as a 404 that looks like "no lyrics": the account then needs a sign-in. The lyrics requests
 /// carry the parameters the web player's current tools send (`l[lyrics]`, `extend=ttmlLocalizations`, `l[script]`).
 ///
 /// The catalog is asked next whether the song has lyrics at all: Apple answers a lyrics request it will not serve with
@@ -42,7 +44,8 @@ final class AppleMusicLyricsClient {
     private let client: any HTTPClient
     private let log: any AppleMusicLog
     let account: AppleMusicAccount
-    /// What the account's storefront answered this run.
+    /// What the account's storefront answered this run. It wins over the stored storefront, which the Keychain may have
+    /// refused to replace.
     private var accountStorefront: AccountStorefront?
     /// The storefront MusicKit gave when it is not the account's; tried by the probe.
     private var musicKitStorefront: String?
@@ -79,7 +82,8 @@ final class AppleMusicLyricsClient {
     }
 
     private enum Answer {
-        case found(LyricsResult)
+        /// Lyrics, and which attribute of the answer held them (`ttmlLocalizations` or `ttml`).
+        case found(LyricsResult, source: String)
         /// The catalog entry of the song; nil where it does not say.
         case listing(hasLyrics: Bool?, hasTimeSyncedLyrics: Bool?)
         case account(AccountStorefront)
@@ -109,9 +113,10 @@ final class AppleMusicLyricsClient {
     func lyrics(forSongID id: String, pace: () async -> Bool) async -> LyricsResult {
         // The id goes into a path: only a catalog song id (digits) is asked about.
         guard !id.isEmpty, id.utf8.allSatisfy({ (48...57).contains($0) }) else { return .notFound }
-        guard isAvailable, let stored = account.credentials, var storefront = stored.storefront else {
+        guard isAvailable, let stored = account.credentials, let storedStorefront = stored.storefront else {
             return .unavailable("Apple Music is not connected")
         }
+        var storefront = accountStorefront?.id ?? storedStorefront
         var credentials = stored
         var refresh: Refresh?
         var steps: [String] = []
@@ -121,7 +126,9 @@ final class AppleMusicLyricsClient {
             switch await fetch(request, step: step.rawValue, storefront: storefront, pace: pace) {
             case .reply(let reply):
                 steps.append("\(step.rawValue)=\(reply.status)")
-                return parse(reply)
+                let answer = parse(reply)
+                if case .found(_, let source) = answer { write(.default, "Apple Music \(step.rawValue): lyrics from \(source)") }
+                return answer
             case .failed(let reason):
                 steps.append("\(step.rawValue)=failed")
                 return .unavailable(reason)
@@ -151,10 +158,14 @@ final class AppleMusicLyricsClient {
             switch await ask(.accountStorefront, Self.accountStorefrontAnswer) {
             case .account(let answer):
                 hasCheckedStorefront = true
-                storefront = adopt(answer, stored: storefront)
-            case .notFound, .rejected:
-                // Nothing to learn from asking again; whether the sign-in is good is for the lyrics to say.
+                storefront = adopt(answer, stored: storefront, persist: true)
+            case .notFound:
+                // No entry, or an id that is no country: nothing to learn from asking again.
                 hasCheckedStorefront = true
+            case .rejected:
+                // Refused after the one renewal of the developer token: the user token is not accepted, which a lyrics request
+                // would not say (it answers 404, as for a song without lyrics). Same as a refused lyrics request.
+                return signInExpired()
             default:
                 break
             }
@@ -176,7 +187,7 @@ final class AppleMusicLyricsClient {
         // Word-by-word lyrics first, the line-synced ones when there are none.
         for step in [Step.syllableLyrics, .lyrics] {
             switch await ask(step, Self.lyricsAnswer) {
-            case .found(let result): return result
+            case .found(let result, _): return result
             case .notFound, .listing, .account: continue
             case .rejected: return signInExpired()
             case .unavailable(let reason): return .unavailable(reason)
@@ -200,10 +211,16 @@ final class AppleMusicLyricsClient {
     /// from the page, which is kept for the probe; the page's is used when Apple does not answer. False (with the reason
     /// in `account.problem`) when there is none or the Keychain refuses; nothing is stored then.
     func connect(_ credentials: AppleMusicCredentials) async -> Bool {
+        // A new sign-in is a new account as far as the run is concerned: nothing learned about the last one applies.
+        accountStorefront = nil
+        musicKitStorefront = nil
+        hasCheckedStorefront = false
+        workingVariant = nil
+        hasProbed = false
         var credentials = credentials
         if let answer = await storefront(for: credentials) {
             hasCheckedStorefront = true
-            credentials.storefront = adopt(answer, stored: credentials.storefront)
+            credentials.storefront = adopt(answer, stored: credentials.storefront, persist: false)
         }
         guard credentials.storefront != nil else {
             account.problem = Self.storefrontProblem
@@ -213,15 +230,16 @@ final class AppleMusicLyricsClient {
     }
 
     /// Takes what the account's storefront said: remembers it and its language, keeps the one it replaces (MusicKit's) for
-    /// the probe, stores the new one. Returns the storefront to use.
-    private func adopt(_ answer: AccountStorefront, stored: String?) -> String {
+    /// the probe, and stores the new one unless `persist` is false (`connect` stores it with the rest). A Keychain that
+    /// refuses is logged; the answer is used for the run all the same. Returns the storefront to use.
+    private func adopt(_ answer: AccountStorefront, stored: String?, persist: Bool) -> String {
         accountStorefront = answer
         let changed = stored != answer.id
-        if let stored, changed {
-            musicKitStorefront = stored
-            account.replaceStorefront(answer.id)
-        }
+        if let stored, changed { musicKitStorefront = stored }
         write(.default, "Apple Music account storefront: id=\(answer.id) stored=\(stored ?? "-") language=\(answer.language ?? "-") changed=\(changed)")
+        if persist, changed, !account.replaceStorefront(answer.id) {
+            write(.error, "Apple Music could not keep the account storefront in the Keychain: it is used for this run only")
+        }
         return answer.id
     }
 
@@ -243,7 +261,6 @@ final class AppleMusicLyricsClient {
     ) async -> LyricsResult {
         write(.error, "Apple Music lists lyrics for the song but returned none: \(steps.joined(separator: " ")) storefront=\(storefront) userToken=\(Self.describe(userToken: credentials.userToken))")
         guard !hasProbed else { return .unavailable(Self.missingLyricsReason) }
-        hasProbed = true
         let variants = [
             Variant(name: "params+account-storefront", storefront: accountStorefront?.id, usesLyricParameters: true),
             Variant(name: "params+musickit-storefront", storefront: musicKitStorefront, usesLyricParameters: true),
@@ -267,16 +284,19 @@ final class AppleMusicLyricsClient {
             switch await fetch(request, step: step, storefront: variantStorefront, pace: pace) {
             case .failed(let reason):
                 results.append("\(variant.name)=failed")
+                // A probe cut short is not spent: the next mismatch tries again.
                 if reason == Self.stoppedReason { return .unavailable(reason) }
             case .reply(let reply):
                 results.append("\(variant.name)=\(reply.status)")
-                if case .found(let lyrics) = Self.lyricsAnswer(reply) {
+                if case .found(let lyrics, let source) = Self.lyricsAnswer(reply) {
+                    hasProbed = true
                     workingVariant = variant
-                    write(.default, "Apple lyrics variant that works: \(variant.details)")
+                    write(.default, "Apple lyrics variant that works: \(variant.details) source=\(source)")
                     return lyrics
                 }
             }
         }
+        hasProbed = true
         write(.error, "Apple Music lyrics probe: no variant returned the lyrics: \(results.joined(separator: " "))")
         return .unavailable(Self.missingLyricsReason)
     }
@@ -373,13 +393,14 @@ final class AppleMusicLyricsClient {
     }
 
     /// The localizations first (the answer to `extend=ttmlLocalizations`), then the plain TTML: whichever holds lyrics.
+    /// The log says which did, so a real run settles whether the order matters.
     private static func lyricsAnswer(_ reply: HTTPReply) -> Answer {
         answer(for: reply) { body in
             guard let envelope = try? JSONDecoder().decode(Envelope.self, from: body) else { return .unavailable("Unreadable answer") }
             // No TTML, or TTML that is no lyrics: the same as nothing there.
             let attributes = envelope.data?.first?.attributes
-            for ttml in [attributes?.ttmlLocalizations, attributes?.ttml] {
-                if let ttml, let lyrics = TTMLLyricsParser.parse(ttml) { return .found(lyrics) }
+            for (source, ttml) in [("ttmlLocalizations", attributes?.ttmlLocalizations), ("ttml", attributes?.ttml)] {
+                if let ttml, let lyrics = TTMLLyricsParser.parse(ttml) { return .found(lyrics, source: source) }
             }
             return .notFound
         }
@@ -436,13 +457,13 @@ final class AppleMusicLyricsClient {
     }
 
     /// One line per request, at the default (notice) level that the log keeps on disk: what was asked, how Apple answered,
-    /// and what was attached. Whether a user token went along and how long it is, never its value; the user agent as set,
-    /// or the system's when the request sets none; the lyric parameters, which hold no secret.
+    /// and what was attached. Whether a user token went along and how long it is, never its value; the lyric parameters,
+    /// which hold no secret; a user agent only if the request sets one (none does: the system's is not readable here).
     private func record(_ step: String, of request: URLRequest, storefront: String?, outcome: String) {
         let userToken = request.value(forHTTPHeaderField: "Media-User-Token").map { Self.describe(userToken: $0) } ?? "none"
-        let userAgent = request.value(forHTTPHeaderField: "User-Agent") ?? "system default"
+        let userAgent = request.value(forHTTPHeaderField: "User-Agent").map { " userAgent=\($0)" } ?? ""
         let query = request.url?.query.map { " query=\($0)" } ?? ""
-        write(.default, "Apple Music \(step): \(outcome) storefront=\(storefront ?? "-") userToken=\(userToken) userAgent=\(userAgent)\(query)")
+        write(.default, "Apple Music \(step): \(outcome) storefront=\(storefront ?? "-") userToken=\(userToken)\(userAgent)\(query)")
     }
 
     private static func describe(userToken: String) -> String {

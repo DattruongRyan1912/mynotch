@@ -143,7 +143,7 @@ import Testing
     @Test func aStorefrontTheAccountReportsReplacesTheStoredOneAndTheStatus() {
         let account = account(FakeTokenStore.connected(storefront: "us"))
         account.load()
-        account.replaceStorefront("vn")
+        #expect(account.replaceStorefront("vn"))
         #expect(account.status == .connected(storefront: "vn"))
         #expect(account.credentials?.storefront == "vn")
         #expect(account.credentials?.developerToken == "dev-token-fake")
@@ -155,7 +155,7 @@ import Testing
         let account = account(tokens)
         account.load()
         account.markNeedsReauth()
-        account.replaceStorefront("vn")
+        #expect(account.replaceStorefront("vn"))
         #expect(account.status == .needsReauth)
         #expect(tokens.values[.storefront] == "vn")
     }
@@ -165,14 +165,14 @@ import Testing
         let account = account(tokens)
         account.load()
         tokens.failsToSave = true
-        account.replaceStorefront("vn")
+        #expect(!account.replaceStorefront("vn"))
         #expect(account.status == .connected(storefront: "us"))
         #expect(tokens.values[.storefront] == "us")
     }
 
     @Test func replacingTheStorefrontOfADisconnectedAccountDoesNothing() {
         let account = account()
-        account.replaceStorefront("vn")
+        #expect(!account.replaceStorefront("vn"))
         #expect(account.status == .notConnected)
         #expect(store.values.isEmpty)
     }
