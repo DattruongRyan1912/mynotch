@@ -3,6 +3,7 @@ import MyNotchCore
 import NotchUI
 import Observation
 import SwiftUI
+import YouTubeBridgeKit
 
 /// Setting names and defaults in one place, shared by the running module and the Settings rows.
 struct MediaSettingsKeys {
@@ -16,6 +17,9 @@ struct MediaSettingsKeys {
     let realSpectrum: SettingKey<Bool>
     /// Synced lyrics from lrclib.net. Off by default: it sends each new track's name, artist, album and length there.
     let lyrics: SettingKey<Bool>
+    /// Lyrics from the captions the user turned on in a YouTube video in Chrome, which the extension hands over on this
+    /// Mac. Off by default; it opens a socket for the helper that Chrome starts, and sends nothing anywhere.
+    let youtubeCaptions: SettingKey<Bool>
 
     init(_ settings: ModuleSettings) {
         showActivity = settings.key("showActivity", default: true)
@@ -23,6 +27,7 @@ struct MediaSettingsKeys {
         hiddenApps = settings.key("hiddenApps", default: [])
         realSpectrum = settings.key("realSpectrum", default: false)
         lyrics = settings.key("lyrics", default: false)
+        youtubeCaptions = settings.key("youtubeCaptions", default: false)
     }
 }
 
@@ -68,6 +73,22 @@ public final class MediaModule: FeatureModule {
     private var lyricsTask: Task<Void, Never>?
     /// Counts track changes, so a retry planned for an earlier track finds out it is stale.
     private var lyricsEpoch = 0
+    /// What the Settings rows show of the Chrome bridge, and where its buttons put the files.
+    let youtubeBridge = YouTubeBridgeModel()
+    /// nil is the standard place in the module's storage.
+    private let youtubeSocketPath: String?
+    /// nil is the real installer, which needs the module's storage and so is made with the Settings rows.
+    private let youtubeSetup: YouTubeBridgeSetup?
+    private var youtubeCaptionsEnabled = false
+    /// What the extension has sent; memory only.
+    private var captionStore = YouTubeCaptionStore()
+    /// Set while the setting is on and the socket could be opened.
+    private var youtubeServer: YouTubeBridgeServer?
+    /// The socket could not be opened; it is tried again only after the setting was switched off and on.
+    private var youtubeListenFailed = false
+    /// The captions the lyric row shows, nil while it shows something else. Compared, so the row is assigned once per
+    /// arrival rather than with every position update.
+    private var shownCaptions: (videoID: String, revision: Int)?
     /// Track the published activity belongs to; nil while none is published. Compared so the activity is
     /// set once per track: everything that changes while a track plays is read by its views from `store`.
     private var publishedTrack: TrackIdentity?
@@ -105,11 +126,13 @@ public final class MediaModule: FeatureModule {
         lyricsClient: any HTTPClient,
         tokens: any TokenStore,
         signIn: any AppleMusicSignIn,
-        lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed
+        lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed,
+        youtubeSocketPath: String? = nil,
+        youtubeSetup: YouTubeBridgeSetup? = nil
     ) {
         self.init(
             makeSource: { _ in source }, spectrum: spectrum, lyricsClient: lyricsClient,
-            tokens: tokens, signIn: signIn, lookUpApp: lookUpApp
+            tokens: tokens, signIn: signIn, lookUpApp: lookUpApp, youtubeSocketPath: youtubeSocketPath, youtubeSetup: youtubeSetup
         )
     }
 
@@ -119,8 +142,12 @@ public final class MediaModule: FeatureModule {
         lyricsClient: any HTTPClient,
         tokens: any TokenStore,
         signIn: any AppleMusicSignIn,
-        lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed
+        lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed,
+        youtubeSocketPath: String? = nil,
+        youtubeSetup: YouTubeBridgeSetup? = nil
     ) {
+        self.youtubeSocketPath = youtubeSocketPath
+        self.youtubeSetup = youtubeSetup
         self.makeSource = makeSource
         self.spectrum = spectrum
         self.lyricsClient = lyricsClient
@@ -156,7 +183,8 @@ public final class MediaModule: FeatureModule {
             let changes = Observations {
                 (
                     settings.value(keys.showActivity), settings.value(keys.pauseGraceSeconds),
-                    settings.value(keys.hiddenApps), settings.value(keys.realSpectrum), settings.value(keys.lyrics)
+                    settings.value(keys.hiddenApps), settings.value(keys.realSpectrum), settings.value(keys.lyrics),
+                    settings.value(keys.youtubeCaptions)
                 )
             }
             for await _ in changes { self?.settingsChanged() }
@@ -185,8 +213,11 @@ public final class MediaModule: FeatureModule {
         lyricsTask?.cancel()
         lyricsTask = nil
         lyricsTrack = nil
+        shownCaptions = nil
         lyricsService?.shutDown()
         lyricsService = nil
+        youtubeCaptionsEnabled = false
+        stopYouTubeBridge()
         signIn.close()
         context = nil
         cancelDeadline()
@@ -211,11 +242,24 @@ public final class MediaModule: FeatureModule {
             hiddenApps: environment.settings.binding(keys.hiddenApps),
             realSpectrum: environment.settings.binding(keys.realSpectrum),
             lyrics: environment.settings.binding(keys.lyrics),
+            youtubeCaptions: environment.settings.binding(keys.youtubeCaptions),
+            youtubeBridge: youtubeBridgeModel(for: environment),
             store: store,
             appleAccount: appleAccount,
             connectAppleMusic: { [weak self] in self?.connectAppleMusic() },
             disconnectAppleMusic: { [weak self] in Task { await self?.disconnectAppleMusic() } }
         ))
+    }
+
+    /// Installing the bridge turns `youtubeCaptions` on, since the captions come over a socket that is open only while it is.
+    func youtubeBridgeModel(for environment: ModuleSettingsEnvironment) -> YouTubeBridgeModel {
+        let settings = environment.settings
+        let key = MediaSettingsKeys(settings).youtubeCaptions
+        youtubeBridge.configure(
+            setup: youtubeSetup ?? .system(storageDirectory: environment.storage.directory),
+            didInstall: { settings.set(true, for: key) }
+        )
+        return youtubeBridge
     }
 
     /// Opens the sign-in window; the account is connected once the window has found the tokens.
@@ -283,6 +327,8 @@ public final class MediaModule: FeatureModule {
         policy.hiddenBundleIDs = Set(settings.value(keys.hiddenApps))
         realSpectrum = settings.value(keys.realSpectrum)
         lyricsEnabled = settings.value(keys.lyrics)
+        youtubeCaptionsEnabled = settings.value(keys.youtubeCaptions)
+        updateYouTubeBridge()
     }
 
     private func evaluate(at now: Date) {
@@ -307,6 +353,16 @@ public final class MediaModule: FeatureModule {
     /// the track has no key (an advertisement, no length) or nothing plays. Position and play-state updates leave
     /// the key as it is, so they never fetch.
     private func refreshLyrics() {
+        if let captions = matchedCaptions() {
+            showCaptions(captions)
+            return
+        }
+        if shownCaptions != nil {
+            // What was fetched for the track was replaced by the captions, so the lookup starts again (from the cache if it can).
+            shownCaptions = nil
+            lyricsTrack = nil
+            store.showLyrics(nil)
+        }
         let track = lyricsEnabled ? TrackKey(store.state) : nil
         guard track != lyricsTrack else { return }
         lyricsTask?.cancel()
@@ -346,6 +402,68 @@ public final class MediaModule: FeatureModule {
         case .instrumental, .notFound:
             break
         }
+    }
+
+    // MARK: YouTube captions
+
+    /// Listens for the Chrome helper only while the setting is on.
+    private func updateYouTubeBridge() {
+        guard let context else { return }
+        guard youtubeCaptionsEnabled else {
+            stopYouTubeBridge()
+            return
+        }
+        guard youtubeServer == nil, !youtubeListenFailed else { return }
+        let path = youtubeSocketPath ?? YouTubeSocket.path(inStorageDirectory: context.storage.directory)
+        let server = YouTubeBridgeServer(socketPath: path) { [weak self] message in self?.receiveYouTube(message) }
+        do {
+            try server.start()
+            youtubeServer = server
+            youtubeBridge.listenFailed = false
+        } catch {
+            youtubeListenFailed = true
+            youtubeBridge.listenFailed = true
+            context.logger.error("Cannot listen for YouTube captions: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// Closes the socket and forgets everything the extension sent. Runs with every change of a setting, so it assigns
+    /// only what is not already so: the Settings rows watch these.
+    private func stopYouTubeBridge() {
+        youtubeServer?.stop()
+        youtubeServer = nil
+        youtubeListenFailed = false
+        if youtubeBridge.listenFailed { youtubeBridge.listenFailed = false }
+        if youtubeBridge.lastMessageAt != nil { youtubeBridge.lastMessageAt = nil }
+        captionStore.removeAll()
+    }
+
+    /// What the helper passed on. Ignored while the setting is off, as a message still on its way when it was switched
+    /// off would be.
+    func receiveYouTube(_ message: YouTubeMessage, at now: Date = Date()) {
+        guard youtubeCaptionsEnabled else { return }
+        captionStore.apply(message, at: now)
+        youtubeBridge.lastMessageAt = now
+        refreshLyrics()
+    }
+
+    /// The captions for the track playing now, nil while the setting is off or nothing fits.
+    private func matchedCaptions() -> YouTubeCaptionStore.Track? {
+        guard youtubeCaptionsEnabled else { return nil }
+        return YouTubeCaptionMatcher.track(for: store.state, in: captionStore, now: Date(), keeping: shownCaptions?.videoID)
+    }
+
+    /// The captions win over lyrics from the web: a lookup still going is stopped, and one that was shown is replaced.
+    private func showCaptions(_ captions: YouTubeCaptionStore.Track) {
+        if lyricsTrack != nil {
+            lyricsTask?.cancel()
+            lyricsTask = nil
+            lyricsTrack = nil
+            lyricsEpoch += 1
+        }
+        guard shownCaptions?.videoID != captions.videoID || shownCaptions?.revision != captions.revision else { return }
+        shownCaptions = (captions.videoID, captions.revision)
+        store.showLyrics(captions.lines)
     }
 
     /// The tap runs only while the setting is on, something plays and some bars are on screen.

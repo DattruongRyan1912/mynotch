@@ -1,0 +1,56 @@
+import Foundation
+import YouTubeBridgeKit
+@testable import MediaModule
+
+/// Protocol messages for tests, with placeholder words as captions: never real captions or lyrics.
+enum YouTubeTestMessages {
+    static let videoID = "abcdefghijk"
+    static let title = "Sample video"
+
+    static func captions(
+        _ videoID: String = videoID, _ events: [CaptionEvent]? = nil, kind: YouTubeCaptions.Kind = .standard
+    ) -> YouTubeMessage {
+        .captions(YouTubeCaptions(
+            videoID: videoID, language: "vi", kind: kind,
+            events: events ?? [
+                CaptionEvent(time: 2, duration: 2, text: "alpha"), CaptionEvent(time: 4, duration: 2, text: "beta"),
+                CaptionEvent(time: 6, duration: 2, text: "gamma"),
+            ]
+        ))
+    }
+
+    /// What `captions` turns into once converted.
+    static let lines = [
+        LyricLine(time: 2, text: "alpha"), LyricLine(time: 4, text: "beta"), LyricLine(time: 6, text: "gamma"), LyricLine(time: 8, text: ""),
+    ]
+
+    static func playback(
+        _ videoID: String = videoID, title: String = title, playing: Bool = true, time: Double = 3
+    ) -> YouTubeMessage {
+        .playback(YouTubePlayback(videoID: videoID, title: title, time: time, isPlaying: playing, rate: 1))
+    }
+
+    static func clear(_ videoID: String = videoID) -> YouTubeMessage {
+        .clear(videoID: videoID)
+    }
+
+    /// The JSON the extension sends, for the tests that go through a socket.
+    static func json(_ message: YouTubeMessage) -> Data {
+        let object: [String: Any]
+        switch message {
+        case .captions(let captions):
+            object = [
+                "v": 1, "type": "captions", "videoId": captions.videoID, "lang": captions.language, "kind": captions.kind.rawValue,
+                "events": captions.events.map { ["t": $0.time, "d": $0.duration, "text": $0.text] },
+            ]
+        case .playback(let playback):
+            object = [
+                "v": 1, "type": "playback", "videoId": playback.videoID, "title": playback.title, "time": playback.time,
+                "playing": playback.isPlaying, "rate": playback.rate,
+            ]
+        case .clear(let videoID):
+            object = ["v": 1, "type": "clear", "videoId": videoID]
+        }
+        return try! JSONSerialization.data(withJSONObject: object)
+    }
+}

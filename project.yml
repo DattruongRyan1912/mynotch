@@ -60,6 +60,14 @@ targets:
       # Run by /usr/bin/perl, which loads the embedded MediaRemoteAdapter.framework.
       - path: Vendor/mediaremote-adapter/bin/mediaremote-adapter.pl
         buildPhase: resources
+      # The Chrome extension without its tests, in Contents/Resources/ChromeExtension: Media's installer copies it out
+      # of the app, and the user loads that copy unpacked.
+      - path: Extensions/Chrome/MyNotchYouTube
+        excludes: ["tests/**"]
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: ChromeExtension
     dependencies:
       - package: MyNotchCore
       - package: NotchUI
@@ -83,6 +91,13 @@ targets:
         codeSign: true
       # Copied into Contents/MacOS, where AIAgentsModule's HookSetup looks for the helper.
       - target: mynotch-hook
+        embed: true
+        link: false
+        codeSign: true
+        copy:
+          destination: executables
+      # Copied into Contents/MacOS, where MediaModule's YouTubeBridgeInstaller looks for the helper.
+      - target: mynotch-youtube-host
         embed: true
         link: false
         codeSign: true
@@ -181,5 +196,21 @@ targets:
       groups: [signing]
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch.hook
+        SKIP_INSTALL: YES
+        ENABLE_HARDENED_RUNTIME: YES
+  # The helper Chrome starts for the YouTube captions extension (see Media's YouTubeBridgeInstaller); it only passes
+  # the extension's messages to the app over a socket.
+  mynotch-youtube-host:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Tools/mynotch-youtube-host
+    dependencies:
+      - package: MediaModule
+        product: YouTubeBridgeKit
+    settings:
+      groups: [signing]
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch.youtube-host
         SKIP_INSTALL: YES
         ENABLE_HARDENED_RUNTIME: YES

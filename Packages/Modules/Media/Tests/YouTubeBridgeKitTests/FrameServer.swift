@@ -1,0 +1,113 @@
+import Foundation
+import Synchronization
+@testable import YouTubeBridgeKit
+
+/// Stands in for the app: listens on a stream socket in a short `/tmp/mn-<id>` folder and collects the frames each
+/// client sends. Plain threads and blocking calls, so the host's own behaviour is all that is under test.
+final class FrameServer: Sendable {
+    private struct State {
+        var frames: [Data] = []
+        var connections = 0
+        var clients: [Int32] = []
+        var listener: Int32 = -1
+    }
+
+    let directory: URL
+    var path: String { directory.appending(path: YouTubeSocket.fileName).path }
+    private let state = Mutex(State())
+
+    /// A private folder with a path short enough for a socket (`directory` to reuse one); the socket file is made by `start`.
+    init(directory: URL? = nil) {
+        self.directory = directory ?? URL(filePath: "/tmp/mn-\(UUID().uuidString.prefix(8))", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
+    }
+
+    var frames: [Data] { state.withLock { $0.frames } }
+    var connectionCount: Int { state.withLock { $0.connections } }
+
+    func start() throws {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard var address = UnixSocketAddress(path: path)?.value else { close(fd); throw POSIXError(.ENAMETOOLONG) }
+        unlink(path)
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        guard bound == 0, listen(fd, 8) == 0, fcntl(fd, F_SETFL, O_NONBLOCK) == 0 else { close(fd); throw POSIXError(.EADDRINUSE) }
+        state.withLock { $0.listener = fd }
+        Thread.detachNewThread { [self] in accept(on: fd) }
+    }
+
+    /// Closes the listener and every client, like the app quitting.
+    func stop() {
+        // Under the lock, and only for descriptors still listed: one that its thread has closed may be another test's by now.
+        state.withLock { state in
+            for client in state.clients { shutdown(client, SHUT_RDWR) }
+            state.clients = []
+            if state.listener >= 0 { close(state.listener) }
+            state.listener = -1
+        }
+        unlink(path)
+    }
+
+    func remove() {
+        stop()
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    private func accept(on listener: Int32) {
+        while true {
+            // Checked and accepted under the lock, so `stop` cannot close the descriptor in between.
+            let client = state.withLock { state -> Int32? in
+                guard state.listener == listener else { return nil }
+                let client = Foundation.accept(listener, nil, nil)
+                if client >= 0 {
+                    // A socket accepted from a non-blocking listener is non-blocking too on macOS.
+                    _ = fcntl(client, F_SETFL, 0)
+                    state.connections += 1
+                    state.clients.append(client)
+                }
+                return client
+            }
+            guard let client else { return }
+            if client < 0 {
+                usleep(5_000)
+                continue
+            }
+            Thread.detachNewThread { [self] in read(from: client) }
+        }
+    }
+
+    private func read(from client: Int32) {
+        var decoder = AppFrameDecoder()
+        var buffer = [UInt8](repeating: 0, count: 65_536)
+        while true {
+            let count = recv(client, &buffer, buffer.count, 0)
+            guard count > 0 else { break }
+            decoder.append(Data(buffer[0..<count]))
+            while case .frame(let frame) = decoder.next() { state.withLock { $0.frames.append(frame) } }
+        }
+        // Unlisted before it is closed, so `stop` never touches a descriptor that is no longer this client's.
+        state.withLock { $0.clients.removeAll { $0 == client } }
+        close(client)
+    }
+}
+
+/// Polls until `condition` holds, for at most `seconds`; the result says whether it did.
+@discardableResult
+func waitUntil(seconds: Double = 5, _ condition: () -> Bool) async -> Bool {
+    let deadline = Date().addingTimeInterval(seconds)
+    while !condition() {
+        if Date() > deadline { return false }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    return true
+}
+
+/// A clock the test moves by hand, in seconds.
+final class TestClock: Sendable {
+    private let seconds = Mutex(1_000.0)
+
+    var now: TimeInterval { seconds.withLock { $0 } }
+
+    func advance(by interval: TimeInterval) { seconds.withLock { $0 += interval } }
+}

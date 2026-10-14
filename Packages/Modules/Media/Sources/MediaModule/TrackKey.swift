@@ -60,9 +60,7 @@ nonisolated struct TrackKey: Hashable, Sendable {
     /// nil for advertisements (their metadata is not a song) and for tracks that report no length.
     init?(_ state: NowPlayingState) {
         guard !state.isAdvertisement, let duration = state.durationSeconds else { return nil }
-        let owners = [state.bundleIdentifier, state.parentApplicationBundleIdentifier].compactMap { $0 }
-        let isBrowser = owners.contains { owner in Self.browserBundlePrefixes.contains { owner.hasPrefix($0) } }
-        self.init(artist: state.artist, title: state.title, album: state.album, duration: duration, isFromBrowser: isBrowser)
+        self.init(artist: state.artist, title: state.title, album: state.album, duration: duration, isFromBrowser: state.isFromBrowser)
         if state.bundleIdentifier == Self.appleMusicBundleID { appleCatalogID = state.catalogID }
     }
 
@@ -81,5 +79,13 @@ nonisolated struct TrackKey: Hashable, Sendable {
     private static func normalised(_ text: String?) -> String {
         // Composed, as lrclib stores Vietnamese: a player may report the decomposed form.
         (text ?? "").split(whereSeparator: \.isWhitespace).joined(separator: " ").precomposedStringWithCanonicalMapping
+    }
+}
+
+nonisolated extension NowPlayingState {
+    /// A web browser plays this, or one of its helper processes does.
+    var isFromBrowser: Bool {
+        let owners = [bundleIdentifier, parentApplicationBundleIdentifier].compactMap { $0 }
+        return owners.contains { owner in TrackKey.browserBundlePrefixes.contains { owner.hasPrefix($0) } }
     }
 }

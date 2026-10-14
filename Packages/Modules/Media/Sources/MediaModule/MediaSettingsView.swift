@@ -14,6 +14,8 @@ struct MediaSettingsView: View {
     @Binding var hiddenApps: [String]
     @Binding var realSpectrum: Bool
     @Binding var lyrics: Bool
+    @Binding var youtubeCaptions: Bool
+    let youtubeBridge: YouTubeBridgeModel
     /// Only for the permission hint; the module keeps the store for its whole life, running or not.
     let store: NowPlayingStore
     let appleAccount: AppleMusicAccount
@@ -49,6 +51,7 @@ struct MediaSettingsView: View {
             if lyrics {
                 AppleMusicRows(account: appleAccount, connect: connectAppleMusic, disconnect: disconnectAppleMusic)
             }
+            YouTubeBridgeRows(isOn: $youtubeCaptions, model: youtubeBridge)
         }
     }
 }
