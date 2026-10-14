@@ -111,6 +111,10 @@ public final class MediaModule: FeatureModule {
     /// Whether the published activity carries the lyric strip. Unlike the track it can change while a track plays
     /// (lyrics arrive, playback pauses), and each change republishes the activity.
     private var publishedStrip = false
+    /// Keeps the strip up through a track change, a seek or a stall, so the notch does not shrink and grow again.
+    private var stripHold = LyricStripHold()
+    private var stripHoldTimer: ScheduledAction?
+    private var scheduledStripDeadline: Date?
     /// Whether the lock screen view is on offer; its view reads `store`, so it is set once and cleared once.
     private var lockScreenOffered = false
     private var deadlineTimer: ScheduledAction?
@@ -189,6 +193,7 @@ public final class MediaModule: FeatureModule {
         policy = ActivityPolicy()
         publishedTrack = nil
         publishedStrip = false
+        resetStripHold()
         lockScreenOffered = false
         spectrumFeed = SpectrumFeed(source: spectrum, store: store, scheduler: context.scheduler, logger: context.logger)
         lyricsTrack = nil
@@ -262,6 +267,7 @@ public final class MediaModule: FeatureModule {
         policy = ActivityPolicy()
         publishedTrack = nil
         publishedStrip = false
+        resetStripHold()
         lockScreenOffered = false
         store.reset()
     }
@@ -416,12 +422,13 @@ public final class MediaModule: FeatureModule {
         lyricsTask = nil
         lyricsTrack = track
         lyricsEpoch += 1
+        // The lookup is under way before the activity looks at the lyrics, so a strip held for them knows they are coming.
+        if let track { fetchLyrics(for: track, mayRetry: true) }
         show(lyrics: nil)
-        guard let track else { return }
-        fetchLyrics(for: track, mayRetry: true)
     }
 
-    /// Hands the lyrics to the store and the activity gets its say: its strip exists only while there are synced lyrics.
+    /// Hands the lyrics to the store and the activity gets its say: its strip exists only while there are synced lyrics
+    /// (or is held for a moment while they are on their way).
     private func show(lyrics: [LyricLine]?) {
         store.showLyrics(lyrics)
         refreshActivity()
@@ -438,11 +445,14 @@ public final class MediaModule: FeatureModule {
     private func receiveLyrics(_ result: LyricsResult, for track: TrackKey, mayRetry: Bool) {
         // The track may have changed while the answer was on its way.
         guard track == lyricsTrack else { return }
+        // The lookup is over: nothing is pending any more, which lets a strip held for it go.
+        lyricsTask = nil
         switch result {
         case .synced(let lines):
             show(lyrics: lines)
         case .unavailable(let reason):
             context?.logger.info("Lyrics unavailable: \(reason, privacy: .public)")
+            refreshActivity()
             // A rate limit is no verdict on the track: ask once more when lrclib is open again.
             guard mayRetry, let lyricsService, lyricsService.isCoolingDown else { return }
             let epoch = lyricsEpoch
@@ -452,8 +462,9 @@ public final class MediaModule: FeatureModule {
             }
         case .plain:
             store.showUnsyncedLyrics()
+            refreshActivity()
         case .instrumental, .notFound:
-            break
+            refreshActivity()
         }
     }
 
@@ -592,10 +603,53 @@ public final class MediaModule: FeatureModule {
         }
     }
 
-    /// The strip under the notch is on offer while the setting is on and the track plays with synced lyrics, from
-    /// whichever source: a paused track has no line being sung.
-    private var offersLyricStrip: Bool {
-        lyricsUnderNotch && store.state.isPlaying && store.syncedLyrics?.isEmpty == false
+    /// Lyrics for the current track may still arrive: a lookup is out, the next track has not shown up yet, or captions
+    /// from the Chrome extension may still come.
+    private var lyricsArePending: Bool {
+        lyricsTask != nil || !store.state.isActive || (youtubeCaptionsEnabled && shownCaptions == nil)
+    }
+
+    /// Whether the activity carries the strip: the setting is on and the track plays with synced lyrics, from whichever
+    /// source (a paused track has no line being sung). Once up it also stays through a track change (up to 3 s, while
+    /// the new lyrics are looked up) and a stall of playback (up to 1 s), so the notch does not collapse and grow again.
+    private func updateStripHold() -> Bool {
+        stripHold.update(
+            LyricStripHold.Inputs(
+                enabled: lyricsUnderNotch, playing: store.state.isPlaying,
+                hasLyrics: store.syncedLyrics?.isEmpty == false, lyricsPending: lyricsArePending
+            ),
+            at: Date()
+        )
+        scheduleStripHold()
+        return stripHold.isShown
+    }
+
+    /// One timer for the end of the hold, like the policy's deadline.
+    private func scheduleStripHold() {
+        guard stripHold.nextDeadline != scheduledStripDeadline else { return }
+        cancelStripHold()
+        guard let deadline = stripHold.nextDeadline, let context else { return }
+        scheduledStripDeadline = deadline
+        let delay = Duration.milliseconds(Int64((max(deadline.timeIntervalSince(Date()), 0) * 1000).rounded()))
+        stripHoldTimer = context.scheduler.schedule(after: delay) { [weak self] in self?.stripHoldEnded(at: deadline) }
+    }
+
+    private func stripHoldEnded(at deadline: Date) {
+        stripHoldTimer = nil
+        scheduledStripDeadline = nil
+        stripHold.tick(at: max(Date(), deadline))
+        refreshActivity()
+    }
+
+    private func cancelStripHold() {
+        stripHoldTimer?.cancel()
+        stripHoldTimer = nil
+        scheduledStripDeadline = nil
+    }
+
+    private func resetStripHold() {
+        stripHold = LyricStripHold()
+        cancelStripHold()
     }
 
     /// Sets the activity when it becomes visible, another track starts or its strip comes or goes; clears it when it
@@ -609,10 +663,12 @@ public final class MediaModule: FeatureModule {
                 publishedTrack = nil
                 publishedStrip = false
             }
+            resetStripHold()
             return
         }
         let track = store.state.trackIdentity
-        let strip = offersLyricStrip
+        // Before the guard below: the hold starts at the track change, while the state is still empty.
+        let strip = updateStripHold()
         // While a track change is debounced the state is briefly empty: an activity already up keeps showing
         // the last track (the store's snapshot), and none is published until a track is there to show.
         guard store.state.isActive, publishedTrack == nil || track != publishedTrack || strip != publishedStrip else { return }

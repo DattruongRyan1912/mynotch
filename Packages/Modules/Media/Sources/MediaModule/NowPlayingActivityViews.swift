@@ -67,7 +67,8 @@ struct NowPlayingBars: View {
 
 /// Under the closed notch while the lyrics are synced: the line being sung and the one coming next, like karaoke.
 /// Two rows of one line each, so the strip keeps its height whatever the lyrics say. The notch gives it its width
-/// and its side padding.
+/// and its side padding. While the strip is held across a track change and the new lyrics are not there yet, it shows
+/// the dimmed note alone, so the notch keeps its height.
 struct NowPlayingLyricStrip: View {
     static let height: CGFloat = 36
 
@@ -76,18 +77,16 @@ struct NowPlayingLyricStrip: View {
     var body: some View {
         // Four times a second is fine-grained enough for lines that last seconds; the clock itself is exact.
         TimelineView(.periodic(from: .now, by: 0.25)) { timeline in
-            let strip = store.lyricStrip(at: timeline.date)
+            // The note alone while the lyrics are gone and the new ones are not there yet (between two tracks).
+            let strip = store.lyricStrip(at: timeline.date) ?? .waiting
             ZStack {
-                // Blank in the moment between two tracks, when the old lyrics are gone and the new ones are not there yet.
-                if let strip {
-                    rows(strip)
-                        // A new pair of lines slides up into place while the old one leaves.
-                        .id(strip)
-                        .transition(.asymmetric(
-                            insertion: .offset(y: 6).combined(with: .opacity),
-                            removal: .offset(y: -6).combined(with: .opacity)
-                        ))
-                }
+                rows(strip)
+                    // A new pair of lines slides up into place while the old one leaves.
+                    .id(strip)
+                    .transition(.asymmetric(
+                        insertion: .offset(y: 6).combined(with: .opacity),
+                        removal: .offset(y: -6).combined(with: .opacity)
+                    ))
             }
             .animation(.easeOut(duration: 0.2), value: strip)
             .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height)
@@ -109,5 +108,9 @@ struct NowPlayingLyricStrip: View {
         .lineLimit(1)
         .truncationMode(.tail)
         .frame(maxWidth: .infinity)
+        // One element that reads the lines, never the note.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Lời bài hát")
+        .accessibilityValue(strip.spoken)
     }
 }

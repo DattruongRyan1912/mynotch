@@ -130,6 +130,44 @@ import Testing
         #expect(harness.activities.current?.activity.hasBottom == true)
     }
 
+    @Test func aChangeOfVideoKeepsTheStripWhileTheNextCaptionsAreAwaited() async throws {
+        harness.settings.set(true, for: keys.lyricsUnderNotch)
+        await bootstrapWithCaptions()
+        playInChrome()
+        receive(YouTubeTestMessages.captions(), YouTubeTestMessages.playback())
+        #expect(harness.activities.current?.activity.hasBottom == true)
+
+        source.emit(AdapterLines.empty)
+        playInChrome(title: "Next video")
+        #expect(store.syncedLyrics == nil)
+        #expect(harness.activities.current?.activity.hasBottom == true, "held while the extension has not sent the next captions")
+        let held = try #require(harness.activities.current)
+
+        receive(YouTubeTestMessages.playback("bbbbbbbbbbb", title: "Next video"), YouTubeTestMessages.captions("bbbbbbbbbbb"))
+        #expect(store.syncedLyrics == YouTubeTestMessages.lines)
+        #expect(harness.activities.current == held, "the captions arrive into the same strip")
+        harness.scheduler.advance(by: .seconds(10))
+        #expect(harness.activities.current == held)
+    }
+
+    @Test func captionsThatNeverComeLetTheStripGoOnceAfterThreeSeconds() async throws {
+        harness.settings.set(true, for: keys.lyricsUnderNotch)
+        await bootstrapWithCaptions()
+        playInChrome()
+        receive(YouTubeTestMessages.captions(), YouTubeTestMessages.playback())
+
+        source.emit(AdapterLines.empty)
+        playInChrome(title: "Next video")
+        harness.scheduler.advance(by: .milliseconds(2900))
+        #expect(harness.activities.current?.activity.hasBottom == true)
+        harness.scheduler.advance(by: .milliseconds(200))
+        #expect(harness.activities.current?.activity.id == "nowPlaying")
+        #expect(harness.activities.current?.activity.hasBottom == false)
+        let hidden = try #require(harness.activities.current)
+        harness.scheduler.advance(by: .seconds(10))
+        #expect(harness.activities.current == hidden)
+    }
+
     @Test func theOrderOfTheMessagesAndTheTrackDoesNotMatter() async {
         await bootstrapWithCaptions()
         receive(YouTubeTestMessages.playback(), YouTubeTestMessages.captions())

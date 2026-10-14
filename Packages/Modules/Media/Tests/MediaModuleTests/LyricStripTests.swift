@@ -122,6 +122,17 @@ import Testing
     @Test func theNoteIsAMusicalNote() {
         #expect(LyricStrip.note == "\u{266A}")
     }
+
+    @Test func aStripWaitingForLyricsIsJustTheNote() {
+        #expect(LyricStrip.waiting == LyricStrip(current: nil, next: nil))
+    }
+
+    @Test func spokenTextIsTheLinesAndNeverTheNote() {
+        #expect(LyricStrip(current: "a", next: "b").spoken == "a, b")
+        #expect(LyricStrip(current: nil, next: "b").spoken == "b")
+        #expect(LyricStrip(current: "a", next: nil).spoken == "a")
+        #expect(LyricStrip.waiting.spoken == "")
+    }
 }
 
 @Suite struct NowPlayingStoreLyricStripTests {
@@ -269,17 +280,38 @@ import Testing
         #expect(activity?.hasBottom == false)
     }
 
-    @Test func aPausedTrackHasNoStripUntilItPlaysAgain() async {
+    @Test func aPausedTrackLosesTheStripAfterAMomentAndGetsItBackWhenItPlaysAgain() async {
         await playWithTheStripOn()
         #expect(activity?.hasBottom == true)
 
         source.emit(AdapterLines.playing(false))
         #expect(activity?.id == "nowPlaying", "the activity itself stays through the pause grace")
+        #expect(activity?.hasBottom == true, "a stall shorter than a second must not show as a gap")
+        harness.scheduler.advance(by: .milliseconds(900))
+        #expect(activity?.hasBottom == true)
+        harness.scheduler.advance(by: .milliseconds(200))
+        #expect(activity?.id == "nowPlaying")
         #expect(activity?.hasBottom == false)
 
         source.emit(AdapterLines.playing(true))
         #expect(activity?.hasBottom == true)
         #expect(harness.activities.entries.count == 1)
+    }
+
+    @Test func aBriefStallOrASeekNeverRepublishesTheActivity() async throws {
+        await playWithTheStripOn()
+        let first = try #require(harness.activities.current)
+
+        source.emit(AdapterLines.playing(false))
+        source.emit(AdapterLines.position(80))
+        harness.scheduler.advance(by: .milliseconds(600))
+        source.emit(AdapterLines.playing(true))
+        #expect(harness.activities.current == first)
+
+        // The timer that would have ended the stall is gone.
+        harness.scheduler.advance(by: .seconds(5))
+        #expect(harness.activities.current == first)
+        #expect(activity?.hasBottom == true)
     }
 
     @Test func lyricsThatArriveWhileATrackIsPausedWaitForPlayback() async {
@@ -333,17 +365,185 @@ import Testing
         #expect(harness.activities.current == first)
     }
 
-    @Test func anotherTrackDropsTheStripUntilItsOwnLyricsArrive() async {
+    // MARK: holding the strip across a track change
+
+    /// What the lookup of the track after the first one ends with.
+    enum Ending: CaseIterable, CustomTestStringConvertible {
+        case notFound, instrumental, unsyncedOnly, rateLimited
+
+        var reply: HTTPReply {
+            switch self {
+            case .notFound: LrclibReplies.notFound
+            case .instrumental: LrclibReplies.instrumental
+            case .unsyncedOnly: LrclibReplies.found(synced: nil, plain: "x\ny")
+            case .rateLimited: LrclibReplies.busy()
+            }
+        }
+
+        var testDescription: String { String(describing: self) }
+    }
+
+    /// Makes the next request wait at the gate, with `reply` as the answer to it and to any later one (the service falls
+    /// back to a second request when the first has no synced lyrics).
+    func holdNextLookup(replying reply: HTTPReply = LrclibReplies.found(synced: LrclibReplies.lrcText(4, tag: "Other"))) -> Gate {
+        let gate = Gate()
+        var waited = false
+        client.handler = { _ in
+            if !waited {
+                waited = true
+                await gate.wait()
+            }
+            return reply
+        }
+        return gate
+    }
+
+    /// Plays "Second" after the first track's strip is up and lets the lookup reach the gate.
+    func changeTrack(through gate: Gate) async {
+        source.emit(AdapterLines.empty)
+        playTrack("Second")
+        // The service spaces requests 300 ms apart.
+        harness.scheduler.advance(by: .milliseconds(300))
+        await settle { gate.isWaiting }
+    }
+
+    @Test func aTrackChangeKeepsTheStripWhileTheNewLyricsLoadAndPublishesOnce() async throws {
+        await playWithTheStripOn()
+        let first = try #require(harness.activities.current)
+        let gate = holdNextLookup()
+
+        source.emit(AdapterLines.empty)
+        #expect(harness.activities.current == first, "the track change debounce publishes nothing")
+        #expect(activity?.hasBottom == true)
+
+        playTrack("Second")
+        #expect(store.syncedLyrics == nil, "the old track's lyrics must not stay under the new track")
+        #expect(activity?.hasBottom == true, "the strip stays while the new lyrics are looked up")
+        #expect(activity?.bottomHeight == NowPlayingLyricStrip.height)
+        let second = try #require(harness.activities.current)
+        #expect(second != first, "the new track is published, once")
+
+        harness.scheduler.advance(by: .milliseconds(300))
+        await settle { gate.isWaiting }
+        #expect(activity?.hasBottom == true)
+
+        gate.open()
+        await settle { store.syncedLyrics != nil }
+        #expect(store.syncedLyrics?.first?.text == "Other 1")
+        #expect(activity?.hasBottom == true)
+        #expect(harness.activities.current == second, "the lyrics arrive into the same strip without another publish")
+
+        // The hold's timer is gone: nothing hides the strip later.
+        harness.scheduler.advance(by: .seconds(10))
+        #expect(harness.activities.current == second)
+        #expect(activity?.hasBottom == true)
+    }
+
+    @Test func aTrackChangeWithCachedLyricsNeverShowsAGap() async throws {
         await playWithTheStripOn()
         client.reply(LrclibReplies.found(synced: LrclibReplies.lrcText(4, tag: "Other")))
         playTrack("Second")
-        #expect(store.syncedLyrics == nil)
-        #expect(activity?.hasBottom == false, "the old track's lyrics must not stay under the new track")
-
-        // The service spaces requests 300 ms apart.
         harness.scheduler.advance(by: .milliseconds(300))
+        await settle { store.syncedLyrics?.first?.text == "Other 1" }
+
+        // Back to the first track: its lyrics are cached and arrive one hop after the change.
+        source.emit(AdapterLines.empty)
+        playTrack("Song")
+        #expect(activity?.hasBottom == true)
+        await settle { store.syncedLyrics?.first?.text != "Other 1" && store.syncedLyrics != nil }
+        #expect(activity?.hasBottom == true)
+        #expect(store.syncedLyrics?.count == LrclibReplies.syncedLines.count)
+    }
+
+    @Test func noLyricsThreeSecondsAfterATrackChangeHideTheStripOnce() async throws {
+        await playWithTheStripOn()
+        let gate = holdNextLookup(replying: LrclibReplies.notFound)
+        await changeTrack(through: gate)
+        let held = try #require(harness.activities.current)
+        #expect(activity?.hasBottom == true)
+
+        harness.scheduler.advance(by: .milliseconds(2500))
+        #expect(harness.activities.current == held)
+        #expect(activity?.hasBottom == true, "still within three seconds of the track change")
+
+        harness.scheduler.advance(by: .milliseconds(600))
+        #expect(activity?.id == "nowPlaying")
+        #expect(activity?.hasBottom == false, "hidden after the hold, and the activity stays")
+        let hidden = try #require(harness.activities.current)
+        #expect(hidden != held)
+
+        // The late answer (no lyrics) and the rest of time change nothing more: one hide, no flicker.
+        gate.open()
+        await settle { false }
+        harness.scheduler.advance(by: .seconds(10))
+        #expect(harness.activities.current == hidden)
+    }
+
+    @Test(arguments: Ending.allCases)
+    func aLookupThatEndsWithoutSyncedLyricsReleasesTheStripAtOnce(_ ending: Ending) async throws {
+        await playWithTheStripOn()
+        let held = holdNextLookup(replying: ending.reply)
+        await changeTrack(through: held)
+        let before = try #require(harness.activities.current)
+        #expect(activity?.hasBottom == true, "held while the lookup is out")
+
+        held.open()
+        // A lookup without a hit goes through a few requests, 300 ms apart; all of them are well inside the hold.
+        var waitedFor = Duration.zero
+        while activity?.hasBottom == true, waitedFor < .seconds(2) {
+            await settle { activity?.hasBottom == false }
+            harness.scheduler.advance(by: .milliseconds(300))
+            waitedFor += .milliseconds(300)
+        }
+        #expect(store.syncedLyrics == nil)
+        #expect(activity?.hasBottom == false)
+        #expect(harness.activities.current != before)
+        let hidden = try #require(harness.activities.current)
+
+        // Released by the end of the lookup, not by the hold running out, and the hold's own timer does nothing later.
+        #expect(waitedFor < .seconds(2))
+        harness.scheduler.advance(by: .seconds(5))
+        #expect(harness.activities.current == hidden)
+    }
+
+    @Test func holdingDoesNotApplyToAStripThatWasNeverUp() async {
+        enableLyrics()
+        enableStrip()
+        let gate = holdNextLookup()
+        await harness.registry.bootstrap()
+        playTrack()
+        harness.scheduler.advance(by: .milliseconds(300))
+        await settle { gate.isWaiting }
+        #expect(activity?.hasBottom == false, "nothing to hold: the first track starts without a strip")
+        gate.open()
         await settle { store.syncedLyrics != nil }
         #expect(activity?.hasBottom == true)
+    }
+
+    @Test func turningTheSettingOffEndsTheHoldAtOnce() async {
+        await playWithTheStripOn()
+        let gate = holdNextLookup()
+        await changeTrack(through: gate)
+        #expect(activity?.hasBottom == true)
+
+        harness.settings.set(false, for: keys.lyricsUnderNotch)
+        await settle { activity?.hasBottom == false }
+        #expect(activity?.hasBottom == false)
+        gate.open()
+        await settle { store.syncedLyrics != nil }
+        harness.scheduler.advance(by: .seconds(10))
+        #expect(activity?.hasBottom == false)
+    }
+
+    @Test func stoppingTheModuleDuringAHoldLeavesNothingBehind() async {
+        await playWithTheStripOn()
+        let gate = holdNextLookup()
+        await changeTrack(through: gate)
+        await harness.registry.setEnabled(false, for: "media")
+        #expect(activity == nil)
+        gate.open()
+        harness.scheduler.advance(by: .seconds(10))
+        #expect(activity == nil)
     }
 
     @Test func theActivityGoesAwayWithItsStrip() async {

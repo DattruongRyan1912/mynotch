@@ -2,6 +2,8 @@
 struct LyricStrip: Hashable {
     /// Shown dimmed where nothing is sung: before the first line and in the pauses between lines.
     static let note = "\u{266A}"
+    /// The strip while the lyrics are not there yet (a new track's are being looked up): the note and an empty second row.
+    static let waiting = LyricStrip(current: nil, next: nil)
 
     /// The line being sung; nil while nothing is, which the strip shows as the note.
     var current: String?
@@ -11,6 +13,11 @@ struct LyricStrip: Hashable {
     init(current: String?, next: String?) {
         self.current = current
         self.next = next
+    }
+
+    /// What VoiceOver reads: the lines, never the note.
+    var spoken: String {
+        [current, next].compactMap { $0 }.joined(separator: ", ")
     }
 
     /// `position` nil is a clock that knows no elapsed time yet: the strip then only shows the note.
