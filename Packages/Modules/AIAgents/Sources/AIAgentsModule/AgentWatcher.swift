@@ -70,7 +70,8 @@ nonisolated final class AgentWatcher: @unchecked Sendable {
     private let now: @Sendable () -> Date
     private let debounce: DispatchTimeInterval
     private let heartbeat: DispatchTimeInterval
-    private let queue = DispatchQueue(label: "io.lucasvu.mynotch.aiagents.watcher", qos: .utility)
+    private let scheduler: any AgentWatcherScheduler
+    private let queue: DispatchQueue
     /// Whether the watcher is wanted, and which start or stop call made it so. Set at once by `start` and `stop`
     /// and read on the main queue too, so a batch the queue already handed over is dropped when a stop came
     /// after it, even if the watcher has been started again since.
@@ -83,7 +84,7 @@ nonisolated final class AgentWatcher: @unchecked Sendable {
 
     // Everything below belongs to `queue`.
     private var watch: (any AgentWatchHandle)?
-    private var heartbeatTimer: DispatchSourceTimer?
+    private var heartbeatTimer: (any AgentWatchHandle)?
     private var rescanScheduled = false
     private var watchesClaude = false
     private var watchesCodex = false
@@ -102,6 +103,7 @@ nonisolated final class AgentWatcher: @unchecked Sendable {
     ///   - debounce: how long after a file event the rescan waits, so a burst of writes costs one scan.
     ///   - heartbeat: how often to rescan without an event. A process that dies leaves its registry file behind
     ///     and touches no file, so only polling notices.
+    ///   - scheduler: the queue the watcher runs on and the timers for the debounce and the heartbeat.
     init(
         store: AgentSessionStore,
         claudeRoot: URL?,
@@ -110,7 +112,8 @@ nonisolated final class AgentWatcher: @unchecked Sendable {
         makeTailer: @escaping @Sendable (URL, UInt64) -> any LineTailing = { JSONLTailer(url: $0, startOffset: $1) },
         now: @escaping @Sendable () -> Date = { Date() },
         debounce: DispatchTimeInterval = .milliseconds(100),
-        heartbeat: DispatchTimeInterval = .seconds(10)
+        heartbeat: DispatchTimeInterval = .seconds(10),
+        scheduler: any AgentWatcherScheduler = QueueAgentWatcherScheduler()
     ) {
         self.store = store
         self.claudeRoot = claudeRoot
@@ -120,6 +123,8 @@ nonisolated final class AgentWatcher: @unchecked Sendable {
         self.now = now
         self.debounce = debounce
         self.heartbeat = heartbeat
+        self.scheduler = scheduler
+        queue = scheduler.queue
     }
 
     /// Starts watching the roots that exist now; a missing one (Codex not installed) stays off until the next start.
@@ -192,14 +197,10 @@ nonisolated final class AgentWatcher: @unchecked Sendable {
                 }
             }
         }
-        let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + heartbeat, repeating: heartbeat, leeway: .seconds(1))
-        timer.setEventHandler { [weak self] in
+        heartbeatTimer = scheduler.every(heartbeat) { [weak self] in
             self?.missingTranscripts = []
             self?.scan()
         }
-        timer.resume()
-        heartbeatTimer = timer
     }
 
     /// Lets a missing transcript be looked for again when something that could have created it changed: the
@@ -222,7 +223,7 @@ nonisolated final class AgentWatcher: @unchecked Sendable {
     private func requestRescan() {
         guard !rescanScheduled else { return }
         rescanScheduled = true
-        queue.asyncAfter(deadline: .now() + debounce) { [self] in
+        scheduler.after(debounce) { [self] in
             rescanScheduled = false
             scan()
         }

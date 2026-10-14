@@ -102,9 +102,93 @@ enum Line {
     }
 }
 
+/// The watcher's clock moved by hand: nothing it schedules runs until the test says so. Timers run on the
+/// watcher's own queue, as the real ones do, and `settle` waits for that queue, so a test that has fired a file
+/// event and settled knows the watcher has seen it.
+nonisolated final class ManualAgentWatcherScheduler: AgentWatcherScheduler, @unchecked Sendable {
+    private nonisolated final class Beat: AgentWatchHandle {
+        let stopped: @Sendable () -> Void
+        init(stopped: @escaping @Sendable () -> Void) { self.stopped = stopped }
+        func cancel() { stopped() }
+    }
+
+    let queue = DispatchQueue(label: "io.lucasvu.mynotch.aiagents.watcher.tests")
+    private let lock = NSLock()
+    private var debounces: [(delay: DispatchTimeInterval, action: @Sendable () -> Void)] = []
+    private var beats: [UUID: (interval: DispatchTimeInterval, action: @Sendable () -> Void)] = [:]
+
+    /// The delays of the one-shot timers still waiting.
+    var pendingDebounces: [DispatchTimeInterval] { lock.withLock { debounces.map(\.delay) } }
+    /// The intervals of the repeating timers still running.
+    var heartbeats: [DispatchTimeInterval] { lock.withLock { beats.values.map(\.interval) } }
+
+    func after(_ delay: DispatchTimeInterval, _ action: @escaping @Sendable () -> Void) {
+        lock.withLock { debounces.append((delay, action)) }
+    }
+
+    func every(_ interval: DispatchTimeInterval, _ action: @escaping @Sendable () -> Void) -> any AgentWatchHandle {
+        let id = UUID()
+        lock.withLock { beats[id] = (interval, action) }
+        return Beat { [weak self] in self?.lock.withLock { self?.beats[id] = nil } }
+    }
+
+    /// Returns once the watcher's queue has run everything handed to it so far.
+    func settle() {
+        queue.sync {}
+    }
+
+    /// Runs the one-shot timers that are waiting, as if their time had come, and returns how many there were.
+    @discardableResult
+    func fireDebounce() -> Int {
+        settle()
+        let due = lock.withLock {
+            let due = debounces
+            debounces = []
+            return due
+        }
+        queue.sync { due.forEach { $0.action() } }
+        return due.count
+    }
+
+    /// Runs one tick of every repeating timer and returns how many there were.
+    @discardableResult
+    func fireHeartbeat() -> Int {
+        settle()
+        let due = lock.withLock { beats.values.map(\.action) }
+        queue.sync { due.forEach { $0() } }
+        return due.count
+    }
+}
+
+/// Returns once the main queue has run what was queued before this call, such as the batch a scan handed over.
+func drainMainQueue() async {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.main.async { continuation.resume() }
+    }
+}
+
+/// The real file system, remembering the paths its events carried.
+nonisolated final class RecordingFileSystem: AgentFileSystem, @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [String] = []
+    var paths: [String] { lock.withLock { recorded } }
+
+    func watch(_ roots: [URL], onChange: @escaping @Sendable ([String]) -> Void) -> any AgentWatchHandle {
+        LocalAgentFileSystem().watch(roots) { [self] paths in
+            lock.withLock { recorded += paths }
+            onChange(paths)
+        }
+    }
+
+    func isAlive(_ session: ClaudeSessionInfo) -> Bool {
+        LocalAgentFileSystem().isAlive(session)
+    }
+}
+
 @Suite final class AgentWatcherTests {
     let sandbox: Sandbox
     let fileSystem = FakeAgentFileSystem()
+    let scheduler = ManualAgentWatcherScheduler()
     let store: AgentSessionStore
     let session = "11111111-2222-4333-8444-555555555555"
     let codexID = "0199aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee"
@@ -120,13 +204,16 @@ enum Line {
         watcher?.stop()
     }
 
+    /// Starts a watcher whose timers only run when the test fires them, unless it is given the real scheduler.
     func startWatcher(
         claude: Bool = true, codex: Bool = true, fileSystem: (any AgentFileSystem)? = nil,
+        scheduler: (any AgentWatcherScheduler)? = nil,
         debounce: DispatchTimeInterval = .milliseconds(100), heartbeat: DispatchTimeInterval = .seconds(60)
     ) -> AgentWatcher {
         let watcher = AgentWatcher(
             store: store, claudeRoot: claude ? sandbox.claude : nil, codexRoot: codex ? sandbox.codex : nil,
-            fileSystem: fileSystem ?? self.fileSystem, debounce: debounce, heartbeat: heartbeat
+            fileSystem: fileSystem ?? self.fileSystem, debounce: debounce, heartbeat: heartbeat,
+            scheduler: scheduler ?? self.scheduler
         )
         self.watcher = watcher
         watcher.start()
@@ -141,12 +228,14 @@ enum Line {
         store.sessions[AgentSessionKey(source: .codex, sessionID: codexID)]
     }
 
-    /// Polls, for the tests that wait on the debounce, the heartbeat or real file system events.
-    func waitUntil(_ condition: () -> Bool) async -> Bool {
-        let deadline = Date().addingTimeInterval(2)
-        while Date() < deadline {
+    /// Polls for the one test on real file system events, whose arrival has no moment to wait for. The limit only
+    /// stops a broken run from hanging: it is far above any delivery time, and no test asserts on how long it took.
+    func eventually(_ condition: () -> Bool) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(30)
+        while clock.now < deadline {
             if condition() { return true }
-            try? await Task.sleep(for: .milliseconds(10))
+            try? await Task.sleep(for: .milliseconds(20))
         }
         return condition()
     }
@@ -182,25 +271,40 @@ enum Line {
 
     @Test func aFileEventRescansAfterTheDebounce() async throws {
         try liveClaudeSession()
-        _ = startWatcher()
-        #expect(await waitUntil { claudeSession() != nil })
+        let watcher = startWatcher()
+        await watcher.rescan()
+        #expect(claudeSession() != nil)
         try sandbox.append(Line.finish(session), to: sandbox.transcript(session))
         fileSystem.fire()
-        #expect(await waitUntil { claudeSession()?.state == .finished })
+        scheduler.settle()
+        await drainMainQueue()
+        // The event only asks for a rescan, which waits for the debounce.
+        #expect(claudeSession()?.state == .working(tool: "Bash", summary: "git status"))
+        #expect(scheduler.fireDebounce() == 1)
+        await drainMainQueue()
+        #expect(claudeSession()?.state == .finished)
     }
 
     @Test func aBurstOfFileEventsDoesNotStarveTheRescan() async throws {
         try liveClaudeSession()
-        _ = startWatcher()
-        #expect(await waitUntil { claudeSession() != nil })
+        let watcher = startWatcher()
+        await watcher.rescan()
         try sandbox.append(Line.finish(session), to: sandbox.transcript(session))
-        // Events keep coming faster than the debounce: the rescan must still happen.
-        let deadline = Date().addingTimeInterval(2)
-        while Date() < deadline, claudeSession()?.state != .finished {
-            fileSystem.fire()
-            try await Task.sleep(for: .milliseconds(5))
-        }
+        // Events keep coming before the debounce is up: they share the rescan the first one asked for, and none
+        // of them pushes it back.
+        for _ in 0..<50 { fileSystem.fire() }
+        scheduler.settle()
+        #expect(scheduler.pendingDebounces == [.milliseconds(100)])
+        #expect(scheduler.fireDebounce() == 1)
+        await drainMainQueue()
         #expect(claudeSession()?.state == .finished)
+        // Once it has run, the next event asks for another.
+        try sandbox.append(Line.anonymousUsage(session), to: sandbox.transcript(session))
+        let before = claudeSession()?.usage.output ?? 0
+        fileSystem.fire()
+        #expect(scheduler.fireDebounce() == 1)
+        await drainMainQueue()
+        #expect(claudeSession()?.usage.output == before + 1)
     }
 
     @Test func aTranscriptIsReadFromItsLastKilobytesOnly() async throws {
@@ -257,10 +361,16 @@ enum Line {
 
     @Test func aProcessThatDiesWithoutTouchingFilesIsNoticedByTheHeartbeat() async throws {
         try liveClaudeSession()
-        _ = startWatcher(heartbeat: .milliseconds(50))
-        #expect(await waitUntil { claudeSession() != nil })
+        let watcher = startWatcher()
+        await watcher.rescan()
+        #expect(claudeSession() != nil)
         fileSystem.setAlive()
-        #expect(await waitUntil { claudeSession() == nil })
+        await drainMainQueue()
+        // No file changed, so nothing notices until the heartbeat ticks.
+        #expect(claudeSession() != nil)
+        #expect(scheduler.fireHeartbeat() == 1)
+        await drainMainQueue()
+        #expect(claudeSession() == nil)
     }
 
     @Test func aRegistryFileCaughtHalfWrittenDoesNotEndTheSession() async throws {
@@ -323,8 +433,8 @@ enum Line {
         let file = sandbox.rollout(codexID)
         try sandbox.write(Line.codexMeta() + Line.codexContext + Line.codexTurn() + Line.codexTokens(input: 1_000, output: 50), to: file)
         fileSystem.fire()
-        #expect(await waitUntil { codexSession() != nil })
-        await watcher.rescan()
+        #expect(scheduler.fireDebounce() == 1)
+        await drainMainQueue()
         let found = codexSession()
         #expect(found?.state == .working(tool: nil, summary: nil))
         #expect(found?.project == "tool")
@@ -394,6 +504,16 @@ enum Line {
         #expect(fileSystem.watchedRoots.map(\.lastPathComponent) == ["claude"])
     }
 
+    @Test func theDebounceAndTheHeartbeatUseTheDelaysTheWatcherWasGiven() async throws {
+        try liveClaudeSession()
+        let watcher = startWatcher(debounce: .milliseconds(70), heartbeat: .seconds(3))
+        await watcher.rescan()
+        fileSystem.fire()
+        scheduler.settle()
+        #expect(scheduler.heartbeats == [.seconds(3)])
+        #expect(scheduler.pendingDebounces == [.milliseconds(70)])
+    }
+
     @Test func aSourceCanBeLeftOut() async throws {
         try liveClaudeSession()
         try sandbox.write(Line.codexMeta() + Line.codexTurn(), to: sandbox.rollout(codexID))
@@ -407,12 +527,24 @@ enum Line {
         try liveClaudeSession()
         let watcher = startWatcher()
         await watcher.rescan()
-        watcher.stop()
-        // The watch is cancelled on the watcher's own queue, so `stop` does not wait for it.
-        #expect(await waitUntil { !fileSystem.isWatching })
+        #expect(fileSystem.isWatching)
+        #expect(scheduler.heartbeats.count == 1)
+        // An event the watcher has already seen leaves a rescan waiting for the debounce.
         try sandbox.append(Line.finish(session), to: sandbox.transcript(session))
         fileSystem.fire()
-        try await Task.sleep(for: .milliseconds(300))
+        scheduler.settle()
+        #expect(scheduler.pendingDebounces.count == 1)
+        watcher.stop()
+        // The watch is cancelled on the watcher's own queue, so `stop` does not wait for it; a rescan queued
+        // after it does.
+        await watcher.rescan()
+        #expect(!fileSystem.isWatching)
+        #expect(scheduler.heartbeats.isEmpty)
+        // The rescan that was waiting finds the watcher stopped, and later events have nobody to reach.
+        fileSystem.fire()
+        scheduler.fireDebounce()
+        scheduler.fireHeartbeat()
+        await drainMainQueue()
         #expect(claudeSession()?.state == .working(tool: "Bash", summary: "git status"))
     }
 
@@ -430,17 +562,22 @@ enum Line {
 
     // MARK: Real file system events
 
+    /// The only test on real FSEvents: it proves that what they report reaches the store, and that the events
+    /// carry the paths the watcher filters by. Everything else drives the events and the timers by hand.
     @Test func realFileSystemEventsReachTheStore() async throws {
         try sandbox.createDirectory(sandbox.claude.appending(path: "sessions"))
         try sandbox.createDirectory(sandbox.claude.appending(path: "projects"))
-        let watcher = startWatcher(fileSystem: LocalAgentFileSystem())
+        let recording = RecordingFileSystem()
+        // The heartbeat is a minute away, so only the events can bring the files in.
+        let watcher = startWatcher(fileSystem: recording, scheduler: QueueAgentWatcherScheduler())
         // Once this returns the watcher is running, so the files below can only reach it as events.
         await watcher.rescan()
         // The registry names this very process, which is alive.
         try sandbox.writeRegistry(pid: getpid(), sessionID: session)
         try sandbox.write(Line.prompt(session) + Line.tool(session), to: sandbox.transcript(session))
-        #expect(await waitUntil { claudeSession()?.state == .working(tool: "Bash", summary: "git status") })
+        #expect(await eventually { claudeSession()?.state == .working(tool: "Bash", summary: "git status") })
         try sandbox.append(Line.finish(session), to: sandbox.transcript(session))
-        #expect(await waitUntil { claudeSession()?.state == .finished })
+        #expect(await eventually { claudeSession()?.state == .finished })
+        #expect(recording.paths.contains { $0.hasSuffix("/\(session).jsonl") })
     }
 }

@@ -1,7 +1,6 @@
 import Foundation
 import MyNotchCore
 import MyNotchTestSupport
-import Synchronization
 import Testing
 @testable import AIAgentsModule
 
@@ -49,6 +48,7 @@ nonisolated final class TailerSpy: @unchecked Sendable {
 @Suite final class AgentWatcherScanTests {
     let sandbox: Sandbox
     let fileSystem = FakeAgentFileSystem()
+    let scheduler = ManualAgentWatcherScheduler()
     let store = AgentSessionStore(scheduler: ManualScheduler())
     let spy = TailerSpy()
     let session = "11111111-2222-4333-8444-555555555555"
@@ -63,10 +63,11 @@ nonisolated final class TailerSpy: @unchecked Sendable {
         watcher?.stop()
     }
 
-    func startWatcher(heartbeat: DispatchTimeInterval = .seconds(60)) -> AgentWatcher {
+    /// Starts a watcher whose timers only run when the test fires them.
+    func startWatcher() -> AgentWatcher {
         let watcher = AgentWatcher(
             store: store, claudeRoot: sandbox.claude, codexRoot: nil, fileSystem: fileSystem,
-            makeTailer: { [spy] in spy.makeTailer($0, $1) }, debounce: .milliseconds(50), heartbeat: heartbeat
+            makeTailer: { [spy] in spy.makeTailer($0, $1) }, scheduler: scheduler
         )
         self.watcher = watcher
         watcher.start()
@@ -79,23 +80,9 @@ nonisolated final class TailerSpy: @unchecked Sendable {
 
     var transcriptName: String { "\(session).jsonl" }
 
-    func waitUntil(_ condition: () -> Bool) async -> Bool {
-        let deadline = Date().addingTimeInterval(2)
-        while Date() < deadline {
-            if condition() { return true }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        return condition()
-    }
-
     func liveSession(_ lines: String? = nil) throws {
         try sandbox.writeRegistry(pid: 4242, sessionID: session)
         try sandbox.write(lines ?? Line.prompt(session) + Line.tool(session), to: sandbox.transcript(session))
-    }
-
-    /// Holds the main thread, so what a scan hands to the main queue stays queued.
-    func blockMainThread(milliseconds: UInt32) {
-        usleep(milliseconds * 1_000)
     }
 
     // MARK: Reading
@@ -166,10 +153,11 @@ nonisolated final class TailerSpy: @unchecked Sendable {
     @Test func aBatchTheScanQueuedBeforeAStopIsDropped() async throws {
         try liveSession()
         let watcher = startWatcher()
-        // The scan finishes while the main thread is busy, so its batch is still waiting for the main queue.
-        blockMainThread(milliseconds: 400)
+        // Waiting for the scan's queue holds this test on the main thread, so the batch the scan handed over is
+        // still waiting for the main queue when the watcher stops.
+        scheduler.settle()
         watcher.stop()
-        try await Task.sleep(for: .milliseconds(100))
+        await drainMainQueue()
         #expect(store.sessions.isEmpty)
     }
 
@@ -177,11 +165,10 @@ nonisolated final class TailerSpy: @unchecked Sendable {
         // Without a message id every record counts, so a batch delivered twice would show as 2.
         try liveSession(Line.prompt(session) + Line.anonymousUsage(session))
         let watcher = startWatcher()
-        blockMainThread(milliseconds: 400)
+        scheduler.settle()
         watcher.stop()
         watcher.start()
         await watcher.rescan()
-        try await Task.sleep(for: .milliseconds(100))
         #expect(claudeSession?.usage.output == 1)
     }
 
@@ -199,10 +186,11 @@ nonisolated final class TailerSpy: @unchecked Sendable {
         try liveSession()
         let watcher = startWatcher()
         watcher.stop()
+        // The start and the stop are on the watcher's queue ahead of this rescan, so it returns after both.
         await watcher.rescan()
-        try await Task.sleep(for: .milliseconds(100))
         #expect(store.sessions.isEmpty)
-        #expect(await waitUntil { !fileSystem.isWatching })
+        #expect(!fileSystem.isWatching)
+        #expect(scheduler.heartbeats.isEmpty)
     }
 
     // MARK: Finding transcripts
@@ -222,56 +210,48 @@ nonisolated final class TailerSpy: @unchecked Sendable {
     }
 
     @Test func aMissingTranscriptIsNotSearchedForAgainByEventsThatCannotHaveCreatedIt() async throws {
-        _ = try await sessionWaitingForItsTranscript()
+        let watcher = try await sessionWaitingForItsTranscript()
         fileSystem.fire(projects("22222222-2222-4333-8444-555555555555.jsonl"))
         fileSystem.fire(sandbox.registryFile(pid: 4242).path)
-        try await Task.sleep(for: .milliseconds(300))
+        #expect(scheduler.fireDebounce() == 1)
+        await drainMainQueue()
         #expect(claudeSession == nil)
+        // The transcript was there to be found: a rescan that looks for it again does find it.
+        await watcher.rescan()
+        #expect(claudeSession != nil)
     }
 
     @Test func anEventForTheTranscriptItselfSearchesAgain() async throws {
         _ = try await sessionWaitingForItsTranscript()
         fileSystem.fire(projects(transcriptName))
-        #expect(await waitUntil { claudeSession != nil })
+        #expect(scheduler.fireDebounce() == 1)
+        await drainMainQueue()
+        #expect(claudeSession != nil)
     }
 
     @Test func anEventForAFolderSearchesAgain() async throws {
         _ = try await sessionWaitingForItsTranscript()
         fileSystem.fire(sandbox.claude.appending(path: "projects/-Users-example-Projects-demo").path)
-        #expect(await waitUntil { claudeSession != nil })
+        #expect(scheduler.fireDebounce() == 1)
+        await drainMainQueue()
+        #expect(claudeSession != nil)
     }
 
     @Test func anEventWithoutPathsSearchesAgain() async throws {
         _ = try await sessionWaitingForItsTranscript()
         fileSystem.fire()
-        #expect(await waitUntil { claudeSession != nil })
+        #expect(scheduler.fireDebounce() == 1)
+        await drainMainQueue()
+        #expect(claudeSession != nil)
     }
 
     @Test func theHeartbeatSearchesAgain() async throws {
         try sandbox.writeRegistry(pid: 4242, sessionID: session)
-        let watcher = startWatcher(heartbeat: .milliseconds(100))
+        let watcher = startWatcher()
         await watcher.rescan()
         try sandbox.write(Line.prompt(session), to: sandbox.transcript(session))
-        #expect(await waitUntil { claudeSession != nil })
-    }
-}
-
-/// The real file system events carry the paths that changed.
-@Suite struct LocalAgentFileSystemTests {
-    @Test func eventsCarryTheChangedPaths() async throws {
-        let directory = FileManager.default.temporaryDirectory.appending(path: "LocalAgentFileSystemTests-\(UUID().uuidString)", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let seen = Mutex<[String]>([])
-        let handle = LocalAgentFileSystem().watch([directory]) { paths in seen.withLock { $0 += paths } }
-        defer { handle.cancel() }
-        // Let the stream start before the file is written.
-        try await Task.sleep(for: .milliseconds(300))
-        try Data("x".utf8).write(to: directory.appending(path: "transcript.jsonl"))
-        let deadline = Date().addingTimeInterval(3)
-        while Date() < deadline, !seen.withLock({ $0.contains { $0.hasSuffix("/transcript.jsonl") } }) {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        #expect(seen.withLock { $0.contains { $0.hasSuffix("/transcript.jsonl") } })
+        #expect(scheduler.fireHeartbeat() == 1)
+        await drainMainQueue()
+        #expect(claudeSession != nil)
     }
 }
