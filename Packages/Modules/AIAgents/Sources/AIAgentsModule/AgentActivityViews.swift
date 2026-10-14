@@ -2,7 +2,8 @@ import NotchUI
 import SwiftUI
 
 /// Left side of the closed notch: the agent's glyph. It pulses while the agent works and turns orange when it
-/// waits for the user.
+/// waits for the user. The pulse is a Core Animation one (`notchPulse`): a repeating `symbolEffect(.pulse)` redraws the
+/// symbol at the display's refresh rate, which kept the whole notch laying out for as long as an agent worked.
 struct AgentActivityLeading: View {
     let content: AgentActivityContent
 
@@ -14,7 +15,7 @@ struct AgentActivityLeading: View {
         Image(systemName: content.source.systemImage)
             .font(.system(size: 14, weight: .semibold))
             .foregroundStyle(content.kind == .waitingForInput ? Color.orange : NotchTokens.primaryText)
-            .symbolEffect(.pulse, options: .repeating, isActive: isWorking)
+            .notchPulse(isActive: isWorking)
             .accessibilityLabel(content.accessibilityLabel)
     }
 }
