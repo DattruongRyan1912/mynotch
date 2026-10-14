@@ -138,6 +138,45 @@ import Testing
         #expect(account.status == .connected(storefront: "vn"))
     }
 
+    // MARK: storefront
+
+    @Test func aStorefrontTheAccountReportsReplacesTheStoredOneAndTheStatus() {
+        let account = account(FakeTokenStore.connected(storefront: "us"))
+        account.load()
+        account.replaceStorefront("vn")
+        #expect(account.status == .connected(storefront: "vn"))
+        #expect(account.credentials?.storefront == "vn")
+        #expect(account.credentials?.developerToken == "dev-token-fake")
+        #expect(account.credentials?.userToken == "user-token-fake")
+    }
+
+    @Test func replacingTheStorefrontKeepsAStatusThatNeedsASignIn() {
+        let tokens = FakeTokenStore.connected(storefront: "us")
+        let account = account(tokens)
+        account.load()
+        account.markNeedsReauth()
+        account.replaceStorefront("vn")
+        #expect(account.status == .needsReauth)
+        #expect(tokens.values[.storefront] == "vn")
+    }
+
+    @Test func aStoreThatCannotSaveKeepsTheOldStorefront() {
+        let tokens = FakeTokenStore.connected(storefront: "us")
+        let account = account(tokens)
+        account.load()
+        tokens.failsToSave = true
+        account.replaceStorefront("vn")
+        #expect(account.status == .connected(storefront: "us"))
+        #expect(tokens.values[.storefront] == "us")
+    }
+
+    @Test func replacingTheStorefrontOfADisconnectedAccountDoesNothing() {
+        let account = account()
+        account.replaceStorefront("vn")
+        #expect(account.status == .notConnected)
+        #expect(store.values.isEmpty)
+    }
+
     // MARK: disconnect
 
     @Test func disconnectingDeletesEverythingFromTheStore() {

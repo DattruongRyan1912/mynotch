@@ -109,6 +109,25 @@ final class LyricsService {
         return result
     }
 
+    #if DEBUG
+    /// DEBUG builds, for `AppleLyricsDebugTrigger`: one Apple lookup for a catalog song, through the same queue and spacing as
+    /// any lookup. Unrelated to the playing track and never cached.
+    func appleLookup(forSongID id: String) async -> LyricsResult {
+        guard let apple, apple.isAvailable else { return .unavailable("Apple Music is not connected") }
+        guard await takeTurn() else {
+            return .unavailable(Task.isCancelled ? "Lookup cancelled" : "Lyrics service stopped")
+        }
+        guard !Task.isCancelled else {
+            passTurn()
+            return .unavailable("Lookup cancelled")
+        }
+        hasSentRequest = false
+        let result = await apple.lyrics(forSongID: id, pace: { [self] in await pace() == nil })
+        spacingTimer = scheduler.schedule(after: Self.minimumSpacing) { [weak self] in self?.passTurn() }
+        return result
+    }
+    #endif
+
     /// Ends the service with its module: calls still waiting come back `.unavailable` and nothing is sent again.
     func shutDown() {
         isShutDown = true

@@ -60,6 +60,12 @@ public final class MediaModule: FeatureModule {
     let appleClient: AppleMusicLyricsClient
     private let signIn: any AppleMusicSignIn
     private var appleWasConnected = false
+    #if DEBUG
+    /// Runs an Apple lookup for a song id posted from outside, while the module runs.
+    private(set) var appleDebugTrigger: AppleLyricsDebugTrigger?
+    /// Where the trigger listens; tests put their own in place of the distributed notification center.
+    var debugObserve = AppleLyricsDebugTrigger.systemObserve
+    #endif
     private var source: (any NowPlayingSource)?
     private var spectrumFeed: SpectrumFeed?
     private var context: ModuleContext?
@@ -175,6 +181,16 @@ public final class MediaModule: FeatureModule {
             scheduler: context.scheduler,
             apple: appleClient
         )
+        #if DEBUG
+        if let lyricsService {
+            let trigger = AppleLyricsDebugTrigger(
+                lookUp: { [weak lyricsService] id in await lyricsService?.appleLookup(forSongID: id) ?? .unavailable("Lyrics service stopped") },
+                observe: debugObserve
+            )
+            trigger.start()
+            appleDebugTrigger = trigger
+        }
+        #endif
         applySettings(context.settings)
         registerHotkeys(context.hotkeys)
         let settings = context.settings
@@ -214,6 +230,10 @@ public final class MediaModule: FeatureModule {
         lyricsTask = nil
         lyricsTrack = nil
         shownCaptions = nil
+        #if DEBUG
+        appleDebugTrigger?.stop()
+        appleDebugTrigger = nil
+        #endif
         lyricsService?.shutDown()
         lyricsService = nil
         youtubeCaptionsEnabled = false

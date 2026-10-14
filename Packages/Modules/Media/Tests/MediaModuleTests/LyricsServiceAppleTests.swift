@@ -61,6 +61,7 @@ import Testing
     /// Apple's catalog and two lyrics endpoints and lrclib answer separately. The catalog says the song has lyrics unless
     /// told otherwise; lrclib's searches find nothing unless `search` says so.
     func route(
+        storefront: HTTPReply = AppleReplies.storefront("vn"),
         catalog: HTTPReply = AppleReplies.catalog(), syllable: HTTPReply = AppleReplies.notFound, plain: HTTPReply = AppleReplies.notFound,
         lrclib: HTTPReply = LrclibReplies.notFound, search: HTTPReply = LrclibReplies.results([])
     ) {
@@ -68,6 +69,7 @@ import Testing
             let url = request.url!
             switch url.host() {
             case "amp-api.music.apple.com":
+                if url.path() == "/v1/me/storefront" { return storefront }
                 if url.path().hasSuffix("/syllable-lyrics") { return syllable }
                 return url.path().hasSuffix("/lyrics") ? plain : catalog
             default: return url.path() == "/api/search" ? search : lrclib
@@ -80,6 +82,8 @@ import Testing
 
     static let apple = "amp-api.music.apple.com"
     static let catalogCall = "amp-api.music.apple.com/v1/catalog/vn/songs/1856960468"
+    /// Asked once per client, at its first lookup.
+    static let storefrontCall = "amp-api.music.apple.com/v1/me/storefront"
     static let appleLines = AppleReplies.lines(count: 5, tag: "apple")
     static let appleSyllable = AppleReplies.lyrics(ttml: AppleReplies.ttml(timing: "Word", count: 5, tag: "apple"))
     var appleFound: HTTPReply { AppleReplies.lyrics(ttml: AppleReplies.ttml(count: 5, tag: "apple")) }
@@ -89,7 +93,7 @@ import Testing
     @Test func appleLyricsAreTheAnswerAndLrclibIsNotAsked() async {
         route(syllable: appleFound, lrclib: LrclibReplies.found())
         #expect(await lookup(makeService(), track()) == .synced(Self.appleLines))
-        #expect(calls == [Self.catalogCall, "\(Self.catalogCall)/syllable-lyrics"])
+        #expect(calls == [Self.storefrontCall, Self.catalogCall, "\(Self.catalogCall)/syllable-lyrics"])
     }
 
     @Test func syllableTimedLyricsAreTheAnswerToo() async {
@@ -97,25 +101,25 @@ import Testing
         let result = await lookup(makeService(), track())
         guard case .synced(let lines) = result else { Issue.record("not synced: \(result)"); return }
         #expect(lines.count == 5)
-        #expect(http.requests.count == 2)
+        #expect(http.requests.count == 3)
     }
 
     @Test func plainLyricsFromAppleAreAnAnswerToo() async {
         route(syllable: AppleReplies.lyrics(ttml: AppleReplies.ttml(timing: "None", count: 2, tag: "words")), lrclib: LrclibReplies.found())
         #expect(await lookup(makeService(), track()) == .plain("words 1\nwords 2"))
-        #expect(http.requests.count == 2)
+        #expect(http.requests.count == 3)
     }
 
     @Test func whenTheCatalogSaysAppleHasNoLyricsTheLrclibChainRunsAsItAlwaysDid() async {
         route(catalog: AppleReplies.catalogWithoutLyrics, lrclib: LrclibReplies.found())
         #expect(await lookup(makeService(), track()) == .synced(LrclibReplies.syncedLines))
-        #expect(calls == [Self.catalogCall, "lrclib.net/api/get"])
+        #expect(calls == [Self.storefrontCall, Self.catalogCall, "lrclib.net/api/get"])
     }
 
     @Test func theWholeLrclibChainFollowsWhenNobodyHasIt() async {
         route(catalog: AppleReplies.catalogWithoutLyrics)
         #expect(await lookup(makeService(), track()) == .notFound)
-        #expect(http.requests.count == 5)
+        #expect(http.requests.count == 6)
         #expect(calls.suffix(4) == ["lrclib.net/api/get", "lrclib.net/api/get", "lrclib.net/api/search", "lrclib.net/api/search"])
     }
 
@@ -143,7 +147,7 @@ import Testing
     @Test func appleFoundOnTheLyricsEndpointEndsTheChainThere() async {
         route(plain: AppleReplies.lyrics(ttml: AppleReplies.ttml(count: 5, tag: "apple"), type: "lyrics"), lrclib: LrclibReplies.found())
         #expect(await lookup(makeService(), track()) == .synced(Self.appleLines))
-        #expect(http.requests.count == 3)
+        #expect(http.requests.count == 4)
     }
 
     @Test func aMixInTheTitleStillKeepsMusicTracksOutOfEveryLookup() async {
@@ -201,7 +205,7 @@ import Testing
     @Test func aFailureAtAppleStillRunsLrclib() async {
         route(syllable: HTTPReply(status: 503), lrclib: LrclibReplies.found())
         #expect(await lookup(makeService(), track()) == .synced(LrclibReplies.syncedLines))
-        #expect(calls == [Self.catalogCall, "\(Self.catalogCall)/syllable-lyrics", "lrclib.net/api/get"])
+        #expect(calls == [Self.storefrontCall, Self.catalogCall, "\(Self.catalogCall)/syllable-lyrics", "lrclib.net/api/get"])
     }
 
     @Test(arguments: [429, 500, 503])
@@ -210,14 +214,14 @@ import Testing
         let service = makeService()
         let result = await lookup(service, track())
         #expect(result.reason == "Apple Music: HTTP \(status)")
-        #expect(http.requests.count == 6)
+        #expect(http.requests.count == 7)
         let cached = (try? FileManager.default.contentsOfDirectory(atPath: cacheDirectory.path())) ?? []
         #expect(cached.isEmpty)
 
         // The next ask goes to Apple again, and this time Apple has it.
         route(syllable: appleFound)
         #expect(await lookup(service, track()) == .synced(Self.appleLines))
-        #expect(http.requests.count == 8)
+        #expect(http.requests.count == 9)
     }
 
     @Test func aNetworkFailureAtAppleStillRunsLrclib() async {
@@ -265,7 +269,8 @@ import Testing
         let service = makeService()
         let result = await lookup(service, track())
         #expect(result == .unavailable("Apple Music: Apple Music did not return the lyrics it lists"))
-        // The catalog, both endpoints, the two probe variants (the token has no "%"), then the four lrclib steps.
+        // The account's storefront, the catalog, both endpoints, the one probe variant that is not skipped (the same storefront
+        // and parameters as the lookup, and no other storefront is known), then the four lrclib steps.
         #expect(http.requests.count == 9)
         #expect(calls.suffix(4) == ["lrclib.net/api/get", "lrclib.net/api/get", "lrclib.net/api/search", "lrclib.net/api/search"])
         let cached = (try? FileManager.default.contentsOfDirectory(atPath: cacheDirectory.path())) ?? []
@@ -275,8 +280,8 @@ import Testing
         // Asked again at the next replay, and the probe does not run twice.
         #expect(await lookup(service, track()).isUnavailable)
         #expect(http.requests.count == 9 + 3 + 4)
-        let probes = http.requests.filter { $0.value(forHTTPHeaderField: "User-Agent") == AppleMusicLyricsClient.safariUserAgent }
-        #expect(probes.count == 2)
+        let probes = http.requests.filter { $0.url!.path().hasSuffix("/lyrics") && $0.url!.query == nil }
+        #expect(probes.count == 1)
     }
 
     @Test func lrclibStillAnswersWhenAppleDoesNotReturnWhatItLists() async {
@@ -289,16 +294,18 @@ import Testing
         http.handler = { [self] request in
             let url = request.url!
             guard url.host() == "amp-api.music.apple.com" else { return LrclibReplies.found() }
+            if url.path() == "/v1/me/storefront" { return AppleReplies.storefront("vn") }
             guard url.path().hasSuffix("lyrics") else { return AppleReplies.catalog() }
-            return request.value(forHTTPHeaderField: "User-Agent") == AppleMusicLyricsClient.safariUserAgent ? appleFound : AppleReplies.noRelatedResources
+            // Only the request without the lyric parameters gets the lyrics.
+            return url.query == nil ? appleFound : AppleReplies.noRelatedResources
         }
         let service = makeService()
         #expect(await lookup(service, track()) == .synced(Self.appleLines))
         #expect(calls.allSatisfy { $0.hasPrefix(Self.apple) })
-        #expect(http.requests.count == 4)
+        #expect(http.requests.count == 5)
         scheduler.advance(by: .seconds(1))
         #expect(await lookup(makeService(), track()) == .synced(Self.appleLines))
-        #expect(http.requests.count == 4)
+        #expect(http.requests.count == 5)
         #expect(log.messages(at: .default).contains { $0.hasPrefix("Apple lyrics variant that works") })
     }
 
@@ -330,7 +337,7 @@ import Testing
         _ = await lookup(makeService(), track())
         scheduler.advance(by: .seconds(1))
         #expect(await lookup(makeService(), track()) == .synced(Self.appleLines))
-        #expect(http.requests.count == 2)
+        #expect(http.requests.count == 3)
     }
 
     @Test func connectingMakesAnEarlierNotFoundIrrelevant() async {
@@ -352,7 +359,7 @@ import Testing
         route(syllable: appleFound)
         scheduler.advance(by: .seconds(1))
         #expect(await lookup(makeService(), track()) == .synced(Self.appleLines))
-        #expect(http.requests.count == 6)
+        #expect(http.requests.count == 7)
         #expect(calls.last?.hasPrefix(Self.apple) == true)
     }
 
@@ -373,11 +380,12 @@ import Testing
     // MARK: sequencing
 
     @Test func everyRequestWaitsForTheSpacingAfterTheLast() async {
-        // The catalog, the syllable endpoint (nothing), then the lyrics endpoint: three requests, one spacing between each.
+        // The account's storefront, the catalog, the syllable endpoint (nothing), then the lyrics endpoint: four requests, one
+        // spacing between each.
         route(plain: appleFound, lrclib: LrclibReplies.found())
         let service = makeService()
         let task = Task { await service.lyrics(for: track()) }
-        for expected in 1...3 {
+        for expected in 1...4 {
             await settle { http.requests.count == expected }
             #expect(http.requests.count == expected)
             scheduler.advance(by: .milliseconds(299))
@@ -386,7 +394,7 @@ import Testing
             scheduler.advance(by: .milliseconds(1))
         }
         #expect(await task.value == .synced(Self.appleLines))
-        #expect(http.requests.count == 3)
+        #expect(http.requests.count == 4)
         #expect(http.maxActiveCount == 1)
     }
 
@@ -395,6 +403,7 @@ import Testing
             switch request.url!.host() {
             case "amp-api.music.apple.com":
                 request.value(forHTTPHeaderField: "Authorization") != "Bearer \(AppleReplies.freshToken)" ? AppleReplies.rejected
+                    : request.url!.path() == "/v1/me/storefront" ? AppleReplies.storefront("vn")
                     : request.url!.path().hasSuffix("/syllable-lyrics") ? self.appleFound : AppleReplies.catalog()
             case "music.apple.com":
                 request.url!.path() == "/" ? AppleReplies.page : AppleReplies.bundle(containing: [AppleReplies.freshToken])
@@ -403,7 +412,7 @@ import Testing
         }
         let service = makeService()
         let task = Task { await service.lyrics(for: track()) }
-        for expected in 1...5 {
+        for expected in 1...6 {
             await settle { http.requests.count == expected }
             #expect(http.requests.count == expected)
             await settle { http.requests.count > expected }
@@ -411,7 +420,7 @@ import Testing
             scheduler.advance(by: LyricsService.minimumSpacing)
         }
         #expect(await task.value == .synced(Self.appleLines))
-        #expect(http.requests.count == 5)
+        #expect(http.requests.count == 6)
         #expect(http.maxActiveCount == 1)
     }
 
@@ -449,4 +458,58 @@ import Testing
         #expect(await second.value == .synced(LrclibReplies.syncedLines))
         #expect(http.maxActiveCount == 1)
     }
+
+    // MARK: the debug lookup
+
+    #if DEBUG
+    @Test func aDebugLookupAsksAppleForTheSongThroughTheQueueAndTouchesNoCache() async {
+        route(syllable: appleFound, lrclib: LrclibReplies.found())
+        let service = makeService()
+        let task = Task { await service.appleLookup(forSongID: "1856960468") }
+        for expected in 1...3 {
+            await settle { http.requests.count == expected }
+            #expect(http.requests.count == expected)
+            scheduler.advance(by: LyricsService.minimumSpacing)
+        }
+        #expect(await task.value == .synced(Self.appleLines))
+        #expect(calls == [Self.storefrontCall, Self.catalogCall, "\(Self.catalogCall)/syllable-lyrics"])
+        // Nothing is cached, so a lookup for the same song asks again, and lrclib is never asked.
+        let cached = (try? FileManager.default.contentsOfDirectory(atPath: cacheDirectory.path())) ?? []
+        #expect(cached.isEmpty)
+        #expect(!calls.contains { $0.hasPrefix("lrclib.net") })
+    }
+
+    @Test func aDebugLookupWaitsForTheLookupBeforeIt() async {
+        route(syllable: appleFound, lrclib: LrclibReplies.found())
+        let service = makeService()
+        let playing = Task { await service.lyrics(for: track("Playing")) }
+        await settle { http.requests.count == 1 }
+        let debug = Task { await service.appleLookup(forSongID: "42") }
+        await settle { service.queuedCount == 1 }
+        #expect(service.queuedCount == 1)
+        for _ in 0..<12 where http.requests.count < 7 {
+            await settle { http.requests.count > 100 }
+            scheduler.advance(by: LyricsService.minimumSpacing)
+        }
+        #expect(await playing.value == .synced(Self.appleLines))
+        #expect(await debug.value == .synced(Self.appleLines))
+        #expect(http.maxActiveCount == 1)
+    }
+
+    @Test func aDebugLookupWithoutAConnectedAccountSendsNothing() async {
+        account.disconnect()
+        route()
+        #expect(await makeService().appleLookup(forSongID: "42") == .unavailable("Apple Music is not connected"))
+        #expect(http.requests.isEmpty)
+        let service = LyricsService(client: http, cacheDirectory: cacheDirectory, scheduler: scheduler, appVersion: "1.2")
+        #expect(await service.appleLookup(forSongID: "42").isUnavailable)
+    }
+
+    @Test func aStoppedServiceAnswersADebugLookupAtOnce() async {
+        let service = makeService()
+        service.shutDown()
+        #expect(await service.appleLookup(forSongID: "42").isUnavailable)
+        #expect(http.requests.isEmpty)
+    }
+    #endif
 }

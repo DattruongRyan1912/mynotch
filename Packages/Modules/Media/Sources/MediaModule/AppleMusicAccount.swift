@@ -75,6 +75,13 @@ final class AppleMusicAccount {
         _ = tokens.save(token, for: .developerToken)
     }
 
+    /// The storefront the account itself reports (`/v1/me/storefront`), which is where its lyrics are: kept in place of the
+    /// one MusicKit gave. Nothing happens for an account that is not connected, or when the store refuses.
+    func replaceStorefront(_ storefront: String) {
+        guard status != .notConnected, tokens.save(storefront, for: .storefront) else { return }
+        if status.isConnected { status = .connected(storefront: storefront) }
+    }
+
     func markNeedsReauth() {
         if status.isConnected { status = .needsReauth }
     }

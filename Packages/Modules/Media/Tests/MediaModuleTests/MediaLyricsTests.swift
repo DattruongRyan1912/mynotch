@@ -393,8 +393,8 @@ import Testing
         playMusicTrack()
         await letTimePass { store.syncedLyrics != nil }
         #expect(store.syncedLyrics == AppleReplies.lines(count: 5, tag: "apple"))
-        // The catalog entry, then the lyrics: both from Apple, nothing from lrclib.
-        #expect(client.requests.count == 2)
+        // The account's storefront, the catalog entry, then the lyrics: all from Apple, nothing from lrclib.
+        #expect(client.requests.count == 3)
         #expect(client.requests.allSatisfy { $0.url?.host() == "amp-api.music.apple.com" })
     }
 
@@ -448,10 +448,49 @@ import Testing
         playMusicTrack()
         await letTimePass { store.syncedLyrics != nil }
         module.appleAccount.markNeedsReauth()
-        await settle { client.requests.count > 2 }
-        #expect(client.requests.count == 2)
+        await settle { client.requests.count > 3 }
+        #expect(client.requests.count == 3)
         #expect(store.syncedLyrics == AppleReplies.lines(count: 5, tag: "apple"))
     }
+
+    #if DEBUG
+    @Test func theDebugTriggerRunsAnAppleLookupAndTouchesNothingElse() async throws {
+        storeSignIn()
+        enableLyrics()
+        var deliver: (@MainActor (String?) -> Void)?
+        var removed = 0
+        module.debugObserve = { handler in
+            deliver = handler
+            return { removed += 1 }
+        }
+        client.reply(appleFound)
+        #expect(module.appleDebugTrigger == nil)
+        await harness.registry.bootstrap()
+        #expect(module.appleDebugTrigger?.isObserving == true)
+
+        deliver?("not a song id")
+        deliver?(nil)
+        await settle { !client.requests.isEmpty }
+        #expect(client.requests.isEmpty)
+
+        deliver?("1856960468")
+        await letTimePass { client.requests.count >= 3 }
+        // The account's storefront, the catalog entry and the lyrics: all from Apple, the way a lookup for the playing track goes.
+        #expect(client.requests.count == 3)
+        #expect(client.requests.allSatisfy { $0.url?.host() == "amp-api.music.apple.com" })
+        #expect(client.requests.last?.url?.path() == "/v1/catalog/vn/songs/1856960468/syllable-lyrics")
+        // The playing track's state and the cache are untouched.
+        #expect(store.syncedLyrics == nil)
+        #expect(!store.state.isActive)
+        let environment = try #require(harness.settingsEnvironment(for: "media"))
+        let cached = (try? FileManager.default.contentsOfDirectory(atPath: environment.storage.cachesDirectory.appending(path: "lyrics").path())) ?? []
+        #expect(cached.isEmpty)
+
+        await harness.registry.setEnabled(false, for: "media")
+        #expect(removed == 1)
+        #expect(module.appleDebugTrigger == nil)
+    }
+    #endif
 
     @Test func startingTheModuleLoadsTheStoredSignIn() async {
         storeSignIn()

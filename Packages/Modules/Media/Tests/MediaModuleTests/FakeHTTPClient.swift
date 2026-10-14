@@ -17,6 +17,11 @@ final class FakeHTTPClient: HTTPClient {
         return try await handler(request)
     }
 
+    /// Forgets the requests so far, for a test that sets up its state with some.
+    func forgetRequests() {
+        requests = []
+    }
+
     /// Every request gets `reply`.
     func reply(_ reply: HTTPReply) {
         handler = { _ in reply }
