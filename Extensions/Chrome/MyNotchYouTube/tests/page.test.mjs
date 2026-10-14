@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { createContext, flush, plain, runScripts } from "./helpers.mjs";
+import { assertSafeDiag, createContext, flush, plain, runScripts } from "./helpers.mjs";
 
 const SCRIPTS = ["captions.js", "page.js"];
 const ORIGIN = "https://www.youtube.com";
@@ -36,6 +36,9 @@ class FakeXhr {
   addEventListener(type, listener) {
     (this.listeners[type] ??= new Set()).add(listener);
   }
+  fail() {
+    for (const listener of this.listeners.error ?? []) listener({ target: this, currentTarget: this });
+  }
   finish(status, body, { responseType = "", response = null } = {}) {
     this.status = status;
     this.responseText = body;
@@ -46,11 +49,14 @@ class FakeXhr {
 }
 
 function makePage() {
-  const page = { posted: [], fetchCalls: [], nextFetch: null, fetchThrows: null };
+  const page = { posted: [], diags: [], timers: [], fetchCalls: [], nextFetch: null, fetchThrows: null };
   page.window = createContext({
     location: { origin: ORIGIN, href: `${ORIGIN}/watch?v=abcdefghijk` },
     postMessage(message, origin) {
-      page.posted.push({ message: plain(message), origin });
+      (message.type === "diag" ? page.diags : page.posted).push({ message: plain(message), origin });
+    },
+    setTimeout(fn, ms) {
+      page.timers.push({ fn, ms });
     },
     fetch(...args) {
       page.fetchCalls.push(args);
@@ -340,4 +346,136 @@ test("a page without fetch or XMLHttpRequest is left alone", () => {
   assert.doesNotThrow(() => runScripts(window, SCRIPTS));
   assert.equal(window.fetch, undefined);
   assert.equal(window.XMLHttpRequest, undefined);
+});
+
+// ---- diagnostics --------------------------------------------------------------------------------
+
+/** Diag messages the page script posted, without the transport envelope. */
+function diagsOf(page) {
+  return page.diags.map(({ message, origin }) => {
+    assert.equal(message.source, "mynotch-yt");
+    assert.equal(origin, ORIGIN);
+    const { source, ...rest } = message;
+    assertSafeDiag(rest, "page");
+    return rest.event;
+  });
+}
+
+test("diag: the wrapper status is reported once shortly after start and checked again later", () => {
+  const page = makePage();
+  assert.deepEqual(page.timers.map((timer) => timer.ms), [1000, 10000]);
+  assert.deepEqual(diagsOf(page), [], "nothing is posted synchronously (the content script may not be listening yet)");
+
+  page.timers[0].fn();
+  assert.deepEqual(diagsOf(page), ["page-wrap fetch=true xhr=true"]);
+  page.timers[1].fn();
+  assert.deepEqual(diagsOf(page), ["page-wrap fetch=true xhr=true", "page-wrap-check fetch=true xhr=true"]);
+});
+
+test("diag: the later check notices when another script replaced a wrapper", () => {
+  const page = makePage();
+  page.window.fetch = () => Promise.resolve(); // an ad blocker's replacement
+  page.window.XMLHttpRequest.prototype.open = function open() {};
+  page.timers[1].fn();
+  assert.deepEqual(diagsOf(page), ["page-wrap-check fetch=false xhr=false"]);
+
+  const onlyFetch = makePage();
+  onlyFetch.window.XMLHttpRequest.prototype.open = function open() {};
+  onlyFetch.timers[1].fn();
+  assert.deepEqual(diagsOf(onlyFetch), ["page-wrap-check fetch=true xhr=false"]);
+});
+
+test("diag: a page without fetch or XMLHttpRequest reports that nothing was installed", () => {
+  const timers = [];
+  const posted = [];
+  const window = createContext({
+    location: { origin: ORIGIN, href: ORIGIN },
+    postMessage: (message) => posted.push(plain(message)),
+    setTimeout: (fn, ms) => timers.push({ fn, ms })
+  });
+  runScripts(window, SCRIPTS);
+  timers[0].fn();
+  assert.deepEqual(posted.map((message) => message.event), ["page-wrap fetch=false xhr=false"]);
+});
+
+test("diag: a timedtext fetch is reported as counts only", async () => {
+  const page = makePage();
+  page.nextFetch = respond(json3);
+  await page.window.fetch(TIMEDTEXT);
+  await flush();
+  assert.deepEqual(diagsOf(page), ["page-seen fetch", "page-timedtext json3 events=2"]);
+
+  page.nextFetch = respond(srv3);
+  await page.window.fetch(`${ORIGIN}/api/timedtext?v=abcdefghijk&lang=en&fmt=srv3`);
+  await flush();
+  assert.deepEqual(diagsOf(page).slice(2), ["page-timedtext srv3 events=2"], "page-seen fetch is rate limited");
+});
+
+test("diag: parse errors, other formats, status codes, oversize bodies and failed requests", async () => {
+  const page = makePage();
+  const run = async (body, init) => {
+    page.nextFetch = respond(body, init);
+    await page.window.fetch(TIMEDTEXT);
+    await flush();
+  };
+  await run("{broken json");
+  await run("WEBVTT\n\n00:00.500 --> 00:01.500\nline one");
+  await run(json3, { status: 404 });
+  await run(`{"events":[],"pad":"${"x".repeat(20000001)}"}`);
+
+  page.nextFetch = Promise.reject(new TypeError("Failed to fetch"));
+  await assert.rejects(page.window.fetch(TIMEDTEXT), TypeError);
+  await flush();
+
+  assert.deepEqual(diagsOf(page).filter((event) => event !== "page-seen fetch"), [
+    "page-timedtext-parse-error",
+    "page-timedtext other events=0",
+    "page-timedtext-status 404",
+    "page-timedtext-too-large",
+    "page-timedtext-failed fetch"
+  ]);
+});
+
+test("diag: xhr requests, status codes and network errors", () => {
+  const page = makePage();
+  const ok = new page.window.XMLHttpRequest();
+  ok.open("GET", TIMEDTEXT);
+  ok.finish(200, json3);
+  const missing = new page.window.XMLHttpRequest();
+  missing.open("GET", `${ORIGIN}/api/timedtext?v=abcdefghijk&lang=en&fmt=srv3`);
+  missing.finish(404, "");
+  const broken = new page.window.XMLHttpRequest();
+  broken.open("GET", `${ORIGIN}/api/timedtext?v=abcdefghijk&lang=de&fmt=json3`);
+  broken.fail();
+  const unrelated = new page.window.XMLHttpRequest();
+  unrelated.open("GET", `${ORIGIN}/watch`);
+  assert.deepEqual(Object.keys(unrelated.listeners), []);
+
+  assert.deepEqual(diagsOf(page), ["page-seen xhr", "page-timedtext json3 events=2", "page-timedtext-status 404", "page-timedtext-failed xhr"]);
+});
+
+test("diag: identical events are rate limited and no URL, token or id ever appears", async () => {
+  const page = makePage();
+  for (let i = 0; i < 4; i++) {
+    page.nextFetch = respond(json3);
+    await page.window.fetch(TIMEDTEXT);
+  }
+  await flush();
+  assert.deepEqual(diagsOf(page), ["page-seen fetch", "page-timedtext json3 events=2"]);
+
+  const wire = JSON.stringify(page.diags.map(({ message }) => message));
+  for (const secret of ["SECRET_TOKEN", "SECRET_SIG", "abcdefghijk", "api/timedtext", "pot=", "https://", "youtube.com", "line one"]) {
+    assert.equal(wire.includes(secret), false, secret);
+  }
+});
+
+test("diag: a failing diagnostic never reaches the page", async () => {
+  const page = makePage();
+  page.window.postMessage = () => {
+    throw new Error("post failed");
+  };
+  page.nextFetch = respond(json3);
+  await page.window.fetch(TIMEDTEXT);
+  await flush();
+  assert.doesNotThrow(() => page.timers.forEach((timer) => timer.fn()));
 });

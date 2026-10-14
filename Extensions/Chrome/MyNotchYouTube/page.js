@@ -12,6 +12,9 @@
  *    Nothing observation-related can throw into YouTube's code or leave an unhandled rejection.
  *  - Wrapping is idempotent (a hidden symbol flag), and this script exposes no globals.
  *  - The request URL is only used to read the video id, language and kind; it is never forwarded.
+ *
+ * It also reports what it sees as `diag` events (wrapper installed, requests seen, format and
+ * number of events, parse errors): fixed codes and numbers only, never URLs, ids or text.
  */
 (function (root) {
   "use strict";
@@ -31,6 +34,11 @@
   }
 
   var MAX_BODY_CHARS = 20000000;
+  var DIAG_WINDOW_MS = 5000;
+  var allowDiag = C.createDiagLimiter(function () {
+    return Date.now();
+  }, DIAG_WINDOW_MS);
+  var ours = { fetch: null, open: null }; // our wrappers, to notice if someone replaces them later
 
   function noop() {}
 
@@ -42,19 +50,39 @@
     root.postMessage(envelope, root.location.origin);
   }
 
+  /** One diagnostic event for the content script (rate limited, never throws). */
+  function diag(event) {
+    try {
+      if (!allowDiag(event)) return;
+      var message = C.buildDiag("page", event);
+      if (message) post(message);
+    } catch (e) {
+      /* diagnostics must never disturb the page */
+    }
+  }
+
   /** Turns one observed timedtext body into a `captions` message and posts it. */
   function handleBody(track, body) {
     try {
-      if (typeof body === "string" && body.length > MAX_BODY_CHARS) return;
+      if (typeof body === "string" && body.length > MAX_BODY_CHARS) {
+        diag("page-timedtext-too-large");
+        return;
+      }
+      var parsed = C.parseBody(body);
+      if (parsed.error) {
+        diag("page-timedtext-parse-error");
+        return;
+      }
+      diag("page-timedtext " + parsed.format + " events=" + parsed.events.length);
       var message = C.buildCaptionsMessage({
         videoId: track.videoId,
         lang: track.lang,
         kind: track.kind,
-        events: C.eventsFromBody(body)
+        events: parsed.events
       });
       if (message) post(message);
     } catch (e) {
-      /* observation must never disturb the page */
+      diag("page-timedtext-parse-error");
     }
   }
 
@@ -72,11 +100,16 @@
   function observeFetch(args, result) {
     var track = trackFor(urlOfFetchInput(args[0]));
     if (!track || !result || typeof result.then !== "function") return;
+    diag("page-seen fetch");
     // Registered before the page can attach its own handlers, so the clone is taken before the
     // body is read. The derived promise swallows every outcome.
     result.then(function (response) {
       try {
-        if (!response || response.ok === false) return;
+        if (response && response.ok === false) {
+          if (typeof response.status === "number") diag("page-timedtext-status " + response.status);
+          return;
+        }
+        if (!response) return;
         response
           .clone()
           .text()
@@ -87,13 +120,16 @@
       } catch (e) {
         /* body already used, opaque response, ... */
       }
-    }, noop);
+    }, function () {
+      diag("page-timedtext-failed fetch"); // network error, or blocked by an extension
+    });
   }
 
+  /** Returns true when the wrapper was installed. */
   function wrapFetch() {
     var original = root.fetch;
-    if (typeof original !== "function") return;
-    root.fetch = new Proxy(original, {
+    if (typeof original !== "function") return false;
+    ours.fetch = new Proxy(original, {
       apply: function (target, thisArg, args) {
         var result = Reflect.apply(target, thisArg, args);
         try {
@@ -104,6 +140,8 @@
         return result;
       }
     });
+    root.fetch = ours.fetch;
+    return true;
   }
 
   function readXhrBody(xhr) {
@@ -116,10 +154,11 @@
     return null;
   }
 
+  /** Returns true when the wrapper was installed. */
   function wrapXhr() {
     var Xhr = root.XMLHttpRequest;
     var proto = Xhr && Xhr.prototype;
-    if (!proto || typeof proto.open !== "function") return;
+    if (!proto || typeof proto.open !== "function") return false;
     var tracks = new WeakMap();
 
     // One shared listener function: addEventListener ignores duplicate registrations of it.
@@ -127,7 +166,11 @@
       try {
         var xhr = event.currentTarget || event.target;
         var track = tracks.get(xhr);
-        if (!track || xhr.status < 200 || xhr.status >= 300) return;
+        if (!track) return;
+        if (xhr.status < 200 || xhr.status >= 300) {
+          diag("page-timedtext-status " + xhr.status);
+          return;
+        }
         var body = readXhrBody(xhr);
         if (body !== null && body !== undefined) handleBody(track, body);
       } catch (e) {
@@ -135,14 +178,24 @@
       }
     }
 
-    proto.open = new Proxy(proto.open, {
+    function onError(event) {
+      try {
+        if (tracks.get(event.currentTarget || event.target)) diag("page-timedtext-failed xhr");
+      } catch (e) {
+        /* never disturb the page */
+      }
+    }
+
+    ours.open = new Proxy(proto.open, {
       apply: function (target, thisArg, args) {
         var result = Reflect.apply(target, thisArg, args); // throws exactly like the original
         try {
           var track = trackFor(urlOfFetchInput(args[1]));
           if (track) {
+            diag("page-seen xhr");
             tracks.set(thisArg, track);
             thisArg.addEventListener("load", onLoad);
+            thisArg.addEventListener("error", onError);
           } else {
             tracks.delete(thisArg);
           }
@@ -152,16 +205,34 @@
         return result;
       }
     });
+    proto.open = ours.open;
+    return true;
   }
 
+  var fetchWrapped = false;
+  var xhrWrapped = false;
   try {
-    wrapFetch();
+    fetchWrapped = wrapFetch();
   } catch (e) {
     /* leave fetch alone */
   }
   try {
-    wrapXhr();
+    xhrWrapped = wrapXhr();
   } catch (e) {
     /* leave XMLHttpRequest alone */
+  }
+
+  // Reported a little later: the content script has to be listening by then. The second report
+  // tells whether another script (an ad blocker, say) replaced our wrappers in the meantime.
+  if (typeof root.setTimeout === "function") {
+    root.setTimeout(function () {
+      diag("page-wrap fetch=" + fetchWrapped + " xhr=" + xhrWrapped);
+    }, 1000);
+    root.setTimeout(function () {
+      var proto = root.XMLHttpRequest && root.XMLHttpRequest.prototype;
+      diag(
+        "page-wrap-check fetch=" + (fetchWrapped && root.fetch === ours.fetch) + " xhr=" + (xhrWrapped && !!proto && proto.open === ours.open)
+      );
+    }, 10000);
   }
 })(typeof globalThis !== "undefined" ? globalThis : self);

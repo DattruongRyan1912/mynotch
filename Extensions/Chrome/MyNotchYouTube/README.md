@@ -9,6 +9,8 @@ Extension Chrome nhỏ (Manifest V3) chuyển phụ đề mà YouTube đã tải
 
 **Được gửi cho MyNotch:** mã video, tiêu đề video, vị trí phát hiện tại, trạng thái phát/tạm dừng, tốc độ phát và nội dung phụ đề (thời điểm, độ dài, chữ).
 
+**Chẩn đoán:** extension cũng gửi vài mã chẩn đoán rất ngắn (extension đã khởi động, kết nối với host thế nào, số sự kiện phụ đề đã đọc, lỗi gửi tin). Chúng chỉ gồm mã cố định và con số, không chứa tiêu đề, URL, mã video hay chữ của phụ đề, và MyNotch chỉ ghi chúng vào nhật ký hệ thống của máy.
+
 **Không bao giờ gửi:** URL (kể cả URL phụ đề có token), cookie, thông tin tài khoản hay bất cứ thứ gì ngoài các trường trên.
 
 ## Cài đặt

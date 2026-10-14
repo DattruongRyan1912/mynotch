@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { createContext, plain, runScripts } from "./helpers.mjs";
+import { assertSafeDiag, createContext, flush, plain, runScripts } from "./helpers.mjs";
 
 const ORIGIN = "https://www.youtube.com";
 const ID = "abcdefghijk";
@@ -42,7 +42,8 @@ function fakeVideo() {
 /** A page with just enough DOM for content.js, plus a manual clock and interval. */
 function makePage({ url = watch(ID), title = "Placeholder title - YouTube", pressed = "true", video = fakeVideo() } = {}) {
   const page = {
-    sent: [],
+    sent: [], // protocol messages (captions, playback, clear)
+    diags: [], // diag messages, kept apart so the protocol tests stay readable
     video,
     title,
     ad: false,
@@ -61,6 +62,7 @@ function makePage({ url = watch(ID), title = "Placeholder title - YouTube", pres
       return page.title;
     },
     querySelector(selector) {
+      if (page.queryThrows) throw page.queryThrows;
       if (selector === ".ytp-subtitles-button") return page.button;
       return selector.includes("video") ? page.video : null;
     },
@@ -77,8 +79,8 @@ function makePage({ url = watch(ID), title = "Placeholder title - YouTube", pres
         },
         sendMessage(message) {
           if (page.sendThrows) throw page.sendThrows;
-          page.sent.push(plain(message));
-          return Promise.resolve();
+          (message.type === "diag" ? page.diags : page.sent).push(plain(message));
+          return page.sendResult ? page.sendResult(message) : Promise.resolve();
         }
       }
     },
@@ -681,4 +683,232 @@ test("a send error on a healthy context does not shut the script down", () => {
   page.sendThrows = null;
   page.video.emit("play");
   assert.equal(page.take().length, 1);
+});
+
+// ---- diagnostics --------------------------------------------------------------------------------
+
+/** The diag events the content script sent, each checked to be a safe diag message. */
+function diagEvents(page) {
+  return page.diags.map((message) => {
+    assertSafeDiag(message, "content");
+    return message.event;
+  });
+}
+
+test("diag: start and the main video being found are reported", () => {
+  const page = pausedPage();
+  page.start();
+  assert.deepEqual(diagEvents(page), ["content-start", "content-video-found", "content-cc on"]);
+  page.advance(10000);
+  assert.deepEqual(diagEvents(page).slice(3), [], "reported once, not on every tick");
+});
+
+test("diag: a missing main video on a watch page is reported once, and again when it shows up", () => {
+  const page = makePage({ video: null, pressed: null });
+  page.start();
+  page.advance(10000);
+  assert.deepEqual(diagEvents(page), ["content-start", "content-video-missing"]);
+
+  page.setVideo(fakeVideo());
+  page.advance(1000);
+  assert.deepEqual(diagEvents(page).slice(2), ["content-video-found"]);
+});
+
+test("diag: pages without a video id report neither found nor missing", () => {
+  const page = makePage({ url: `${ORIGIN}/feed/subscriptions`, video: null });
+  page.start();
+  page.advance(10000);
+  assert.deepEqual(diagEvents(page), ["content-start"]);
+});
+
+test("diag: found/missing is reported again for the next video", () => {
+  const page = pausedPage();
+  page.start();
+  const before = diagEvents(page).length;
+  page.advance(5000);
+  page.navigate(watch(ID2), "Another placeholder - YouTube");
+  assert.deepEqual(diagEvents(page).slice(before).filter((event) => event.startsWith("content-video")), ["content-video-found"]);
+});
+
+test("diag: captions button state changes are reported", () => {
+  const page = pausedPage();
+  page.start();
+  page.advance(5000);
+  page.button.pressed = "false";
+  page.advance(1000);
+  page.advance(4000);
+  page.button.pressed = "true";
+  page.advance(1000);
+  assert.deepEqual(diagEvents(page).filter((event) => event.startsWith("content-cc")), ["content-cc on", "content-cc off", "content-cc on"]);
+});
+
+test("diag: an alive line every 30 s with presence and playing flags", () => {
+  const page = makePage();
+  page.start();
+  page.advance(29000);
+  assert.deepEqual(diagEvents(page).filter((event) => event.startsWith("content-alive")), []);
+  page.advance(1000);
+  page.video.paused = true;
+  page.advance(30000);
+  page.navigate(`${ORIGIN}/`, "YouTube");
+  page.advance(30000);
+  assert.deepEqual(diagEvents(page).filter((event) => event.startsWith("content-alive")), [
+    "content-alive videoid-present=true playing=true",
+    "content-alive videoid-present=true playing=false",
+    "content-alive videoid-present=false playing=false"
+  ]);
+});
+
+test("diag: send failures are kept and reported once the channel works again", async () => {
+  const page = makePage();
+  page.start();
+  await flush();
+  page.diags.length = 0;
+
+  const failure = (message) =>
+    message.type === "diag" ? Promise.resolve() : Promise.reject(new Error("Could not establish connection. Receiving end does not exist."));
+  page.sendResult = failure;
+  page.video.emit("play");
+  page.video.emit("pause");
+  await flush();
+  assert.deepEqual(diagEvents(page), [], "nothing can be reported through the failing channel yet");
+
+  page.sendResult = null;
+  page.video.emit("seeked");
+  await flush();
+  assert.deepEqual(diagEvents(page), ["content-send-error no-receiving-end count=2"]);
+
+  page.video.emit("seeked");
+  await flush();
+  assert.equal(diagEvents(page).length, 1, "reported once");
+});
+
+test("diag: a synchronous send error on a healthy context is reported afterwards too", async () => {
+  const page = makePage();
+  page.start();
+  await flush();
+  page.diags.length = 0;
+
+  page.sendThrows = new Error("Message length exceeded maximum allowed length.");
+  page.video.emit("play");
+  page.sendThrows = null;
+  page.video.emit("pause");
+  await flush();
+  assert.deepEqual(diagEvents(page), ["content-send-error message-too-long count=1"]);
+});
+
+test("diag: a channel that keeps failing does not loop or report itself", async () => {
+  const page = makePage();
+  page.sendResult = () => Promise.reject(new Error("Could not establish connection. Receiving end does not exist."));
+  page.start();
+  for (let i = 0; i < 20; i++) {
+    page.advance(5000);
+    await flush(2);
+  }
+  assert.equal(diagEvents(page).some((event) => event.startsWith("content-send-error")), false);
+  assert.ok(page.diags.length < 60, "bounded by the rate limit");
+});
+
+test("diag: an exception in the tick is reported and the next tick still runs", () => {
+  const page = pausedPage();
+  page.start();
+  page.take();
+  page.queryThrows = new TypeError("Cannot read properties of null (reading 'foo')");
+  page.advance(1000);
+  assert.deepEqual(diagEvents(page).filter((event) => event.startsWith("content-tick-error")), [
+    "content-tick-error typeerror-cannot-read-properties-of-null-reading"
+  ]);
+
+  page.advance(10000);
+  assert.ok(diagEvents(page).filter((event) => event.startsWith("content-tick-error")).length <= 3, "rate limited");
+
+  page.queryThrows = null;
+  page.video.paused = false;
+  page.advance(1000);
+  assert.ok(page.take().some((message) => message.type === "playback"), "the tick works again");
+});
+
+test("diag: page-side diag events are relayed (clean, rate limited); forged ones are not", () => {
+  const page = pausedPage();
+  page.start();
+  page.advance(1000);
+  page.diags.length = 0;
+  page.take();
+  const pageDiag = (event) => ({ v: 1, type: "diag", where: "page", event });
+
+  page.postFromPage(pageDiag("page-timedtext json3 events=3"));
+  page.postFromPage({ ...pageDiag("page-timedtext json3 events=9"), url: "https://example.invalid/?pot=SECRET" });
+  assert.deepEqual(page.diags, [pageDiag("page-timedtext json3 events=3")], "same kind twice within 5 s: once");
+  assert.deepEqual(page.sent, []);
+
+  page.advance(5000);
+  page.postFromPage(pageDiag("page-timedtext json3 events=9"));
+  assert.equal(page.diags.at(-1).event, "page-timedtext json3 events=9");
+
+  const before = page.diags.length;
+  page.postFromPage({ v: 1, type: "diag", where: "sw", event: "sw-start v=0.1.1" });
+  page.postFromPage({ v: 1, type: "diag", where: "content", event: "content-start" });
+  page.postFromPage(pageDiag("page-seen https://www.youtube.com/"));
+  page.postFromPage(pageDiag("page-timedtext json3 events=1 abcdefghijk"));
+  page.postFromPage(pageDiag("page-seen fetch"), { origin: "https://evil.example" });
+  page.postFromPage(pageDiag("page-seen fetch"), { source: {} });
+  assert.equal(page.diags.length, before);
+});
+
+test("diag: a flood of forged page events is bounded", () => {
+  const page = pausedPage();
+  page.start();
+  page.diags.length = 0;
+  for (let i = 0; i < 2000; i++) page.postFromPage({ v: 1, type: "diag", where: "page", event: `page-timedtext-status ${100 + (i % 900)}` });
+  assert.ok(page.diags.length <= 128, "the table of kinds is bounded");
+  const afterFirst = page.diags.length;
+  for (let i = 0; i < 2000; i++) page.postFromPage({ v: 1, type: "diag", where: "page", event: i % 2 ? "page-seen fetch" : "page-seen xhr" });
+  assert.ok(page.diags.length - afterFirst <= 2, "two more kinds, once each");
+  page.advance(5000);
+  page.postFromPage({ v: 1, type: "diag", where: "page", event: "page-seen fetch" });
+  assert.ok(page.diags.length - afterFirst <= 3, "a new window lets one through again");
+});
+
+test("diag: nothing a user could recognise ever appears: no title, URL or video id", async () => {
+  const page = makePage({ title: "Secret Placeholder Title - YouTube" });
+  page.start();
+  page.postFromPage(captionsMessage(ID, "secret caption words"));
+  page.video.emit("play");
+  page.button.pressed = "false";
+  page.advance(6000);
+  page.sendResult = () => Promise.reject(new Error(`Failed for ${watch(ID)} and Secret Placeholder Title`));
+  page.video.emit("seeked");
+  await flush();
+  page.sendResult = null;
+  page.video.emit("seeked");
+  await flush();
+  page.queryThrows = new Error(`bad ${watch(ID2)} Secret Placeholder Title ${ID}`);
+  page.advance(6000);
+  page.queryThrows = null;
+  page.navigate(watch(ID2), "Another Secret Title - YouTube");
+  page.advance(60000);
+  await flush();
+
+  assert.ok(page.diags.length >= 8, `enough diag traffic to be meaningful (${page.diags.length})`);
+  const wire = JSON.stringify(page.diags);
+  for (const secret of [ID, ID2, "Secret", "secret", "Placeholder", "placeholder", "caption words", "http", "youtube.com", "watch?v="]) {
+    assert.equal(wire.includes(secret), false, secret);
+  }
+  diagEvents(page);
+});
+
+test("diag: a failing diagnostic is not reported as a send error of the protocol messages", async () => {
+  const page = makePage();
+  page.start();
+  await flush();
+  page.diags.length = 0;
+
+  page.sendResult = (message) => (message.type === "diag" ? Promise.reject(new Error("Could not establish connection. Receiving end does not exist.")) : Promise.resolve());
+  page.button.pressed = "false"; // a diag attempt that fails ("content-cc off")
+  page.advance(1000);
+  page.video.emit("seeked"); // a protocol message that succeeds
+  await flush();
+  page.video.emit("seeked");
+  await flush();
+  assert.equal(page.diags.some((message) => message.event.startsWith("content-send-error")), false);
 });

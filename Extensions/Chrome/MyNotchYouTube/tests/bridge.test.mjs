@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadBridge } from "./helpers.mjs";
+import { assertSafeDiag, loadBridge, loadCaptions } from "./helpers.mjs";
 
 const B = loadBridge();
+const C = loadCaptions();
 const A = "aaaaaaaaaaa";
 const Z = "zzzzzzzzzzz";
 
@@ -25,12 +26,14 @@ function harness() {
       if (h.connectError) throw h.connectError;
       const listeners = [];
       const port = {
-        posted: [],
+        posted: [], // protocol messages
+        diags: [], // diag messages
+
         dead: false,
         onDisconnect: { addListener: (fn) => listeners.push(fn) },
         postMessage(message) {
           if (port.dead) throw new Error("Attempting to use a disconnected port object");
-          port.posted.push(message);
+          (message.type === "diag" ? port.diags : port.posted).push(message);
         },
         disconnect(reason = "") {
           h.lastError = reason;
@@ -46,7 +49,9 @@ function harness() {
       return h.lastError;
     },
     now: () => h.time,
-    log: (text) => h.logs.push(text)
+    log: (text) => h.logs.push(text),
+    errorCode: C.errorCode,
+    buildDiag: C.buildDiag
   });
   h.advance = (ms) => {
     h.time += ms;
@@ -217,4 +222,201 @@ test("isTrustedSender accepts only this extension's own scripts on youtube.com p
   ]) {
     assert.equal(B.isTrustedSender(sender, own), false, JSON.stringify(sender));
   }
+});
+
+// ---- diagnostics: reconnect reasons and the service worker relay ------------------------------------
+
+const OWN = "abcdefghijklmnopabcdefghijklmnop";
+const SENDER = { id: OWN, url: "https://www.youtube.com/watch?v=aaaaaaaaaaa" };
+
+/** Every diag a port received must be a safe one from the service worker. */
+function swDiags(port) {
+  return port.diags.map((message) => {
+    assertSafeDiag(message, "sw");
+    return message.event;
+  });
+}
+
+function relayHarness(overrides = {}) {
+  const h = harness();
+  h.infos = [];
+  h.relay = B.createRelay({
+    bridge: h.bridge,
+    captions: C,
+    ownId: OWN,
+    now: () => h.time,
+    version: "0.1.1",
+    log: (text) => h.infos.push(text),
+    ...overrides
+  });
+  return h;
+}
+
+test("diag: the reason of a failed connection is kept and reported once the next connection exists", () => {
+  const h = harness();
+  h.bridge.handle(playback());
+  h.ports[0].disconnect("Specified native messaging host not found.");
+  assert.deepEqual(swDiags(h.ports[0]), [], "nothing was reported on the failed connection");
+
+  h.advance(2000);
+  h.bridge.handle(playback());
+  assert.deepEqual(swDiags(h.ports[1]), ["sw-reconnect after=host-not-found failures=1"]);
+
+  h.ports[1].disconnect("");
+  h.advance(4000); // the second failure doubles the backoff
+  h.bridge.handle(playback());
+  assert.deepEqual(swDiags(h.ports[2]), ["sw-reconnect after=disconnected failures=2"]);
+
+  h.advance(60000);
+  h.bridge.handle(playback());
+  assert.equal(h.ports.length, 3, "no new connection, no new report");
+  assert.equal(h.ports[2].diags.length, 1);
+});
+
+test("diag: connectNative throwing is reported after the next successful connect, with a safe code", () => {
+  const h = harness();
+  h.connectError = new Error("Failed for https://www.youtube.com/watch?v=abcdefghijk and My Secret Title");
+  assert.equal(h.bridge.handle(playback()), false);
+  h.connectError = null;
+  h.advance(2000);
+  h.bridge.handle(playback());
+  assert.deepEqual(swDiags(h.ports[0]), ["sw-reconnect after=failed-for-x-and-x failures=1"]);
+  const wire = JSON.stringify(h.ports[0].diags).toLowerCase();
+  for (const leak of ["secret", "title", "youtube", "abcdefghijk", "https"]) assert.equal(wire.includes(leak), false, leak);
+});
+
+test("diag: the reconnect report comes before the stored captions and the triggering message", () => {
+  const h = harness();
+  h.bridge.handle(captions(A));
+  h.ports[0].disconnect("Native host has exited.");
+  h.advance(2000);
+  h.bridge.handle(playback());
+  assert.deepEqual(swDiags(h.ports[1]), ["sw-reconnect after=host-has-exited failures=1"]);
+  assert.deepEqual(h.ports[1].posted, [captions(A), playback()]);
+});
+
+test("diag: diag messages are never stored or replayed", () => {
+  const h = harness();
+  h.bridge.handle({ v: 1, type: "diag", where: "content", event: "content-start" });
+  assert.deepEqual(h.bridge.state().storedCaptions, []);
+  h.ports[0].disconnect("");
+  h.advance(2000);
+  h.bridge.handle(playback());
+  assert.deepEqual(h.ports[1].diags.map((message) => message.event), ["sw-reconnect after=disconnected failures=1"], "only the reconnect report");
+});
+
+test("relay.start connects eagerly and reports the version", () => {
+  const h = relayHarness();
+  assert.deepEqual(h.connects, []);
+  h.relay.start();
+  assert.deepEqual(h.connects, ["io.lucasvu.mynotch.youtube"], "connected before any message arrived");
+  assert.deepEqual(swDiags(h.ports[0]), ["sw-start v=0.1.1"]);
+  assert.deepEqual(h.infos, ["sw-start v=0.1.1"]);
+});
+
+test("relay.start with an odd version string reports it as unknown, never as free text", () => {
+  for (const version of [undefined, "", "My Secret Title", "1.2.3.4.5", "abcdefghijk"]) {
+    const h = relayHarness({ version });
+    h.relay.start();
+    assert.deepEqual(swDiags(h.ports[0]), ["sw-start v=unknown"], String(version));
+  }
+});
+
+test("relay.start without a host: the worker keeps going, the backoff applies and the reason is reported later", () => {
+  const h = relayHarness();
+  h.relay.start();
+  h.ports[0].disconnect("Specified native messaging host not found.");
+  h.relay.onMessage(playback(), SENDER);
+  assert.equal(h.connects.length, 1, "inside the backoff window");
+
+  h.advance(5000); // past the backoff and the 5 s diag window (the dropped one counted)
+  h.relay.onMessage(playback(), SENDER);
+  assert.equal(h.connects.length, 2);
+  assert.deepEqual(swDiags(h.ports[1]), ["sw-reconnect after=host-not-found failures=1", "sw-msg playback"]);
+  assert.deepEqual(h.ports[1].posted, [playback()]);
+});
+
+test("relay: valid messages are forwarded and reported by type, at most once per type every 5 s", () => {
+  const h = relayHarness();
+  h.relay.start();
+  for (let i = 0; i < 10; i++) {
+    h.relay.onMessage(playback(A, i), SENDER);
+    h.advance(100);
+  }
+  h.relay.onMessage(captions(A), SENDER);
+  h.relay.onMessage(captions(Z), SENDER);
+  h.relay.onMessage(clear(A), SENDER);
+  assert.equal(h.ports[0].posted.filter((message) => message.type === "playback").length, 10, "messages are never rate limited");
+  assert.deepEqual(swDiags(h.ports[0]), ["sw-start v=0.1.1", "sw-msg playback", "sw-msg captions events=1", "sw-msg clear"]);
+
+  h.advance(5000);
+  h.relay.onMessage(playback(), SENDER);
+  assert.equal(swDiags(h.ports[0]).at(-1), "sw-msg playback");
+  assert.equal(swDiags(h.ports[0]).length, 5);
+});
+
+test("relay: untrusted senders are rejected, reported (rate limited) and not forwarded", () => {
+  const h = relayHarness();
+  h.relay.start();
+  const strangers = [undefined, {}, { id: "someotherextensionidsomeotherext", url: SENDER.url }, { id: OWN, url: "https://evil.example/" }, { id: OWN }];
+  for (const sender of strangers) h.relay.onMessage(playback(), sender);
+  assert.deepEqual(h.ports[0].posted, []);
+  assert.deepEqual(swDiags(h.ports[0]), ["sw-start v=0.1.1", "sw-reject untrusted"]);
+
+  h.advance(5000);
+  h.relay.onMessage(playback(), strangers[1]);
+  assert.equal(swDiags(h.ports[0]).at(-1), "sw-reject untrusted");
+  assert.equal(swDiags(h.ports[0]).length, 3);
+});
+
+test("relay: invalid messages are rejected by type word only, never echoing their content", () => {
+  const h = relayHarness();
+  h.relay.start();
+  h.relay.onMessage({ v: 1, type: "playback", videoId: "short", title: "My Secret Title", time: 1, playing: true, rate: 1 }, SENDER);
+  h.relay.onMessage({ v: 1, type: "captions", videoId: A, lang: "vi", kind: "standard", events: [] }, SENDER);
+  h.relay.onMessage({ v: 1, type: "My Secret Title" }, SENDER);
+  h.relay.onMessage("My Secret Title", SENDER);
+  h.relay.onMessage(null, SENDER);
+  h.relay.onMessage({ v: 1, type: "diag", where: "content", event: "my secret title" }, SENDER);
+  assert.deepEqual(h.ports[0].posted, []);
+  assert.deepEqual(swDiags(h.ports[0]), [
+    "sw-start v=0.1.1",
+    "sw-reject invalid playback",
+    "sw-reject invalid captions",
+    "sw-reject invalid unknown",
+    "sw-reject invalid diag"
+  ]);
+  assert.equal(JSON.stringify(h.ports[0].diags).toLowerCase().includes("secret"), false);
+});
+
+test("relay: diag events of the content and page scripts are forwarded once per kind every 5 s; sw events cannot be forged", () => {
+  const h = relayHarness();
+  h.relay.start();
+  const content = (event) => ({ v: 1, type: "diag", where: "content", event });
+  const page = (event) => ({ v: 1, type: "diag", where: "page", event });
+
+  h.relay.onMessage(content("content-start"), SENDER);
+  h.relay.onMessage(content("content-start"), SENDER);
+  h.relay.onMessage(page("page-timedtext json3 events=3"), SENDER);
+  h.relay.onMessage(page("page-timedtext json3 events=9"), SENDER);
+  assert.deepEqual(
+    h.ports[0].diags.slice(1).map((message) => [message.where, message.event]),
+    [["content", "content-start"], ["page", "page-timedtext json3 events=3"]]
+  );
+
+  // a content script cannot speak for the service worker
+  h.relay.onMessage({ v: 1, type: "diag", where: "sw", event: "sw-msg playback" }, SENDER);
+  const events = h.ports[0].diags.map((message) => message.event);
+  assert.equal(events.includes("sw-msg playback"), false);
+  assert.equal(events.at(-1), "sw-reject invalid diag");
+  assert.equal(h.ports[0].diags.at(-1).where, "sw");
+  for (const message of h.ports[0].diags) assertSafeDiag(message);
+});
+
+test("relay.start connects even when no diagnostic can be built", () => {
+  const h = relayHarness({ captions: { ...C, buildDiag: () => null } });
+  h.relay.start();
+  assert.deepEqual(h.connects, ["io.lucasvu.mynotch.youtube"]);
+  assert.deepEqual(h.ports[0].posted, []);
+  assert.deepEqual(h.ports[0].diags, []);
 });

@@ -161,16 +161,34 @@
     return finalizeEvents(out);
   }
 
-  /** Picks the parser from the first non-space character of the body. */
-  function eventsFromBody(body) {
-    if (body !== null && typeof body === "object") return eventsFromJson3(body);
-    if (typeof body !== "string") return [];
+  /**
+   * Picks the parser from the first non-space character of the body.
+   * Returns { format: "json3" | "srv3" | "other", events, error }; `error` is true only when a
+   * body that looks like json3 is not valid JSON.
+   */
+  function parseBody(body) {
+    if (body !== null && typeof body === "object") {
+      return { format: "json3", events: eventsFromJson3(body), error: false };
+    }
+    if (typeof body !== "string") return { format: "other", events: [], error: false };
     var i = 0;
-    while (i < body.length && i < 64 && /[\s﻿]/.test(body.charAt(i))) i++;
+    while (i < body.length && i < 64 && /[\s\uFEFF]/.test(body.charAt(i))) i++;
     var first = body.charAt(i);
-    if (first === "{") return eventsFromJson3(i > 0 ? body.slice(i) : body);
-    if (first === "<") return eventsFromSrv3(body);
-    return [];
+    if (first === "{") {
+      var parsed;
+      try {
+        parsed = JSON.parse(i > 0 ? body.slice(i) : body);
+      } catch (e) {
+        return { format: "json3", events: [], error: true };
+      }
+      return { format: "json3", events: eventsFromJson3(parsed), error: false };
+    }
+    if (first === "<") return { format: "srv3", events: eventsFromSrv3(body), error: false };
+    return { format: "other", events: [], error: false };
+  }
+
+  function eventsFromBody(body) {
+    return parseBody(body).events;
   }
 
   function normalizeLang(value) {
@@ -285,6 +303,146 @@
     return { v: 1, type: "clear", videoId: message.videoId };
   }
 
+  // ---- diagnostics ("diag" messages) -----------------------------------------------------------
+  // A diag event is one fixed code followed by a fixed argument shape: words from a closed list,
+  // numbers and booleans. The only free-form part is a lowercase [a-z0-9-] error token (at most 80
+  // characters) made by errorCode(). So an event never carries titles, URLs, video ids or caption
+  // text, and a standalone 11-character run of video-id characters is refused as well.
+  var MAX_DIAG_EVENT = 120;
+  var DIAG_WHERE = { sw: true, content: true, page: true };
+  var NO_ARGS = /^$/;
+  var FETCH_XHR = /^ fetch=(?:true|false) xhr=(?:true|false)$/;
+  var DIAG_ARGS = {
+    "sw-start": /^ v=(?:[0-9]{1,4}(?:\.[0-9]{1,4}){0,3}|unknown)$/,
+    "sw-msg": /^ (?:captions events=[0-9]{1,5}|playback|clear)$/,
+    "sw-reject": /^ (?:untrusted|invalid (?:captions|playback|clear|diag|unknown))$/,
+    "sw-reconnect": /^ after=[a-z0-9-]{1,80} failures=[0-9]{1,6}$/,
+    "content-start": NO_ARGS,
+    "content-video-found": NO_ARGS,
+    "content-video-missing": NO_ARGS,
+    "content-cc": /^ (?:on|off)$/,
+    "content-send-error": /^ [a-z0-9-]{1,80} count=[0-9]{1,6}$/,
+    "content-alive": /^ videoid-present=(?:true|false) playing=(?:true|false)$/,
+    "content-tick-error": /^ [a-z0-9-]{1,80}$/,
+    "page-wrap": FETCH_XHR,
+    "page-wrap-check": FETCH_XHR,
+    "page-seen": /^ (?:fetch|xhr)$/,
+    "page-timedtext": /^ (?:json3|srv3|other) events=[0-9]{1,5}$/,
+    "page-timedtext-status": /^ [0-9]{3}$/,
+    "page-timedtext-parse-error": NO_ARGS,
+    "page-timedtext-too-large": NO_ARGS,
+    "page-timedtext-failed": /^ (?:fetch|xhr)$/
+  };
+  var MESSAGE_TYPES = { captions: true, playback: true, clear: true, diag: true };
+  // Known Chrome error texts become fixed codes (none is exactly 11 characters long).
+  var ERROR_CODES = [
+    [/context invalidated/i, "context-invalidated"],
+    [/receiving end does not exist/i, "no-receiving-end"],
+    [/message length exceeded|exceeded maximum/i, "message-too-long"],
+    [/native messaging host not found/i, "host-not-found"],
+    [/native messaging host is forbidden/i, "host-forbidden"],
+    [/native host has exited/i, "host-has-exited"],
+    [/error when communicating with the native messaging host/i, "host-comm-error"],
+    [/failed to start native messaging host/i, "host-start-failed"],
+    [/disconnected port/i, "port-disconnected"]
+  ];
+
+  // Generic words of JavaScript and Chrome error messages. Any other word of an unknown error text
+  // (a property name, a title or URL fragment that ended up in the message) is replaced by "x".
+  var ERROR_WORDS = {};
+  (
+    "a access add allowed an and at attribute be blocked bound call can cannot client connection context could " +
+    "denied disconnected document domexception element error event exceeded execute extension failed fetch for " +
+    "forbidden found frame from function get has host in invalid is iterable it length listener maximum message " +
+    "messaging more must native network new no node not null number object of on or port properties property " +
+    "query range rangeerror read reading received referenceerror remove response runtime selector set setting " +
+    "size specified stack string syntaxerror tab than that the this timeout to token type typeerror undefined " +
+    "unexpected use value was window with"
+  )
+    .split(" ")
+    .forEach(function (word) {
+      ERROR_WORDS[word] = true;
+    });
+
+  /**
+   * One short lowercase token for an error: a fixed code for the known Chrome errors, otherwise the
+   * generic words of the text joined by "-" (everything inside quotes and every other word becomes
+   * "x"), at most 80 characters and never exactly 11 characters long.
+   */
+  function errorCode(text) {
+    var raw = typeof text === "string" ? text : "";
+    for (var i = 0; i < ERROR_CODES.length; i++) {
+      if (ERROR_CODES[i][0].test(raw)) return ERROR_CODES[i][1];
+    }
+    var words = [];
+    raw
+      .toLowerCase()
+      .replace(/'[^']*'|"[^"]*"|`[^`]*`/g, " ")
+      .split(/[^a-z0-9]+/)
+      .forEach(function (word) {
+        if (!word) return;
+        var generic = ERROR_WORDS[word] === true ? word : "x";
+        if (generic !== "x" || words[words.length - 1] !== "x") words.push(generic);
+      });
+    var token = words.join("-").slice(0, 80).replace(/-+$/, "");
+    if (token.length === 11) token += "-x";
+    return token || "unknown";
+  }
+
+  /** The message's own type when it is one of the protocol types, else "unknown". */
+  function typeWord(message) {
+    var type = isObject(message) ? message.type : undefined;
+    return typeof type === "string" && MESSAGE_TYPES[type] === true ? type : "unknown";
+  }
+
+  function validDiagEvent(where, event) {
+    if (typeof event !== "string" || event.length === 0 || event.length > MAX_DIAG_EVENT) return false;
+    var space = event.indexOf(" ");
+    var code = space < 0 ? event : event.slice(0, space);
+    var shape = Object.prototype.hasOwnProperty.call(DIAG_ARGS, code) ? DIAG_ARGS[code] : null;
+    if (!shape || code.indexOf(where + "-") !== 0) return false;
+    if (!shape.test(event.slice(code.length))) return false;
+    var runs = event.match(/[a-z0-9_-]+/g) || [];
+    for (var i = 0; i < runs.length; i++) {
+      if (runs[i].length === 11) return false; // would look like a video id
+    }
+    return true;
+  }
+
+  function validateDiag(message) {
+    if (typeof message.where !== "string" || DIAG_WHERE[message.where] !== true) return null;
+    if (!validDiagEvent(message.where, message.event)) return null;
+    return { v: 1, type: "diag", where: message.where, event: message.event };
+  }
+
+  /** A validated diag message, or null when the event is not an allowed one. */
+  function buildDiag(where, event) {
+    return validateMessage({ v: 1, type: "diag", where: where, event: event });
+  }
+
+  /**
+   * Rate limiter for diag events: at most one event per key within `windowMs`, where the key is
+   * the event without its key=value parts (so "page-timedtext json3 events=3" and "... events=9"
+   * are the same kind). The table is bounded, so forged events cannot grow it.
+   */
+  function createDiagLimiter(now, windowMs) {
+    var last = new Map();
+    return function allow(event) {
+      var key = String(event).replace(/=\S*/g, "");
+      var time = now();
+      var previous = last.get(key);
+      if (previous !== undefined && time >= previous && time - previous < windowMs) return false;
+      if (last.size >= 128 && !last.has(key)) {
+        last.forEach(function (at, other) {
+          if (time < at || time - at >= windowMs) last.delete(other);
+        });
+        if (last.size >= 128) return false;
+      }
+      last.set(key, time);
+      return true;
+    };
+  }
+
   /**
    * Validates a protocol message and returns a fresh object holding only the protocol fields
    * (so nothing extra, such as a URL, can ride along), or null when the message is not valid.
@@ -298,21 +456,25 @@
         return validatePlayback(message);
       case "clear":
         return validateClear(message);
+      case "diag":
+        return validateDiag(message);
       default:
         return null;
     }
   }
 
   /**
-   * Content-script gate for window "message" events: only `captions` messages that this very
-   * window posted to its own origin with the bridge's source tag are accepted, and they are
-   * re-validated before they go any further.
+   * Content-script gate for window "message" events: only `captions` and page-side `diag`
+   * messages that this very window posted to its own origin with the bridge's source tag are
+   * accepted, and they are re-validated before they go any further.
    */
   function acceptPageMessage(event, win, origin) {
     if (!event || event.source !== win || event.origin !== origin) return null;
     var data = event.data;
-    if (!isObject(data) || data.source !== SOURCE || data.type !== "captions") return null;
-    return validateMessage(data);
+    if (!isObject(data) || data.source !== SOURCE) return null;
+    if (data.type === "captions") return validateMessage(data);
+    if (data.type === "diag" && data.where === "page") return validateMessage(data);
+    return null;
   }
 
   var api = {
@@ -325,11 +487,16 @@
     eventsFromJson3: eventsFromJson3,
     eventsFromSrv3: eventsFromSrv3,
     eventsFromBody: eventsFromBody,
+    parseBody: parseBody,
     parseTimedTextUrl: parseTimedTextUrl,
     buildCaptionsMessage: buildCaptionsMessage,
     videoIdFromUrl: videoIdFromUrl,
     cleanTitle: cleanTitle,
     validateMessage: validateMessage,
+    errorCode: errorCode,
+    typeWord: typeWord,
+    buildDiag: buildDiag,
+    createDiagLimiter: createDiagLimiter,
     acceptPageMessage: acceptPageMessage
   };
 

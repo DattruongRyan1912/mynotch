@@ -6,6 +6,9 @@
  *  - Tracks the video id and the main <video>, and reports `playback` (on play, pause, seeked,
  *    ratechange, video change and every 5 s while playing) and `clear` (video change, leaving
  *    the watch page, captions button turned off).
+ *  - Reports its own health as `diag` events (start, video found/missing, CC state, send errors,
+ *    a 30 s "alive" line, exceptions of the 1 s tick) and relays the page script's `diag` events.
+ *    Diag events are fixed codes plus numbers and booleans: no titles, URLs or video ids.
  *
  * Only the fields of the shared protocol are ever sent; no URLs, no cookies, nothing else.
  */
@@ -23,6 +26,8 @@
   var STALE_TITLE_MS = 3000;
   // How long a track for a video other than the page's current one is kept (see onPageMessage).
   var HELD_CAPTIONS_MS = 10000;
+  var ALIVE_MS = 30000;
+  var DIAG_WINDOW_MS = 5000;
   var VIDEO_EVENTS = ["play", "pause", "seeked", "ratechange", "ended", "playing"];
 
   var doc = root.document;
@@ -39,19 +44,63 @@
     lastTitle: "",
     staleTitle: "",
     staleUntil: 0,
+    videoReported: null, // whether the last diag said the main <video> was found (true) or missing
+    lastAliveAt: Date.now(),
+    sendErrors: 0, // failed sends since the last report
+    sendErrorCode: "", // code of the latest failure, reported once a send works again
     timer: 0
   };
 
+  var allowDiag = C.createDiagLimiter(function () {
+    return Date.now();
+  }, DIAG_WINDOW_MS);
+
   function send(message) {
     var clean = C.validateMessage(message);
-    if (!clean) return;
+    if (clean) transmit(clean, clean.type !== "diag");
+  }
+
+  /** Hands a validated message to the service worker; failures are recorded, never thrown. */
+  function transmit(clean, regular) {
     try {
       var result = root.chrome.runtime.sendMessage(clean);
-      if (result && typeof result.catch === "function") result.catch(function () {});
-    } catch (e) {
-      // "Extension context invalidated" after a reload or update: this copy is orphaned.
-      if (!root.chrome || !root.chrome.runtime || !root.chrome.runtime.id) shutdown();
+      if (result && typeof result.then === "function") {
+        result.then(onDelivered, function (error) {
+          onSendFailure(error, regular);
+        });
+      } else {
+        onDelivered();
+      }
+    } catch (error) {
+      onSendFailure(error, regular);
     }
+  }
+
+  function onSendFailure(error, regular) {
+    // "Extension context invalidated" after a reload or update: this copy is orphaned.
+    if (!root.chrome || !root.chrome.runtime || !root.chrome.runtime.id) {
+      shutdown();
+      return;
+    }
+    if (!regular) return; // a failing channel is not used to report its own failure
+    state.sendErrors += 1;
+    state.sendErrorCode = C.errorCode(error && error.message);
+  }
+
+  /** The channel works again: report what failed in the meantime (once). */
+  function onDelivered() {
+    if (state.sendErrors === 0) return;
+    var event = "content-send-error " + state.sendErrorCode + " count=" + state.sendErrors;
+    state.sendErrors = 0;
+    state.sendErrorCode = "";
+    diag(event);
+  }
+
+  /** One of the content script's own diagnostic events (rate limited). */
+  function diag(event) {
+    if (!allowDiag(event)) return;
+    var message = C.buildDiag("content", event);
+    if (message) transmit(message, false);
   }
 
   function sendClear(videoId) {
@@ -113,6 +162,7 @@
     sendClear(previous);
     state.videoId = videoId;
     state.cc = "unknown";
+    state.videoReported = null;
     if (state.captions && state.captions.videoId !== videoId) state.captions = null;
     state.staleTitle = state.lastTitle;
     state.staleUntil = Date.now() + STALE_TITLE_MS;
@@ -162,6 +212,7 @@
     var next = pressed === "true" ? "on" : pressed === "false" ? "off" : "unknown";
     if (next === "unknown" || next === state.cc) return;
     state.cc = next;
+    diag("content-cc " + next);
     if (next === "off") {
       sendClear(state.videoId);
     } else if (state.clearedId === state.videoId && state.captions && state.captions.videoId === state.videoId) {
@@ -176,6 +227,7 @@
     try {
       onVideoChange(C.videoIdFromUrl(root.location.href));
       bindVideo();
+      reportVideoPresence();
       checkCaptionsButton();
       if (state.held && Date.now() - state.held.at > HELD_CAPTIONS_MS) state.held = null;
       if (state.video && state.videoId) {
@@ -184,14 +236,38 @@
         // `playing` can change without a media event (the ad-showing class drops after the last one).
         if (state.pending || due || playing !== state.lastPlaying) sendPlayback();
       }
-    } catch (e) {
-      /* a failed tick must not stop the next one */
+      reportAlive();
+    } catch (error) {
+      // A failed tick must not stop the next one, but it must not be silent either.
+      diag("content-tick-error " + C.errorCode((error && error.name ? error.name + " " : "") + (error && error.message)));
     }
+  }
+
+  /** Reports once per video whether the main <video> element was found. */
+  function reportVideoPresence() {
+    if (!state.videoId) return;
+    var present = state.video !== null;
+    if (present === state.videoReported) return;
+    state.videoReported = present;
+    diag(present ? "content-video-found" : "content-video-missing");
+  }
+
+  function reportAlive() {
+    var now = Date.now();
+    if (now - state.lastAliveAt < ALIVE_MS) return;
+    state.lastAliveAt = now;
+    diag(
+      "content-alive videoid-present=" + (state.videoId !== null) + " playing=" + (state.video !== null && isPlaying(state.video))
+    );
   }
 
   function onPageMessage(event) {
     var message = C.acceptPageMessage(event, root, root.location.origin);
     if (!message) return;
+    if (message.type === "diag") {
+      if (allowDiag(message.event)) transmit(message, false); // from page.js, already validated
+      return;
+    }
     // The live URL decides (not state.videoId: the tick may not have run yet). A track for any
     // other video is only held, never relayed: the player can fetch the next video's captions just
     // before the address bar changes, but a late response of the previous video, a preview or
@@ -223,5 +299,6 @@
   root.addEventListener("yt-navigate-finish", tick, true);
   root.addEventListener("pagehide", onPageHide, false);
   state.timer = root.setInterval(tick, TICK_MS);
+  diag("content-start");
   tick();
 })(typeof globalThis !== "undefined" ? globalThis : self);

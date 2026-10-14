@@ -1,10 +1,15 @@
 /*
  * MyNotch YouTube Bridge: native-messaging connection manager used by the service worker.
  *
- * Connects lazily (on the first message), forwards validated protocol messages to the native
- * host, keeps only the latest `captions` per video so they can be resent after a reconnect, and
- * reconnects with exponential backoff (2 s doubling to 60 s) only when new messages arrive.
- * It never schedules timers of its own and logs at most once per minute.
+ * Connects once when the worker starts (start() in createRelay) and again whenever a message
+ * arrives while there is no connection, forwards validated protocol messages to the native host,
+ * keeps only the latest `captions` per video so they can be resent after a reconnect, and
+ * retries with exponential backoff (2 s doubling to 60 s) only when new messages arrive. It never
+ * schedules timers of its own and logs at most once per minute. Why the previous connection
+ * failed is remembered and reported to the host as a `diag` event once a new connection exists.
+ *
+ * createRelay() is the message handler of the service worker: it checks the sender, validates,
+ * forwards, and reports its own diagnostics (rate limited).
  *
  * Everything Chrome-specific is injected, so the logic runs under Node in the tests.
  */
@@ -19,9 +24,11 @@
   var LOG_INTERVAL_MS = 60000;
   var MAX_STORED_CAPTIONS = 8;
   var ALLOWED_PAGE_PREFIX = "https://www.youtube.com/";
+  var DIAG_WINDOW_MS = 5000;
 
   /**
-   * deps: connectNative(name) -> port, lastError() -> string, now() -> ms, log(text).
+   * deps: connectNative(name) -> port, lastError() -> string, now() -> ms, log(text), and for the
+   * diagnostics errorCode(text) -> token and buildDiag(where, event) -> message | null.
    */
   function createBridge(deps) {
     var port = null;
@@ -30,6 +37,7 @@
     var retryAt = 0;
     var lastLogAt = -Infinity;
     var storedCaptions = new Map(); // videoId -> latest captions message
+    var lastFailure = null; // { reason, failures } of the last failed connection, reported once
 
     function note(text) {
       var now = deps.now();
@@ -40,6 +48,7 @@
 
     function scheduleRetry(reason) {
       failures += 1;
+      lastFailure = { reason: typeof reason === "string" ? reason : "", failures: failures };
       retryAt = deps.now() + Math.min(MIN_BACKOFF_MS * Math.pow(2, failures - 1), MAX_BACKOFF_MS);
       note("native host unavailable" + (reason ? " (" + reason + ")" : ""));
     }
@@ -64,7 +73,22 @@
       }
       port = opened;
       connectedAt = deps.now();
-      return true;
+      announce();
+      return port !== null;
+    }
+
+    /** First messages on a new connection: why the last one failed, then the stored captions. */
+    function announce() {
+      if (lastFailure) {
+        var failure = lastFailure;
+        lastFailure = null;
+        var code = failure.reason && deps.errorCode ? deps.errorCode(failure.reason) : "disconnected";
+        var diag = deps.buildDiag ? deps.buildDiag("sw", "sw-reconnect after=" + code + " failures=" + failure.failures) : null;
+        if (diag && !post(diag)) return;
+      }
+      storedCaptions.forEach(function (stored) {
+        if (port) post(stored);
+      });
     }
 
     function post(message) {
@@ -100,14 +124,14 @@
         if (!connect()) return false;
         fresh = true;
       }
-      if (!fresh) return post(message);
+      if (fresh && message.type === "captions") return true; // sent with the stored captions
+      return post(message);
+    }
 
-      var sent = true;
-      storedCaptions.forEach(function (stored) {
-        if (sent && port) sent = post(stored);
-      });
-      if (message.type !== "captions" && sent && port) sent = post(message);
-      return sent;
+    /** Connects now unless a connection exists or the backoff has not elapsed. */
+    function ensureConnected() {
+      if (!port && deps.now() >= retryAt) connect();
+      return port !== null;
     }
 
     function state() {
@@ -119,7 +143,7 @@
       };
     }
 
-    return { handle: handle, state: state };
+    return { handle: handle, ensureConnected: ensureConnected, state: state };
   }
 
   /** Only messages from this extension's own content scripts on a youtube.com page are relayed. */
@@ -132,11 +156,58 @@
     );
   }
 
+  /**
+   * Message handler of the service worker.
+   * deps: bridge, captions (captions.js API), ownId, now() -> ms, version, log(text).
+   */
+  function createRelay(deps) {
+    var C = deps.captions;
+    var allow = C.createDiagLimiter(deps.now, DIAG_WINDOW_MS);
+
+    /** The worker's own diagnostics: one event per kind every 5 s. */
+    function report(event) {
+      if (!allow(event)) return;
+      var message = C.buildDiag("sw", event);
+      if (message) deps.bridge.handle(message);
+    }
+
+    /** Eager connection when the worker starts, then the first diagnostic. */
+    function start() {
+      deps.bridge.ensureConnected();
+      var version = /^[0-9]{1,4}(?:\.[0-9]{1,4}){0,3}$/.test(deps.version) ? deps.version : "unknown";
+      report("sw-start v=" + version);
+      deps.log("sw-start v=" + version);
+    }
+
+    function onMessage(message, sender) {
+      if (!isTrustedSender(sender, deps.ownId)) {
+        report("sw-reject untrusted");
+        return;
+      }
+      var clean = C.validateMessage(message);
+      if (!clean) {
+        report("sw-reject invalid " + C.typeWord(message));
+        return;
+      }
+      if (clean.type === "diag") {
+        // Content scripts only speak for themselves and the page script; "sw" events are ours.
+        if (clean.where === "sw") report("sw-reject invalid diag");
+        else if (allow(clean.event)) deps.bridge.handle(clean);
+        return;
+      }
+      report("sw-msg " + clean.type + (clean.type === "captions" ? " events=" + clean.events.length : ""));
+      deps.bridge.handle(clean);
+    }
+
+    return { start: start, onMessage: onMessage };
+  }
+
   var api = {
     HOST_NAME: HOST_NAME,
     MIN_BACKOFF_MS: MIN_BACKOFF_MS,
     MAX_BACKOFF_MS: MAX_BACKOFF_MS,
     createBridge: createBridge,
+    createRelay: createRelay,
     isTrustedSender: isTrustedSender
   };
 
