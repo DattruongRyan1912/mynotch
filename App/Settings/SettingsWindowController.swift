@@ -8,19 +8,30 @@ final class SettingsWindowController: NSObject {
     private let settings: SettingsStore
     private let registry: ModuleRegistry
     private let permissions: any PermissionCenter
+    private let overview: PermissionOverview
     private let hotkeys: HotkeyRegistry
+    private let navigation = SettingsNavigation()
     private var window: NSWindow?
 
-    init(settings: SettingsStore, registry: ModuleRegistry, permissions: any PermissionCenter, hotkeys: HotkeyRegistry) {
+    init(
+        settings: SettingsStore, registry: ModuleRegistry, permissions: any PermissionCenter,
+        overview: PermissionOverview, hotkeys: HotkeyRegistry
+    ) {
         self.settings = settings
         self.registry = registry
         self.permissions = permissions
+        self.overview = overview
         self.hotkeys = hotkeys
     }
 
-    func show() {
+    /// Shows the window, on `page` when given and otherwise on the page it was last showing.
+    func show(page: SettingsPage? = nil) {
+        if let page { navigation.selection = page }
         if window == nil {
-            let root = SettingsRootView(settings: settings, registry: registry, permissions: permissions, hotkeys: hotkeys)
+            let root = SettingsRootView(
+                settings: settings, registry: registry, permissions: permissions, overview: overview,
+                hotkeys: hotkeys, navigation: navigation
+            )
             let window = NSWindow(contentViewController: NSHostingController(rootView: root))
             window.title = "MyNotch Settings"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
@@ -37,13 +48,29 @@ final class SettingsWindowController: NSObject {
         NSApp.activate()
         if window?.isMiniaturized == true { window?.deminiaturize(nil) }
         window?.makeKeyAndOrderFront(nil)
+        overview.setWindowVisible(true)
     }
 }
 
 extension SettingsWindowController: NSWindowDelegate {
+    /// Granting happens in System Settings, so coming back to this window is the moment to read the statuses again.
+    func windowDidBecomeKey(_ notification: Notification) {
+        overview.refresh()
+    }
+
+    /// The Permissions page polls only while the window can be seen: closed, minimized and covered all stop it.
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        overview.setWindowVisible(window?.occlusionState.contains(.visible) == true)
+    }
+
+    func windowDidMiniaturize(_ notification: Notification) {
+        overview.setWindowVisible(false)
+    }
+
     /// Minimizing keeps the window, and so the Dock icon that brings it back; only closing returns to a menu bar app.
     /// Modules open their own titled windows too (language installer, markup editor); stay a regular app while any is visible.
     func windowWillClose(_ notification: Notification) {
+        overview.setWindowVisible(false)
         let closing = notification.object as? NSWindow
         let otherTitledWindowVisible = NSApp.windows.contains {
             $0 !== closing && ($0.isVisible || $0.isMiniaturized) && $0.styleMask.contains(.titled)

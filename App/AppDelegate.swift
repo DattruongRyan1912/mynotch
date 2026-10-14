@@ -23,8 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         services: services
     )
     private lazy var screens = ScreenManager(registry: registry, activities: activities, settings: settings, scheduler: scheduler)
+    private lazy var permissionOverview = PermissionOverview(registry: registry, scheduler: scheduler)
     private lazy var settingsWindow = SettingsWindowController(
-        settings: settings, registry: registry, permissions: permissions, hotkeys: hotkeys
+        settings: settings, registry: registry, permissions: permissions, overview: permissionOverview, hotkeys: hotkeys
     )
     private var statusItem: StatusItemController?
     #if DEBUG
@@ -44,10 +45,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             initial: KeyboardShortcuts.Shortcut(.n, modifiers: [.control, .option])
         ) { [weak self] in self?.coordinator.toggle() }
         statusItem = StatusItemController(
-            settings: settings, registry: registry, screens: screens,
-            openSettings: { [weak self] in self?.settingsWindow.show() }
+            settings: settings, registry: registry, screens: screens, overview: permissionOverview,
+            openSettings: { [weak self] in self?.settingsWindow.show() },
+            openPermissions: { [weak self] in self?.settingsWindow.show(page: .permissions) }
         )
         screens.start()
+        openPermissionsIfNeeded()
         #if DEBUG
         debugActivities = DebugActivityTrigger(activities: activities)
         debugActivities?.start()
@@ -90,7 +93,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showSettings() { settingsWindow.show() }
 
     private func refreshPermissions() {
+        permissionOverview.refresh()
         Task { await registry.refreshPermissions() }
+    }
+
+    /// Once on the first launch, and when re-signing made macOS forget the permissions, so nobody has to go looking for
+    /// them. The identity is stored even when nothing opens, so the next launch compares against this one.
+    private func openPermissionsIfNeeded() {
+        let stored = settings.value(AppSettings.permissionIdentity)
+        let current = SigningIdentity.current()
+        if permissionOverview.shouldOpenAtLaunch(previousIdentity: stored.isEmpty ? nil : stored, currentIdentity: current) {
+            settingsWindow.show(page: .permissions)
+        }
+        settings.set(current ?? "unreadable", for: AppSettings.permissionIdentity)
     }
 
     /// TCC posts no notification when a permission changes, so poll while a module waits for one.
