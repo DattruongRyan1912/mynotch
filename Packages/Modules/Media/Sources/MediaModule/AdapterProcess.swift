@@ -26,6 +26,8 @@ final class AdapterProcess: NowPlayingSource {
     private let killDelay: Duration
     private let log: @MainActor (String) -> Void
     private let environment: [String: String]
+    /// Looks for adapter streams an earlier MyNotch left running, each time the source starts; nil never looks.
+    private let processTable: (any ProcessTable)?
 
     private var onLine: (@MainActor (String) -> Void)?
     private var onFailure: (@MainActor (String) -> Void)?
@@ -46,23 +48,30 @@ final class AdapterProcess: NowPlayingSource {
         script: URL,
         framework: URL,
         scheduler: any Scheduler,
+        processTable: (any ProcessTable)? = SystemProcessTable(),
         log: @escaping @MainActor (String) -> Void = AdapterProcess.defaultLog
     ) {
-        self.init(executable: perl, baseArguments: [script.path, framework.path], scheduler: scheduler, log: log)
+        self.init(
+            executable: perl, baseArguments: [script.path, framework.path], scheduler: scheduler,
+            processTable: processTable, log: log
+        )
     }
 
     /// Runs `executable baseArguments… <command>`; tests pass `/bin/sh` and a fake adapter script.
+    /// - Parameter processTable: where `start` looks for streams of this adapter that a killed MyNotch left behind.
     init(
         executable: URL,
         baseArguments: [String],
         scheduler: any Scheduler,
         killDelay: Duration = .seconds(1),
+        processTable: (any ProcessTable)? = nil,
         log: @escaping @MainActor (String) -> Void = AdapterProcess.defaultLog
     ) {
         self.executable = executable
         self.baseArguments = baseArguments
         self.scheduler = scheduler
         self.killDelay = killDelay
+        self.processTable = processTable
         self.log = log
         self.environment = Self.adapterEnvironment(from: ProcessInfo.processInfo.environment)
     }
@@ -104,7 +113,17 @@ final class AdapterProcess: NowPlayingSource {
         self.onFailure = onFailure
         restartAttempt = 0
         startupFailures = 0
+        stopOrphans()
         launch()
+    }
+
+    /// An app that was killed or crashed cannot stop its adapter, which runs on as a child of launchd. Once per start, before
+    /// the new stream, the ones that were started from this very adapter are asked to end; our own stream is a child of
+    /// this app, and is not touched here.
+    private func stopOrphans() {
+        guard let processTable else { return }
+        let stopped = OrphanedAdapterReaper(table: processTable, adapterArguments: baseArguments).reap()
+        if !stopped.isEmpty { log("Stopped \(stopped.count) media adapter process(es) left running by an earlier MyNotch") }
     }
 
     func stop() {
