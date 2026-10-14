@@ -11,7 +11,7 @@ final class BarsDriver {
     private static let intervalSeconds: TimeInterval = 0.033_333_333
     /// The least time between two draws of tap bands. The tap's timer has 5 ms of leeway, so its sets come 28 to 38 ms apart;
     /// holding back the early ones for a full interval cost a `Task.sleep` and a main-actor hop each and drifted the rate to
-    /// 28 a second. A quarter of an interval short is drawn on arrival; only a faster source waits for its slot.
+    /// 28 a second. A quarter of an interval short is drawn on arrival; a set that comes sooner waits only until the gap has passed.
     private static let minimumGap: TimeInterval = intervalSeconds * 0.75
 
     private let scheduler: any Scheduler
@@ -24,7 +24,7 @@ final class BarsDriver {
     private var lastDraw: Date?
     /// The next step of the made-up motion.
     private var step: ScheduledAction?
-    /// A set of bands that arrived too soon after the last draw; it draws the latest bands when its slot comes.
+    /// A set of bands that arrived less than `minimumGap` after the last draw; it draws the latest bands when the gap has passed.
     private var pending: ScheduledAction?
 
     /// `draw` gets one level in 0…1 per bar and whether to ease to it instead of jumping.
@@ -80,14 +80,16 @@ final class BarsDriver {
         step = scheduler.schedule(after: Self.interval) { [weak self] in self?.tick() }
     }
 
-    /// Draws now, or in the slot after the last draw when the set came much too soon.
+    /// Draws now, or as soon as the gap after the last draw has passed when the set came too soon. The wait ends at the gap, not
+    /// a full interval after the last draw: a late set would otherwise pass its lag on to the next, which then came less than
+    /// the gap after it and waited too, and so on for good, with a timer per set.
     private func requestDraw() {
         let elapsed = lastDraw.map { now().timeIntervalSince($0) } ?? .infinity
         if elapsed >= Self.minimumGap {
             cancelPending()
             drawNow()
         } else if pending == nil {
-            pending = scheduler.schedule(after: .seconds(Self.intervalSeconds - elapsed)) { [weak self] in
+            pending = scheduler.schedule(after: .seconds(Self.minimumGap - elapsed)) { [weak self] in
                 self?.pending = nil
                 guard let self, isOnScreen, isPlaying, spectrum != nil else { return }
                 drawNow()

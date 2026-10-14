@@ -50,7 +50,7 @@ th{background:var(--card)}
 <li><strong>Ngắt lượt không có <code>Stop</code>:</strong> quy tắc 90 giây của spec nay cũng áp cho <code>waitingForInput</code> của Claude khi registry báo idle (xem Ruling).</li>
 <li><strong>Bảng giá:</strong> khớp tiền tố tên model, ký tự sau tiền tố không được là chữ số, sau dấu gạch chỉ không có chữ số hoặc đúng 8 chữ số (ngày); model có đuôi lạ như <code>claude-opus-5-9</code> hay <code>claude-opus-4-11</code> không có ước tính. Giá Claude lấy từ skill claude-api (cache 2026-10-06). <strong>Giá Codex/OpenAI chưa được xác minh</strong> (có comment trong code). Haiku 5.5 với prompt trên 100K token tính 0,50 và 2,50 USD; code bỏ qua điều này.</li>
 <li><strong>Không yêu cầu nhưng có:</strong> nhãn "≥" khi chi phí chỉ một phần (ngày lẫn model có giá và không có giá); đường cơ sở qua nửa đêm trong <code>DayUsageLedger</code>; bấm một dòng phiên thì đóng notch.</li>
-<li><strong>Glyph "đang làm" nhấp nháy bằng độ mờ, không phải <code>symbolEffect(.pulse)</code></strong> (PERF1, <code>44a2ace</code>): chi tiết ở mục 7. Spec và các câu trong mục này nói "glyph xoay" hay "pulse" lúc đầu; code nay là độ mờ 1 → 0,35.</li>
+<li><strong>Glyph "đang làm" nhấp nháy bằng độ mờ, không phải <code>symbolEffect(.pulse)</code></strong> (PERF1, <code>44a2ace</code>): chi tiết ở mục 7. Spec và các câu trong mục này nói "glyph xoay" hay "pulse" lúc đầu; code nay là độ mờ 1 → 0,30.</li>
 <li><strong>Quyền riêng tư:</strong> chỉ giữ tên tool và tóm tắt tối đa 120 ký tự (đầu lệnh Bash hoặc tên file), không bao giờ lưu hay hiện nội dung prompt hoặc câu trả lời.</li>
 </ul>
 <h2 id="3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</h2>
@@ -72,7 +72,7 @@ th{background:var(--card)}
 <li>Bản Debug ký ad-hoc không có cờ <code>runtime</code> (Hardened Runtime) cho cả app lẫn helper; cần kiểm bản Release.</li>
 <li>Mở thư mục bằng app khác (spec §4.1 nói "có tuỳ chọn") chưa làm; chỉ có Terminal.</li>
 <li>Chưa có kết quả kiểm thử tay được ghi lại cho: phiên Claude Code và Codex thật, hiệu ứng pulse, cài hook thật, chờ duyệt quyền.</li>
-<li><strong>Chưa so bằng mắt:</strong> hiệu ứng nhấp nháy mới (độ mờ 1 → 0,35, mỗi chiều 0,8 giây, <code>NotchPulse.dimmedOpacity</code> và <code>halfPeriod</code>) với hiệu ứng pulse của symbol; hai AI "xong" chồng nhau thì activity không được <code>set</code> lại nên check thứ hai bị cắt ngắn (khoảng 3 giây thay vì 5, Minor review UI2b).</li>
+<li><strong>Chưa so bằng mắt:</strong> hiệu ứng nhấp nháy mới (độ mờ 1 → 0,30, mỗi chiều 1,0 giây, <code>NotchPulse.dimmedOpacity</code> và <code>halfPeriod</code>) với hiệu ứng pulse của symbol; hai AI "xong" chồng nhau thì activity không được <code>set</code> lại nên check thứ hai bị cắt ngắn (khoảng 3 giây thay vì 5, Minor review UI2b).</li>
 </ul>
 <h2 id="5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</h2>
 <ul>

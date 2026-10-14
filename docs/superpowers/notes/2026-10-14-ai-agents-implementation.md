@@ -29,7 +29,7 @@
 - **Ngắt lượt không có `Stop`:** quy tắc 90 giây của spec nay cũng áp cho `waitingForInput` của Claude khi registry báo idle (xem Ruling).
 - **Bảng giá:** khớp tiền tố tên model, ký tự sau tiền tố không được là chữ số, sau dấu gạch chỉ không có chữ số hoặc đúng 8 chữ số (ngày); model có đuôi lạ như `claude-opus-5-9` hay `claude-opus-4-11` không có ước tính. Giá Claude lấy từ skill claude-api (cache 2026-10-06). **Giá Codex/OpenAI chưa được xác minh** (có comment trong code). Haiku 5.5 với prompt trên 100K token tính 0,50 và 2,50 USD; code bỏ qua điều này.
 - **Không yêu cầu nhưng có:** nhãn "≥" khi chi phí chỉ một phần (ngày lẫn model có giá và không có giá); đường cơ sở qua nửa đêm trong `DayUsageLedger`; bấm một dòng phiên thì đóng notch.
-- **Glyph "đang làm" nhấp nháy bằng độ mờ, không phải `symbolEffect(.pulse)`** (PERF1, `44a2ace`): chi tiết ở mục 7. Spec và các câu trong mục này nói "glyph xoay" hay "pulse" lúc đầu; code nay là độ mờ 1 → 0,35.
+- **Glyph "đang làm" nhấp nháy bằng độ mờ, không phải `symbolEffect(.pulse)`** (PERF1, `44a2ace`): chi tiết ở mục 7. Spec và các câu trong mục này nói "glyph xoay" hay "pulse" lúc đầu; code nay là độ mờ 1 → 0,30.
 - **Quyền riêng tư:** chỉ giữ tên tool và tóm tắt tối đa 120 ký tự (đầu lệnh Bash hoặc tên file), không bao giờ lưu hay hiện nội dung prompt hoặc câu trả lời.
 
 ## 3. Giới hạn đã chấp nhận (Ruling)
@@ -51,7 +51,7 @@
 - Bản Debug ký ad-hoc không có cờ `runtime` (Hardened Runtime) cho cả app lẫn helper; cần kiểm bản Release.
 - Mở thư mục bằng app khác (spec §4.1 nói "có tuỳ chọn") chưa làm; chỉ có Terminal.
 - Chưa có kết quả kiểm thử tay được ghi lại cho: phiên Claude Code và Codex thật, hiệu ứng pulse, cài hook thật, chờ duyệt quyền.
-- **Chưa so bằng mắt:** hiệu ứng nhấp nháy mới (độ mờ 1 → 0,35, mỗi chiều 0,8 giây, `NotchPulse.dimmedOpacity` và `halfPeriod`) với hiệu ứng pulse của symbol; hai AI "xong" chồng nhau thì activity không được `set` lại nên check thứ hai bị cắt ngắn (khoảng 3 giây thay vì 5, Minor review UI2b).
+- **Chưa so bằng mắt:** hiệu ứng nhấp nháy mới (độ mờ 1 → 0,30, mỗi chiều 1,0 giây, `NotchPulse.dimmedOpacity` và `halfPeriod`) với hiệu ứng pulse của symbol; hai AI "xong" chồng nhau thì activity không được `set` lại nên check thứ hai bị cắt ngắn (khoảng 3 giây thay vì 5, Minor review UI2b).
 
 ## 5. Sửa lại spec (Spec corrections)
 
