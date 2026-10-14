@@ -72,7 +72,7 @@ struct NotchRootView: View {
                     entry.activity.trailing.frame(width: geometry.config.compactSideWidth)
                 }
                 .frame(height: geometry.notchSize.height)
-                .transition(.opacity)
+                .transition(.asymmetric(insertion: .opacity.animation(NotchTokens.enter), removal: .opacity.animation(NotchTokens.leave)))
                 .notchLogLifecycle("compact")
             }
         case .open, .toast:
@@ -107,6 +107,7 @@ struct NotchRootView: View {
                     .onExitCommand { model.close() }
                     .notchLogLifecycle("tab \(shownTab.id.rawValue)")
                     .id(shownTab.id)
+                    .transition(.opacity.animation(NotchTokens.swap))
             } else {
                 Text("Chưa có module nào đang chạy")
                     .foregroundStyle(NotchTokens.secondaryText)
@@ -123,8 +124,8 @@ struct NotchRootView: View {
         .padding([.horizontal, .bottom], NotchTokens.padding)
         .notchLogLifecycle("expanded")
         .transition(.asymmetric(
-            insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)).animation(NotchTokens.spring.delay(0.08)),
-            removal: .opacity.animation(.easeOut(duration: 0.1))
+            insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)).animation(NotchTokens.enter),
+            removal: .opacity.animation(NotchTokens.leave)
         ))
     }
 }

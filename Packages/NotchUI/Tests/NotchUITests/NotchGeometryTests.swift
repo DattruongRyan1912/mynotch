@@ -109,4 +109,48 @@ import Testing
         settings.set(10, for: InterfaceSettings.virtualNotchHeight)
         #expect(NotchLayoutConfig(settings: settings).virtualNotchHeight == 24)
     }
+
+    /// Every shape the notch can take, as the rect it covers when anchored to the top centre of `screenFrame`.
+    func allShapeRects(_ geometry: NotchGeometry, in screenFrame: CGRect) -> [(NotchState, CGFloat, CGRect)] {
+        var rects: [(NotchState, CGFloat, CGRect)] = []
+        for height in stride(from: NotchTab.heightRange.lowerBound, through: NotchTab.heightRange.upperBound, by: 10) {
+            for state in [NotchState.closed, .compact, .open("a"), .open(nil), .toast] {
+                let size = geometry.shapeSize(for: state, contentHeight: height)
+                rects.append((state, height, CGRect(
+                    x: screenFrame.midX + geometry.centerOffset - size.width / 2, y: screenFrame.maxY - size.height,
+                    width: size.width, height: size.height
+                )))
+            }
+        }
+        return rects
+    }
+
+    @Test func theFixedPanelCoversEveryShapeSoNoTabSwitchOrResizeNeedsAWindowFrameChange() {
+        let screens = [Self.macBook14, Self.external, Self.externalAboveLeft]
+        let configs = [
+            NotchLayoutConfig(),
+            NotchLayoutConfig(virtualNotchWidth: 300, virtualNotchHeight: 40, openWidth: 720),
+            NotchLayoutConfig(virtualNotchWidth: 120, virtualNotchHeight: 24, openWidth: 480),
+        ]
+        for screen in screens {
+            for config in configs {
+                let geometry = NotchGeometry(screen: screen, config: config)
+                let panel = geometry.panelFrame(in: screen.frame)
+                for (state, height, rect) in allShapeRects(geometry, in: screen.frame) {
+                    #expect(rect.width > 0 && rect.height > 0, "\(state) \(height) is never zero-sized")
+                    #expect(panel.contains(rect), "\(state) \(height) fits the fixed panel")
+                }
+            }
+        }
+    }
+
+    @Test func switchingTabsChangesOnlyTheHeightOfTheSameOpenShape() {
+        let geometry = NotchGeometry(screen: Self.macBook14, config: NotchLayoutConfig())
+        let short = geometry.shapeSize(for: .open("a"), contentHeight: 130)
+        let tall = geometry.shapeSize(for: .open("b"), contentHeight: 230)
+        #expect(short.width == tall.width)
+        #expect(tall.height - short.height == 100)
+        #expect(geometry.cornerRadii(for: .open("a")) == geometry.cornerRadii(for: .open("b")))
+        #expect(geometry.cornerRadii(for: .open("a")) == geometry.cornerRadii(for: .toast))
+    }
 }

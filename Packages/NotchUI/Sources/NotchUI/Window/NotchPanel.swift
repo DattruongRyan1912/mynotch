@@ -17,6 +17,9 @@ final class NotchPanel: NSPanel {
         allowsToolTipsWhenApplicationIsInactive = true
         // NSPanel hides on deactivate by default; Settings activates the app, so leaving it would hide every notch.
         hidesOnDeactivate = false
+        // Ordering the panel in or out (fullscreen, display mode, handing the keyboard back) must never play the
+        // system's window fade: the notch pops, it does not blink.
+        animationBehavior = .none
     }
 
     /// True only while an open tab accepts keyboard input; the panel never takes the keyboard otherwise.

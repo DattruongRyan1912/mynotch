@@ -7,5 +7,14 @@ public enum NotchTokens {
     public static let primaryText = Color.white
     public static let secondaryText = Color.white.opacity(0.6)
     public static let padding: CGFloat = 14
+    /// The one animation of the notch's size and shape; every state change moves it with this spring.
     public static let spring = Animation.spring(response: 0.38, dampingFraction: 0.8)
+
+    /// Content entering the notch follows the shape a moment later on the same spring.
+    static let enter = spring.delay(0.08)
+    /// Content leaving the notch is gone quickly, so it does not hang on while the shape is already moving.
+    static let leave = Animation.easeOut(duration: 0.1)
+    /// One tab replacing another in an open notch: a quick dissolve instead of the spring's half-second tail,
+    /// which kept both tabs on screen while the shape resized.
+    static let swap = Animation.easeInOut(duration: 0.14)
 }

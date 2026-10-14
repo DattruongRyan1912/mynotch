@@ -60,9 +60,11 @@ final class NotchWindowController {
         NotchLog.record("update display=\(displayID) panel \(panel.frame.logDescription) -> \(newGeometry.panelFrame(in: screen.frame).logDescription)")
         screenFrame = screen.frame
         geometry = newGeometry
+        // The new shape first, then the frame: `setFrame(display: true)` draws at once, and it must not draw the old shape
+        // in the new frame.
+        hosting.rootView = NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry)
         panel.setFrame(geometry.panelFrame(in: screen.frame), display: true)
         hosting.frame = CGRect(origin: .zero, size: geometry.panelSize)
-        hosting.rootView = NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry)
         refreshHitTesting()
     }
 
@@ -157,22 +159,28 @@ final class NotchWindowController {
     }
 
     /// The panel may become key while the shown tab accepts the keyboard, and hands the keyboard back to the app in
-    /// front otherwise; it is non-activating, so MyNotch never becomes the active app. It makes itself key only when
-    /// focus starts being wanted, never on later updates, so a pinned notch does not grab the keyboard back after
-    /// the user clicked another app.
-    private func updateKeyboard(wants: Bool, focuses: Bool) {
-        if wants != panel.allowsKeyStatus {
-            NotchLog.record("keyboard allowsKey=\(wants) isKey=\(panel.isKeyWindow) state=\(model.displayState.logDescription)")
-            panel.allowsKeyStatus = wants
-            if !wants, isVisible, panel.isKeyWindow {
-                // Ordering out returns key status to the app in front; ordering back in leaves it there.
-                orderOut("hand keyboard back")
-                orderFront("hand keyboard back")
-            }
+    /// front otherwise (once the notch collapses, never during a tab switch); it is non-activating, so MyNotch never
+    /// becomes the active app. It makes itself key only when focus starts being wanted, never on later updates, so a
+    /// pinned notch does not grab the keyboard back after the user clicked another app.
+    private func updateKeyboard(wants: Bool, focuses: Bool, isExpanded: Bool) {
+        let plan = NotchKeyboardPolicy.panelKeyPlan(
+            wants: wants, focuses: focuses, wasFocused: lastFocus, isKey: panel.isKeyWindow, isVisible: isVisible, isExpanded: isExpanded
+        )
+        if plan.allowsKeyStatus != panel.allowsKeyStatus {
+            NotchLog.record("keyboard allowsKey=\(plan.allowsKeyStatus) isKey=\(panel.isKeyWindow) expanded=\(isExpanded)")
+            panel.allowsKeyStatus = plan.allowsKeyStatus
         }
-        // An ordered-out panel must not take the keyboard where nobody can see it.
-        if focuses, !lastFocus, isVisible {
-            NotchLog.record("keyboard makeKey state=\(model.displayState.logDescription)")
+        if !plan.handBack, !wants, isExpanded, panel.isKeyWindow {
+            NotchLog.record("keyboard hand-back waits until the notch collapses")
+        }
+        if plan.handBack {
+            // Ordering out returns key status to the app in front; ordering back in leaves it there. The plan only asks for
+            // it once the notch is collapsed, because the panel blinks.
+            orderOut("hand keyboard back")
+            orderFront("hand keyboard back")
+        }
+        if plan.makeKey {
+            NotchLog.record("keyboard makeKey expanded=\(isExpanded)")
             panel.makeKey()
         }
         lastFocus = focuses
@@ -210,7 +218,7 @@ final class NotchWindowController {
                 // A finished drag (drop, or the pointer left) must not leave its types behind for later refreshes.
                 if !isDragging { self.dragTypes = [] }
                 self.refreshHitTesting()
-                self.updateKeyboard(wants: wantsKeyboard, focuses: focusesKeyboard)
+                self.updateKeyboard(wants: wantsKeyboard, focuses: focusesKeyboard, isExpanded: state.isExpanded)
             }
         }
     }
