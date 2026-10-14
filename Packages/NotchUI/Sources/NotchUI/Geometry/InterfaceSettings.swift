@@ -18,6 +18,8 @@ public enum InterfaceSettings {
     public static let hideInFullscreen = SettingKey("interface.hideInFullscreen", default: true)
     /// Whether the notch's windows stay out of screen recordings and shared screens.
     public static let hideFromCapture = SettingKey("interface.hideFromCapture", default: CaptureHiding.never)
+    /// A two-finger sideways swipe on the open notch moves to the previous or next tab.
+    public static let swipeBetweenTabs = SettingKey("interface.swipeBetweenTabs", default: true)
 }
 
 /// Geometry inputs read from settings.

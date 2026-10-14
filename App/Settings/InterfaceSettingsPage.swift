@@ -27,6 +27,9 @@ struct InterfaceSettingsPage: View {
                         value: settings.binding(InterfaceSettings.openDelayMs), in: 0...1000, step: 50)
                 Stepper("Trễ khi đóng: \(settings.value(InterfaceSettings.closeDelayMs)) ms",
                         value: settings.binding(InterfaceSettings.closeDelayMs), in: 0...1000, step: 50)
+                Toggle("Vuốt hai ngón để chuyển trang", isOn: settings.binding(InterfaceSettings.swipeBetweenTabs))
+                Text("Vuốt ngang trên thanh trang hoặc vùng trống của notch. Nội dung tự cuộn ngang, như băng clipboard, giữ cử chỉ của nó.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

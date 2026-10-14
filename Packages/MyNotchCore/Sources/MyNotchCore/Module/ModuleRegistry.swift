@@ -6,8 +6,9 @@ import SwiftUI
 public final class ModuleRegistry {
     public let modules: [any FeatureModule]
     public private(set) var states: [ModuleID: ModuleState] = [:]
-    public private(set) var tabs: [NotchTab] = []
     public private(set) var isPaused = false
+    /// The tabs of the modules that run, in module order; `tabs` is the same list in the user's order.
+    private var runningTabs: [NotchTab] = []
 
     @ObservationIgnored private let settings: SettingsStore
     @ObservationIgnored private let activities: ActivityCenter
@@ -55,6 +56,17 @@ public final class ModuleRegistry {
             ($0.descriptor.id, ModuleSettings(store: settings, module: $0.descriptor.id))
         })
         for module in sorted { states[module.descriptor.id] = .disabled }
+    }
+
+    /// The order the user gave the tabs of the open notch, as module ids; empty means module order. Ids of modules that
+    /// do not run stay in it, so they find their place again.
+    public static let tabOrderKey = SettingKey<[ModuleID]>("app.tabOrder", default: [])
+
+    /// The tabs of the modules that run, in the user's order (`tabOrderKey`). Reads the setting, so views that read
+    /// it follow a change of the order.
+    public var tabs: [NotchTab] {
+        let order = TabOrder.merged(stored: settings.value(Self.tabOrderKey), available: runningTabs.map(\.id))
+        return order.compactMap { id in runningTabs.first { $0.id == id } }
     }
 
     public static func enabledKey(for descriptor: ModuleDescriptor) -> SettingKey<Bool> {
@@ -251,6 +263,6 @@ public final class ModuleRegistry {
     }
 
     private func rebuildTabs() {
-        tabs = modules.compactMap { tabCache[$0.descriptor.id] }
+        runningTabs = modules.compactMap { tabCache[$0.descriptor.id] }
     }
 }

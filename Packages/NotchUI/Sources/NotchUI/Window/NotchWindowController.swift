@@ -15,6 +15,9 @@ final class NotchWindowController {
     private let registry: ModuleRegistry
     private let activities: ActivityCenter
     private let captureHiding: () -> CaptureHiding
+    private let swipesBetweenTabs: () -> Bool
+    private let systemAllowsSwipe: () -> Bool
+    private var swipe = TabSwipeRecognizer()
     private var observation: Task<Void, Never>?
     #if DEBUG
     private let trace: NotchWindowTrace
@@ -42,12 +45,16 @@ final class NotchWindowController {
         registry: ModuleRegistry,
         activities: ActivityCenter,
         delays: @escaping () -> (open: Duration, close: Duration),
-        captureHiding: @escaping () -> CaptureHiding
+        captureHiding: @escaping () -> CaptureHiding,
+        swipesBetweenTabs: @escaping () -> Bool,
+        systemAllowsSwipe: @escaping () -> Bool = { NSEvent.isSwipeTrackingFromScrollEventsEnabled }
     ) {
         self.displayID = displayID
         self.registry = registry
         self.activities = activities
         self.captureHiding = captureHiding
+        self.swipesBetweenTabs = swipesBetweenTabs
+        self.systemAllowsSwipe = systemAllowsSwipe
         screenFrame = screen.frame
         geometry = NotchGeometry(screen: screen, config: config)
         model = NotchViewModel(scheduler: scheduler, availableTabs: { [weak registry] in registry?.tabs.map(\.id) ?? [] }, delays: delays)
@@ -58,6 +65,11 @@ final class NotchWindowController {
         #if DEBUG
         trace = NotchWindowTrace(panel)
         #endif
+        hosting.onUnusedScroll = { [weak self] event in
+            self?.handleScroll(
+                phase: event.phase, momentumPhase: event.momentumPhase, deltaX: event.scrollingDeltaX, deltaY: event.scrollingDeltaY
+            )
+        }
         NotchPerf.start()
         updateOnScreen()
         // Before the panel can be shown, so a recorder never sees a frame of a notch that was meant to be hidden.
@@ -130,6 +142,18 @@ final class NotchWindowController {
             "sharing \(panel.sharingType.logName) -> \(type.logName) hiding=\(captureHiding().rawValue) display=\(model.displayState.logDescription)"
         )
         panel.sharingType = type
+    }
+
+    /// A scroll event nothing under the pointer used. A two-finger sideways swipe moves the open notch one tab along the
+    /// tab bar; `NotchPanel` only sees these while the pointer is over the notch, because it ignores the mouse elsewhere.
+    func handleScroll(phase: NSEvent.Phase, momentumPhase: NSEvent.Phase, deltaX: CGFloat, deltaY: CGFloat) {
+        guard let step = swipe.feed(phase: phase, momentumPhase: momentumPhase, deltaX: deltaX, deltaY: deltaY) else { return }
+        let tabs = registry.tabs.map(\.id)
+        guard let target = step.target(
+            state: model.state, tabs: tabs, enabled: swipesBetweenTabs(), systemAllows: systemAllowsSwipe()
+        ) else { return }
+        NotchLog.record("swipe \(step == .next ? "next" : "previous") \(model.state.logDescription) -> \(target.rawValue)")
+        model.open(tab: target)
     }
 
     /// Called for every pointer move; flips click-through and drives hover and drag state. `dragTypes` are the

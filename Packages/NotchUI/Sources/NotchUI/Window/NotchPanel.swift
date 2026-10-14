@@ -46,6 +46,16 @@ final class NotchPanel: NSPanel {
 final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    /// Scroll events no view under the pointer used: the tab bar, empty notch chrome, and content that does not scroll
+    /// that way. A scroll view that handles the event (the clipboard carousel) keeps it, so only what is left over can
+    /// become a swipe between tabs.
+    var onUnusedScroll: ((NSEvent) -> Void)?
+
+    override func scrollWheel(with event: NSEvent) {
+        onUnusedScroll?(event)
+        super.scrollWheel(with: event)
+    }
+
     #if DEBUG
     /// Layout passes of this view alone; `NotchPerf` counts all of them together, which a test in a process that
     /// animates other notches (they run free without a display link) cannot use.

@@ -20,7 +20,8 @@ import Testing
             displayID: 1, screen: screen, config: NotchLayoutConfig(), scheduler: harness.scheduler,
             registry: harness.registry, activities: harness.activities,
             delays: { (.milliseconds(150), .milliseconds(300)) },
-            captureHiding: { [settings] in settings.value(InterfaceSettings.hideFromCapture) }
+            captureHiding: { [settings] in settings.value(InterfaceSettings.hideFromCapture) },
+            swipesBetweenTabs: { true }
         )
     }
 

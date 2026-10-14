@@ -81,7 +81,8 @@ public final class ScreenManager {
                 controllers[uuid] = NotchWindowController(
                     displayID: displayID, screen: descriptor, config: config, scheduler: scheduler,
                     registry: registry, activities: activities, delays: { [settings] in Self.delays(settings) },
-                    captureHiding: { [settings] in settings.value(InterfaceSettings.hideFromCapture) }
+                    captureHiding: { [settings] in settings.value(InterfaceSettings.hideFromCapture) },
+                    swipesBetweenTabs: { [settings] in settings.value(InterfaceSettings.swipeBetweenTabs) }
                 )
             }
         }
