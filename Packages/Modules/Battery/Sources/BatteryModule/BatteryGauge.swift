@@ -26,7 +26,8 @@ struct BatteryGauge: View {
                 .frame(width: Metrics.nubSize.width, height: Metrics.nubSize.height)
         }
         .frame(height: Metrics.height)
-        // Over the terminal, reaching a little onto the body, so it is white on the fill when the battery is full.
+        // On the body's right outline, beside the terminal: the glyph is wider than the terminal and its gap, so it
+        // covers the outline there and stays clear of the number, which ends 10 pt inside the fill.
         .overlay(alignment: .trailing) {
             if isCharging {
                 Image(systemName: "bolt.fill")

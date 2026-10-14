@@ -11,6 +11,7 @@ import Testing
             "AppleRawMaxCapacity": 5520,
             "NominalChargeCapacity": 5400,
             "MaxCapacity": 100,
+            "BatteryData": ["FccComp1": 5580, "FccComp2": 5520, "CycleCount": 312, "DesignCapacity": 6000, "MaxCapacity": 100],
             "Voltage": 12000,
             "Amperage": 1000,
             "InstantAmperage": 1100,
@@ -21,7 +22,7 @@ import Testing
     }
 
     @Test func parsesATypicalEntry() {
-        #expect(BatteryDetailsParser.parse(entry()) == BatteryDetails(cycleCount: 312, healthPercent: 92, batteryWatts: 12, adapterWatts: 96))
+        #expect(BatteryDetailsParser.parse(entry()) == BatteryDetails(cycleCount: 312, healthPercent: 93, batteryWatts: 12, adapterWatts: 96))
     }
 
     @Test func parsesValuesBridgedFromTheRegistry() {
@@ -40,25 +41,52 @@ import Testing
 
     // MARK: Maximum capacity
 
-    @Test func healthIsMaximumOverDesignCapacityRoundedAndClamped() {
-        #expect(BatteryDetailsParser.parse(entry(["AppleRawMaxCapacity": 5969])).healthPercent == 99)
-        #expect(BatteryDetailsParser.parse(entry(["AppleRawMaxCapacity": 5970])).healthPercent == 100)
-        #expect(BatteryDetailsParser.parse(entry(["AppleRawMaxCapacity": 6100])).healthPercent == 100)
-        #expect(BatteryDetailsParser.parse(entry(["AppleRawMaxCapacity": 3000])).healthPercent == 50)
+    /// Numbers of a Mac whose Battery Health says 79 %: the registry has no percent, so this is the only way to the figure.
+    private let realShapedCapacities: [String: Any?] = [
+        "DesignCapacity": 6075, "AppleRawMaxCapacity": 4578, "NominalChargeCapacity": 4728, "MaxCapacity": 100,
+        "BatteryData": ["FccComp1": 4831, "FccComp2": 4578, "DesignCapacity": 6075, "MaxCapacity": 100],
+    ]
+
+    @Test func healthIsTheFullChargeCapacityOverTheDesignCapacityAsMacOSShowsIt() {
+        // 4831 / 6075 is 79.5 %: macOS shows 79, so the division truncates (rounding would say 80).
+        #expect(BatteryDetailsParser.parse(entry(realShapedCapacities)).healthPercent == 79)
     }
 
-    @Test func healthFallsBackToTheNominalCapacityWhenTheRawOneIsMissingOrEmpty() {
-        #expect(BatteryDetailsParser.parse(entry(["AppleRawMaxCapacity": nil])).healthPercent == 90)
-        #expect(BatteryDetailsParser.parse(entry(["AppleRawMaxCapacity": 0])).healthPercent == 90)
-        #expect(BatteryDetailsParser.parse(entry(["AppleRawMaxCapacity": "5520"])).healthPercent == 90)
+    @Test func healthIsTruncatedAndClamped() {
+        func health(_ fcc: Int) -> Int? { BatteryDetailsParser.parse(entry(["BatteryData": ["FccComp1": fcc]])).healthPercent }
+        #expect(health(5999) == 99)
+        #expect(health(6000) == 100)
+        #expect(health(6100) == 100)
+        #expect(health(3000) == 50)
+        #expect(health(3059) == 50)
+    }
+
+    @Test func healthFallsBackToTheNominalThenTheRawCapacity() {
+        let withoutFullCharge = realShapedCapacities.merging(["BatteryData": nil]) { $1 }
+        #expect(BatteryDetailsParser.parse(entry(withoutFullCharge)).healthPercent == 77)   // 4728 / 6075
+        let withoutNominal = withoutFullCharge.merging(["NominalChargeCapacity": nil]) { $1 }
+        #expect(BatteryDetailsParser.parse(entry(withoutNominal)).healthPercent == 75)      // 4578 / 6075
+    }
+
+    @Test func aMissingEmptyOrOddFullChargeCapacityFallsBack() {
+        func health(_ batteryData: Any?) -> Int? {
+            BatteryDetailsParser.parse(entry(realShapedCapacities.merging(["BatteryData": batteryData]) { $1 })).healthPercent
+        }
+        #expect(health(["FccComp2": 4578]) == 77)
+        #expect(health(["FccComp1": 0]) == 77)
+        #expect(health(["FccComp1": -5]) == 77)
+        #expect(health(["FccComp1": "4831"]) == 77)
+        #expect(health(["FccComp1": true]) == 77)
+        #expect(health([4831]) == 77)
+        #expect(health("4831") == 77)
     }
 
     @Test func maxCapacityCountsOnlyWhenItIsInMilliampHours() {
-        let withoutRawOrNominal: [String: Any?] = ["AppleRawMaxCapacity": nil, "NominalChargeCapacity": nil]
+        let onlyMaxCapacity: [String: Any?] = ["BatteryData": nil, "AppleRawMaxCapacity": nil, "NominalChargeCapacity": nil]
         // 100 is the percent some Macs report in this key: it says nothing about health.
-        #expect(BatteryDetailsParser.parse(entry(withoutRawOrNominal.merging(["MaxCapacity": 100]) { $1 })).healthPercent == nil)
-        #expect(BatteryDetailsParser.parse(entry(withoutRawOrNominal.merging(["MaxCapacity": 87]) { $1 })).healthPercent == nil)
-        #expect(BatteryDetailsParser.parse(entry(withoutRawOrNominal.merging(["MaxCapacity": 5400]) { $1 })).healthPercent == 90)
+        #expect(BatteryDetailsParser.parse(entry(onlyMaxCapacity.merging(["MaxCapacity": 100]) { $1 })).healthPercent == nil)
+        #expect(BatteryDetailsParser.parse(entry(onlyMaxCapacity.merging(["MaxCapacity": 87]) { $1 })).healthPercent == nil)
+        #expect(BatteryDetailsParser.parse(entry(onlyMaxCapacity.merging(["MaxCapacity": 5400]) { $1 })).healthPercent == 90)
     }
 
     @Test func healthNeedsADesignCapacity() {

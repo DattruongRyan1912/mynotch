@@ -279,6 +279,34 @@ final class FakePowerSource: PowerSourceReading {
         #expect(source.detailReads == before + 1)
     }
 
+    @Test func twoNotchesShowingTheTabKeepItVisibleUntilBothLeave() async {
+        let source = FakePowerSource(PowerSourceSnapshot(percent: 60, isCharging: false, isOnAC: false), details: Self.details)
+        let module = BatteryModule(reader: source)
+        let harness = RegistryHarness([module])
+        await harness.registry.bootstrap()
+        module.actions.appeared()
+        module.actions.appeared()
+        module.actions.disappeared()
+        #expect(module.state.isTabVisible)
+        let before = source.detailReads
+        harness.scheduler.advance(by: .seconds(30))
+        #expect(source.detailReads == before + 1)
+
+        module.actions.disappeared()
+        #expect(!module.state.isTabVisible)
+        harness.scheduler.advance(by: .seconds(300))
+        #expect(source.detailReads == before + 1)
+    }
+
+    @Test func aStrayDisappearDoesNotHideTheNextTab() async {
+        let source = FakePowerSource(PowerSourceSnapshot(percent: 60, isCharging: false, isOnAC: false), details: Self.details)
+        let module = BatteryModule(reader: source)
+        await RegistryHarness([module]).registry.bootstrap()
+        module.actions.disappeared()
+        module.actions.appeared()
+        #expect(module.state.isTabVisible)
+    }
+
     @Test func stoppingTheModuleStopsThePollingAndForgetsTheTab() async {
         let source = FakePowerSource(PowerSourceSnapshot(percent: 60, isCharging: false, isOnAC: false), details: Self.details)
         let module = BatteryModule(reader: source)

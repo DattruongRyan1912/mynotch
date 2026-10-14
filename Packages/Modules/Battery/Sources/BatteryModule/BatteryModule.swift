@@ -39,6 +39,8 @@ public final class BatteryModule: FeatureModule {
     /// Threshold used for the previous decision, so lowering it in Settings dismisses the alert.
     private var lastThreshold: Int?
     private var pollTimer: ScheduledAction?
+    /// Tabs on screen: each screen has its own notch, so more than one can show this tab at a time.
+    private var visibleTabs = 0
 
     /// How often the open tab reads the battery again: the power flowing in or out changes without a notification.
     static let pollInterval = Duration.seconds(30)
@@ -87,6 +89,7 @@ public final class BatteryModule: FeatureModule {
         state.details = nil
         state.isLowPowerMode = false
         state.isTabVisible = false
+        visibleTabs = 0
         lowActive = false
         publishedLowPercent = nil
         lastThreshold = nil
@@ -126,12 +129,15 @@ public final class BatteryModule: FeatureModule {
     /// Opening the tab shows fresh numbers, and from then on they are read again every `pollInterval`.
     private func tabAppeared() {
         guard context != nil else { return }
+        visibleTabs += 1
         state.isTabVisible = true
         refresh()
         schedulePoll()
     }
 
     private func tabDisappeared() {
+        visibleTabs = max(0, visibleTabs - 1)
+        guard visibleTabs == 0 else { return }
         state.isTabVisible = false
         pollTimer?.cancel()
         pollTimer = nil

@@ -16,13 +16,18 @@ nonisolated enum BatteryDetailsParser {
         )
     }
 
+    /// macOS publishes no percent for Battery Health in the registry or in the power-source description, so it is
+    /// computed. The full-charge capacity the gauge reports (`BatteryData.FccComp1`) over the design capacity,
+    /// truncated, gives the figure System Settings shows on the Mac this was checked against (4831 of 6075 is
+    /// 79.5 %, shown as 79 %). The two older keys follow for Macs that lack it: they read 78 % and 75 % there.
     private static func healthPercent(_ registry: [String: Any]) -> Int? {
         guard let design = integer(registry["DesignCapacity"]), design > 0 else { return nil }
-        let reported = [integer(registry["AppleRawMaxCapacity"]), integer(registry["NominalChargeCapacity"])]
+        let fullCharge = (registry["BatteryData"] as? [String: Any]).flatMap { integer($0["FccComp1"]) }
+        let reported = [fullCharge, integer(registry["NominalChargeCapacity"]), integer(registry["AppleRawMaxCapacity"])]
         // Current Macs report a percent (100) in `MaxCapacity`: it only counts when it is clearly milliamp-hours.
         let milliampHours = integer(registry["MaxCapacity"]).flatMap { $0 > 100 ? $0 : nil }
         guard let maximum = (reported + [milliampHours]).compactMap({ $0 }).first(where: { $0 > 0 }) else { return nil }
-        return min(max(Int((Double(maximum) / Double(design) * 100).rounded()), 0), 100)
+        return min(maximum * 100 / design, 100)
     }
 
     private static func batteryWatts(_ registry: [String: Any]) -> Double? {
