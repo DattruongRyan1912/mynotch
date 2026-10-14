@@ -931,7 +931,7 @@ test("command: a worker made without a way to reach tabs reports no tab", async 
   assert.equal(swDiags(h.ports[0]).at(-1), "sw-command-no-tab");
 });
 
-test("command: anything but the closed command set from the host is rejected, reported once per 5 s, and never sent on", async () => {
+test("command: anything but the closed command set from the host is rejected, reported every time, and never sent on", async () => {
   const h = commandHarness();
   h.relay.onMessage(playback(), senderInTab(7));
   const bad = [
@@ -948,11 +948,10 @@ test("command: anything but the closed command set from the host is rejected, re
   for (const message of bad) assert.doesNotThrow(() => h.ports[0].receive(message));
   await flush();
   assert.deepEqual(h.toTabs, []);
-  assert.deepEqual(swDiags(h.ports[0]), ["sw-start v=0.1.1", "sw-msg playback", "sw-reject invalid command"]);
-
-  h.advance(5000);
-  h.ports[0].receive({ v: 1, type: "command", action: "skip" });
-  assert.equal(swDiags(h.ports[0]).at(-1), "sw-reject invalid command");
+  // The app waits for an answer to every command, so none is held back by the 5 s limit.
+  assert.deepEqual(swDiags(h.ports[0]), [
+    "sw-start v=0.1.1", "sw-msg playback", ...Array(bad.length).fill("sw-reject invalid command")
+  ]);
 });
 
 test("command: a content script cannot send one through the worker's message handler", async () => {
@@ -973,4 +972,22 @@ test("command: no diagnostic carries the tab id or anything else of the tab", as
   assert.equal(JSON.stringify(h.ports[0].diags).includes("4242"), false);
   assert.equal(JSON.stringify(h.infos).includes("4242"), false);
   assert.deepEqual(h.logs, []);
+});
+
+test("command: the answers are not rate limited: every no-tab report and every content-command line reaches the host", async () => {
+  const h = commandHarness({ sendToTab: () => Promise.reject(new Error("gone")) });
+  h.ports[0].receive(NEXT);
+  h.ports[0].receive(NEXT);
+  h.ports[0].receive(NEXT);
+  await flush();
+  assert.equal(swDiags(h.ports[0]).filter((event) => event === "sw-command-no-tab").length, 3);
+
+  const content = (event) => ({ v: 1, type: "diag", where: "content", event });
+  h.relay.onMessage(content("content-command next ok"), senderInTab(7));
+  h.relay.onMessage(content("content-command next ok"), senderInTab(7));
+  h.relay.onMessage(content("content-command previous unavailable"), senderInTab(7));
+  h.relay.onMessage(content("content-start"), senderInTab(7));
+  h.relay.onMessage(content("content-start"), senderInTab(7));
+  const events = h.ports[0].diags.filter((message) => message.where === "content").map((message) => message.event);
+  assert.deepEqual(events, ["content-command next ok", "content-command next ok", "content-command previous unavailable", "content-start"]);
 });

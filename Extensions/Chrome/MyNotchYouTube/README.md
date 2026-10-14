@@ -34,7 +34,7 @@ Chrome chỉ nạp script của extension vào trang mở sau khi extension có 
 
 YouTube tự gỡ các nút "bài sau/bài trước" khỏi điều khiển media của Chrome, nên phím media của macOS không chuyển được bài trong YouTube (kể cả danh sách Mix). Khi nhận lệnh từ MyNotch, script của extension làm đúng như người dùng: bấm nút **Next** của trình phát (nút chỉ được bấm khi đang hiện và đang bật). Với **Previous**, nó bấm nút Previous của trình phát nếu có; nếu trình phát không có nút đó (video lẻ, không nằm trong danh sách) thì tua về 0 giây khi video đã chạy quá 3 giây, đúng như nút Previous của YouTube. Nút Previous của YouTube cũng tự quay về đầu video khi đã quá 3 giây, nên muốn về video trước hãy bấm hai lần.
 
-Script không tạo sự kiện bàn phím nào và không làm gì khi quảng cáo đang chạy. Mỗi lệnh để lại một mã chẩn đoán (`content-command next ok` hoặc `unavailable`); nếu tab đã đóng, service worker báo `sw-command-no-tab` và bỏ lệnh. MyNotch không thử cách nào khác khi lệnh không làm được.
+Script không tạo sự kiện bàn phím nào và không làm gì khi quảng cáo đang chạy. Mỗi lệnh để lại một mã chẩn đoán (`content-command next ok` hoặc `unavailable`); nếu tab đã đóng, service worker báo `sw-command-no-tab` và bỏ lệnh. Các mã trả lời này không bị giới hạn tần suất vì MyNotch chờ mỗi lệnh một câu trả lời: không thấy gì sau 1 giây (host hoặc extension là bản cũ chưa biết lệnh) thì MyNotch dùng phím media của macOS cho lần bấm đó. Khi extension đã trả lời, kể cả `unavailable`, MyNotch không thử cách nào khác.
 
 Mã extension (id) cố định nhờ khoá công khai trong `manifest.json`, id nằm trong file `EXTENSION_ID`. Cầu nối của MyNotch chỉ cho phép đúng id này kết nối.
 

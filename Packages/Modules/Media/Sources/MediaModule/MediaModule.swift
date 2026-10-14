@@ -38,8 +38,14 @@ struct MediaSettingsKeys {
 struct MediaActions {
     var send: (MediaCommand) -> Void
     var seek: (Double) -> Void
-    /// Whether Next and Previous can do anything for what plays now (see `SkipRoute`); the buttons are disabled when not.
-    var canSkip: () -> Bool = { true }
+}
+
+/// A next or previous that went to the extension and waits for its answer.
+private struct UnansweredSkip {
+    var id: Int
+    var command: MediaCommand
+    var action: YouTubeCommand
+    var timer: ScheduledAction
 }
 
 /// Now playing from any app: a live activity while music plays and a "Media" tab with the player controls.
@@ -120,6 +126,9 @@ public final class MediaModule: FeatureModule {
     private var stripHold = LyricStripHold()
     private var stripHoldTimer: ScheduledAction?
     private var scheduledStripDeadline: Date?
+    /// Skips sent to the extension and not answered yet, oldest first.
+    private var unansweredSkips: [UnansweredSkip] = []
+    private var unansweredSkipCount = 0
     /// Whether the lock screen view is on offer; its view reads `store`, so it is set once and cleared once.
     private var lockScreenOffered = false
     private var deadlineTimer: ScheduledAction?
@@ -333,17 +342,16 @@ public final class MediaModule: FeatureModule {
     var actions: MediaActions {
         MediaActions(
             send: { [weak self] command in self?.send(command) },
-            seek: { [weak self] seconds in self?.seek(toSeconds: seconds) },
-            canSkip: { [weak self] in self?.canSkip ?? true }
+            seek: { [weak self] seconds in self?.seek(toSeconds: seconds) }
         )
     }
 
     /// Next and previous of a video that plays in Chrome go to the extension, which presses the player's own button, when it
     /// has a live session for that video: Chrome ignores MediaRemote's next and previous there. Whatever else is sent
-    /// goes to MediaRemote. When the extension cannot do it, nothing else is tried.
+    /// goes to MediaRemote, as does a press the extension does not take (see `sendToExtension`).
     func send(_ command: MediaCommand) {
         if let action = command.youTubeCommand, skipRoute() == .bridge {
-            sendToExtension(action)
+            sendToExtension(command, as: action)
             return
         }
         source?.send(command)
@@ -354,18 +362,49 @@ public final class MediaModule: FeatureModule {
         SkipRoute.decide(for: store.state, in: captionStore, now: now)
     }
 
-    /// False while Chrome plays and no route can skip, which the tab shows as disabled buttons.
-    var canSkip: Bool { skipRoute() != .unavailable }
-
     /// The hosts connected to the socket (for tests).
     var youtubeServerConnectionCount: Int { youtubeServer?.connectionCount ?? 0 }
 
-    private func sendToExtension(_ action: YouTubeCommand) {
+    /// Writes the command to the host and waits `SkipRoute.answerTimeout` for the extension to answer it (it does, with a
+    /// diagnostic, whether or not it could do it). Nothing answers when the host or the extension is of a version that does not
+    /// know commands, which an app update can leave behind; that press goes to MediaRemote instead. An answer of any kind,
+    /// "unavailable" included, ends it: nothing else is tried.
+    private func sendToExtension(_ command: MediaCommand, as action: YouTubeCommand) {
         guard let youtubeServer, youtubeServer.send(action) else {
-            youtubeLog("command not-sent reason=no-host")
+            fallBackToMediaRemote(command, reason: "no-host")
             return
         }
         youtubeLog("command sent action=\(action.rawValue)")
+        guard let context else { return }
+        unansweredSkipCount += 1
+        let id = unansweredSkipCount
+        let timer = context.scheduler.schedule(after: SkipRoute.answerTimeout) { [weak self] in self?.skipUnanswered(id) }
+        unansweredSkips.append(UnansweredSkip(id: id, command: command, action: action, timer: timer))
+    }
+
+    private func skipUnanswered(_ id: Int) {
+        guard let index = unansweredSkips.firstIndex(where: { $0.id == id }) else { return }
+        let skip = unansweredSkips.remove(at: index)
+        fallBackToMediaRemote(skip.command, reason: "no-answer")
+    }
+
+    private func fallBackToMediaRemote(_ command: MediaCommand, reason: String) {
+        youtubeLog("skip fallback=mediaremote reason=\(reason)")
+        source?.send(command)
+    }
+
+    /// The extension answered a command: the oldest press waiting for that answer is done.
+    private func commandAnswered(_ answer: YouTubeDiag.CommandAnswer) {
+        let index = unansweredSkips.firstIndex { skip in
+            if case .content(let action, _) = answer { skip.action == action } else { true }
+        }
+        guard let index else { return }
+        unansweredSkips.remove(at: index).timer.cancel()
+    }
+
+    private func dropUnansweredSkips() {
+        for skip in unansweredSkips { skip.timer.cancel() }
+        unansweredSkips = []
     }
 
     func seek(toSeconds seconds: Double) {
@@ -531,6 +570,7 @@ public final class MediaModule: FeatureModule {
     private func stopYouTubeBridge() {
         youtubeServer?.stop()
         youtubeServer = nil
+        dropUnansweredSkips()
         youtubeListenFailed = false
         if youtubeBridge.listenFailed { youtubeBridge.listenFailed = false }
         if youtubeBridge.lastPageMessageAt != nil { youtubeBridge.lastPageMessageAt = nil }
@@ -553,6 +593,7 @@ public final class MediaModule: FeatureModule {
         }
         // A diagnostic decides nothing about lyrics; the service worker's says whether Chrome lets the extension read YouTube.
         if case .diag(let diag) = message {
+            if let answer = diag.commandAnswer { commandAnswered(answer) }
             if let access = diag.siteAccess, youtubeBridge.accessWithheld != (access == .withheld) {
                 youtubeBridge.accessWithheld = access == .withheld
             }

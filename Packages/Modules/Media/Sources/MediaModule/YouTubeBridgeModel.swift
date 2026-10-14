@@ -37,6 +37,8 @@ final class YouTubeBridgeModel {
 
     /// What to do when Chrome has set the extension's site access to "On click" and so lets it read nothing on YouTube.
     static let accessWithheldMessage = "Chrome đang chặn extension đọc YouTube. Mở chrome://extensions, chọn MyNotch YouTube Bridge → Quyền truy cập trang web → Trên tất cả trang web, rồi tải lại tab YouTube."
+    /// Why the skip buttons may do nothing for a YouTube video in Chrome: YouTube ignores the system's next and previous there.
+    static let skipHint = "Nút chuyển bài cho YouTube cần extension MyNotch"
     static let listenFailureMessage = "Không mở được socket nhận phụ đề từ Chrome nên phụ đề YouTube chưa hoạt động. Tắt rồi bật lại để thử lại."
     /// The extension counts as connected while its last page message is no older than this; the page sends one every 5 s while a video plays.
     static let connectedWindow: TimeInterval = 30

@@ -195,6 +195,15 @@
     var states = {}; // kind -> the last state event sent by reportState
     var playbackTab = null; // the tab that last sent a playback message; in memory only, never stored
 
+    /**
+     * The answer to a command, as a diagnostic that is never rate limited: the app waits for one per command and
+     * uses MediaRemote for a press that gets none.
+     */
+    function answer(event) {
+      var message = C.buildDiag("sw", event);
+      if (message) deps.bridge.handle(message);
+    }
+
     /** The worker's own diagnostics: one event per kind every 5 s. */
     function report(event) {
       if (!allow(event)) return;
@@ -236,7 +245,7 @@
       if (clean.type === "diag") {
         // Content scripts only speak for themselves and the page script; "sw" events are ours.
         if (clean.where === "sw") report("sw-reject invalid diag");
-        else if (allow(clean.event)) deps.bridge.handle(clean);
+        else if (clean.event.indexOf("content-command ") === 0 || allow(clean.event)) deps.bridge.handle(clean);
         return;
       }
       report("sw-msg " + clean.type + (clean.type === "captions" ? " events=" + clean.events.length : ""));
@@ -255,19 +264,19 @@
     function onHostMessage(message) {
       var command = C.validateCommand(message);
       if (!command) {
-        report("sw-reject invalid command");
+        answer("sw-reject invalid command");
         return;
       }
       var tabId = playbackTab;
       if (tabId === null || typeof deps.sendToTab !== "function") {
-        report("sw-command-no-tab");
+        answer("sw-command-no-tab");
         return;
       }
       new Promise(function (resolve) {
         resolve(deps.sendToTab(tabId, command));
       }).then(undefined, function () {
         if (playbackTab === tabId) playbackTab = null;
-        report("sw-command-no-tab");
+        answer("sw-command-no-tab");
       });
     }
 

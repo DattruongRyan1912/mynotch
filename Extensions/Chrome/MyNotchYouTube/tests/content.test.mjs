@@ -1245,17 +1245,33 @@ test("anything but the closed command set is ignored without a click, a diagnost
   assert.deepEqual(commandDiags(page), []);
 });
 
-test("every command is carried out, the diagnostic is rate limited like the others", () => {
+test("every command is carried out and every one is answered: the app waits for each answer, so it is not rate limited", () => {
   const page = startedPage();
   page.nextButton = fakeButton();
   page.command(NEXT);
   page.command(NEXT);
   page.command(NEXT);
   assert.equal(page.nextButton.clicks, 3);
-  assert.deepEqual(commandDiags(page), ["content-command next ok"], "one line per kind every 5 s");
-  page.advance(5000);
+  assert.deepEqual(commandDiags(page), Array(3).fill("content-command next ok"));
+  page.nextButton = null;
+  page.video.currentTime = 1; // too early to restart
   page.command(NEXT);
-  assert.deepEqual(commandDiags(page), ["content-command next ok", "content-command next ok"]);
+  page.command(PREVIOUS);
+  assert.deepEqual(commandDiags(page).slice(3), ["content-command next unavailable", "content-command previous unavailable"]);
+});
+
+test("the other diagnostics of the content script stay rate limited when commands are answered", () => {
+  const page = startedPage({ pressed: "true" });
+  page.nextButton = fakeButton();
+  page.command(NEXT);
+  page.command(NEXT);
+  for (const pressed of ["false", "true", "false", "true", "false"]) {
+    page.button.pressed = pressed;
+    page.advance(1000);
+  }
+  const events = page.diags.map((message) => message.event);
+  assert.deepEqual(events.filter((event) => event.startsWith("content-cc")), ["content-cc off"], "off once; the repeats and the on sent at start are within 5 s");
+  assert.equal(events.filter((event) => event === "content-command next ok").length, 2);
 });
 
 test("the listener is registered once, removed when the copy stops and not doubled by a second copy", () => {

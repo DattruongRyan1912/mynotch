@@ -175,6 +175,7 @@ import Testing
         )
         #expect(YouTubeBridgeRows.installTitle == "Cài cầu nối cho Chrome")
         #expect(YouTubeBridgeRows.removeTitle == "Gỡ cầu nối")
+        #expect(YouTubeBridgeModel.skipHint == "Nút chuyển bài cho YouTube cần extension MyNotch")
         #expect(YouTubeBridgeModel.listenFailureMessage == "Không mở được socket nhận phụ đề từ Chrome nên phụ đề YouTube chưa hoạt động. Tắt rồi bật lại để thử lại.")
     }
 }

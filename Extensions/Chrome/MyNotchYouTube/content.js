@@ -135,9 +135,12 @@
     diag(event);
   }
 
-  /** One of the content script's own diagnostic events (rate limited). */
-  function diag(event) {
-    if (!allowDiag(event)) return;
+  /**
+   * One of the content script's own diagnostic events (rate limited). The answer to a command is not: the app waits
+   * for one per command, and takes the lack of one for a host or an extension that does not know commands.
+   */
+  function diag(event, answersCommand) {
+    if (answersCommand !== true && !allowDiag(event)) return;
     var message = C.buildDiag("content", event);
     if (message) transmit(message, false);
   }
@@ -353,7 +356,7 @@
     var command = C.validateCommand(message);
     if (!command) return undefined;
     var ok = perform(command.action);
-    diag("content-command " + command.action + " " + (ok ? "ok" : "unavailable"));
+    diag("content-command " + command.action + " " + (ok ? "ok" : "unavailable"), true);
     try {
       if (typeof sendResponse === "function") sendResponse({ ok: ok });
     } catch (error) {

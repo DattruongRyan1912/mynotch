@@ -58,13 +58,10 @@ struct MediaTabView: View {
                 Spacer(minLength: 4)
                 PlaybackProgressView(store: store, seek: actions.seek)
                 Spacer(minLength: 2)
-                // Asked again every second: what the extension has said is not observable, and a session ends by saying nothing.
-                TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    TransportControls(isPlaying: store.state.isPlaying, canSkip: actions.canSkip(), send: actions.send)
-                }
-                .frame(maxWidth: .infinity)
-                // An overlay, so the buttons stay centred under the progress bar.
-                .overlay(alignment: .trailing) { NowPlayingBars(store: store) }
+                TransportControls(isPlaying: store.state.isPlaying, send: actions.send)
+                    .frame(maxWidth: .infinity)
+                    // An overlay, so the buttons stay centred under the progress bar.
+                    .overlay(alignment: .trailing) { NowPlayingBars(store: store) }
             }
             // The cover's height. Not stretched to the space available, which would pull the column out of line
             // with the cover.
@@ -103,28 +100,16 @@ enum TransportControl: CaseIterable {
     }
 
     var symbolSize: CGFloat { self == .playPause ? 20 : 14 }
-
-    /// What the disabled Next and Previous buttons say: with Chrome playing and the extension not there, they could only do nothing.
-    static let skipUnavailableHelp = "Cài extension MyNotch cho YouTube để chuyển bài"
-
-    /// Play and pause work through MediaRemote everywhere; Next and Previous need a route (`SkipRoute`).
-    func isEnabled(canSkip: Bool) -> Bool { self == .playPause || canSkip }
-
-    /// The tooltip: the button's name, or what to do about a disabled one.
-    func help(isPlaying: Bool, canSkip: Bool) -> String {
-        isEnabled(canSkip: canSkip) ? label(isPlaying: isPlaying) : Self.skipUnavailableHelp
-    }
 }
 
 struct TransportControls: View {
     let isPlaying: Bool
-    var canSkip = true
     let send: (MediaCommand) -> Void
 
     var body: some View {
         HStack(spacing: 14) {
             ForEach(TransportControl.allCases, id: \.self) { control in
-                TransportButton(control: control, isPlaying: isPlaying, canSkip: canSkip) { send(control.command) }
+                TransportButton(control: control, isPlaying: isPlaying) { send(control.command) }
             }
         }
     }
@@ -133,28 +118,24 @@ struct TransportControls: View {
 private struct TransportButton: View {
     let control: TransportControl
     let isPlaying: Bool
-    let canSkip: Bool
     let action: () -> Void
     @State private var isHovering = false
 
     var body: some View {
         let label = control.label(isPlaying: isPlaying)
-        let isEnabled = control.isEnabled(canSkip: canSkip)
         Button(action: action) {
             Image(systemName: control.symbol(isPlaying: isPlaying))
                 .font(.system(size: control.symbolSize, weight: .semibold))
                 .foregroundStyle(NotchTokens.primaryText)
                 .contentTransition(.symbolEffect(.replace))
                 .frame(width: 28, height: 28)
-                .background(Circle().fill(Color.white.opacity(isHovering && isEnabled ? 0.14 : 0)))
+                .background(Circle().fill(Color.white.opacity(isHovering ? 0.14 : 0)))
                 .contentShape(Circle())
         }
         .buttonStyle(PressableButtonStyle())
-        .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.35)
         .onHover { isHovering = $0 }
         .animation(.easeOut(duration: 0.15), value: isHovering)
-        .help(control.help(isPlaying: isPlaying, canSkip: canSkip))
+        .help(label)
         .accessibilityLabel(label)
     }
 }

@@ -20,6 +20,14 @@ public struct YouTubeDiag: Equatable, Sendable {
         case withheld
     }
 
+    /// What the extension says about a command it was given (`YouTubeCommand`).
+    public enum CommandAnswer: Equatable, Sendable {
+        /// The content script did the command, or could not (no usable button, an advert plays, ...).
+        case content(YouTubeCommand, performed: Bool)
+        /// The service worker could not hand a command to a tab, or refused it as invalid; it does not say which command.
+        case worker
+    }
+
     public static let maxEventLength = 120
 
     public var origin: Origin
@@ -38,6 +46,25 @@ public struct YouTubeDiag: Equatable, Sendable {
         case "sw-access youtube=granted": return .granted
         case "sw-access youtube=withheld": return .withheld
         default: return nil
+        }
+    }
+
+    /// The command this diagnostic answers, nil for any other event and for the same words from a part that cannot know.
+    /// The answer to a command is how the app learns that the host and the extension of this version took it.
+    public var commandAnswer: CommandAnswer? {
+        let words = event.split(separator: " ", omittingEmptySubsequences: false)
+        switch origin {
+        case .content:
+            guard words.count == 3, words[0] == "content-command", let command = YouTubeCommand(rawValue: String(words[1])) else { return nil }
+            switch words[2] {
+            case "ok": return .content(command, performed: true)
+            case "unavailable": return .content(command, performed: false)
+            default: return nil
+            }
+        case .sw:
+            return event == "sw-command-no-tab" || event == "sw-reject invalid command" ? .worker : nil
+        case .page:
+            return nil
         }
     }
 

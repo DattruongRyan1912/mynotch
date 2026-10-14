@@ -184,6 +184,28 @@ import Testing
         #expect(YouTubeDiag(origin: .page, event: "sw-access youtube=withheld").siteAccess == nil)
     }
 
+    @Test func theAnswersToACommandAreReadAndNothingElseIs() {
+        let content: [(String, YouTubeDiag.CommandAnswer)] = [
+            ("content-command next ok", .content(.next, performed: true)),
+            ("content-command next unavailable", .content(.next, performed: false)),
+            ("content-command previous ok", .content(.previous, performed: true)),
+            ("content-command previous unavailable", .content(.previous, performed: false)),
+        ]
+        for (event, answer) in content {
+            #expect(YouTubeDiag(origin: .content, event: event).commandAnswer == answer, "\(event)")
+            // Only the content script performs commands.
+            #expect(YouTubeDiag(origin: .sw, event: event).commandAnswer == nil, "\(event)")
+            #expect(YouTubeDiag(origin: .page, event: event).commandAnswer == nil, "\(event)")
+        }
+        #expect(YouTubeDiag(origin: .sw, event: "sw-command-no-tab").commandAnswer == .worker)
+        #expect(YouTubeDiag(origin: .sw, event: "sw-reject invalid command").commandAnswer == .worker)
+        #expect(YouTubeDiag(origin: .content, event: "sw-command-no-tab").commandAnswer == nil, "only the worker knows about tabs")
+        for event in ["sw-start v=0.1.3", "sw-reject invalid playback", "sw-msg playback", "sw-access youtube=granted", "content-start", "content-alive videoid-present=true playing=true", "content-command next", "content-command skip ok", ""] {
+            #expect(YouTubeDiag(origin: .sw, event: event).commandAnswer == nil, "\(event)")
+            #expect(YouTubeDiag(origin: .content, event: event).commandAnswer == nil, "\(event)")
+        }
+    }
+
     @Test func aDiagIsNotAVideosMessage() {
         let message = Self.decode(where: "sw", event: "sw-start v=1")
         #expect(message?.videoID == nil)

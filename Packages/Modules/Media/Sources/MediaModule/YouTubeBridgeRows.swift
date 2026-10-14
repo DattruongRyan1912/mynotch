@@ -25,6 +25,7 @@ struct YouTubeBridgeRows: View {
                     Text(status.text).foregroundStyle(status == .connected ? .green : .secondary)
                 }
             }
+            Text(YouTubeBridgeModel.skipHint).font(.caption).foregroundStyle(.secondary)
             if model.listenFailed {
                 Text(YouTubeBridgeModel.listenFailureMessage).font(.caption).foregroundStyle(.red)
             }

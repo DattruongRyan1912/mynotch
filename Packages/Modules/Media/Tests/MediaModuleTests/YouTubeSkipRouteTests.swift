@@ -3,7 +3,7 @@ import Testing
 import YouTubeBridgeKit
 @testable import MediaModule
 
-/// Where Next and Previous go for what plays now: MediaRemote, the Chrome extension, or nowhere.
+/// Where Next and Previous go for what plays now: the Chrome extension when it has a live matched session, MediaRemote otherwise.
 @Suite struct YouTubeSkipRouteTests {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
     let title = YouTubeTestMessages.title
@@ -35,14 +35,14 @@ import YouTubeBridgeKit
 
     @Test func theTitleIsComparedTheWayTheCaptionsAre() {
         #expect(route(state("com.google.Chrome", title: "  SAMPLE   video "), store()) == .bridge)
-        #expect(route(state("com.google.Chrome", title: "Sample videos"), store()) == .unavailable)
-        #expect(route(state("com.google.Chrome", title: "Another video"), store()) == .unavailable)
+        #expect(route(state("com.google.Chrome", title: "Sample videos"), store()) == .mediaRemote)
+        #expect(route(state("com.google.Chrome", title: "Another video"), store()) == .mediaRemote)
     }
 
     @Test func aBrowsersHelperProcessCountsThroughItsParent() {
         let helper = state("com.google.Chrome.helper", parent: "com.google.Chrome")
         #expect(route(helper, store()) == .bridge)
-        #expect(route(helper, YouTubeCaptionStore()) == .unavailable)
+        #expect(route(helper, YouTubeCaptionStore()) == .mediaRemote)
     }
 
     @Test func anotherBrowserWithALiveMatchedSessionIsStillServedByTheBridge() {
@@ -51,20 +51,21 @@ import YouTubeBridgeKit
 
     // MARK: no live session
 
-    @Test func chromeWithoutAnythingFromTheExtensionHasNoRoute() {
-        #expect(route(state("com.google.Chrome"), YouTubeCaptionStore()) == .unavailable)
-        #expect(route(state("com.google.Chrome", title: nil), store()) == .unavailable)
+    @Test func chromeWithoutAnythingFromTheExtensionKeepsMediaRemoteBecauseTheAppCannotTellWhichSitePlays() {
+        // Spotify Web and YouTube Music skip through MediaRemote; only a live YouTube session needs the extension.
+        #expect(route(state("com.google.Chrome"), YouTubeCaptionStore()) == .mediaRemote)
+        #expect(route(state("com.google.Chrome", title: nil), store()) == .mediaRemote)
     }
 
     @Test func theSessionIsLiveWhilethePageWasHeardFromWithinTheWindow() {
         #expect(SkipRoute.liveWindow == 75, "a paused tab in the background tells it is there about once a minute")
         #expect(route(state("com.google.Chrome"), store(playbackAge: SkipRoute.liveWindow)) == .bridge)
-        #expect(route(state("com.google.Chrome"), store(playbackAge: SkipRoute.liveWindow + 0.1)) == .unavailable)
+        #expect(route(state("com.google.Chrome"), store(playbackAge: SkipRoute.liveWindow + 0.1)) == .mediaRemote)
     }
 
     @Test func aHeartbeatOfTheContentScriptKeepsAPausedVideosSessionAlive() {
         var heard = store(playbackAge: 600)
-        #expect(route(state("com.google.Chrome"), heard) == .unavailable)
+        #expect(route(state("com.google.Chrome"), heard) == .mediaRemote)
         heard.apply(YouTubeTestMessages.diag("content-alive videoid-present=true playing=false", from: .content), at: now - 20)
         #expect(route(state("com.google.Chrome"), heard) == .bridge)
     }
@@ -73,7 +74,7 @@ import YouTubeBridgeKit
         var heard = store(playbackAge: 600)
         heard.apply(YouTubeTestMessages.diag("sw-access youtube=granted"), at: now - 1)
         heard.apply(YouTubeTestMessages.diag("sw-start v=0.1.3"), at: now - 1)
-        #expect(route(state("com.google.Chrome"), heard) == .unavailable)
+        #expect(route(state("com.google.Chrome"), heard) == .mediaRemote)
     }
 
     // MARK: what MediaRemote can still do
@@ -86,20 +87,10 @@ import YouTubeBridgeKit
         #expect(route(NowPlayingState.empty, YouTubeCaptionStore()) == .mediaRemote)
     }
 
-    @Test func aBrowserTheExtensionCannotServeKeepsMediaRemote() {
-        // The extension is for Chrome: for these there is nothing to tell the user to install.
-        for bundle in ["com.apple.Safari", "org.mozilla.firefox", "company.thebrowser.Browser", "com.microsoft.edgemac", "com.brave.Browser"] {
+    @Test func aBrowserWithoutALiveMatchedSessionKeepsMediaRemote() {
+        for bundle in ["com.google.Chrome", "com.apple.Safari", "org.mozilla.firefox", "company.thebrowser.Browser", "com.microsoft.edgemac", "com.brave.Browser"] {
             #expect(route(state(bundle), YouTubeCaptionStore()) == .mediaRemote, "\(bundle)")
             #expect(route(state(bundle, title: "Another video"), store()) == .mediaRemote, "\(bundle)")
         }
-    }
-
-    @Test func chromeIsRecognisedByItsBundleOrItsHelpersParent() {
-        #expect(state("com.google.Chrome").isFromChrome)
-        #expect(state("com.google.Chrome.helper", parent: "com.google.Chrome").isFromChrome)
-        #expect(state("org.example.Helper", parent: "com.google.Chrome").isFromChrome)
-        #expect(!state("com.apple.Safari").isFromChrome)
-        #expect(!state("com.example.Player").isFromChrome)
-        #expect(!NowPlayingState.empty.isFromChrome)
     }
 }
