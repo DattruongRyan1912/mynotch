@@ -19,7 +19,7 @@ table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:b
 th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
 th{background:var(--card)}
 @media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
-</style></head><body><div class="layout"><nav><a class="h2" href="#1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</a><a class="h2" href="#2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</a><a class="h2" href="#3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</a><a class="h2" href="#4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</a><a class="h2" href="#5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</a><a class="h2" href="#6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</a></nav><main><h1 id="ghi-chú-triển-khai-dịch">Ghi chú triển khai: Dịch</h1>
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-đã-xây-gì-so-với-spec">1. Đã xây gì so với spec</a><a class="h2" href="#2-sai-khác-so-với-spec-và-lý-do">2. Sai khác so với spec và lý do</a><a class="h2" href="#3-giới-hạn-đã-chấp-nhận-ruling">3. Giới hạn đã chấp nhận (Ruling)</a><a class="h2" href="#4-khoảng-trống-đã-biết">4. Khoảng trống đã biết</a><a class="h2" href="#5-sửa-lại-spec-spec-corrections">5. Sửa lại spec (Spec corrections)</a><a class="h2" href="#6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</a><a class="h2" href="#cập-nhật-2026-10-15-khai-báo-quyền">Cập nhật 2026-10-15 (khai báo quyền)</a></nav><main><h1 id="ghi-chú-triển-khai-dịch">Ghi chú triển khai: Dịch</h1>
 <ul>
 <li><strong>Ngày:</strong> 2026-10-14</li>
 <li><strong>Spec:</strong> <a href="../specs/2026-10-13-translation-design.html">Dịch (dự án con 4)</a>. Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".</li>
@@ -67,7 +67,9 @@ th{background:var(--card)}
 <li><strong>Dòng trạng thái</strong> "Thiết kế, triển khai sau Screenshot" đã lỗi thời: module đã triển khai và gắn vào app.</li>
 </ul>
 <h2 id="6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</h2>
-<p>Xem <a href="../../manual-test-checklist-all.html#translation">mục Dịch trong checklist gộp</a>. Các mục đụng quyền: phím tắt ⌃⌥T cần Accessibility; Services không cần quyền.</p></main></div><script>
+<p>Xem <a href="../../manual-test-checklist-all.html#translation">mục Dịch trong checklist gộp</a>. Các mục đụng quyền: phím tắt ⌃⌥T cần Accessibility; Services không cần quyền.</p>
+<h2 id="cập-nhật-2026-10-15-khai-báo-quyền">Cập nhật 2026-10-15 (khai báo quyền)</h2>
+<p>P11b (<code>335f489</code>) thêm lý do một dòng cho quyền tuỳ chọn <code>.accessibility</code> hiện ở trang Quyền: "Đọc văn bản bạn đang chọn ở app khác để dịch." (module chỉ ghi pasteboard, không cần quyền cho phần đó). Không đổi gì khác.</p></main></div><script>
 document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
 b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
 </script></body></html>

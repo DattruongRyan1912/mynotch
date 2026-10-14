@@ -48,3 +48,7 @@ Ledger không có dòng `Ruling:` nào cho Lịch; K2 và K3-fix được review
 ## 6. Cần kiểm thử tay
 
 Xem [mục Lịch trong checklist gộp](../../manual-test-checklist-all.html#calendar). Các mục đụng quyền: Lịch và Lời nhắc (reset TCC trước khi thử hộp thoại).
+
+## Cập nhật 2026-10-15 (khai báo quyền)
+
+P11b (`335f489`) chỉ thêm lý do một dòng cho trang Quyền, không đổi quyền: `.calendars` (bắt buộc) "Hiện sự kiện sắp tới và thông báo họp."; `.reminders` (tuỳ chọn) "Hiện lời nhắc khi bật “Hiện lời nhắc đến hạn hôm nay”." (nhãn thật của công tắc, khác chữ trong bảng của P11a). Activity `meeting` không đổi (`.normal`, `.high` trong phút cuối) và không phải notice, nên nhạc đang phát vẫn giữ chính trừ phút cuối.

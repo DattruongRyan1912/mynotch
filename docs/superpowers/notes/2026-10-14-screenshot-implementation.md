@@ -2,7 +2,7 @@
 
 - **Ngày:** 2026-10-14
 - **Spec:** [Chụp màn hình + OCR (dự án con 3)](../specs/2026-10-13-screenshot-design.html). Spec không bị sửa; chỗ đã lỗi thời nằm ở mục "Sửa lại spec".
-- **Package:** `Packages/Modules/Screenshot`, product `ScreenshotModule`. Module id `screenshot` ("Ảnh chụp", order 300), tab "Ảnh chụp" (cao 200 pt), bật mặc định, quyền bắt buộc `.screenRecording`.
+- **Package:** `Packages/Modules/Screenshot`, product `ScreenshotModule`. Module id `screenshot` ("Ảnh chụp", order 300), tab "Ảnh chụp" (cao 200 pt), bật mặc định, quyền bắt buộc `.screenRecording`, quyền tuỳ chọn `.desktopFolder` và `.downloadsFolder` (từ P11b, `335f489`).
 - **Commit chính:** `e0ce3a0` hình học, `31cc797` lưu trữ và OCR, `d6e8710` model và trình sửa, `c25a867` chụp, overlay, module, `611348c` sửa ảnh, `0bd2692` sửa lỗi lưu, `33bbe96` gắn vào app, `75ccd69` sửa thumbnail. Phụ: `b4f009a`, `d57cc9d`, `118d3d5` (chỉ mục ảnh an toàn hơn).
 - **Test tự động:** 217 test theo báo cáo `S-fix-report` và báo cáo L1 (`verify.sh` qua ở `8a2b842`). Có OCR thật trên ảnh tổng hợp (Vision, chạy cục bộ). Mọi thứ chạm hệ thống (ScreenCaptureKit, overlay, pasteboard, phím tắt, hộp thoại quyền) đều dùng bản giả. Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Ảnh chụp trong checklist gộp](../../manual-test-checklist-all.html#screenshot)
@@ -58,3 +58,8 @@ Ledger không gắn nhãn `Ruling:` cho Screenshot; bản ghi là "DONE_WITH_CON
 ## 6. Cần kiểm thử tay
 
 Xem [mục Ảnh chụp trong checklist gộp](../../manual-test-checklist-all.html#screenshot). Các mục đụng quyền: Screen Recording (reset TCC trước khi thử), thư mục Desktop và Downloads khi lưu lần đầu.
+
+## Cập nhật 2026-10-15 (quyền và activity)
+
+- **Khai báo quyền (P11b).** Bắt buộc: `.screenRecording` ("Chụp màn hình."). Tuỳ chọn: `.desktopFolder` ("Lưu ảnh vào Desktop (nơi lưu mặc định của “Lưu vào”).") và `.downloadsFolder` ("Lưu ảnh vào Downloads khi chọn nơi lưu là Downloads."); Pictures không cần hộp thoại. Hai hàng thư mục hiện ở trang Quyền với nhãn xám "Chưa kiểm tra được" (macOS không cho kiểm trước) và nút "Cấp quyền" gây hộp thoại lần đầu; Downloads dùng chung với module Hệ thống. Vì Screen Recording là quyền bắt buộc nên thiếu nó module ở `.needsPermission`, tab và phím tắt biến mất cho tới khi cấp, và gợi ý `showPermissionHint` trong module không bao giờ tới (đúng spec, review P11b).
+- **Activity là notice.** "Đã chụp" (3 giây) và kết quả OCR (3 giây) có hạn nên chiếm notch vài giây kể cả khi nhạc đang phát, rồi nhạc quay lại (ghi chú nền tảng, mục 8). "Đang nhận chữ…" không có hạn nên không phải notice.

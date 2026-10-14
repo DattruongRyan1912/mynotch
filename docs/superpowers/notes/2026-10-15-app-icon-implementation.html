@@ -1,0 +1,72 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ghi chú triển khai: Icon ứng dụng</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-đã-làm-gì">1. Đã làm gì</a><a class="h2" href="#2-quyết-định-hướng-a-notch-glow">2. Quyết định: hướng A "Notch glow"</a><a class="h2" href="#3-nằm-ở-đâu">3. Nằm ở đâu</a><a class="h2" href="#4-cách-đổi-icon">4. Cách đổi icon</a><a class="h2" href="#5-giới-hạn-và-chưa-kiểm">5. Giới hạn và chưa kiểm</a><a class="h2" href="#6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</a></nav><main><h1 id="ghi-chú-triển-khai-icon-ứng-dụng">Ghi chú triển khai: Icon ứng dụng</h1>
+<ul>
+<li><strong>Ngày:</strong> 2026-10-14 tối (commit), ghi chú 2026-10-15</li>
+<li><strong>Spec:</strong> không có spec riêng; đây là yêu cầu của người dùng trong phiên ("làm icon cho app"). Mục "Sửa lại spec" không áp dụng.</li>
+<li><strong>Commit:</strong> <code>e99b26d</code> <code>feat(app): give MyNotch its own icon</code> (file <code>App/Icon/MyNotch.icon/</code>, hai dòng trong <code>project.yml</code>, một dòng trong <code>README.md</code>).</li>
+<li><strong>Test tự động:</strong> không có. Kiểm bằng một bản dựng riêng (copy sạch của cây, không phải cây làm việc): <code>Assets.car</code> và <code>MyNotch.icns</code> có trong bundle, <code>CFBundleIconName</code> và <code>CFBundleIconFile</code> đều là <code>MyNotch</code>, và ảnh kết xuất từ bản dựng khớp hướng A với hiệu ứng Liquid Glass. <code>verify.sh</code> không kiểm icon.</li>
+<li><strong>Kiểm thử tay:</strong> <a href="../../manual-test-checklist-all.html#app-icon">Icon ứng dụng trong checklist gộp</a></li>
+</ul>
+<h2 id="1-đã-làm-gì">1. Đã làm gì</h2>
+<ul>
+<li>Một <strong>tài liệu Icon Composer</strong> <code>App/Icon/MyNotch.icon</code> (định dạng icon nhiều lớp của macOS 26) thay cho <code>AppIcon.appiconset</code>. Không có <code>.appiconset</code> song song: <code>.icon</code> thay thế nó, mục tiêu tối thiểu của app là macOS 26.0, và công cụ biên dịch (<code>actool</code>) tự sinh <code>Assets.car</code> cùng bản dự phòng <code>MyNotch.icns</code>.</li>
+<li>Nối vào dự án bằng <strong>một dòng</strong> <code>ASSETCATALOG_COMPILER_APPICON_NAME: MyNotch</code> trong <code>settings.base</code> của <strong>target app <code>MyNotch</code></strong> (không áp cho các helper <code>mynotch-hook</code>, <code>mynotch-youtube-host</code> hay framework). XcodeGen (2.46.0) tự thêm <code>.icon</code> vào Resources vì <code>project.yml</code> đã có <code>sources: - path: App</code>; không cần khai báo file.</li>
+</ul>
+<h2 id="2-quyết-định-hướng-a-notch-glow">2. Quyết định: hướng A "Notch glow"</h2>
+<p>Ba hướng được vẽ và đặt cạnh nhau trong một trang xem trước (<code>~/Project/MyNotch-handoff/icon-concepts/index.html</code>, <strong>ngoài repo</strong>): A "Notch glow", B "Notch + sound" (notch cộng năm thanh tím như phổ nhạc) và C "Notch + bubbles" (viên thuốc cộng hai bong bóng, một sáng một đen). <strong>Người dùng chọn A.</strong> Chưa có thay đổi trong repo cho tới khi người dùng chọn.</p>
+<p>Hướng A: thân squircle than chì ba tông (sáng ở trên, tối dần xuống dưới), một notch đen cắt ở giữa mép trên với tỉ lệ thật (rộng, thấp, góc dưới bo tròn, hai "tai" lõm ở trên) và một luồng sáng tím <code>#7D5CFF</code> (màu nhấn của app, <code>NotchTokens.accent</code>) tràn xuống từ dưới notch như đang mở ra. Chỉ một nguồn sáng, không thêm ký hiệu nào. Lý do chọn trong trang xem trước: ít chi tiết nhất nên đọc được nhất khi nhỏ (ở 16 px vẫn thấy khe đen và vệt sáng tím), và hợp Liquid Glass vì lớp ánh sáng nằm riêng. MyNotch là app <code>LSUIElement</code> (không có ô trong Dock), nên icon chủ yếu hiện ở Finder, Login Items, System Settings và Spotlight, tức cỡ 16 đến 64 pt: khả năng đọc khi nhỏ quan trọng hơn Dock.</p>
+<h2 id="3-nằm-ở-đâu">3. Nằm ở đâu</h2>
+<table><thead><tr><th>Thứ</th><th>Vị trí</th></tr></thead><tbody>
+<tr><td>Tài liệu icon</td><td><code>App/Icon/MyNotch.icon/icon.json</code></td></tr>
+<tr><td>Ba lớp (SVG 1024 × 1024 phủ kín khung, không bo góc, không bóng; hệ thống tự cắt squircle và thêm hiệu ứng kính)</td><td><code>App/Icon/MyNotch.icon/Assets/</code></td></tr>
+<tr><td>Tên icon cho bộ biên dịch</td><td><code>ASSETCATALOG_COMPILER_APPICON_NAME: MyNotch</code> trong <code>project.yml</code>, target <code>MyNotch</code></td></tr>
+<tr><td>Kết quả dựng</td><td><code>MyNotch.app/Contents/Resources/Assets.car</code> và <code>MyNotch.icns</code>; <code>CFBundleIconName</code> và <code>CFBundleIconFile</code> trong <code>Info.plist</code> của bản dựng</td></tr>
+<tr><td>Nguồn của ba hướng (ngoài repo)</td><td><code>~/Project/MyNotch-handoff/icon-concepts/</code>: <code>generate_icons.py</code> (vẽ SVG bằng Python, không dùng ảnh có sẵn hay biểu tượng của app khác), <code>build_preview.py</code> (trang xem trước), <code>render_liquid_glass.sh</code> (kết xuất bằng <code>ictool</code> và kiểm <code>actool</code>), thư mục <code>A</code>, <code>B</code>, <code>C</code></td></tr>
+</tbody></table>
+<p>Các lớp của <code>icon.json</code> (từ sau ra trước), đều tắt <code>glass</code>, không bóng, không trong suốt, <code>lighting</code> là <code>individual</code>:</p>
+<table><thead><tr><th>Lớp</th><th>Vai trò</th></tr></thead><tbody>
+<tr><td><code>layer0-background.svg</code></td><td>nền toàn khung, đục</td></tr>
+<tr><td><code>layer1-glow.svg</code></td><td>ánh sáng tím tràn xuống từ dưới notch</td></tr>
+<tr><td><code>layer2-notch.svg</code></td><td>notch đen</td></tr>
+</tbody></table>
+<p>Màu nền của tài liệu (<code>fill</code>) là than chì <code>srgb:0.094,0.098,0.114</code>.</p>
+<h2 id="4-cách-đổi-icon">4. Cách đổi icon</h2>
+<ol>
+<li><strong>Chỉnh bằng Icon Composer:</strong> mở <code>App/Icon/MyNotch.icon</code> bằng Icon Composer (đi cùng Xcode 26; bản đã dùng là Icon Composer 1.6 với Xcode 26.6), chỉnh lớp, kính, và các dạng tối, nhuộm màu, trong suốt, rồi lưu đè tại chỗ. Không cần sửa <code>project.yml</code>.</li>
+<li><strong>Hoặc đổi file SVG</strong> trong <code>App/Icon/MyNotch.icon/Assets/</code> (giữ 1024 × 1024, phủ kín khung, không bo góc, không bóng). Nếu thêm hay bớt lớp thì sửa tên trong <code>icon.json</code>.</li>
+<li><strong>Dựng lại:</strong> <code>xcodegen generate</code> chỉ cần khi thêm hay bớt file ngoài <code>.icon</code>; build bình thường. Kiểm <code>Contents/Resources/Assets.car</code> và <code>MyNotch.icns</code> có mặt, và <code>plutil -p MyNotch.app/Contents/Info.plist</code> có <code>CFBundleIconName</code> là <code>MyNotch</code>.</li>
+<li><strong>Xem trước các dạng của Tahoe</strong> (mặc định, tối, nhuộm màu, trong suốt) không cần chạy app: <code>render_liquid_glass.sh</code> trong thư mục concept kết xuất từng bản nháp bằng <code>ictool</code> và kiểm <code>actool</code> biên dịch được.</li>
+<li>macOS lưu đệm icon: nếu Finder vẫn hiện icon cũ sau khi dựng lại, <code>touch</code> bundle rồi mở lại cửa sổ Finder (chưa kiểm cách này trên máy này). Muốn đổi sang hướng B hay C: chép bản nháp <code>B/icon-draft/MyNotchB.icon</code> hay <code>C/icon-draft/MyNotchC.icon</code> thành <code>App/Icon/MyNotch.icon</code>.</li>
+</ol>
+<h2 id="5-giới-hạn-và-chưa-kiểm">5. Giới hạn và chưa kiểm</h2>
+<ul>
+<li>Chưa ai nhìn icon thật ở Finder, System Settings (Login Items, Quyền riêng tư), Spotlight, và ở các chế độ sáng, tối, nhuộm màu, trong suốt của macOS 26; ảnh kết xuất của người điều phối khớp hướng A nhưng chỉ là ảnh, không phải Finder thật.</li>
+<li>Cỡ nhỏ (16 và 32 px) chỉ được xem qua ảnh phóng của trang xem trước, không qua Finder.</li>
+<li><code>project.yml</code> dùng mặc định Debug và Release; icon áp cho cả hai. Bản Release chưa được dựng lại để kiểm riêng icon.</li>
+<li>Hướng B và C còn trong thư mục ngoài repo; không được dùng ở đâu trong dự án.</li>
+</ul>
+<h2 id="6-cần-kiểm-thử-tay">6. Cần kiểm thử tay</h2>
+<p>Xem <a href="../../manual-test-checklist-all.html#app-icon">Icon ứng dụng trong checklist gộp</a>: Finder (cỡ khác nhau), Settings và Login Items, About, dạng tối, nhuộm màu và trong suốt.</p></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>

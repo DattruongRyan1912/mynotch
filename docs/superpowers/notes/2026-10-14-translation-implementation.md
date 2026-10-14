@@ -49,3 +49,7 @@ Ledger không có dòng `Ruling:` nào riêng cho Dịch. Điểm đã biết t�
 ## 6. Cần kiểm thử tay
 
 Xem [mục Dịch trong checklist gộp](../../manual-test-checklist-all.html#translation). Các mục đụng quyền: phím tắt ⌃⌥T cần Accessibility; Services không cần quyền.
+
+## Cập nhật 2026-10-15 (khai báo quyền)
+
+P11b (`335f489`) thêm lý do một dòng cho quyền tuỳ chọn `.accessibility` hiện ở trang Quyền: "Đọc văn bản bạn đang chọn ở app khác để dịch." (module chỉ ghi pasteboard, không cần quyền cho phần đó). Không đổi gì khác.
