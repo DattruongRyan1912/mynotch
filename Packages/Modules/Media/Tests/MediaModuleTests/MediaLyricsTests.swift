@@ -8,13 +8,15 @@ import Testing
 @Suite final class MediaLyricsTests {
     let source = FakeNowPlayingSource()
     let client = FakeHTTPClient()
+    let tokens = FakeTokenStore()
+    let signIn = FakeAppleMusicSignIn()
     let module: MediaModule
     let harness: RegistryHarness
     /// Where the harness's modules keep their files; the disk cache of lyrics ends up here.
     let storageBase: URL
 
     init() {
-        module = MediaModule(source: source, spectrum: FakeSpectrumSource(), lyricsClient: client, lookUpApp: { _ in nil })
+        module = MediaModule(source: source, spectrum: FakeSpectrumSource(), lyricsClient: client, tokens: tokens, signIn: signIn, lookUpApp: { _ in nil })
         harness = RegistryHarness([module])
         storageBase = harness.storageRoot.caches.deletingLastPathComponent()
     }
@@ -351,6 +353,135 @@ import Testing
 
     @Test func theSettingExplainsWhatIsSent() {
         #expect(MediaSettingsView.lyricsExplanation == "Khi bật, tên bài, nghệ sĩ, album và thời lượng của mỗi bài mới (kể cả video phát trong trình duyệt) được gửi tới lrclib.net để lấy lời.")
+    }
+
+    @Test func theAppleMusicRowsExplainWhatHappens() {
+        #expect(AppleMusicRows.title == "Lời từ Apple Music")
+        #expect(AppleMusicRows.explanation == "Khi kết nối, MyNotch dùng phiên đăng nhập Apple Music của bạn để lấy lời của bài đang phát trong app Music từ máy chủ Apple (API không chính thức, có thể ngừng hoạt động). Token được cất trong Keychain của máy này.")
+        #expect(AppleMusicRows.connectTitle == "Kết nối Apple Music…")
+        #expect(AppleMusicRows.disconnectTitle == "Ngắt kết nối")
+        #expect(AppleMusicLoginWindow.title == "Đăng nhập Apple Music")
+    }
+
+    // MARK: Apple Music
+
+    func storeSignIn() {
+        tokens.signIn()
+    }
+
+    let credentials = AppleMusicCredentials(developerToken: "dev-token-fake", userToken: "user-token-fake", storefront: "vn")
+
+    func playMusicTrack(_ title: String = "Song", id: Int? = 1_856_960_468) {
+        source.emit(AdapterLines.track(title, album: "Album", bundle: "com.apple.Music", uniqueIdentifier: id))
+    }
+
+    var appleFound: HTTPReply { AppleReplies.lyrics(ttml: AppleReplies.ttml(count: 5, tag: "apple")) }
+
+    @Test func aMusicTrackOfAConnectedAccountShowsAppleLyrics() async throws {
+        storeSignIn()
+        enableLyrics()
+        client.reply(appleFound)
+        await harness.registry.bootstrap()
+        playMusicTrack()
+        await settle { store.syncedLyrics != nil }
+        #expect(store.syncedLyrics == AppleReplies.lines(count: 5, tag: "apple"))
+        #expect(client.requests.count == 1)
+        #expect(try #require(client.requests.first).url?.host() == "amp-api.music.apple.com")
+    }
+
+    @Test func withoutAnAccountAMusicTrackGoesToLrclibOnly() async {
+        enableLyrics()
+        client.reply(LrclibReplies.found())
+        await harness.registry.bootstrap()
+        playMusicTrack()
+        await settle { store.syncedLyrics != nil }
+        #expect(store.syncedLyrics == LrclibReplies.syncedLines)
+        #expect(client.requests.allSatisfy { $0.url?.host() == "lrclib.net" })
+    }
+
+    @Test func aTrackFromAnotherAppNeverGoesToApple() async {
+        storeSignIn()
+        enableLyrics()
+        client.reply(LrclibReplies.found())
+        await harness.registry.bootstrap()
+        source.emit(AdapterLines.track("Song", album: "Album", bundle: "com.spotify.client", uniqueIdentifier: 1_856_960_468))
+        await settle { store.syncedLyrics != nil }
+        #expect(store.syncedLyrics == LrclibReplies.syncedLines)
+        #expect(client.requests.allSatisfy { $0.url?.host() == "lrclib.net" })
+    }
+
+    @Test func connectingWhileATrackPlaysLooksItUpAgain() async {
+        enableLyrics()
+        // lrclib is down, so the first lookup ends at once with nothing to show.
+        client.handler = { [self] request in
+            request.url?.host() == "lrclib.net" ? HTTPReply(status: 500) : appleFound
+        }
+        await harness.registry.bootstrap()
+        playMusicTrack()
+        await settle { client.requests.count == 1 }
+        await settle { store.syncedLyrics != nil }
+        #expect(store.syncedLyrics == nil)
+        #expect(client.requests.count == 1)
+
+        module.connectAppleMusic()
+        #expect(signIn.openCount == 1)
+        #expect(await signIn.found(credentials))
+        harness.scheduler.advance(by: LyricsService.minimumSpacing)
+        await settle { store.syncedLyrics != nil }
+        #expect(store.syncedLyrics == AppleReplies.lines(count: 5, tag: "apple"))
+        #expect(client.requests.last?.url?.host() == "amp-api.music.apple.com")
+    }
+
+    @Test func aSignInThatExpiresStopsAskingAppleButKeepsTheLyricsShown() async {
+        storeSignIn()
+        enableLyrics()
+        client.reply(appleFound)
+        await harness.registry.bootstrap()
+        playMusicTrack()
+        await settle { store.syncedLyrics != nil }
+        module.appleAccount.markNeedsReauth()
+        await settle { client.requests.count > 1 }
+        #expect(client.requests.count == 1)
+        #expect(store.syncedLyrics == AppleReplies.lines(count: 5, tag: "apple"))
+    }
+
+    @Test func startingTheModuleLoadsTheStoredSignIn() async {
+        storeSignIn()
+        #expect(module.appleAccount.status == .notConnected)
+        await harness.registry.bootstrap()
+        #expect(module.appleAccount.status == .connected(storefront: "vn"))
+    }
+
+    @Test func theSignInWindowConnectsTheAccount() async {
+        await harness.registry.bootstrap()
+        module.connectAppleMusic()
+        #expect(signIn.openCount == 1)
+        #expect(await signIn.found(credentials))
+        #expect(module.appleAccount.status == .connected(storefront: "vn"))
+        #expect(tokens.values[.mediaUserToken] == "user-token-fake")
+    }
+
+    @Test func theSignInWindowLearnsWhenTheAccountRefusedTheTokens() async {
+        tokens.failsToSave = true
+        module.connectAppleMusic()
+        #expect(!(await signIn.found(credentials)))
+        #expect(module.appleAccount.status == .notConnected)
+    }
+
+    @Test func disconnectingClearsTheStoreTheWebDataAndTheStatus() async {
+        storeSignIn()
+        await harness.registry.bootstrap()
+        await module.disconnectAppleMusic()
+        #expect(tokens.values.isEmpty)
+        #expect(module.appleAccount.status == .notConnected)
+        #expect(signIn.removeCount == 1)
+        #expect(signIn.closeCount == 1)
+    }
+
+    @Test func stoppingTheModuleClosesTheSignInWindow() async {
+        await harness.registry.bootstrap()
+        await harness.registry.setEnabled(false, for: "media")
+        #expect(signIn.closeCount == 1)
     }
 }
 

@@ -187,4 +187,21 @@ import Testing
         other.elapsedAnchor = PlaybackAnchor(elapsedSeconds: 3, timestamp: Self.anchorDate, rate: 1)
         #expect(other.trackIdentity == base.trackIdentity)
     }
+
+    @Test func theCatalogIdIsTheUniqueIdentifierWhenItIsOnlyDigits() {
+        func catalogID(_ identifier: String) -> String? {
+            applying(line(diff: false, #"{"bundleIdentifier":"com.apple.Music","title":"T","playing":true,"uniqueIdentifier":\#(identifier)}"#)).state.catalogID
+        }
+        #expect(catalogID("1856960468") == "1856960468")
+        #expect(catalogID(#""1856960468""#) == "1856960468")
+        #expect(catalogID("0") == "0")
+        #expect(catalogID("-5") == nil)
+        #expect(catalogID("1.5") == nil)
+        #expect(catalogID(#""ABC123""#) == nil)
+        #expect(catalogID(#""1219::1227""#) == nil)
+        #expect(catalogID(#""""#) == nil)
+        #expect(catalogID("null") == nil)
+        #expect(catalogID("true") == nil)
+        #expect(applying(line(diff: false, #"{"bundleIdentifier":"com.apple.Music","title":"T"}"#)).state.catalogID == nil)
+    }
 }

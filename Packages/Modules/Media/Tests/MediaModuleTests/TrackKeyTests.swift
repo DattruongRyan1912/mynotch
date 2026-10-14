@@ -134,7 +134,7 @@ import Testing
     @Test func theCacheKeyIsVersioned() throws {
         let key = try #require(TrackKey(artist: "Artist", title: "Song", album: "Album", duration: 200))
         let unversioned = ["Artist", "Song", "Album", "200"].joined(separator: "\u{1F}")
-        let withVersion = [unversioned, "v3"].joined(separator: "\u{1F}")
+        let withVersion = [unversioned, "v4"].joined(separator: "\u{1F}")
         #expect(key.cacheKey == hash(withVersion))
         // Entries written before the version existed are never found again.
         #expect(key.cacheKey != hash(unversioned))
@@ -155,5 +155,47 @@ import Testing
 
     func hash(_ text: String) -> String {
         SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+@Suite struct TrackKeyAppleTests {
+    func state(bundle: String? = "com.apple.Music", id: String? = "1856960468") -> NowPlayingState {
+        NowPlayingState(
+            bundleIdentifier: bundle, title: "Song", artist: "Artist", album: "Album", durationSeconds: 200, uniqueIdentifier: id
+        )
+    }
+
+    @Test func aMusicTrackWithACatalogIdCarriesIt() throws {
+        #expect(try #require(TrackKey(state())).appleCatalogID == "1856960468")
+    }
+
+    @Test func nothingElseCarriesOne() throws {
+        for bundle in ["com.spotify.client", "com.google.Chrome", "com.apple.Music.helper", "com.apple.music", nil] {
+            #expect(try #require(TrackKey(state(bundle: bundle))).appleCatalogID == nil, "\(bundle ?? "nil")")
+        }
+        for id in [nil, "", "ABC", "1219::1227", "-5"] {
+            #expect(try #require(TrackKey(state(id: id))).appleCatalogID == nil, "\(id ?? "nil")")
+        }
+        #expect(TrackKey(artist: "Artist", title: "Song", album: "Album", duration: 200)?.appleCatalogID == nil)
+    }
+
+    @Test func theKeyEncodesWhetherAppleIsAsked() throws {
+        let asked = try #require(TrackKey(state()))
+        var notAsked = asked
+        notAsked.appleCatalogID = nil
+        let fields = ["Artist", "Song", "Album", "200"]
+        func hash(_ version: String) -> String {
+            SHA256.hash(data: Data((fields + [version]).joined(separator: "\u{1F}").utf8)).map { String(format: "%02x", $0) }.joined()
+        }
+        #expect(TrackKey.cacheVersion == "v4")
+        #expect(notAsked.cacheKey == hash("v4"))
+        #expect(asked.cacheKey == hash("v4+am"))
+        #expect(asked.cacheKey != notAsked.cacheKey)
+    }
+
+    @Test func theCatalogIdItselfIsNotPartOfTheKey() throws {
+        let one = try #require(TrackKey(state(id: "1")))
+        let other = try #require(TrackKey(state(id: "2")))
+        #expect(one.cacheKey == other.cacheKey)
     }
 }

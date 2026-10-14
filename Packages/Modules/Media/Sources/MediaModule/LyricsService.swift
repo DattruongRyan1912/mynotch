@@ -1,10 +1,12 @@
 import Foundation
 import MyNotchCore
 
-/// Looks lyrics up on lrclib.net. Opt-in: a request sends the track's name, artist, album and length off the Mac.
+/// Looks lyrics up on lrclib.net, and for a track of the Music app on Apple Music first, when the user has connected
+/// their account. Opt-in: a request sends the track's name, artist, album and length off the Mac.
 ///
-/// One request at a time, each at least `minimumSpacing` after the previous answer, and none while lrclib has
-/// asked for quiet. Answers are cached on disk, so a track is asked for once; "not found" is asked again after a week.
+/// One request at a time, each at least `minimumSpacing` after the previous one (whichever server it goes to), and none
+/// while lrclib has asked for quiet. Answers are cached on disk, so a track is asked for once; "not found" is asked
+/// again after a week.
 final class LyricsService {
     static let minimumSpacing: Duration = .milliseconds(300)
     static let endpoint = URL(string: "https://lrclib.net/api/get")!
@@ -20,6 +22,7 @@ final class LyricsService {
     static let cooldownSecondsRange = 1...3600
 
     private let client: any HTTPClient
+    private let apple: AppleMusicLyricsClient?
     private let cache: LyricsCache
     private let scheduler: any Scheduler
     private let userAgent: String
@@ -34,6 +37,8 @@ final class LyricsService {
     private var cooldownTimer: ScheduledAction?
     private var cooldownWaiters: [@MainActor () -> Void] = []
     private var isShutDown = false
+    /// Whether the lookup in progress has sent a request yet; the next one waits out the spacing only if it has.
+    private var hasSentRequest = false
 
     /// Calls waiting for their turn (for tests).
     var queuedCount: Int { waiters.count }
@@ -46,14 +51,18 @@ final class LyricsService {
         cooldownWaiters.append(action)
     }
 
-    /// - Parameter appVersion: the app's `CFBundleShortVersionString`, for the User-Agent lrclib asks clients to send.
+    /// - Parameters:
+    ///   - appVersion: the app's `CFBundleShortVersionString`, for the User-Agent lrclib asks clients to send.
+    ///   - apple: asked first for the Music app's tracks while its account is connected; nil never asks Apple.
     init(
         client: any HTTPClient,
         cacheDirectory: URL,
         scheduler: any Scheduler,
-        appVersion: String? = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        appVersion: String? = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+        apple: AppleMusicLyricsClient? = nil
     ) {
         self.client = client
+        self.apple = apple
         cache = LyricsCache(directory: cacheDirectory)
         self.scheduler = scheduler
         userAgent = "MyNotch/\(appVersion ?? "dev") (personal)"
@@ -68,11 +77,19 @@ final class LyricsService {
     /// instrumental. What is less (a stub, plain words) is kept as a fallback, the answer when no step does better.
     /// A rate limit or any other failure ends the chain as `.unavailable`, fallback or not.
     ///
+    /// A track of the Music app with a catalog id is asked of Apple Music first, while the account is connected:
+    /// synced or plain lyrics from there are the answer and lrclib is not asked. Nothing from Apple (not found, or it
+    /// could not be asked) goes on to the chain above, which then runs as it always did; only an Apple failure with
+    /// nothing found at lrclib either is `.unavailable` rather than `.notFound`, so the track is not written off.
+    ///
     /// A rate-limited request is not retried: the answer is `.unavailable` and the next uncached track waits out
     /// the cooldown, which is the retry. Cancelling the caller cancels the request in flight; a cancelled call
     /// still waiting its turn, or its next step, sends nothing.
     func lyrics(for track: TrackKey) async -> LyricsResult {
         if track.isLongOrMix || track.lookupTitle.isEmpty { return .notFound }
+        var track = track
+        // The key says whether Apple is asked, so what was found without the account does not stand for a lookup with it.
+        if apple?.isAvailable != true { track.appleCatalogID = nil }
         if let cached = cache.load(track) { return cached }
         guard await takeTurn() else {
             return .unavailable(Task.isCancelled ? "Lookup cancelled" : "Lyrics service stopped")
@@ -122,6 +139,23 @@ final class LyricsService {
     }
 
     private func lookUp(_ track: TrackKey) async -> LyricsResult {
+        hasSentRequest = false
+        var appleFailure: String?
+        if let id = track.appleCatalogID, let apple {
+            let answer = await apple.lyrics(forSongID: id, pace: { [self] in await pace() == nil })
+            switch answer {
+            case .synced, .plain: return answer
+            case .unavailable(let reason): appleFailure = reason
+            default: break
+            }
+        }
+        let result = await lookUpOnLrclib(track)
+        // Nothing found while Apple could not be asked is no verdict on the track: it is not remembered.
+        if let appleFailure, result == .notFound { return .unavailable("Apple Music: \(appleFailure)") }
+        return result
+    }
+
+    private func lookUpOnLrclib(_ track: TrackKey) async -> LyricsResult {
         let artist = track.lookupArtist
         let title = track.lookupTitle
         let named = [("track_name", title), ("artist_name", artist)]
@@ -136,12 +170,8 @@ final class LyricsService {
 
         let duration = Double(track.durationSeconds)
         var fallback: LyricsResult?
-        for (index, step) in steps.enumerated() {
-            if index > 0 {
-                if let reason = reasonToStop { return reason }
-                await waitOutSpacing()
-                if let reason = reasonToStop { return reason }
-            }
+        for step in steps {
+            if let reason = await pace() { return reason }
             switch await send(step) {
             case .failed(let result):
                 return result
@@ -161,6 +191,18 @@ final class LyricsService {
             }
         }
         return fallback ?? .notFound
+    }
+
+    /// Called before every request of a lookup, Apple's and lrclib's: waits out the spacing since the previous one (the
+    /// first waits for nothing). The reason to send nothing more instead, nil to go on.
+    private func pace() async -> LyricsResult? {
+        if let reason = reasonToStop { return reason }
+        if hasSentRequest {
+            await waitOutSpacing()
+            if let reason = reasonToStop { return reason }
+        }
+        hasSentRequest = true
+        return nil
     }
 
     /// Why the chain sends nothing more, nil to go on.

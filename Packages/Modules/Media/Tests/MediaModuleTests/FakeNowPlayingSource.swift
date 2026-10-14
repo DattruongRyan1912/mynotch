@@ -50,7 +50,8 @@ enum AdapterLines {
         elapsed: Double = 30,
         duration: Double = 200,
         artworkBase64: String? = nil,
-        isAdvertisement: Bool = false
+        isAdvertisement: Bool = false,
+        uniqueIdentifier: Int? = nil
     ) -> String {
         var payload: [String: Any] = [
             "bundleIdentifier": bundle, "title": title, "artist": artist, "playing": playing,
@@ -59,6 +60,7 @@ enum AdapterLines {
         ]
         payload["parentApplicationBundleIdentifier"] = parent
         payload["album"] = album
+        payload["uniqueIdentifier"] = uniqueIdentifier
         if isAdvertisement { payload["isAdvertisement"] = true }
         if let artworkBase64 {
             payload["artworkData"] = artworkBase64

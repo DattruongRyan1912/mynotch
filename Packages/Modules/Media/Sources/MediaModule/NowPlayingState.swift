@@ -19,6 +19,13 @@ nonisolated struct NowPlayingState: Equatable, Sendable {
 
     static let empty = NowPlayingState()
 
+    /// The Apple Music catalog song id: the Music app reports it as `uniqueIdentifier`. Other players report ids of
+    /// their own, so only an all-digit one counts, and `TrackKey` keeps it for the Music app alone.
+    var catalogID: String? {
+        guard let id = uniqueIdentifier, !id.isEmpty, id.utf8.allSatisfy({ (48...57).contains($0) }) else { return nil }
+        return id
+    }
+
     /// A player is reporting a track; the adapter treats media without a title as invalid.
     var isActive: Bool { !(bundleIdentifier ?? "").isEmpty && !(title ?? "").isEmpty }
 

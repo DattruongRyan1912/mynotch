@@ -16,6 +16,9 @@ struct MediaSettingsView: View {
     @Binding var lyrics: Bool
     /// Only for the permission hint; the module keeps the store for its whole life, running or not.
     let store: NowPlayingStore
+    let appleAccount: AppleMusicAccount
+    let connectAppleMusic: () -> Void
+    let disconnectAppleMusic: () -> Void
 
     var body: some View {
         Group {
@@ -42,6 +45,9 @@ struct MediaSettingsView: View {
             Toggle(isOn: $lyrics) {
                 Text("Lời bài hát đồng bộ từ lrclib.net")
                 Text(Self.lyricsExplanation)
+            }
+            if lyrics {
+                AppleMusicRows(account: appleAccount, connect: connectAppleMusic, disconnect: disconnectAppleMusic)
             }
         }
     }

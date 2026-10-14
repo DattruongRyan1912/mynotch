@@ -50,6 +50,11 @@ public final class MediaModule: FeatureModule {
     private let makeSource: ((any Scheduler) -> any NowPlayingSource)?
     private let spectrum: any SpectrumSource
     private let lyricsClient: any HTTPClient
+    /// The user's Apple Music sign-in, which Settings shows and lyrics lookups use.
+    let appleAccount: AppleMusicAccount
+    let appleClient: AppleMusicLyricsClient
+    private let signIn: any AppleMusicSignIn
+    private var appleWasConnected = false
     private var source: (any NowPlayingSource)?
     private var spectrumFeed: SpectrumFeed?
     private var context: ModuleContext?
@@ -79,33 +84,49 @@ public final class MediaModule: FeatureModule {
             self.init(
                 makeSource: { scheduler in AdapterProcess(script: adapterScript, framework: adapterFramework, scheduler: scheduler) },
                 spectrum: spectrum,
-                lyricsClient: URLSessionHTTPClient()
+                lyricsClient: URLSessionHTTPClient(),
+                tokens: KeychainTokenStore(),
+                signIn: AppleMusicLoginWindow()
             )
         } else {
-            self.init(makeSource: nil, spectrum: spectrum, lyricsClient: URLSessionHTTPClient())
+            self.init(
+                makeSource: nil, spectrum: spectrum, lyricsClient: URLSessionHTTPClient(),
+                tokens: KeychainTokenStore(), signIn: AppleMusicLoginWindow()
+            )
         }
     }
 
     /// For tests: lines come from `source` instead of perl, levels from `spectrum` instead of a system audio tap,
-    /// lyrics from `lyricsClient` instead of lrclib.net. No default for the client, so no test reaches the network by accident.
+    /// lyrics from `lyricsClient` instead of lrclib.net and Apple, the sign-in from `tokens` instead of the Keychain,
+    /// the sign-in window is `signIn`. No defaults for those, so no test reaches the network or the Keychain by accident.
     convenience init(
         source: any NowPlayingSource,
         spectrum: any SpectrumSource,
         lyricsClient: any HTTPClient,
+        tokens: any TokenStore,
+        signIn: any AppleMusicSignIn,
         lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed
     ) {
-        self.init(makeSource: { _ in source }, spectrum: spectrum, lyricsClient: lyricsClient, lookUpApp: lookUpApp)
+        self.init(
+            makeSource: { _ in source }, spectrum: spectrum, lyricsClient: lyricsClient,
+            tokens: tokens, signIn: signIn, lookUpApp: lookUpApp
+        )
     }
 
     private init(
         makeSource: ((any Scheduler) -> any NowPlayingSource)?,
         spectrum: any SpectrumSource,
         lyricsClient: any HTTPClient,
+        tokens: any TokenStore,
+        signIn: any AppleMusicSignIn,
         lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed
     ) {
         self.makeSource = makeSource
         self.spectrum = spectrum
         self.lyricsClient = lyricsClient
+        appleAccount = AppleMusicAccount(tokens: tokens)
+        appleClient = AppleMusicLyricsClient(client: lyricsClient, account: appleAccount)
+        self.signIn = signIn
         store = NowPlayingStore(lookUpApp: lookUpApp)
     }
 
@@ -120,10 +141,12 @@ public final class MediaModule: FeatureModule {
         lockScreenOffered = false
         spectrumFeed = SpectrumFeed(source: spectrum, store: store, scheduler: context.scheduler, logger: context.logger)
         lyricsTrack = nil
+        appleAccount.load()
         lyricsService = LyricsService(
             client: lyricsClient,
             cacheDirectory: context.storage.cachesDirectory.appending(path: "lyrics", directoryHint: .isDirectory),
-            scheduler: context.scheduler
+            scheduler: context.scheduler,
+            apple: appleClient
         )
         applySettings(context.settings)
         registerHotkeys(context.hotkeys)
@@ -141,6 +164,10 @@ public final class MediaModule: FeatureModule {
         let store = store
         context.run { [weak self] in
             for await _ in Observations({ store.spectrumViewCount }) { self?.updateSpectrum() }
+        }
+        let account = appleAccount
+        context.run { [weak self] in
+            for await _ in Observations({ account.status }) { self?.appleStatusChanged() }
         }
         let source = makeSource(context.scheduler)
         self.source = source
@@ -160,6 +187,7 @@ public final class MediaModule: FeatureModule {
         lyricsTrack = nil
         lyricsService?.shutDown()
         lyricsService = nil
+        signIn.close()
         context = nil
         cancelDeadline()
         policy = ActivityPolicy()
@@ -183,8 +211,23 @@ public final class MediaModule: FeatureModule {
             hiddenApps: environment.settings.binding(keys.hiddenApps),
             realSpectrum: environment.settings.binding(keys.realSpectrum),
             lyrics: environment.settings.binding(keys.lyrics),
-            store: store
+            store: store,
+            appleAccount: appleAccount,
+            connectAppleMusic: { [weak self] in self?.connectAppleMusic() },
+            disconnectAppleMusic: { [weak self] in Task { await self?.disconnectAppleMusic() } }
         ))
+    }
+
+    /// Opens the sign-in window; the account is connected once the window has found the tokens.
+    func connectAppleMusic() {
+        signIn.open { [appleClient] credentials in await appleClient.connect(credentials) }
+    }
+
+    /// Forgets the sign-in: the tokens in the Keychain and everything the sign-in window's web view stored.
+    func disconnectAppleMusic() async {
+        signIn.close()
+        appleAccount.disconnect()
+        await signIn.removeWebsiteData()
     }
 
     var actions: MediaActions {
@@ -247,6 +290,16 @@ public final class MediaModule: FeatureModule {
         scheduleDeadline(from: now)
         refreshActivity()
         updateSpectrum()
+        refreshLyrics()
+    }
+
+    /// Connecting changes what can be found for the track playing now, so it is looked up again. Losing the sign-in does
+    /// not: lyrics already shown stay, and the service stops asking Apple on its own.
+    private func appleStatusChanged() {
+        let isConnected = appleAccount.status.isConnected
+        defer { appleWasConnected = isConnected }
+        guard isConnected, !appleWasConnected else { return }
+        lyricsTrack = nil
         refreshLyrics()
     }
 

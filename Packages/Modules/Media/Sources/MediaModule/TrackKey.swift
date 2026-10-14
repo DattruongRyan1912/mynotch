@@ -14,6 +14,13 @@ nonisolated struct TrackKey: Hashable, Sendable {
     var durationSeconds: Int
     /// The player is a web browser, so `title` is a video title and `artist` the channel.
     var isFromBrowser = false
+    /// The Apple Music catalog song id of a track of the Music app that reports one, nil for every other source.
+    /// Lyrics are asked of Apple Music only for such a track; the lyrics service clears it while the account is not
+    /// connected, so the cache key tells the lookups that asked Apple from those that did not.
+    var appleCatalogID: String?
+
+    /// Only the Music app's own tracks are looked up at Apple Music.
+    static let appleMusicBundleID = "com.apple.Music"
 
     /// Browsers and their helper processes; a prefix also covers beta and canary builds.
     static let browserBundlePrefixes = [
@@ -56,15 +63,18 @@ nonisolated struct TrackKey: Hashable, Sendable {
         let owners = [state.bundleIdentifier, state.parentApplicationBundleIdentifier].compactMap { $0 }
         let isBrowser = owners.contains { owner in Self.browserBundlePrefixes.contains { owner.hasPrefix($0) } }
         self.init(artist: state.artist, title: state.title, album: state.album, duration: duration, isFromBrowser: isBrowser)
+        if state.bundleIdentifier == Self.appleMusicBundleID { appleCatalogID = state.catalogID }
     }
 
     /// Bumped when the lookup changes, so answers of an older lookup (all "not found" for videos) are asked again.
-    static let cacheVersion = "v3"
+    static let cacheVersion = "v4"
 
-    /// SHA-256 of the fields as hex, a file name that is safe whatever the track is called.
+    /// SHA-256 of the fields as hex, a file name that is safe whatever the track is called. A lookup that asked Apple
+    /// Music has its own key ("+am"): an answer found without the account, "not found" above all, does not stand for it.
     var cacheKey: String {
+        let version = appleCatalogID == nil ? Self.cacheVersion : Self.cacheVersion + "+am"
         // The separator keeps ("ab", "c") apart from ("a", "bc").
-        let text = [artist, title, album, String(durationSeconds), Self.cacheVersion].joined(separator: "\u{1F}")
+        let text = [artist, title, album, String(durationSeconds), version].joined(separator: "\u{1F}")
         return SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
