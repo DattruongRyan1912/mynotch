@@ -18,14 +18,18 @@ public struct AppFrameDecoder {
         case frame(Data)
         /// The bytes so far do not hold a whole frame.
         case needMore
-        /// A length above `AppFrame.maxLength`: the stream is out of step, and stays so.
+        /// A length above the decoder's limit (`AppFrame.maxLength` unless it was given another): the stream is out of step, and stays so.
         case tooLarge(Int)
     }
 
     private var buffer = Data()
     private var failure: Int?
+    private let maxLength: Int
 
-    public init() {}
+    /// - Parameter maxLength: the longest payload that is still a frame; a reader that only expects short messages passes less.
+    public init(maxLength: Int = AppFrame.maxLength) {
+        self.maxLength = maxLength
+    }
 
     public mutating func append(_ bytes: Data) {
         buffer.append(bytes)
@@ -35,7 +39,7 @@ public struct AppFrameDecoder {
         if let failure { return .tooLarge(failure) }
         guard buffer.count >= 4 else { return .needMore }
         let length = buffer.prefix(4).reduce(0) { $0 << 8 | Int($1) }
-        guard length <= AppFrame.maxLength else {
+        guard length <= maxLength else {
             failure = length
             buffer = Data()
             return .tooLarge(length)

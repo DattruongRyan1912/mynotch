@@ -7,7 +7,7 @@ nonisolated enum YouTubeCaptionMatcher {
 
     /// Why captions are or are not used for the track playing now. The reasons are fixed words for the log, which
     /// must never hold a title.
-    enum Reason: String, Equatable {
+    enum Reason: String, Equatable, Error {
         case notBrowser = "not-browser"
         /// The system reports a track without a title.
         case noTitle = "no-title"
@@ -37,6 +37,20 @@ nonisolated enum YouTubeCaptionMatcher {
         decision(for: state, in: store, now: now, keeping: videoID).track
     }
 
+    /// The latest playback the page sent, when it belongs to the track playing now: the source is a browser, the track has
+    /// a title, and the playback's title equals it once normalised. Whether the page is playing, how long ago it said so
+    /// and whether it has captions are for the caller to ask. The first rule that fails is the reason.
+    ///
+    /// The captions and the next and previous commands both depend on it: it is how the app knows that the extension is
+    /// talking about the video the system is playing.
+    static func playback(for state: NowPlayingState, in store: YouTubeCaptionStore) -> Result<YouTubeCaptionStore.ReceivedPlayback, Reason> {
+        guard state.isFromBrowser else { return .failure(.notBrowser) }
+        guard let title = state.title else { return .failure(.noTitle) }
+        guard let received = store.playback else { return .failure(.noPlayback) }
+        guard normalised(received.message.title) == normalised(title) else { return .failure(.titleMismatch) }
+        return .success(received)
+    }
+
     /// A match needs a browser as the source, a playback message that is at most `maxPlaybackAge` old and says the
     /// video plays, and a title equal to the now-playing one once normalised; the captions are those of the playback's
     /// video. When it fails, the first rule that did is the reason.
@@ -47,10 +61,11 @@ nonisolated enum YouTubeCaptionMatcher {
     static func decision(
         for state: NowPlayingState, in store: YouTubeCaptionStore, now: Date, keeping videoID: String?
     ) -> Decision {
-        guard state.isFromBrowser else { return .notMatched(.notBrowser) }
-        guard let title = state.title else { return .notMatched(.noTitle) }
-        guard let received = store.playback else { return .notMatched(.noPlayback) }
-        guard normalised(received.message.title) == normalised(title) else { return .notMatched(.titleMismatch) }
+        let received: YouTubeCaptionStore.ReceivedPlayback
+        switch playback(for: state, in: store) {
+        case .success(let playback): received = playback
+        case .failure(let reason): return .notMatched(reason)
+        }
         guard let track = store.track(forVideo: received.message.videoID) else { return .notMatched(.noCaptions) }
         if track.videoID == videoID { return .matched(track, isKept: true) }
         guard received.message.isPlaying else { return .notMatched(.paused) }

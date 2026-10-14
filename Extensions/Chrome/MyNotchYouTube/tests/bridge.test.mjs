@@ -19,7 +19,7 @@ const playback = (videoId = A, time = 1) => ({ v: 1, type: "playback", videoId, 
 const clear = (videoId) => ({ v: 1, type: "clear", videoId });
 
 function harness() {
-  const h = { time: 1000000, ports: [], connects: [], logs: [], lastErrorReads: 0, lastError: "", connectError: null };
+  const h = { time: 1000000, ports: [], connects: [], logs: [], lastErrorReads: 0, lastError: "", connectError: null, hostMessages: [] };
   h.bridge = B.createBridge({
     connectNative(name) {
       h.connects.push(name);
@@ -30,7 +30,11 @@ function harness() {
         diags: [], // diag messages
 
         dead: false,
+        hostListeners: [],
         onDisconnect: { addListener: (fn) => listeners.push(fn) },
+        onMessage: { addListener: (fn) => port.hostListeners.push(fn) },
+        /** What the native host writes to its stdout reaches the worker as a port message. */
+        receive: (message) => port.hostListeners.forEach((fn) => fn(message)),
         postMessage(message) {
           if (port.dead) throw new Error("Attempting to use a disconnected port object");
           (message.type === "diag" ? port.diags : port.posted).push(message);
@@ -51,7 +55,11 @@ function harness() {
     now: () => h.time,
     log: (text) => h.logs.push(text),
     errorCode: C.errorCode,
-    buildDiag: C.buildDiag
+    buildDiag: C.buildDiag,
+    onHostMessage: (message) => {
+      h.hostMessages.push(message);
+      if (h.onHost) h.onHost(message);
+    }
   });
   h.advance = (ms) => {
     h.time += ms;
@@ -709,4 +717,260 @@ test("relay.reportState keeps trying while the host cannot be reached: the state
   assert.deepEqual(swDiags(h.ports[0]).slice(-1), ["sw-access youtube=withheld"]);
   h.relay.reportState("sw-access youtube=withheld");
   assert.equal(swDiags(h.ports[0]).filter((event) => event === "sw-access youtube=withheld").length, 1);
+});
+
+// ---- commands from the host: native port -> relay -> the tab that last sent playback -----------------------
+
+const NEXT = { v: 1, type: "command", action: "next" };
+const PREVIOUS = { v: 1, type: "command", action: "previous" };
+const senderInTab = (tabId) => ({ ...SENDER, tab: { id: tabId } });
+
+test("a message the host writes to its stdout reaches the worker's handler while that port is the current one", () => {
+  const h = harness();
+  h.bridge.handle(playback());
+  h.ports[0].receive(NEXT);
+  assert.deepEqual(h.hostMessages, [NEXT]);
+
+  // The port dropped and a new one took its place: a late message of the old one means nothing.
+  h.ports[0].disconnect("Native host has exited.");
+  h.advance(2000);
+  h.bridge.handle(playback());
+  h.ports[0].receive(PREVIOUS);
+  assert.deepEqual(h.hostMessages, [NEXT]);
+  h.ports[1].receive(PREVIOUS);
+  assert.deepEqual(h.hostMessages, [NEXT, PREVIOUS]);
+});
+
+test("a handler that throws, or a port without onMessage, does not disturb the bridge", () => {
+  const h = harness();
+  h.onHost = () => {
+    throw new Error("handler failed");
+  };
+  h.bridge.handle(playback());
+  assert.doesNotThrow(() => h.ports[0].receive(NEXT));
+  assert.equal(h.bridge.handle(playback(A, 2)), true, "the port is still in use");
+
+  const plain = B.createBridge({
+    connectNative: () => ({ onDisconnect: { addListener() {} }, postMessage() {} }),
+    lastError: () => "",
+    now: () => 1000000,
+    log() {},
+    onHostMessage() {}
+  });
+  assert.equal(plain.handle(playback()), true);
+});
+
+test("a bridge made without a handler does not listen to the host at all", () => {
+  let listening = false;
+  const bare = B.createBridge({
+    connectNative: () => ({
+      onDisconnect: { addListener() {} },
+      onMessage: { addListener: () => (listening = true) },
+      postMessage() {}
+    }),
+    lastError: () => "",
+    now: () => 1000000,
+    log() {}
+  });
+  bare.handle(playback());
+  assert.equal(listening, false);
+});
+
+function commandHarness({ sendToTab } = {}) {
+  const h = relayHarness({
+    sendToTab:
+      sendToTab ??
+      ((tabId, message) => {
+        h.toTabs.push({ tabId, message });
+        return Promise.resolve({ ok: true });
+      })
+  });
+  h.toTabs = [];
+  h.onHost = (message) => h.relay.onHostMessage(message);
+  h.relay.start();
+  return h;
+}
+
+test("command: it goes to the tab that last sent a playback message, as the validated command only", async () => {
+  const h = commandHarness();
+  h.relay.onMessage(playback(), senderInTab(7));
+  h.ports[0].receive(NEXT);
+  h.ports[0].receive(PREVIOUS);
+  await flush();
+  assert.deepEqual(h.toTabs, [
+    { tabId: 7, message: NEXT },
+    { tabId: 7, message: PREVIOUS }
+  ]);
+  assert.deepEqual(Object.keys(h.toTabs[0].message), ["v", "type", "action"]);
+  assert.deepEqual(swDiags(h.ports[0]), ["sw-start v=0.1.1", "sw-msg playback"], "a delivered command is not reported by the worker");
+});
+
+test("command: what reaches the tab is a fresh object built from the checked command, never the host's own", async () => {
+  const h = commandHarness();
+  h.relay.onMessage(playback(), senderInTab(7));
+  const given = { v: 1, type: "command", action: "next" };
+  h.ports[0].receive(given);
+  await flush();
+  assert.equal(h.toTabs.length, 1);
+  assert.notEqual(h.toTabs[0].message, given);
+  assert.deepEqual(h.toTabs[0].message, given);
+  assert.deepEqual(Object.keys(h.toTabs[0].message), ["v", "type", "action"]);
+});
+
+test("command: the tab follows the latest playback; captions, clear, diag and rejected messages do not move it", async () => {
+  const h = commandHarness();
+  h.relay.onMessage(playback(), senderInTab(7));
+  h.relay.onMessage(playback(Z), senderInTab(9));
+  h.relay.onMessage(captions(A), senderInTab(7));
+  h.relay.onMessage(clear(A), senderInTab(7));
+  h.relay.onMessage({ v: 1, type: "diag", where: "content", event: "content-start" }, senderInTab(7));
+  h.relay.onMessage(playback(), { ...senderInTab(7), id: "someotherextensionidsomeotherext" }); // not ours
+  h.relay.onMessage({ ...playback(), rate: 0 }, senderInTab(7)); // invalid
+  h.ports[0].receive(NEXT);
+  await flush();
+  assert.deepEqual(h.toTabs.map((sent) => sent.tabId), [9]);
+
+  h.relay.onMessage(playback(), senderInTab(7));
+  h.ports[0].receive(NEXT);
+  await flush();
+  assert.deepEqual(h.toTabs.map((sent) => sent.tabId), [9, 7]);
+});
+
+test("command: without a playback message there is no tab: nothing is sent and the worker says so", async () => {
+  const h = commandHarness();
+  h.ports[0].receive(NEXT);
+  await flush();
+  assert.deepEqual(h.toTabs, []);
+  assert.deepEqual(swDiags(h.ports[0]), ["sw-start v=0.1.1", "sw-command-no-tab"]);
+});
+
+test("command: a sender without a usable tab id is not remembered", async () => {
+  const h = commandHarness();
+  for (const tab of [undefined, null, {}, { id: -1 }, { id: 1.5 }, { id: "7" }, { id: NaN }, { id: Infinity }, 7]) {
+    h.relay.onMessage(playback(), { ...SENDER, tab });
+  }
+  h.ports[0].receive(NEXT);
+  await flush();
+  assert.deepEqual(h.toTabs, []);
+  assert.equal(swDiags(h.ports[0]).at(-1), "sw-command-no-tab");
+
+  h.relay.onMessage(playback(), senderInTab(0));
+  h.ports[0].receive(NEXT);
+  await flush();
+  assert.deepEqual(h.toTabs.map((sent) => sent.tabId), [0], "tab 0 is a tab");
+});
+
+test("command: a tab that is gone (the send fails) is dropped and reported; the next playback sets a tab again", async () => {
+  const calls = [];
+  const h = commandHarness({
+    sendToTab: (tabId) => {
+      calls.push(tabId);
+      return Promise.reject(new Error("Could not establish connection. Receiving end does not exist."));
+    }
+  });
+  h.relay.onMessage(playback(), senderInTab(7));
+  h.ports[0].receive(NEXT);
+  await flush();
+  assert.deepEqual(calls, [7]);
+  assert.equal(swDiags(h.ports[0]).at(-1), "sw-command-no-tab");
+
+  h.advance(5000); // past the diag window
+  h.ports[0].receive(NEXT);
+  await flush();
+  assert.deepEqual(calls, [7], "no second attempt: the tab id was dropped");
+  assert.equal(swDiags(h.ports[0]).filter((event) => event === "sw-command-no-tab").length, 2);
+
+  h.relay.onMessage(playback(), senderInTab(8));
+  h.ports[0].receive(NEXT);
+  await flush();
+  assert.deepEqual(calls, [7, 8]);
+});
+
+test("command: a failure for a tab that is no longer the current one keeps the current one", async () => {
+  const calls = [];
+  let failFirst = true;
+  const h = commandHarness({
+    sendToTab: (tabId) => {
+      calls.push(tabId);
+      if (failFirst) {
+        failFirst = false;
+        return new Promise((resolve, reject) => setImmediate(() => reject(new Error("gone"))));
+      }
+      return Promise.resolve();
+    }
+  });
+  h.relay.onMessage(playback(), senderInTab(7));
+  h.ports[0].receive(NEXT);
+  h.relay.onMessage(playback(), senderInTab(8)); // before the failure of the first send is known
+  await flush();
+  h.advance(5000);
+  h.ports[0].receive(NEXT);
+  await flush();
+  assert.deepEqual(calls, [7, 8]);
+});
+
+test("command: a send that throws at once is the same as a tab that is gone, and never an exception", async () => {
+  const h = commandHarness({
+    sendToTab: () => {
+      throw new Error("Tabs cannot be edited right now");
+    }
+  });
+  h.relay.onMessage(playback(), senderInTab(7));
+  assert.doesNotThrow(() => h.ports[0].receive(NEXT));
+  await flush();
+  assert.equal(swDiags(h.ports[0]).at(-1), "sw-command-no-tab");
+});
+
+test("command: a worker made without a way to reach tabs reports no tab", async () => {
+  const h = relayHarness();
+  h.onHost = (message) => h.relay.onHostMessage(message);
+  h.relay.start();
+  h.relay.onMessage(playback(), senderInTab(7));
+  assert.doesNotThrow(() => h.ports[0].receive(NEXT));
+  await flush();
+  assert.equal(swDiags(h.ports[0]).at(-1), "sw-command-no-tab");
+});
+
+test("command: anything but the closed command set from the host is rejected, reported once per 5 s, and never sent on", async () => {
+  const h = commandHarness();
+  h.relay.onMessage(playback(), senderInTab(7));
+  const bad = [
+    null, undefined, "next", 5, [], {}, ["next"],
+    { v: 1, type: "command", action: "skip" },
+    { v: 1, type: "command", action: "NEXT" },
+    { v: 1, type: "command", action: "next", videoId: A },
+    { v: 1, type: "command", action: "next", url: "https://example.invalid/" },
+    { v: 2, type: "command", action: "next" },
+    { v: 1, type: "playback", videoId: A, title: "x", time: 1, playing: true, rate: 1 },
+    { v: 1, type: "diag", where: "sw", event: "sw-msg playback" },
+    { v: 1, type: "clear", videoId: A }
+  ];
+  for (const message of bad) assert.doesNotThrow(() => h.ports[0].receive(message));
+  await flush();
+  assert.deepEqual(h.toTabs, []);
+  assert.deepEqual(swDiags(h.ports[0]), ["sw-start v=0.1.1", "sw-msg playback", "sw-reject invalid command"]);
+
+  h.advance(5000);
+  h.ports[0].receive({ v: 1, type: "command", action: "skip" });
+  assert.equal(swDiags(h.ports[0]).at(-1), "sw-reject invalid command");
+});
+
+test("command: a content script cannot send one through the worker's message handler", async () => {
+  const h = commandHarness();
+  h.relay.onMessage(playback(), senderInTab(7));
+  h.relay.onMessage(NEXT, senderInTab(7));
+  await flush();
+  assert.deepEqual(h.toTabs, []);
+  assert.deepEqual(h.ports[0].posted, [playback()], "and nothing of it goes to the host either");
+  assert.equal(swDiags(h.ports[0]).at(-1), "sw-reject invalid unknown");
+});
+
+test("command: no diagnostic carries the tab id or anything else of the tab", async () => {
+  const h = commandHarness({ sendToTab: () => Promise.reject(new Error("Receiving end does not exist for tab 4242")) });
+  h.relay.onMessage(playback(), senderInTab(4242));
+  h.ports[0].receive(NEXT);
+  await flush();
+  assert.equal(JSON.stringify(h.ports[0].diags).includes("4242"), false);
+  assert.equal(JSON.stringify(h.infos).includes("4242"), false);
+  assert.deepEqual(h.logs, []);
 });

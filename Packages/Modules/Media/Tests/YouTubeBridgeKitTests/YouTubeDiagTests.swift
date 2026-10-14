@@ -9,12 +9,15 @@ import Testing
         ("sw", "sw-msg playback"), ("sw", "sw-msg clear"), ("sw", "sw-msg captions events=130"),
         ("sw", "sw-reject untrusted"), ("sw", "sw-reject invalid captions"), ("sw", "sw-reject invalid playback"),
         ("sw", "sw-reject invalid clear"), ("sw", "sw-reject invalid diag"), ("sw", "sw-reject invalid unknown"),
+        ("sw", "sw-reject invalid command"), ("sw", "sw-command-no-tab"),
         ("sw", "sw-reconnect after=host-not-found failures=3"), ("sw", "sw-reconnect after=disconnected failures=120"),
         ("sw", "sw-inject tabs=3 injected=2 failed=1"), ("sw", "sw-inject tabs=0 injected=0 failed=0"),
         ("sw", "sw-inject tabs=999999 injected=999999 failed=0"),
         ("sw", "sw-access youtube=granted"), ("sw", "sw-access youtube=withheld"),
         ("content", "content-start"), ("content", "content-no-lib"), ("content", "content-video-found"), ("content", "content-video-missing"),
         ("content", "content-cc on"), ("content", "content-cc off"),
+        ("content", "content-command next ok"), ("content", "content-command next unavailable"),
+        ("content", "content-command previous ok"), ("content", "content-command previous unavailable"),
         ("content", "content-send-error no-receiving-end count=2"), ("content", "content-send-error context-invalidated count=100000"),
         ("content", "content-alive videoid-present=true playing=false"),
         ("content", "content-tick-error type-error"),
@@ -94,6 +97,15 @@ import Testing
             ("sw", "sw-access youtube=GRANTED"), ("sw", "sw-access youtube=granted extra"), ("sw", "sw-access  youtube=granted"),
             ("sw", "sw-access site=granted"), ("sw", "sw-access youtube=granted,withheld"),
             ("content", "content-no-lib extra"), ("content", "content-no-lib "), ("content", "content-no-lib=1"),
+            ("content", "content-command"), ("content", "content-command next"), ("content", "content-command ok"),
+            ("content", "content-command skip ok"), ("content", "content-command next maybe"), ("content", "content-command next failed"),
+            ("content", "content-command NEXT ok"), ("content", "content-command next OK"), ("content", "content-command ok next"),
+            ("content", "content-command next ok extra"), ("content", "content-command next  ok"), ("content", "content-command next ok "),
+            ("content", "content-command next ok abcdefghijk"), ("content", "content-command next=ok"),
+            ("content", "content-command unavailable ok"), ("content", "content-command next unavailable unavailable"),
+            ("content", "content-command next ok https://www.youtube.com/watch"),
+            ("sw", "sw-command-no-tab extra"), ("sw", "sw-command-no-tab "), ("sw", "sw-command-no-tab tab=1"),
+            ("sw", "sw-reject invalid commands"), ("sw", "sw-reject invalid Command"), ("sw", "sw-reject invalid unavailable"),
             ("content", "content-start extra"), ("content", "content-start "), ("content", "content-cc"), ("content", "content-cc maybe"),
             ("content", "content-alive videoid-present=true"), ("content", "content-alive videoid-present=yes playing=true"),
             ("content", "content-send-error count=1"), ("content", "content-send-error x"),
@@ -125,6 +137,24 @@ import Testing
         for token in ["abcdefghij", "abcdefghijkl", "abcdefghijk-x"] {
             #expect(Self.decode(where: "content", event: "content-tick-error \(token)") != nil, "\(token)")
         }
+    }
+
+    @Test func unavailableHasElevenLettersAndIsAllowedOnlyInTheCommandReport() {
+        // `unavailable` is exactly the length of a video id, so the scan for id-like tokens would refuse it. It is one of a closed
+        // list of words in `content-command <next|previous> <ok|unavailable>` and the scan skips only those arguments.
+        #expect("unavailable".count == 11)
+        #expect(YouTubeDiag.isAllowed("content-command next unavailable", from: .content))
+        #expect(YouTubeDiag.isAllowed("content-command previous unavailable", from: .content))
+        for event in [
+            "sw-reconnect after=unavailable failures=1", "sw-reject invalid unavailable",
+        ] {
+            #expect(!YouTubeDiag.isAllowed(event, from: .sw), "\(event)")
+        }
+        for event in ["content-send-error unavailable count=1", "content-tick-error unavailable", "content-command unavailable ok"] {
+            #expect(!YouTubeDiag.isAllowed(event, from: .content), "\(event)")
+        }
+        // The code itself is still scanned, and so is anything after a code that is not closed.
+        #expect(!YouTubeDiag.isAllowed("content-command-abcdefg next ok", from: .content))
     }
 
     @Test func noUrlGetsThroughAnywhere() {

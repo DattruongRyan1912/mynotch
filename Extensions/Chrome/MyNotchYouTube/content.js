@@ -9,6 +9,10 @@
  *  - Reports its own health as `diag` events (start, video found/missing, CC state, send errors,
  *    a 30 s "alive" line, exceptions of the 1 s tick) and relays the page script's `diag` events.
  *    Diag events are fixed codes plus numbers and booleans: no titles, URLs or video ids.
+ *  - Carries out the two commands the app can give through the service worker, `next` and `previous`,
+ *    the way a user would: it clicks the player's own button (previous restarts the video when the
+ *    player has no usable previous button and the video is more than 3 s in). It never makes up
+ *    keyboard events, and it says what happened as a `content-command` diag.
  *
  * Only the fields of the shared protocol are ever sent; no URLs, no cookies, nothing else.
  */
@@ -50,6 +54,10 @@
   function noop() {}
 
   var TICK_MS = 1000;
+  var NEXT_BUTTON = ".ytp-next-button";
+  var PREVIOUS_BUTTON = ".ytp-prev-button";
+  // What YouTube's own "previous" does: past this many seconds it restarts the video instead of going back.
+  var RESTART_AFTER_SECONDS = 3;
   var HEARTBEAT_MS = 5000;
   // After a navigation document.title can still hold the previous video's title for a moment.
   var STALE_TITLE_MS = 3000;
@@ -77,6 +85,7 @@
     lastAliveAt: Date.now(),
     sendErrors: 0, // failed sends since the last report
     sendErrorCode: "", // code of the latest failure, reported once a send works again
+    messages: null, // chrome.runtime.onMessage, where the command listener is registered
     timer: 0,
     stopped: false
   };
@@ -148,11 +157,15 @@
     );
   }
 
+  /** An advert runs in the main player: the video time is the ad's time, and the player's buttons are not for the content. */
+  function isAdShowing() {
+    var player = doc.getElementById("movie_player");
+    return Boolean(player && player.classList && player.classList.contains("ad-showing"));
+  }
+
   function isPlaying(video) {
     if (!video || video.paused || video.ended) return false;
-    // While an ad runs in the main player, the video time is the ad's time, not the content's.
-    var player = doc.getElementById("movie_player");
-    return !(player && player.classList && player.classList.contains("ad-showing"));
+    return !isAdShowing();
   }
 
   function sendPlayback() {
@@ -291,6 +304,64 @@
     );
   }
 
+  // ---- commands from the service worker ---------------------------------------------------------------
+
+  /** A button the user could press: there, not disabled, not hidden (display: none leaves it no boxes at all). */
+  function isUsable(button) {
+    if (!button) return false;
+    if (button.hidden === true || button.disabled === true) return false;
+    if (typeof button.getAttribute === "function" && button.getAttribute("aria-disabled") === "true") return false;
+    if (typeof button.getClientRects === "function" && button.getClientRects().length === 0) return false;
+    return true;
+  }
+
+  function clickPlayerButton(selector) {
+    var button = doc.querySelector(selector);
+    if (!isUsable(button)) return false;
+    button.click();
+    return true;
+  }
+
+  /** Previous: the player's previous button; without a usable one, restart a video that is past 3 s. */
+  function goToPrevious() {
+    if (clickPlayerButton(PREVIOUS_BUTTON)) return true;
+    var video = state.video || findVideo();
+    var time = video ? video.currentTime : NaN;
+    if (typeof time !== "number" || !isFinite(time) || time <= RESTART_AFTER_SECONDS) return false;
+    video.currentTime = 0;
+    return true;
+  }
+
+  /** Whether the command could be carried out. Never throws: a page that changed under us is "unavailable". */
+  function perform(action) {
+    try {
+      if (isAdShowing()) return false;
+      return action === "next" ? clickPlayerButton(NEXT_BUTTON) : goToPrevious();
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * chrome.runtime.onMessage: the service worker passes on a command of the app. Only the extension's own
+   * worker (a sender without a tab) is listened to, and only the closed command set; anything else is
+   * ignored. The answer is sent at once, so the worker's send always resolves.
+   */
+  function onRuntimeMessage(message, sender, sendResponse) {
+    var own = root.chrome && root.chrome.runtime ? root.chrome.runtime.id : undefined;
+    if (!own || !sender || sender.tab || sender.id !== own) return undefined;
+    var command = C.validateCommand(message);
+    if (!command) return undefined;
+    var ok = perform(command.action);
+    diag("content-command " + command.action + " " + (ok ? "ok" : "unavailable"));
+    try {
+      if (typeof sendResponse === "function") sendResponse({ ok: ok });
+    } catch (error) {
+      /* the worker stopped waiting */
+    }
+    return undefined;
+  }
+
   function onPageMessage(event) {
     var message = C.acceptPageMessage(event, root, root.location.origin);
     if (!message) return;
@@ -316,6 +387,12 @@
     state.cc = "unknown";
   }
 
+  /** chrome.runtime.onMessage when there is one to listen to. */
+  function runtimeMessages() {
+    var runtime = root.chrome && root.chrome.runtime;
+    return runtime && runtime.onMessage && typeof runtime.onMessage.addListener === "function" ? runtime.onMessage : null;
+  }
+
   /** Whether this copy still runs and the extension that injected it is still there. */
   function isAlive() {
     return !state.stopped && Boolean(root.chrome && root.chrome.runtime && root.chrome.runtime.id);
@@ -329,9 +406,17 @@
     root.removeEventListener("message", onPageMessage, false);
     root.removeEventListener("yt-navigate-finish", tick, true);
     root.removeEventListener("pagehide", onPageHide, false);
+    try {
+      if (state.messages) state.messages.removeListener(onRuntimeMessage);
+    } catch (error) {
+      /* the extension context is gone, and the listener with it */
+    }
+    state.messages = null;
   }
 
   root[STARTED] = { isAlive: isAlive, stop: shutdown };
+  state.messages = runtimeMessages();
+  if (state.messages) state.messages.addListener(onRuntimeMessage);
   root.addEventListener("message", onPageMessage, false);
   root.addEventListener("yt-navigate-finish", tick, true);
   root.addEventListener("pagehide", onPageHide, false);

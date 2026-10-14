@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { assertSafeDiag, createContext, flush, plain, runScripts } from "./helpers.mjs";
+import { assertSafeDiag, createContext, flush, plain, readSource, runScripts } from "./helpers.mjs";
 
 const ORIGIN = "https://www.youtube.com";
 const ID = "abcdefghijk";
@@ -52,7 +52,12 @@ function makePage({ url = watch(ID), title = "Placeholder title - YouTube", pres
     intervals: [],
     sendThrows: null,
     location: { href: url, origin: ORIGIN },
-    runtime: { id: "extension-id" }
+    runtime: { id: "extension-id" },
+    runtimeListeners: [],
+    removedRuntimeListeners: [],
+    nextButton: null,
+    prevButton: null,
+    dispatched: []
   };
   page.setVideo = (next) => {
     page.video = next;
@@ -64,8 +69,11 @@ function makePage({ url = watch(ID), title = "Placeholder title - YouTube", pres
     querySelector(selector) {
       if (page.queryThrows) throw page.queryThrows;
       if (selector === ".ytp-subtitles-button") return page.button;
+      if (selector === ".ytp-next-button") return page.nextButton;
+      if (selector === ".ytp-prev-button") return page.prevButton;
       return selector.includes("video") ? page.video : null;
     },
+    dispatchEvent: (event) => page.dispatched.push(event),
     getElementById: (id) => (id === "movie_player" ? { classList: { contains: (name) => page.ad && name === "ad-showing" } } : null)
   };
   page.context = createContext({
@@ -81,9 +89,14 @@ function makePage({ url = watch(ID), title = "Placeholder title - YouTube", pres
           if (page.sendThrows) throw page.sendThrows;
           (message.type === "diag" ? page.diags : page.sent).push(plain(message));
           return page.sendResult ? page.sendResult(message) : Promise.resolve();
+        },
+        onMessage: {
+          addListener: (fn) => page.runtimeListeners.push(fn),
+          removeListener: (fn) => page.removedRuntimeListeners.push(fn)
         }
       }
     },
+    dispatchEvent: (event) => page.dispatched.push(event),
     addEventListener(type, fn) {
       (page.windowListeners[type] ??= new Set()).add(fn);
     },
@@ -109,6 +122,13 @@ function makePage({ url = watch(ID), title = "Placeholder title - YouTube", pres
     }
   };
   page.take = () => page.sent.splice(0);
+  /** What the service worker does: chrome.tabs.sendMessage reaches the content script's runtime.onMessage listeners. */
+  page.command = (message, ...rest) => {
+    const sender = rest.length > 0 ? rest[0] : { id: page.runtime.id }; // an explicit undefined is a sender-less message
+    const responses = [];
+    const results = page.runtimeListeners.map((fn) => fn(message, sender, (value) => responses.push(plain(value))));
+    return { responses, results };
+  };
   page.fire = (type, event = { type }) => [...(page.windowListeners[type] ?? [])].forEach((fn) => fn(event));
   page.postFromPage = (data, overrides = {}) =>
     page.fire("message", { source: page.win, origin: ORIGIN, data: { source: "mynotch-yt", ...data }, ...overrides });
@@ -1038,4 +1058,243 @@ test("diag: a failing diagnostic is not reported as a send error of the protocol
   page.video.emit("seeked");
   await flush();
   assert.equal(page.diags.some((message) => message.event.startsWith("content-send-error")), false);
+});
+
+// ---- commands from the service worker: next and previous --------------------------------------------------
+
+/** A player button as the page has it: enabled and visible unless the test says otherwise. */
+function fakeButton(overrides = {}) {
+  const button = {
+    clicks: 0,
+    hidden: false,
+    disabled: false,
+    ariaDisabled: "false",
+    rects: 1,
+    click() {
+      button.clicks += 1;
+    },
+    getAttribute: (name) => (name === "aria-disabled" ? button.ariaDisabled : null),
+    getClientRects: () => ({ length: button.rects }),
+    ...overrides
+  };
+  return button;
+}
+
+const NEXT = { v: 1, type: "command", action: "next" };
+const PREVIOUS = { v: 1, type: "command", action: "previous" };
+const commandDiags = (page) => page.diags.filter((message) => message.event.startsWith("content-command")).map((message) => message.event);
+
+function startedPage(options = {}) {
+  const page = makePage(options);
+  page.start();
+  page.take();
+  page.diags.length = 0;
+  return page;
+}
+
+test("next: the player's own next button is clicked once, and the content script says so", () => {
+  const page = startedPage();
+  page.nextButton = fakeButton();
+  const { responses } = page.command(NEXT);
+  assert.equal(page.nextButton.clicks, 1);
+  assert.deepEqual(commandDiags(page), ["content-command next ok"]);
+  assert.deepEqual(responses, [{ ok: true }], "answered at once, so the worker's send resolves");
+  for (const message of page.diags) assertSafeDiag(message, "content");
+});
+
+test("next: a missing, hidden, disabled or invisible button is unavailable and nothing is clicked", () => {
+  const variants = [
+    null,
+    fakeButton({ hidden: true }),
+    fakeButton({ disabled: true }),
+    fakeButton({ ariaDisabled: "true" }),
+    fakeButton({ rects: 0 }) // display: none
+  ];
+  for (const button of variants) {
+    const page = startedPage();
+    page.nextButton = button;
+    const { responses } = page.command(NEXT);
+    assert.equal(button ? button.clicks : 0, 0);
+    assert.deepEqual(commandDiags(page), ["content-command next unavailable"]);
+    assert.deepEqual(responses, [{ ok: false }]);
+  }
+});
+
+test("next: nothing is skipped while an advert plays", () => {
+  const page = startedPage();
+  page.nextButton = fakeButton();
+  page.ad = true;
+  page.command(NEXT);
+  assert.equal(page.nextButton.clicks, 0);
+  assert.deepEqual(commandDiags(page), ["content-command next unavailable"]);
+});
+
+test("previous: the player's previous button is clicked when there is a usable one, and the video is left alone", () => {
+  const page = startedPage();
+  page.prevButton = fakeButton();
+  page.video.currentTime = 40;
+  page.command(PREVIOUS);
+  assert.equal(page.prevButton.clicks, 1);
+  assert.equal(page.video.currentTime, 40);
+  assert.deepEqual(commandDiags(page), ["content-command previous ok"]);
+});
+
+test("previous: without a usable previous button it restarts the video, but only when it is more than 3 s in", () => {
+  for (const button of [null, fakeButton({ ariaDisabled: "true" }), fakeButton({ hidden: true }), fakeButton({ rects: 0 })]) {
+    const page = startedPage();
+    page.prevButton = button;
+    page.video.currentTime = 12.3;
+    const { responses } = page.command(PREVIOUS);
+    assert.equal(page.video.currentTime, 0);
+    assert.equal(button ? button.clicks : 0, 0);
+    assert.deepEqual(commandDiags(page), ["content-command previous ok"]);
+    assert.deepEqual(responses, [{ ok: true }]);
+  }
+  for (const time of [3, 2.9, 0]) {
+    const page = startedPage();
+    page.video.currentTime = time;
+    const { responses } = page.command(PREVIOUS);
+    assert.equal(page.video.currentTime, time, `${time} s: left where it is`);
+    assert.deepEqual(commandDiags(page), ["content-command previous unavailable"]);
+    assert.deepEqual(responses, [{ ok: false }]);
+  }
+  const justOver = startedPage();
+  justOver.video.currentTime = 3.001;
+  justOver.command(PREVIOUS);
+  assert.equal(justOver.video.currentTime, 0);
+});
+
+test("previous: no restart without a video, with an unreadable time, or during an advert", () => {
+  const noVideo = startedPage({ video: null });
+  assert.deepEqual(noVideo.command(PREVIOUS).responses, [{ ok: false }]);
+  const odd = startedPage();
+  odd.video.currentTime = NaN;
+  assert.deepEqual(odd.command(PREVIOUS).responses, [{ ok: false }]);
+  const ad = startedPage();
+  ad.ad = true;
+  ad.video.currentTime = 20;
+  assert.deepEqual(ad.command(PREVIOUS).responses, [{ ok: false }]);
+  assert.equal(ad.video.currentTime, 20);
+});
+
+test("previous: the video is found even when the 1 s check has not bound it yet", () => {
+  const page = makePage({ video: null });
+  page.start();
+  page.take();
+  page.diags.length = 0;
+  page.setVideo(fakeVideo()); // appeared since the last tick
+  page.video.currentTime = 50;
+  page.command(PREVIOUS);
+  assert.equal(page.video.currentTime, 0);
+});
+
+test("a command is performed the way a user would: only a click, never an event the script makes up", () => {
+  const page = startedPage();
+  page.nextButton = fakeButton();
+  page.prevButton = fakeButton();
+  page.command(NEXT);
+  page.command(PREVIOUS);
+  assert.deepEqual(page.dispatched, [], "no dispatchEvent on the window or the document, so no keyboard event");
+  const source = readSource("content.js");
+  assert.equal(/KeyboardEvent|keydown|keyup|keypress|dispatchEvent|\.focus\(/.test(source), false);
+});
+
+test("only the extension's own service worker is listened to: other senders, pages and tabs are ignored", () => {
+  const page = startedPage();
+  page.nextButton = fakeButton();
+  const strangers = [
+    undefined,
+    null,
+    {},
+    { id: "another-extension" },
+    { id: page.runtime.id, tab: { id: 3 } } // a message that came from a tab, not from the worker
+  ];
+  for (const sender of strangers) {
+    const { responses, results } = page.command(NEXT, sender);
+    assert.deepEqual(responses, []);
+    assert.deepEqual(results, [undefined]);
+  }
+  assert.equal(page.nextButton.clicks, 0);
+  assert.deepEqual(commandDiags(page), []);
+
+  // The page cannot ask either: its window messages are only accepted for captions and its own diags.
+  page.postFromPage({ v: 1, type: "command", action: "next" });
+  page.fire("message", { source: page.win, origin: ORIGIN, data: { v: 1, type: "command", action: "next" } });
+  assert.equal(page.nextButton.clicks, 0);
+});
+
+test("anything but the closed command set is ignored without a click, a diagnostic or an answer", () => {
+  const page = startedPage();
+  page.nextButton = fakeButton();
+  page.prevButton = fakeButton();
+  const bad = [
+    null, undefined, "next", 5, [], {}, ["next"],
+    { v: 1, type: "command", action: "skip" },
+    { v: 1, type: "command", action: "NEXT" },
+    { v: 1, type: "command", action: "next", url: "https://example.invalid/" },
+    { v: 2, type: "command", action: "next" },
+    { v: 1, type: "playback", videoId: ID, title: "x", time: 1, playing: true, rate: 1 },
+    { v: 1, type: "diag", where: "sw", event: "sw-start v=0.1.3" }
+  ];
+  for (const message of bad) {
+    const { responses, results } = page.command(message);
+    assert.deepEqual(responses, [], JSON.stringify(message));
+    assert.deepEqual(results, [undefined]);
+  }
+  assert.equal(page.nextButton.clicks + page.prevButton.clicks, 0);
+  assert.deepEqual(commandDiags(page), []);
+});
+
+test("every command is carried out, the diagnostic is rate limited like the others", () => {
+  const page = startedPage();
+  page.nextButton = fakeButton();
+  page.command(NEXT);
+  page.command(NEXT);
+  page.command(NEXT);
+  assert.equal(page.nextButton.clicks, 3);
+  assert.deepEqual(commandDiags(page), ["content-command next ok"], "one line per kind every 5 s");
+  page.advance(5000);
+  page.command(NEXT);
+  assert.deepEqual(commandDiags(page), ["content-command next ok", "content-command next ok"]);
+});
+
+test("the listener is registered once, removed when the copy stops and not doubled by a second copy", () => {
+  const page = startedPage();
+  assert.equal(page.runtimeListeners.length, 1);
+
+  page.start(); // injected again into a tab that has a live copy
+  assert.equal(page.runtimeListeners.length, 1, "a live copy keeps the tab");
+
+  page.runtime.id = undefined; // the extension was reloaded: this copy is an orphan
+  page.nextButton = fakeButton();
+  page.start(); // the new copy replaces it
+  assert.equal(page.removedRuntimeListeners.length, 1, "the orphan's listener was removed");
+  assert.equal(page.removedRuntimeListeners[0], page.runtimeListeners[0]);
+});
+
+test("a command that arrives while the copy is not on a watch page is simply unavailable", () => {
+  const page = startedPage({ url: `${ORIGIN}/` });
+  const { responses } = page.command(NEXT);
+  assert.deepEqual(responses, [{ ok: false }]);
+  assert.deepEqual(commandDiags(page), ["content-command next unavailable"]);
+});
+
+test("a throwing page query is unavailable, never an exception into the worker's message", () => {
+  const page = startedPage();
+  page.queryThrows = new Error("query failed");
+  let outcome;
+  assert.doesNotThrow(() => (outcome = page.command(NEXT)));
+  assert.deepEqual(outcome.responses, [{ ok: false }]);
+  assert.deepEqual(commandDiags(page), ["content-command next unavailable"]);
+});
+
+test("a click that throws is unavailable too", () => {
+  const page = startedPage();
+  page.nextButton = fakeButton({
+    click() {
+      throw new Error("click failed");
+    }
+  });
+  assert.doesNotThrow(() => page.command(NEXT));
+  assert.deepEqual(commandDiags(page), ["content-command next unavailable"]);
 });

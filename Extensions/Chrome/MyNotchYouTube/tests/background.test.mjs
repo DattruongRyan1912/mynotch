@@ -9,10 +9,10 @@ const SENDER = { id: OWN, url: "https://www.youtube.com/watch?v=aaaaaaaaaaa" };
 const PLAYBACK = { v: 1, type: "playback", videoId: "aaaaaaaaaaa", title: "Placeholder title", time: 1, playing: true, rate: 1 };
 
 /** Runs background.js the way the service worker does, against a fake chrome object. */
-function startWorker({ connectThrows = null, tabs = [], rejectFor = [], queryThrows = null, access = true } = {}) {
+function startWorker({ connectThrows = null, tabs = [], rejectFor = [], queryThrows = null, access = true, noTabs = [] } = {}) {
   const worker = {
     connects: [], ports: [], listeners: [], installedListeners: [], addedListeners: [], removedListeners: [], infos: [],
-    warnings: [], now: 1000000, queries: [], injections: [], accessQueries: [], access
+    warnings: [], now: 1000000, queries: [], injections: [], accessQueries: [], access, tabMessages: [], noTabs
   };
   const chrome = {
     runtime: {
@@ -25,7 +25,11 @@ function startWorker({ connectThrows = null, tabs = [], rejectFor = [], queryThr
         const disconnectListeners = [];
         const port = {
           messages: [],
+          hostListeners: [],
           onDisconnect: { addListener: (fn) => disconnectListeners.push(fn) },
+          onMessage: { addListener: (fn) => port.hostListeners.push(fn) },
+          /** What the native host writes to its stdout. */
+          receive: (message) => port.hostListeners.forEach((fn) => fn(message)),
           postMessage: (message) => port.messages.push(plain(message)),
           disconnect(reason) {
             chrome.runtime.lastError = reason ? { message: reason } : undefined;
@@ -48,6 +52,11 @@ function startWorker({ connectThrows = null, tabs = [], rejectFor = [], queryThr
       onRemoved: { addListener: (fn) => worker.removedListeners.push(fn) }
     },
     tabs: {
+      sendMessage(tabId, message, options) {
+        worker.tabMessages.push(plain({ tabId, message, options }));
+        if (worker.noTabs.includes(tabId)) return Promise.reject(new Error("Could not establish connection. Receiving end does not exist."));
+        return Promise.resolve({ ok: true });
+      },
       query(query) {
         worker.queries.push(plain(query));
         if (queryThrows) return Promise.reject(queryThrows);
@@ -262,4 +271,80 @@ test("withdrawing the access is reported and injects nothing", async () => {
   await flush();
   assert.equal(worker.diags().at(-1).event, "sw-access youtube=withheld");
   assert.deepEqual(worker.injections, []);
+});
+
+// ---- commands from the app: host -> worker -> the tab that last sent playback ------------------------------
+
+const TAB_SENDER = (tabId) => ({ ...SENDER, tab: { id: tabId } });
+const NEXT = { v: 1, type: "command", action: "next" };
+const PREVIOUS = { v: 1, type: "command", action: "previous" };
+
+test("a command the host writes goes to the top frame of the tab that last sent playback, nothing else", async () => {
+  const worker = startWorker();
+  worker.listeners[0](PLAYBACK, TAB_SENDER(31));
+  worker.ports[0].receive(NEXT);
+  worker.ports[0].receive(PREVIOUS);
+  await flush();
+  assert.deepEqual(worker.tabMessages, [
+    { tabId: 31, message: NEXT, options: { frameId: 0 } },
+    { tabId: 31, message: PREVIOUS, options: { frameId: 0 } }
+  ]);
+  assert.deepEqual(worker.warnings, []);
+});
+
+test("a tab that is gone: the command is dropped and the worker reports sw-command-no-tab", async () => {
+  const worker = startWorker({ noTabs: [31] });
+  await flush();
+  worker.listeners[0](PLAYBACK, TAB_SENDER(31));
+  worker.ports[0].receive(NEXT);
+  await flush();
+  assert.equal(worker.diags().at(-1).event, "sw-command-no-tab");
+  assertSafeDiag(worker.diags().at(-1), "sw");
+  worker.advance(5000);
+  worker.ports[0].receive(NEXT);
+  await flush();
+  assert.equal(worker.tabMessages.length, 1, "no second try at a tab that is gone");
+});
+
+test("a worker that has seen no playback has no tab to give a command to", async () => {
+  const worker = startWorker();
+  await flush();
+  worker.ports[0].receive(NEXT);
+  await flush();
+  assert.deepEqual(worker.tabMessages, []);
+  assert.equal(worker.diags().at(-1).event, "sw-command-no-tab");
+});
+
+test("commands arrive only from the native port: a content script's message is not one", async () => {
+  const worker = startWorker();
+  await flush();
+  worker.listeners[0](PLAYBACK, TAB_SENDER(31));
+  worker.listeners[0](NEXT, TAB_SENDER(31));
+  await flush();
+  assert.deepEqual(worker.tabMessages, []);
+  assert.equal(worker.diags().at(-1).event, "sw-reject invalid unknown");
+});
+
+test("a command the host writes after it has gone is ignored, and the tab id is kept in memory only", async () => {
+  const worker = startWorker();
+  worker.listeners[0](PLAYBACK, TAB_SENDER(31));
+  worker.ports[0].disconnect("Native host has exited.");
+  worker.advance(5000);
+  worker.ports[0].receive(NEXT);
+  await flush();
+  assert.deepEqual(worker.tabMessages, []);
+  // Nothing of the tab is written anywhere: the worker has no storage API to write it to.
+  const source = readSource("background.js") + readSource("bridge.js");
+  assert.equal(/chrome\.storage|localStorage|indexedDB|sessionStorage/.test(source), false);
+});
+
+test("an invalid command from the host is reported as such and never reaches the tab", async () => {
+  const worker = startWorker();
+  await flush();
+  worker.listeners[0](PLAYBACK, TAB_SENDER(31));
+  worker.ports[0].receive({ v: 1, type: "command", action: "seek" });
+  worker.ports[0].receive("next");
+  await flush();
+  assert.deepEqual(worker.tabMessages, []);
+  assert.equal(worker.diags().at(-1).event, "sw-reject invalid command");
 });

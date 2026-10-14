@@ -586,6 +586,160 @@ import Testing
         #expect(store.syncedLyrics == YouTubeTestMessages.lines)
     }
 
+    // MARK: next and previous
+
+    /// A host as Chrome's helper is, connected to the socket and having sent the page's playback; waits until the module has it.
+    func connectHost(title: String = YouTubeTestMessages.title) async throws -> YouTubeTestClient {
+        let host = try #require(YouTubeTestClient(path: socketPath))
+        host.sendFrame(YouTubeTestMessages.json(YouTubeTestMessages.playback(title: title)))
+        await waitUntil { module.youtubeBridge.lastPageMessageAt != nil }
+        return host
+    }
+
+    func pressHotkey(_ id: String) throws {
+        let registration = try #require(harness.hotkeys.registrations.first { $0.id == id })
+        #expect(harness.hotkeyBackend.trigger(registration.name.rawValue))
+    }
+
+    @Test func nextAndPreviousGoToTheExtensionWhenChromePlaysAVideoItReports() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        let host = try await connectHost()
+        module.send(.nextTrack)
+        module.send(.previousTrack)
+        #expect(host.receiveFrames(count: 2) == [YouTubeCommand.next.json, YouTubeCommand.previous.json])
+        #expect(source.sent.isEmpty, "MediaRemote is not asked: Chrome ignores it for YouTube")
+        #expect(module.skipRoute() == .bridge)
+        #expect(module.canSkip)
+    }
+
+    @Test func theTabButtonsAndTheHotkeysTakeTheSameRoute() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        let host = try await connectHost()
+        module.actions.send(TransportControl.next.command)
+        module.actions.send(TransportControl.previous.command)
+        try pressHotkey("media_mediaNext")
+        try pressHotkey("media_mediaPrevious")
+        #expect(host.receiveFrames(count: 4) == [YouTubeCommand.next, .previous, .next, .previous].map(\.json))
+        #expect(source.sent.isEmpty)
+    }
+
+    @Test func everythingButNextAndPreviousStillGoesToMediaRemote() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        let host = try await connectHost()
+        for command in [MediaCommand.togglePlayPause, .play, .pause] { module.send(command) }
+        module.seek(toSeconds: 30)
+        #expect(source.sent == [.togglePlayPause, .play, .pause])
+        #expect(source.seeks == [30])
+        #expect(!host.hasData(within: 0.2))
+    }
+
+    @Test func aPlayerThatIsNoBrowserKeepsMediaRemoteWhateverTheExtensionHasSaid() async throws {
+        await bootstrapWithCaptions()
+        playInChrome(bundle: "com.spotify.client")
+        let host = try await connectHost()
+        module.send(.nextTrack)
+        module.send(.previousTrack)
+        #expect(source.sent == [.nextTrack, .previousTrack])
+        #expect(!host.hasData(within: 0.2))
+        #expect(module.skipRoute() == .mediaRemote)
+        #expect(module.canSkip)
+    }
+
+    @Test func chromeWithoutALiveSessionCannotSkipFromTheButtonsButTheHotkeysKeepMediaRemote() async throws {
+        await bootstrapWithCaptions()
+        #expect(module.canSkip, "nothing plays yet: nothing to explain")
+        playInChrome()
+        #expect(module.skipRoute() == .unavailable)
+        #expect(!module.canSkip)
+        #expect(!module.actions.canSkip())
+        try pressHotkey("media_mediaNext")
+        try pressHotkey("media_mediaPrevious")
+        #expect(source.sent == [.nextTrack, .previousTrack])
+    }
+
+    @Test func aBrowserTheExtensionCannotServeStillHasItsButtons() async throws {
+        await bootstrapWithCaptions()
+        playInChrome(bundle: "com.apple.Safari")
+        #expect(module.canSkip)
+        module.send(.nextTrack)
+        #expect(source.sent == [.nextTrack])
+    }
+
+    @Test func anotherTitleThanTheExtensionsPlaybackMeansNoLiveSession() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        _ = try await connectHost(title: "Another video")
+        #expect(!module.canSkip)
+        module.send(.nextTrack)
+        #expect(source.sent == [.nextTrack], "not the extension's video, so not its tab")
+    }
+
+    @Test func aSessionThePageHasNotSpokenForInAWhileIsNoLongerLive() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        _ = try await connectHost()
+        #expect(module.skipRoute(at: Date().addingTimeInterval(SkipRoute.liveWindow - 5)) == .bridge)
+        #expect(module.skipRoute(at: Date().addingTimeInterval(SkipRoute.liveWindow + 5)) == .unavailable)
+    }
+
+    @Test func whenTheExtensionSaysUnavailableNothingElseHappens() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        let host = try await connectHost()
+        module.send(.nextTrack)
+        #expect(host.receiveFrames(count: 1) == [YouTubeCommand.next.json])
+        receive(YouTubeTestMessages.diag("content-command next unavailable", from: .content))
+        receive(YouTubeTestMessages.diag("sw-command-no-tab"))
+        #expect(source.sent.isEmpty, "no fallback skip")
+        #expect(!host.hasData(within: 0.2), "and the command is not sent again")
+    }
+
+    @Test func aCommandThatCannotBeDeliveredIsLoggedAndNothingElseHappens() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        do { _ = try await connectHost() }
+        await waitUntil { module.youtubeServerConnectionCount == 0 }
+        module.send(.nextTrack)
+        #expect(source.sent.isEmpty)
+        #expect(recorder.lines.contains("command not-sent reason=no-host"))
+        #expect(!recorder.lines.contains { $0.hasPrefix("command sent") })
+    }
+
+    @Test func turningTheSettingOffLeavesChromeWithoutARouteAndTheHotkeysOnMediaRemote() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        _ = try await connectHost()
+        #expect(module.canSkip)
+        harness.settings.set(false, for: keys.youtubeCaptions)
+        await settle { !FileManager.default.fileExists(atPath: socketPath) }
+        #expect(!module.canSkip)
+        module.send(.nextTrack)
+        #expect(source.sent == [.nextTrack])
+    }
+
+    @Test func eachCommandIsLoggedWithItsWordAndNothingElse() async throws {
+        await bootstrapWithCaptions()
+        playInChrome(title: "Zebra Quartz Secret Title")
+        let host = try await connectHost(title: "Zebra Quartz Secret Title")
+        module.send(.nextTrack)
+        module.send(.previousTrack)
+        #expect(host.receiveFrames(count: 2).count == 2)
+        #expect(recorder.lines.filter { $0.hasPrefix("command") } == ["command sent action=next", "command sent action=previous"])
+        recorder.expectNothingPrivate(["Zebra", "Quartz", "Secret", YouTubeTestMessages.videoID, socketPath])
+    }
+
+    @Test func commandsAreIgnoredWhileTheModuleIsStopped() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        _ = try await connectHost()
+        await harness.registry.setEnabled(false, for: "media")
+        module.send(.nextTrack)
+        #expect(source.sent.isEmpty)
+    }
+
     // MARK: site access
 
     @Test func theExtensionsAccessReportShowsOrClearsTheWithheldNotice() async {

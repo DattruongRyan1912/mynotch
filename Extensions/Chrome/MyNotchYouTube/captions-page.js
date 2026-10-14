@@ -319,12 +319,14 @@
   var DIAG_ARGS = {
     "sw-start": /^ v=(?:[0-9]{1,4}(?:\.[0-9]{1,4}){0,3}|unknown)$/,
     "sw-msg": /^ (?:captions events=[0-9]{1,5}|playback|clear)$/,
-    "sw-reject": /^ (?:untrusted|invalid (?:captions|playback|clear|diag|unknown))$/,
+    "sw-reject": /^ (?:untrusted|invalid (?:captions|playback|clear|diag|command|unknown))$/,
     "sw-reconnect": /^ after=[a-z0-9-]{1,80} failures=[0-9]{1,6}$/,
     "sw-access": /^ youtube=(?:granted|withheld)$/,
     "sw-inject": /^ tabs=[0-9]{1,6} injected=[0-9]{1,6} failed=[0-9]{1,6}$/,
+    "sw-command-no-tab": NO_ARGS,
     "content-start": NO_ARGS,
     "content-no-lib": NO_ARGS,
+    "content-command": /^ (?:next|previous) (?:ok|unavailable)$/,
     "content-video-found": NO_ARGS,
     "content-video-missing": NO_ARGS,
     "content-cc": /^ (?:on|off)$/,
@@ -340,6 +342,9 @@
     "page-timedtext-too-large": NO_ARGS,
     "page-timedtext-failed": /^ (?:fetch|xhr)$/
   };
+  // Codes whose arguments are a closed list of words and nothing else. The 11-character scan below does not look at
+  // their arguments, because one of the words ("unavailable") is exactly 11 letters long; it still looks at the code.
+  var CLOSED_WORDS = { "content-command": true };
   var MESSAGE_TYPES = { captions: true, playback: true, clear: true, diag: true };
   // Known Chrome error texts become fixed codes (none is exactly 11 characters long).
   var ERROR_CODES = [
@@ -409,7 +414,7 @@
     var shape = Object.prototype.hasOwnProperty.call(DIAG_ARGS, code) ? DIAG_ARGS[code] : null;
     if (!shape || code.indexOf(where + "-") !== 0) return false;
     if (!shape.test(event.slice(code.length))) return false;
-    var runs = event.match(/[a-z0-9_-]+/g) || [];
+    var runs = (CLOSED_WORDS[code] === true ? code : event).match(/[a-z0-9_-]+/g) || [];
     for (var i = 0; i < runs.length; i++) {
       if (runs[i].length === 11) return false; // would look like a video id
     }
@@ -470,6 +475,25 @@
     }
   }
 
+  // ---- commands (app -> host -> service worker -> content script) -------------------------------
+  // The only message that travels the other way: the app asks the page to skip. A closed set: exactly
+  // {v: 1, type: "command", action: "next" | "previous"}, no other field and no free text.
+  var COMMAND_ACTIONS = { next: true, previous: true };
+
+  /** A fresh command object, or null when the message is not exactly one of the two commands. */
+  function validateCommand(message) {
+    if (!isObject(message) || message.v !== 1 || message.type !== "command") return null;
+    var keys = Object.keys(message);
+    if (keys.length !== 3 || !hasOwn(message, "v") || !hasOwn(message, "type") || !hasOwn(message, "action")) return null;
+    var action = message.action;
+    if (typeof action !== "string" || !hasOwn(COMMAND_ACTIONS, action) || COMMAND_ACTIONS[action] !== true) return null;
+    return { v: 1, type: "command", action: action };
+  }
+
+  function hasOwn(object, key) {
+    return Object.prototype.hasOwnProperty.call(object, key);
+  }
+
   /**
    * Content-script gate for window "message" events: only `captions` and page-side `diag`
    * messages that this very window posted to its own origin with the bridge's source tag are
@@ -500,6 +524,7 @@
     videoIdFromUrl: videoIdFromUrl,
     cleanTitle: cleanTitle,
     validateMessage: validateMessage,
+    validateCommand: validateCommand,
     errorCode: errorCode,
     typeWord: typeWord,
     buildDiag: buildDiag,

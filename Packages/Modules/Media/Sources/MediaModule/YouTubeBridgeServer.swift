@@ -7,6 +7,9 @@ import YouTubeBridgeKit
 /// messages that passed. The socket is the user's alone (mode 0600 in a 0700 folder, and a peer of another user is
 /// refused), and anything that is not a valid protocol message is ignored.
 ///
+/// The one thing that goes the other way is a command (`YouTubeCommand`): `send` writes it, as a frame, to the host whose
+/// page last reported playback, which is the one that can act on it.
+///
 /// What it does goes to the log (`YouTubeBridgeLog`): connections, a count of the frames by type every 10 s, why a
 /// frame was refused. Never what was in a frame.
 final class YouTubeBridgeServer {
@@ -38,6 +41,8 @@ final class YouTubeBridgeServer {
             var isOpen = true
             var connections: [Int32: DispatchSourceRead] = [:]
             var listener: DispatchSourceRead?
+            /// The connection that sent the latest `playback`: the host whose extension has the page that plays.
+            var playbackConnection: Int32?
         }
 
         private let state = Mutex(State())
@@ -52,6 +57,17 @@ final class YouTubeBridgeServer {
 
         var isOpen: Bool { state.withLock { $0.isOpen } }
         var connectionCount: Int { state.withLock { $0.connections.count } }
+
+        /// Whether every connection refuses to raise SIGPIPE when the host has gone (for tests).
+        var allAreGuardedAgainstSIGPIPE: Bool {
+            state.withLock { state in
+                state.connections.keys.allSatisfy { fd in
+                    var value: Int32 = 0
+                    var size = socklen_t(MemoryLayout<Int32>.size)
+                    return getsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &value, &size) == 0 && value == 1
+                }
+            }
+        }
 
         func setListener(_ source: DispatchSourceRead) { state.withLock { $0.listener = source } }
 
@@ -82,7 +98,32 @@ final class YouTubeBridgeServer {
         }
 
         func remove(_ fd: Int32) {
-            state.withLock { _ = $0.connections.removeValue(forKey: fd)?.cancel() }
+            state.withLock { state in
+                _ = state.connections.removeValue(forKey: fd)?.cancel()
+                if state.playbackConnection == fd { state.playbackConnection = nil }
+            }
+        }
+
+        /// A playback arrived on `fd`.
+        func playbackArrived(on fd: Int32) {
+            state.withLock { state in
+                if state.connections[fd] != nil { state.playbackConnection = fd }
+            }
+        }
+
+        /// Writes `frame` to the connection that sent the latest playback; false when there is none or the write did not
+        /// take all of it, in which case the connection is given up, since a partly written frame leaves the host out of step.
+        /// The sockets do not block, and a frame is a few dozen bytes, so this never waits for the host.
+        func sendToPlaybackConnection(_ frame: Data) -> Bool {
+            state.withLock { state in
+                // Under the lock, so the descriptor is still open: it is closed only after its source is cancelled and removed.
+                guard state.isOpen, let fd = state.playbackConnection, state.connections[fd] != nil else { return false }
+                let written = frame.withUnsafeBytes { Foundation.send(fd, $0.baseAddress, $0.count, 0) }
+                if written == frame.count { return true }
+                // The host sees the end and the read source takes the connection out.
+                shutdown(fd, SHUT_RDWR)
+                return false
+            }
         }
 
         func close() {
@@ -91,6 +132,7 @@ final class YouTubeBridgeServer {
                 defer {
                     state.connections = [:]
                     state.listener = nil
+                    state.playbackConnection = nil
                 }
                 return Array(state.connections.values) + [state.listener].compactMap { $0 }
             }
@@ -178,8 +220,18 @@ final class YouTubeBridgeServer {
         log("app stopped")
     }
 
+    /// Asks the host whose page last reported playback to do `command`. False when no host has, or the host cannot be written
+    /// to; nothing is retried or sent to another host.
+    func send(_ command: YouTubeCommand) -> Bool {
+        session?.sendToPlaybackConnection(command.frame) ?? false
+    }
+
     /// The clients connected right now (for tests).
     var connectionCount: Int { session?.connectionCount ?? 0 }
+
+    /// Whether every connection refuses to raise SIGPIPE: the app writes commands to the host, and a write to a host that
+    /// has gone would otherwise end the app (for tests).
+    var connectionsAreGuardedAgainstSIGPIPE: Bool { session?.allAreGuardedAgainstSIGPIPE ?? true }
 
     isolated deinit {
         stop()
@@ -212,6 +264,13 @@ final class YouTubeBridgeServer {
             guard fcntl(fd, F_SETFL, O_NONBLOCK) == 0, getpeereid(fd, &uid, &gid) == 0, uid == geteuid() else {
                 close(fd)
                 session.log("app connection refused: peer user")
+                continue
+            }
+            // The app writes commands to the host: a write to a host that has gone must fail, not end the app with SIGPIPE.
+            var guarded: Int32 = 1
+            guard setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &guarded, socklen_t(MemoryLayout<Int32>.size)) == 0 else {
+                close(fd)
+                session.log("app connection refused: socket option")
                 continue
             }
             let reader = Reader()
@@ -251,7 +310,7 @@ final class YouTubeBridgeServer {
                 case .tooLarge:
                     return "frame too large"
                 case .frame(let frame):
-                    receive(frame, onMessage: onMessage, session: session)
+                    receive(frame, from: fd, onMessage: onMessage, session: session)
                 }
             }
         }
@@ -260,11 +319,13 @@ final class YouTubeBridgeServer {
     /// Checks one frame: a valid message goes to the main actor, any other is counted with the reason (announced once
     /// per reason every 10 s), and the log gets a summary when one is due.
     private nonisolated static func receive(
-        _ frame: Data, onMessage: @escaping @MainActor @Sendable (YouTubeMessage) -> Void, session: Session
+        _ frame: Data, from fd: Int32, onMessage: @escaping @MainActor @Sendable (YouTubeMessage) -> Void, session: Session
     ) {
         switch YouTubeMessage.check(frame) {
         case .success(let message):
             session.tally.count(message.typeName)
+            // Before the message is handed on, so that whoever acts on it can already answer on this connection.
+            if case .playback = message { session.playbackArrived(on: fd) }
             DispatchQueue.main.async { MainActor.assumeIsolated { if session.isOpen { onMessage(message) } } }
         case .failure(let rejection):
             session.tally.lose(rejection.rawValue)

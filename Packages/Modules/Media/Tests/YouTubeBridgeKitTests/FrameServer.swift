@@ -31,6 +31,18 @@ final class FrameServer: Sendable {
     /// Connections that were accepted and closed again at once.
     var hangUpCount: Int { state.withLock { $0.hangUps } }
 
+    /// Sends bytes to every client, as the app does with a command.
+    func send(_ bytes: Data) {
+        state.withLock { state in
+            for client in state.clients { _ = UnixStreamSocket.writeAll(bytes, to: client) }
+        }
+    }
+
+    /// Sends one frame (4-byte big-endian length, then the JSON) to every client.
+    func sendFrame(_ json: Data) {
+        send(AppFrame.encode(json)!)
+    }
+
     func start() throws {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard var address = UnixSocketAddress(path: path)?.value else { close(fd); throw POSIXError(.ENAMETOOLONG) }

@@ -235,3 +235,59 @@ test("cleanTitle strips the YouTube suffix and the notification counter", () => 
   assert.equal(C.cleanTitle(undefined), "");
   assert.equal(C.cleanTitle("t".repeat(900) + " - YouTube").length, 300);
 });
+
+// ---- commands (app -> host -> service worker -> content script) -------------------------------------------
+
+test("validateCommand accepts exactly next and previous and returns a fresh object", () => {
+  for (const action of ["next", "previous"]) {
+    const input = { v: 1, type: "command", action };
+    const clean = C.validateCommand(input);
+    assert.deepEqual(clean, input);
+    assert.notEqual(clean, input);
+    assert.deepEqual(Object.keys(clean), ["v", "type", "action"]);
+  }
+});
+
+test("validateCommand is closed: any other action, extra field, type or version is refused", () => {
+  const bad = [
+    null, undefined, 5, "next", ["next"], [], {},
+    { v: 1, type: "command" },
+    { v: 1, action: "next" },
+    { type: "command", action: "next" },
+    { v: 2, type: "command", action: "next" },
+    { v: "1", type: "command", action: "next" },
+    { v: true, type: "command", action: "next" },
+    { v: 1, type: "Command", action: "next" },
+    { v: 1, type: "captions", action: "next" },
+    { v: 1, type: "command", action: "skip" },
+    { v: 1, type: "command", action: "NEXT" },
+    { v: 1, type: "command", action: "Next" },
+    { v: 1, type: "command", action: " next" },
+    { v: 1, type: "command", action: "next " },
+    { v: 1, type: "command", action: "next\n" },
+    { v: 1, type: "command", action: "" },
+    { v: 1, type: "command", action: null },
+    { v: 1, type: "command", action: 4 },
+    { v: 1, type: "command", action: ["next"] },
+    { v: 1, type: "command", action: { toString: () => "next" } },
+    { v: 1, type: "command", action: "play" },
+    { v: 1, type: "command", action: "toString" },
+    { v: 1, type: "command", action: "__proto__" },
+    { v: 1, type: "command", action: "next", url: "https://example.invalid/" },
+    { v: 1, type: "command", action: "next", videoId: ID },
+    { v: 1, type: "command", action: "next", extra: undefined },
+    Object.assign(Object.create({ action: "next" }), { v: 1, type: "command" }),
+    Object.assign(Object.create({ action: "next" }), { v: 1, type: "command", extra: 1 }), // three own keys, but the action is inherited
+    Object.assign(Object.create({ type: "command" }), { v: 1, action: "next", extra: 1 })
+  ];
+  for (const value of bad) assert.equal(C.validateCommand(value), null, JSON.stringify(value));
+});
+
+test("a command is not a message a content script may send: validateMessage refuses it", () => {
+  assert.equal(C.validateMessage({ v: 1, type: "command", action: "next" }), null);
+  assert.equal(C.typeWord({ v: 1, type: "command", action: "next" }), "unknown");
+  // And the page script's gate for window messages does not let one through either.
+  const win = {};
+  const event = { source: win, origin: "https://www.youtube.com", data: { source: "mynotch-yt", v: 1, type: "command", action: "next" } };
+  assert.equal(C.acceptPageMessage(event, win, "https://www.youtube.com"), null);
+});

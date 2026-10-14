@@ -1,6 +1,6 @@
 import Foundation
 
-/// The host's side of the stream socket: connect, send whole frames, notice that the app has gone.
+/// The host's side of the stream socket: connect, send whole frames. The thread that reads the connection notices that the app has gone.
 enum UnixStreamSocket {
     /// How long a send may wait for a slow app before the connection is given up.
     static let sendTimeoutSeconds = 5
@@ -97,16 +97,5 @@ enum UnixStreamSocket {
             }
             return true
         }
-    }
-
-    /// The app never sends anything, so a socket that can be read has either closed or been written to by a stranger;
-    /// only the first matters.
-    static func peerHasClosed(_ fd: Int32) -> Bool {
-        var poller = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-        guard poll(&poller, 1, 0) > 0 else { return false }
-        if poller.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0 { return true }
-        var byte: UInt8 = 0
-        let count = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
-        return count == 0 || (count < 0 && errno != EAGAIN && errno != EINTR)
     }
 }

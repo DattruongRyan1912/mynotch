@@ -14,6 +14,41 @@ struct LateReader: ByteReading {
     }
 }
 
+/// Stands in for the host's stdout: collects what is written, and can be made to fail like a pipe Chrome has closed.
+final class CollectedOutput: ByteWriting {
+    private struct State {
+        var bytes = Data()
+        var fails = false
+    }
+
+    private let state = Mutex(State())
+
+    /// Every byte written so far.
+    var bytes: Data { state.withLock { $0.bytes } }
+
+    /// Whether writes fail from now on.
+    var fails: Bool {
+        get { state.withLock { $0.fails } }
+        set { state.withLock { $0.fails = newValue } }
+    }
+
+    /// The payloads of the native messages written so far, read the way Chrome reads them.
+    var messages: [Data] {
+        var reader = NativeMessageReader(source: ScriptedReader(bytes))
+        var messages: [Data] = []
+        while case .message(let message) = reader.next() { messages.append(message) }
+        return messages
+    }
+
+    func write(_ data: Data) -> Bool {
+        state.withLock { state in
+            if state.fails { return false }
+            state.bytes.append(data)
+            return true
+        }
+    }
+}
+
 /// Runs `YouTubeHostCLI.run` on a thread of its own with a pipe for its stdin, the way Chrome starts the host.
 final class HostRun: Sendable {
     /// What the run's thread leaves for the test to read, and what the test counts.
@@ -27,6 +62,8 @@ final class HostRun: Sendable {
 
     private let writeEnd: Int32
     private let progress = Progress()
+    /// What the host wrote to its stdout.
+    let output: CollectedOutput
 
     /// The run's exit code once it has ended.
     var exitCode: Int32? { progress.code.withLock { $0 } }
@@ -39,8 +76,10 @@ final class HostRun: Sendable {
         clock: TestClock = TestClock(), expectedOwner: uid_t = geteuid(),
         readDelay: TimeInterval = 0,
         log: YouTubeBridgeLog = .silent,
-        launch: YouTubeHostLaunch = YouTubeHostLaunch(argumentCount: 2, parentName: "Parent")
+        launch: YouTubeHostLaunch = YouTubeHostLaunch(argumentCount: 2, parentName: "Parent"),
+        output: CollectedOutput = CollectedOutput()
     ) {
+        self.output = output
         var fds: [Int32] = [0, 0]
         precondition(pipe(&fds) == 0)
         writeEnd = fds[1]
@@ -54,7 +93,7 @@ final class HostRun: Sendable {
             let code = YouTubeHostCLI.run(
                 stdin: LateReader(base: FileDescriptorReader(fileDescriptor: readEnd), delay: readDelay), socketPath: socketPath,
                 reconnectInterval: reconnectInterval, now: { clock.now }, expectedOwner: expectedOwner, log: both, launch: launch,
-                didHandle: { progress.handled.withLock { $0 += 1 } }
+                commandOutput: output, didHandle: { progress.handled.withLock { $0 += 1 } }
             )
             close(readEnd)
             progress.code.withLock { $0 = code }

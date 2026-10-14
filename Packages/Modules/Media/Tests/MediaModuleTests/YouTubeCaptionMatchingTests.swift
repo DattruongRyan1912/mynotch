@@ -38,6 +38,32 @@ import YouTubeBridgeKit
         #expect(normalised("Sample video") != normalised("Sample videos"))
     }
 
+    // MARK: the session the captions and the commands share
+
+    @Test func theSessionIsTheLatestPlaybackWhenItBelongsToTheTrackPlayingNow() throws {
+        let fresh = try YouTubeCaptionMatcher.playback(for: chrome(), in: store(age: 4)).get()
+        #expect(fresh.message.videoID == videoID)
+        #expect(fresh.arrivedAt == now - 4)
+        // Age, a pause and the captions are for the captions to decide, not for the session.
+        let old = try YouTubeCaptionMatcher.playback(for: chrome(), in: store(playing: false, age: 600)).get()
+        #expect(!old.message.isPlaying)
+        #expect(old.arrivedAt == now - 600)
+        var withoutCaptions = YouTubeCaptionStore()
+        withoutCaptions.apply(YouTubeTestMessages.playback(), at: now)
+        #expect(throws: Never.self) { try YouTubeCaptionMatcher.playback(for: chrome(), in: withoutCaptions).get() }
+    }
+
+    @Test func theSessionSaysWhichRuleFailedFirst() {
+        func failure(_ state: NowPlayingState, _ store: YouTubeCaptionStore) -> YouTubeCaptionMatcher.Reason? {
+            if case .failure(let reason) = YouTubeCaptionMatcher.playback(for: state, in: store) { reason } else { nil }
+        }
+        #expect(failure(NowPlayingState(bundleIdentifier: "com.spotify.client", title: "x"), store()) == .notBrowser)
+        #expect(failure(chrome(title: nil), store()) == .noTitle)
+        #expect(failure(chrome(), YouTubeCaptionStore()) == .noPlayback)
+        #expect(failure(chrome(title: "Another"), store()) == .titleMismatch)
+        #expect(failure(chrome(), store()) == nil)
+    }
+
     // MARK: the conditions
 
     @Test func aBrowserPlayingTheVideoWithAFreshPlaybackAndMatchingTitleGetsItsCaptions() {

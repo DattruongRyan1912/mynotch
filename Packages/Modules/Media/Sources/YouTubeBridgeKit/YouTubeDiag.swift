@@ -48,9 +48,14 @@ public struct YouTubeDiag: Equatable, Sendable {
         let code = event.prefix { $0 != " " }
         let arguments = event.dropFirst(code.count)
         guard code.hasPrefix(origin.rawValue + "-"), areValid(arguments, for: String(code)) else { return false }
-        // Would look like a video id.
-        return !event.split(whereSeparator: { !isIDCharacter($0) }).contains { $0.count == 11 }
+        // Would look like a video id. The arguments of a code whose arguments are a closed list of words are not looked at:
+        // one of the words, `unavailable`, is eleven letters long, and nothing else can stand where the list does.
+        let scanned = closedWordCodes.contains(String(code)) ? Substring(code) : Substring(event)
+        return !scanned.split(whereSeparator: { !isIDCharacter($0) }).contains { $0.count == 11 }
     }
+
+    /// Codes whose arguments are a closed list of words and nothing else (see `isAllowed`).
+    private static let closedWordCodes: Set<String> = ["content-command"]
 
     // MARK: shapes
 
@@ -71,7 +76,7 @@ public struct YouTubeDiag: Equatable, Sendable {
             return words.count == 2 && words[0] == "captions" && value(of: "events", in: words[1]).map { isNumber($0, digits: 1...5) } == true
         case "sw-reject":
             if words.count == 1 { return words[0] == "untrusted" }
-            return words.count == 2 && words[0] == "invalid" && ["captions", "playback", "clear", "diag", "unknown"].contains(words[1])
+            return words.count == 2 && words[0] == "invalid" && ["captions", "playback", "clear", "diag", "command", "unknown"].contains(words[1])
         case "sw-reconnect":
             return words.count == 2 && value(of: "after", in: words[0]).map(isToken) == true
                 && value(of: "failures", in: words[1]).map { isNumber($0, digits: 1...6) } == true
@@ -81,6 +86,10 @@ public struct YouTubeDiag: Equatable, Sendable {
                 && value(of: "failed", in: words[2]).map { isNumber($0, digits: 1...6) } == true
         case "sw-access":
             return words.count == 1 && value(of: "youtube", in: words[0]).map { $0 == "granted" || $0 == "withheld" } == true
+        case "sw-command-no-tab":
+            return words.isEmpty
+        case "content-command":
+            return words.count == 2 && (words[0] == "next" || words[0] == "previous") && (words[1] == "ok" || words[1] == "unavailable")
         case "content-cc":
             return words.count == 1 && (words[0] == "on" || words[0] == "off")
         case "content-send-error":

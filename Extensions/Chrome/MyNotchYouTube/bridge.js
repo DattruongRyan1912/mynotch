@@ -9,7 +9,9 @@
  * failed is remembered and reported to the host as a `diag` event once a new connection exists.
  *
  * createRelay() is the message handler of the service worker: it checks the sender, validates,
- * forwards, and reports its own diagnostics (rate limited).
+ * forwards, and reports its own diagnostics (rate limited). It also takes the one message that
+ * travels the other way, a command from the app (next or previous) that the native host writes to
+ * its stdout, and passes it to the tab that last sent a playback message.
  *
  * createInjector() runs the manifest's content scripts in the YouTube tabs that were already open
  * when the extension was installed, updated or reloaded (Chrome only injects into pages that load
@@ -36,7 +38,9 @@
 
   /**
    * deps: connectNative(name) -> port, lastError() -> string, now() -> ms, log(text), and for the
-   * diagnostics errorCode(text) -> token and buildDiag(where, event) -> message | null.
+   * diagnostics errorCode(text) -> token and buildDiag(where, event) -> message | null. When
+   * onHostMessage(message) is given, what the host writes to the current port is handed to it
+   * (unchecked: the handler validates).
    */
   function createBridge(deps) {
     var port = null;
@@ -75,6 +79,16 @@
           var reason = deps.lastError(); // reading it also clears Chrome's "unchecked lastError"
           if (port === opened) dropPort(reason);
         });
+        if (deps.onHostMessage && opened.onMessage && typeof opened.onMessage.addListener === "function") {
+          opened.onMessage.addListener(function (message) {
+            if (port !== opened) return; // a late message of a port that was replaced
+            try {
+              deps.onHostMessage(message);
+            } catch (e) {
+              /* a failing handler must not disturb the connection */
+            }
+          });
+        }
       } catch (e) {
         scheduleRetry(e && e.message);
         return false;
@@ -164,14 +178,22 @@
     );
   }
 
+  /** The id of the tab a message came from, or null when it did not come from one. */
+  function tabIdOf(sender) {
+    var id = sender && sender.tab ? sender.tab.id : undefined;
+    return typeof id === "number" && isFinite(id) && id >= 0 && Math.floor(id) === id ? id : null;
+  }
+
   /**
    * Message handler of the service worker.
-   * deps: bridge, captions (captions.js API), ownId, now() -> ms, version, log(text).
+   * deps: bridge, captions (captions.js API), ownId, now() -> ms, version, log(text), and for commands
+   * sendToTab(tabId, message) -> Promise (chrome.tabs.sendMessage to the tab's top frame).
    */
   function createRelay(deps) {
     var C = deps.captions;
     var allow = C.createDiagLimiter(deps.now, DIAG_WINDOW_MS);
     var states = {}; // kind -> the last state event sent by reportState
+    var playbackTab = null; // the tab that last sent a playback message; in memory only, never stored
 
     /** The worker's own diagnostics: one event per kind every 5 s. */
     function report(event) {
@@ -218,10 +240,38 @@
         return;
       }
       report("sw-msg " + clean.type + (clean.type === "captions" ? " events=" + clean.events.length : ""));
+      if (clean.type === "playback") {
+        var tabId = tabIdOf(sender);
+        if (tabId !== null) playbackTab = tabId;
+      }
       deps.bridge.handle(clean);
     }
 
-    return { start: start, onMessage: onMessage, report: report, reportState: reportState };
+    /**
+     * A message the native host wrote: the only thing it may say is a command from the app. It goes, as
+     * the validated command and nothing else, to the tab that last sent playback; a tab that is gone
+     * (or none yet) is dropped and reported, and nothing else is tried.
+     */
+    function onHostMessage(message) {
+      var command = C.validateCommand(message);
+      if (!command) {
+        report("sw-reject invalid command");
+        return;
+      }
+      var tabId = playbackTab;
+      if (tabId === null || typeof deps.sendToTab !== "function") {
+        report("sw-command-no-tab");
+        return;
+      }
+      new Promise(function (resolve) {
+        resolve(deps.sendToTab(tabId, command));
+      }).then(undefined, function () {
+        if (playbackTab === tabId) playbackTab = null;
+        report("sw-command-no-tab");
+      });
+    }
+
+    return { start: start, onMessage: onMessage, onHostMessage: onHostMessage, report: report, reportState: reportState };
   }
 
   /** The manifest's content scripts as executeScript injections, in their declared order and worlds. */

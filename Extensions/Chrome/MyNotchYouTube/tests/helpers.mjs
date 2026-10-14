@@ -51,6 +51,12 @@ export async function flush(times = 8) {
 export const ID_TOKEN = /(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{11}(?![A-Za-z0-9_-])/;
 
 /**
+ * What the id-lookalike scan looks at. The arguments of `content-command` are a closed list of words, one of which
+ * ("unavailable") is exactly 11 letters long, so only its code is scanned, as in captions.js and YouTubeDiag.swift.
+ */
+export const scannedForIds = (event) => (event.startsWith("content-command ") ? "content-command" : event);
+
+/**
  * What every diag message must satisfy, wherever it was produced: a valid protocol message with
  * exactly the four fields, and nothing that looks like a URL, an id or free text.
  */
@@ -65,7 +71,7 @@ export function assertSafeDiag(message, where) {
   assert.deepEqual(sharedCaptions.validateMessage(message), message, `valid per validateMessage: ${message.event}`);
   assert.match(message.event, /^[a-z0-9][a-z0-9 =_.-]*$/, "lowercase code, numbers and booleans only");
   assert.equal(/[/:?&#]|https?|www|youtube\.|\.com/.test(message.event), false, `no URL: ${message.event}`);
-  assert.equal(ID_TOKEN.test(message.event), false, `no id-like token: ${message.event}`);
+  assert.equal(ID_TOKEN.test(scannedForIds(message.event)), false, `no id-like token: ${message.event}`);
 }
 
 

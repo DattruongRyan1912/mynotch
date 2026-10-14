@@ -191,6 +191,156 @@ import Testing
         #expect(await host.finish() == 0)
     }
 
+    // MARK: commands from the app
+
+    static func commandFrames(_ commands: [YouTubeCommand]) -> Data {
+        commands.reduce(into: Data()) { $0 += $1.frame }
+    }
+
+    @Test func aCommandTheAppSendsIsWrittenToChromeAsANativeMessageAndNothingElse() async throws {
+        defer { server.remove() }
+        try server.start()
+        let host = start()
+        await waitUntil { server.connectionCount == 1 }
+        server.sendFrame(YouTubeCommand.next.json)
+        server.sendFrame(YouTubeCommand.previous.json)
+        await waitUntil { host.output.messages.count == 2 }
+        #expect(host.output.messages == [YouTubeCommand.next.json, YouTubeCommand.previous.json])
+        #expect(host.output.bytes == nativeFrame(YouTubeCommand.next.json) + nativeFrame(YouTubeCommand.previous.json))
+        #expect(host.logLines.filter { $0.hasPrefix("command forwarded") } == ["command forwarded action=next", "command forwarded action=previous"])
+        #expect(await host.finish() == 0)
+    }
+
+    @Test func theHostWritesTheCheckedCommandAndNotTheBytesItWasGiven() async throws {
+        defer { server.remove() }
+        try server.start()
+        let host = start()
+        await waitUntil { server.connectionCount == 1 }
+        server.sendFrame(Data(#" {  "action": "previous",  "type":"command", "v":1 } "#.utf8))
+        await waitUntil { !host.output.messages.isEmpty }
+        #expect(host.output.messages == [YouTubeCommand.previous.json])
+        #expect(await host.finish() == 0)
+    }
+
+    @Test func commandsInPiecesAndInOneWriteAreAllForwardedInOrder() async throws {
+        defer { server.remove() }
+        try server.start()
+        let host = start()
+        await waitUntil { server.connectionCount == 1 }
+        let bytes = Self.commandFrames([.next, .previous, .next, .previous, .previous])
+        for start in stride(from: 0, to: bytes.count, by: 5) {
+            server.send(bytes[start..<min(start + 5, bytes.count)])
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        server.send(bytes)
+        await waitUntil { host.output.messages.count == 10 }
+        let expected: [YouTubeCommand] = [.next, .previous, .next, .previous, .previous]
+        #expect(host.output.messages == (expected + expected).map(\.json))
+        #expect(await host.finish() == 0)
+    }
+
+    @Test func anythingButTheClosedCommandSetFromTheAppIsDroppedAndTheConnectionGoesOn() async throws {
+        defer { server.remove() }
+        try server.start()
+        let host = start()
+        await waitUntil { server.connectionCount == 1 }
+        let refused = [
+            "not json", "", #"{"v":1,"type":"command","action":"skip"}"#, #"{"v":1,"type":"command","action":"next","url":"x"}"#,
+            #"{"v":2,"type":"command","action":"next"}"#, #"{"v":1,"type":"clear","videoId":"aaaaaaaaaaa"}"#,
+            #"{"v":1,"type":"playback","videoId":"aaaaaaaaaaa","title":"x","time":1,"playing":true,"rate":1}"#,
+        ]
+        for text in refused { server.sendFrame(Data(text.utf8)) }
+        server.sendFrame(YouTubeCommand.next.json)
+        await waitUntil { !host.output.messages.isEmpty }
+        #expect(host.output.messages == [YouTubeCommand.next.json])
+        #expect(host.logLines.filter { $0 == "command dropped reason=invalid" }.count == refused.count)
+        #expect(server.connectionCount == 1, "the connection was not given up for it")
+        #expect(await host.finish() == 0)
+    }
+
+    @Test func aFrameAboveTheCommandLimitEndsThatConnectionAndTheHostReconnects() async throws {
+        defer { server.remove() }
+        try server.start()
+        let host = start()
+        await waitUntil { server.connectionCount == 1 }
+        // A length no command has, with the start of a body.
+        server.send(Data([0, 0, 0x01, 0x01]) + Data(repeating: 0x20, count: 64))
+        await host.waitForLog(containing: "app socket disconnected: command frame too large")
+        await waitUntil { server.connectionCount == 2 }
+        #expect(server.connectionCount == 2)
+        #expect(host.output.bytes.isEmpty)
+        server.sendFrame(YouTubeCommand.previous.json)
+        await waitUntil { !host.output.messages.isEmpty }
+        #expect(host.output.messages == [YouTubeCommand.previous.json])
+        #expect(await host.finish() == 0)
+    }
+
+    @Test(arguments: readDelays) func aCommandOverTheNewConnectionOfARestartedAppIsForwardedToo(readDelay: TimeInterval) async throws {
+        defer { server.remove() }
+        try server.start()
+        let host = start(readDelay: readDelay)
+        await waitUntil { server.connectionCount == 1 }
+        server.stop()
+        await host.waitForLog(containing: "app socket disconnected: peer closed")
+        let restarted = FrameServer(directory: server.directory)
+        defer { restarted.remove() }
+        try restarted.start()
+        await waitUntil { restarted.connectionCount == 1 }
+        restarted.sendFrame(YouTubeCommand.next.json)
+        await waitUntil { !host.output.messages.isEmpty }
+        #expect(host.output.messages == [YouTubeCommand.next.json])
+        #expect(await host.finish() == 0)
+    }
+
+    @Test func aPipeChromeHasClosedCostsTheCommandAndNothingElse() async throws {
+        defer { server.remove() }
+        try server.start()
+        let host = start()
+        await waitUntil { server.connectionCount == 1 }
+        host.output.fails = true
+        server.sendFrame(YouTubeCommand.next.json)
+        await host.waitForLog(containing: "command not delivered")
+        #expect(host.output.bytes.isEmpty)
+        // Captions still go the other way, and the next command is tried again.
+        let clear = host.sendJSON(Self.clear("aaaaaaaaaaa"))
+        await waitUntil { server.frames.contains(clear) }
+        #expect(server.frames == [clear])
+        host.output.fails = false
+        server.sendFrame(YouTubeCommand.previous.json)
+        await waitUntil { !host.output.messages.isEmpty }
+        #expect(host.output.messages == [YouTubeCommand.previous.json])
+        #expect(await host.finish() == 0)
+    }
+
+    @Test func nothingElseIsEverWrittenToChromeNotEvenForTheReplayOrTheDiagnostics() async throws {
+        defer { server.remove() }
+        let host = start()
+        host.sendJSON(Self.captions("aaaaaaaaaaa"))
+        host.sendJSON(Self.playback("aaaaaaaaaaa"))
+        host.sendJSON(Self.diag("sw-access youtube=withheld"))
+        host.sendJSON(Self.clear("bbbbbbbbbbb"))
+        host.send(Data("not json".utf8))
+        await host.waitUntilHandled()
+        try server.start()
+        await host.waitForLog(containing: "app socket connected replayed-captions=1 replayed-playback=true")
+        host.sendJSON(Self.diag("content-start", from: "content"))
+        await waitUntil { server.frames.count == 4 }
+        #expect(server.frames.count == 4)
+        #expect(host.output.bytes.isEmpty)
+        #expect(await host.finish() == 0)
+    }
+
+    @Test func endingTheInputWhileTheAppIsConnectedEndsTheRunAndClosesTheSocket() async throws {
+        defer { server.remove() }
+        try server.start()
+        let host = start()
+        await waitUntil { server.connectionCount == 1 }
+        // The host is waiting for a command on that connection: closing its input must not leave it hanging there.
+        #expect(await host.finish() == 0)
+        await host.waitForLog(containing: "app socket closed: host exit")
+        #expect(host.logLines.contains("app socket closed: host exit"))
+    }
+
     // MARK: replay
 
     @Test(arguments: readDelays) func theLatestCaptionsOfEachVideoAndThenThePlaybackAreReplayedOnConnecting(readDelay: TimeInterval) async throws {

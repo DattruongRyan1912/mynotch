@@ -2,9 +2,10 @@ import Foundation
 import Synchronization
 
 /// What the `mynotch-youtube-host` executable does: Chrome starts it for the extension and writes native messages to
-/// its stdin; it checks each one and passes it on to the app over a socket. It never writes to stdout or stderr
-/// (stdout is Chrome's channel back to the extension, which gets nothing), and it never fails: Chrome would only
-/// show the extension an error. What it does goes to the unified log instead (see `YouTubeBridgeLog`).
+/// its stdin; it checks each one and passes it on to the app over a socket. The other way, the app may send a command
+/// (next or previous, see `YouTubeCommand`) on that socket; the host checks it and writes it to stdout, which is Chrome's
+/// channel back to the extension. Nothing else is ever written to stdout, and nothing to stderr, and the host never
+/// fails: Chrome would only show the extension an error. What it does goes to the unified log instead (see `YouTubeBridgeLog`).
 public enum YouTubeHostCLI {
     /// How often the host tries to reach the app again while it is away, and how soon it notices the app quitting.
     public static let reconnectInterval: TimeInterval = 2
@@ -19,6 +20,7 @@ public enum YouTubeHostCLI {
     ///   - expectedOwner: the user the socket file must belong to.
     ///   - log: where the host reports itself and the extension's diagnostics.
     ///   - launch: how the host was started, for the first line of the log.
+    ///   - commandOutput: where the commands of the app go, as native messages: Chrome's channel back to the extension.
     public static func run<Source: ByteReading>(
         stdin: Source,
         socketPath: String,
@@ -26,11 +28,12 @@ public enum YouTubeHostCLI {
         now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         expectedOwner: uid_t = geteuid(),
         log: YouTubeBridgeLog = .system,
-        launch: YouTubeHostLaunch = .current
+        launch: YouTubeHostLaunch = .current,
+        commandOutput: any ByteWriting = FileDescriptorWriter(fileDescriptor: STDOUT_FILENO)
     ) -> Int32 {
         run(
             stdin: stdin, socketPath: socketPath, reconnectInterval: reconnectInterval, now: now, expectedOwner: expectedOwner,
-            log: log, launch: launch, didHandle: nil
+            log: log, launch: launch, commandOutput: commandOutput, didHandle: nil
         )
     }
 
@@ -45,10 +48,14 @@ public enum YouTubeHostCLI {
         expectedOwner: uid_t,
         log: YouTubeBridgeLog,
         launch: YouTubeHostLaunch,
+        commandOutput: any ByteWriting,
         didHandle: (@Sendable () -> Void)?
     ) -> Int32 {
         log("host start argc=\(launch.argumentCount) parent=\(launch.parentName ?? "unknown")")
-        let relay = HostRelay(socketPath: socketPath, expectedOwner: expectedOwner, retryInterval: reconnectInterval, now: now, log: log)
+        let relay = HostRelay(
+            socketPath: socketPath, expectedOwner: expectedOwner, retryInterval: reconnectInterval, now: now, log: log,
+            commandOutput: commandOutput
+        )
         relay.start(reconnectingEvery: reconnectInterval)
         var reader = NativeMessageReader(source: stdin)
         loop: while true {
@@ -71,7 +78,8 @@ public enum YouTubeHostCLI {
 }
 
 /// The connection to the app and what is replayed over it. Messages arrive on the thread that reads stdin, and a
-/// second thread keeps the connection up; one lock covers both, so a replay and a new message never interleave.
+/// second thread keeps the connection up; one lock covers both, so a replay and a new message never interleave. Each
+/// connection also has a thread of its own that waits for commands from the app and learns that the app has gone.
 final class HostRelay: Sendable {
     /// Captions of this many videos are kept; the one least recently received goes first.
     static let maxVideos = 3
@@ -99,20 +107,24 @@ final class HostRelay: Sendable {
     private let retryInterval: TimeInterval
     private let now: @Sendable () -> TimeInterval
     private let log: YouTubeBridgeLog
+    private let commandOutput: any ByteWriting
     private let tally: FrameTally
     private let state = Mutex(State())
     private let wake = DispatchSemaphore(value: 0)
     private let finished = DispatchSemaphore(value: 0)
+    /// The threads that read the connections, so that `stop` leaves none behind.
+    private let readers = DispatchGroup()
 
     init(
         socketPath: String, expectedOwner: uid_t, retryInterval: TimeInterval,
-        now: @escaping @Sendable () -> TimeInterval, log: YouTubeBridgeLog
+        now: @escaping @Sendable () -> TimeInterval, log: YouTubeBridgeLog, commandOutput: any ByteWriting
     ) {
         self.socketPath = socketPath
         self.expectedOwner = expectedOwner
         self.retryInterval = retryInterval
         self.now = now
         self.log = log
+        self.commandOutput = commandOutput
         tally = FrameTally(counted: "forwarded", lost: "dropped", now: now)
     }
 
@@ -123,17 +135,26 @@ final class HostRelay: Sendable {
         }
     }
 
-    /// Ends the connecting thread and closes the socket.
+    /// Ends the connecting thread and closes the socket, and the thread that reads it.
     func stop() {
         wake.signal()
         finished.wait()
         state.withLock { state in
-            guard let socket = state.socket else { return }
-            close(socket)
-            state.socket = nil
+            guard state.socket != nil else { return }
+            hangUp(&state)
             log("app socket closed: host exit")
         }
+        readers.wait()
         if let summary = tally.line(force: true) { log("host frames \(summary)") }
+    }
+
+    /// Lets go of the connection: the thread that reads it wakes up and closes the socket. Only that thread closes a
+    /// connection, so a descriptor is never closed under it while it waits in `recv`, and never reused by another socket
+    /// while it still reads the old one.
+    private func hangUp(_ state: inout State) {
+        guard let socket = state.socket else { return }
+        shutdown(socket, SHUT_RDWR)
+        state.socket = nil
     }
 
     /// Checks a native message and, when it is valid and fits a frame, remembers what a later connection needs of it
@@ -175,22 +196,17 @@ final class HostRelay: Sendable {
             if UnixStreamSocket.writeAll(frame, to: socket) {
                 tally.count(parsed.typeName)
             } else {
-                close(socket)
-                state.socket = nil
+                hangUp(&state)
                 tally.lose("send-failed")
                 log("app socket disconnected: send failed")
             }
         }
     }
 
-    /// One round of the connecting thread: notices a closed socket, and connects and replays when there is none.
+    /// One round of the connecting thread: connects and replays when there is no connection. The connection's own
+    /// thread notices the app going away.
     private func keepConnected() {
         state.withLock { state in
-            if let socket = state.socket, UnixStreamSocket.peerHasClosed(socket) {
-                close(socket)
-                state.socket = nil
-                log("app socket disconnected: peer closed")
-            }
             guard state.socket == nil else { return }
             switch UnixStreamSocket.open(to: socketPath, expectedOwner: expectedOwner) {
             case .failure(let failure):
@@ -222,6 +238,68 @@ final class HostRelay: Sendable {
         state.failedAttempts = 0
         state.lastReminder = nil
         log("app socket connected replayed-captions=\(captionCount) replayed-playback=\(playbackIncluded)\(after)")
+        readers.enter()
+        Thread.detachNewThread { [self] in
+            readCommands(from: socket)
+            readers.leave()
+        }
+    }
+
+    // MARK: commands from the app
+
+    /// Waits for what the app sends on the connection, which is commands and nothing else, until the connection ends.
+    private func readCommands(from socket: Int32) {
+        var decoder = AppFrameDecoder(maxLength: YouTubeCommand.maxFrameLength)
+        var buffer = [UInt8](repeating: 0, count: 512)
+        var reason = "peer closed"
+        reading: while true {
+            let count = recv(socket, &buffer, buffer.count, 0)
+            if count == 0 { break }
+            if count < 0 {
+                if errno == EINTR { continue }
+                reason = "read failed"
+                break
+            }
+            decoder.append(Data(buffer[0..<count]))
+            while true {
+                switch decoder.next() {
+                case .needMore:
+                    continue reading
+                case .tooLarge:
+                    // The stream is out of step, and no frame of it can be trusted any more.
+                    reason = "command frame too large"
+                    break reading
+                case .frame(let frame):
+                    forward(frame)
+                }
+            }
+        }
+        ended(socket, reason: reason)
+    }
+
+    /// Writes a command to Chrome, as the checked command: the bytes the app sent are never passed on.
+    private func forward(_ frame: Data) {
+        guard let command = YouTubeCommand.decode(frame) else {
+            log("command dropped reason=invalid")
+            return
+        }
+        if commandOutput.write(NativeMessage.frame(command.json)) {
+            log("command forwarded action=\(command.rawValue)")
+        } else {
+            log("command not delivered: stdout closed")
+        }
+    }
+
+    /// The connection is over, whoever ended it: the app, or the host itself (then `state.socket` is already gone and
+    /// it has said so). The only place a connection is closed.
+    private func ended(_ socket: Int32, reason: String) {
+        state.withLock { state in
+            if state.socket == socket {
+                state.socket = nil
+                log("app socket disconnected: \(reason)")
+            }
+            close(socket)
+        }
     }
 
     /// The first failure after a connection (or the start) is logged, the following ones are a reminder every 30 s.

@@ -38,6 +38,8 @@ struct MediaSettingsKeys {
 struct MediaActions {
     var send: (MediaCommand) -> Void
     var seek: (Double) -> Void
+    /// Whether Next and Previous can do anything for what plays now (see `SkipRoute`); the buttons are disabled when not.
+    var canSkip: () -> Bool = { true }
 }
 
 /// Now playing from any app: a live activity while music plays and a "Media" tab with the player controls.
@@ -331,12 +333,39 @@ public final class MediaModule: FeatureModule {
     var actions: MediaActions {
         MediaActions(
             send: { [weak self] command in self?.send(command) },
-            seek: { [weak self] seconds in self?.seek(toSeconds: seconds) }
+            seek: { [weak self] seconds in self?.seek(toSeconds: seconds) },
+            canSkip: { [weak self] in self?.canSkip ?? true }
         )
     }
 
+    /// Next and previous of a video that plays in Chrome go to the extension, which presses the player's own button, when it
+    /// has a live session for that video: Chrome ignores MediaRemote's next and previous there. Whatever else is sent
+    /// goes to MediaRemote. When the extension cannot do it, nothing else is tried.
     func send(_ command: MediaCommand) {
+        if let action = command.youTubeCommand, skipRoute() == .bridge {
+            sendToExtension(action)
+            return
+        }
         source?.send(command)
+    }
+
+    /// Where Next and Previous go for what plays now.
+    func skipRoute(at now: Date = Date()) -> SkipRoute {
+        SkipRoute.decide(for: store.state, in: captionStore, now: now)
+    }
+
+    /// False while Chrome plays and no route can skip, which the tab shows as disabled buttons.
+    var canSkip: Bool { skipRoute() != .unavailable }
+
+    /// The hosts connected to the socket (for tests).
+    var youtubeServerConnectionCount: Int { youtubeServer?.connectionCount ?? 0 }
+
+    private func sendToExtension(_ action: YouTubeCommand) {
+        guard let youtubeServer, youtubeServer.send(action) else {
+            youtubeLog("command not-sent reason=no-host")
+            return
+        }
+        youtubeLog("command sent action=\(action.rawValue)")
     }
 
     func seek(toSeconds seconds: Double) {

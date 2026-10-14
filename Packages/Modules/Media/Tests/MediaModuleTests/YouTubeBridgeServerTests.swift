@@ -21,8 +21,65 @@ final class YouTubeTestClient {
     @discardableResult
     func sendFrame(_ json: Data) -> Bool { send(AppFrame.encode(json)!) }
 
-    /// The server closed this connection.
-    var isClosedByServer: Bool { UnixStreamSocket.peerHasClosed(fd) }
+    /// The server closed this connection (what it has sent and not been read does not count: a command is not a close).
+    var isClosedByServer: Bool {
+        var poller = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        guard poll(&poller, 1, 0) > 0 else { return false }
+        if poller.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0 { return true }
+        var byte: UInt8 = 0
+        let count = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
+        return count == 0 || (count < 0 && errno != EAGAIN && errno != EINTR)
+    }
+
+    /// The frames the server sends, waiting up to `seconds` for each; fewer than `count` when they do not come.
+    func receiveFrames(count: Int, seconds: Double = 5) -> [Data] {
+        var decoder = AppFrameDecoder()
+        var frames: [Data] = []
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while frames.count < count {
+            if case .frame(let frame) = decoder.next() {
+                frames.append(frame)
+                continue
+            }
+            var poller = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            guard poll(&poller, 1, Int32(seconds * 1000)) > 0 else { break }
+            let received = recv(fd, &buffer, buffer.count, 0)
+            guard received > 0 else { break }
+            decoder.append(Data(buffer[0..<received]))
+        }
+        return frames
+    }
+
+    /// Whether the server has sent anything that has not been read yet, within `seconds`.
+    func hasData(within seconds: Double) -> Bool {
+        var poller = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        return poll(&poller, 1, Int32(seconds * 1000)) > 0 && poller.revents & Int16(POLLIN) != 0
+    }
+}
+
+/// SIGPIPEs raised in this process so far, counted by `SigpipeCounter`.
+private let sigpipesRaised = Atomic<Int>(0)
+
+/// Counts SIGPIPE instead of letting it end the process, which is its default action: a send to a closed socket that is not
+/// guarded against it would otherwise take the whole test run down instead of failing one test. Only one test uses it.
+private final class SigpipeCounter: Sendable {
+    private let previous: Mutex<sigaction>
+    private let baseline = sigpipesRaised.load(ordering: .relaxed)
+
+    init() {
+        var action = sigaction()
+        action.__sigaction_u.__sa_handler = { _ in sigpipesRaised.add(1, ordering: .relaxed) }
+        sigemptyset(&action.sa_mask)
+        var old = sigaction()
+        sigaction(SIGPIPE, &action, &old)
+        previous = Mutex(old)
+    }
+
+    deinit {
+        previous.withLock { _ = sigaction(SIGPIPE, &$0, nil) }
+    }
+
+    var seen: Int { sigpipesRaised.load(ordering: .relaxed) - baseline }
 }
 
 /// Waits on the main actor, where the callbacks run, until `condition` holds.
@@ -195,6 +252,162 @@ final class Finished: Sendable {
         await waitUntil { received.count == 3 }
         #expect(received == sent)
         #expect(await waitUntil { finished.flag.withLock { $0 } })
+    }
+
+    // MARK: commands to the host
+
+    /// A playback from `client`, which is how the server learns which host the page is behind; waits until it has been delivered.
+    func sendPlayback(from client: YouTubeTestClient, time: Double = 1) async {
+        let before = received.count
+        client.sendFrame(YouTubeTestMessages.json(YouTubeTestMessages.playback(time: time)))
+        await waitUntil { received.count == before + 1 }
+    }
+
+    @Test func aCommandGoesAsAFrameToTheHostWhosePlaybackCameLast() async throws {
+        let server = makeServer()
+        try server.start()
+        defer { server.stop() }
+        let first = try #require(YouTubeTestClient(path: path))
+        let second = try #require(YouTubeTestClient(path: path))
+        await sendPlayback(from: first)
+        await sendPlayback(from: second)
+        #expect(server.send(.next))
+        #expect(second.receiveFrames(count: 1) == [YouTubeCommand.next.json])
+        #expect(!first.hasData(within: 0.2), "only the host that is behind the playing page is asked")
+
+        await sendPlayback(from: first, time: 2)
+        #expect(server.send(.previous))
+        #expect(first.receiveFrames(count: 1) == [YouTubeCommand.previous.json])
+        #expect(!second.hasData(within: 0.2))
+    }
+
+    @Test func theFrameIsExactlyTheCommandsFrame() async throws {
+        let server = makeServer()
+        try server.start()
+        defer { server.stop() }
+        let client = try #require(YouTubeTestClient(path: path))
+        await sendPlayback(from: client)
+        #expect(server.send(.previous))
+        var raw = [UInt8](repeating: 0, count: 64)
+        var poller = pollfd(fd: client.fd, events: Int16(POLLIN), revents: 0)
+        #expect(poll(&poller, 1, 5000) > 0)
+        let count = recv(client.fd, &raw, raw.count, 0)
+        #expect(Data(raw[0..<max(count, 0)]) == YouTubeCommand.previous.frame)
+    }
+
+    @Test func withoutAPlaybackThereIsNoHostToSendToAndNothingIsSent() async throws {
+        let server = makeServer()
+        try server.start()
+        defer { server.stop() }
+        #expect(!server.send(.next), "no connection at all")
+        let client = try #require(YouTubeTestClient(path: path))
+        client.sendFrame(YouTubeTestMessages.json(YouTubeTestMessages.clear()))
+        client.sendFrame(YouTubeTestMessages.json(YouTubeTestMessages.captions()))
+        client.sendFrame(YouTubeTestMessages.json(YouTubeTestMessages.diag("content-start", from: .content)))
+        await waitUntil { received.count == 3 }
+        #expect(!server.send(.next), "only a playback says where the page is")
+        #expect(!client.hasData(within: 0.2))
+    }
+
+    @Test func aHostThatClosedIsNotWrittenTo() async throws {
+        let server = makeServer()
+        try server.start()
+        defer { server.stop() }
+        do {
+            let client = try #require(YouTubeTestClient(path: path))
+            await sendPlayback(from: client)
+        }
+        await waitUntil { server.connectionCount == 0 }
+        #expect(!server.send(.next))
+    }
+
+    @Test func aStoppedServerSendsNothing() async throws {
+        let server = makeServer()
+        try server.start()
+        let client = try #require(YouTubeTestClient(path: path))
+        await sendPlayback(from: client)
+        server.stop()
+        #expect(!server.send(.next))
+        #expect(YouTubeTestClient(path: path) == nil)
+    }
+
+    @Test func sendingToAHostThatHasJustGoneNeitherRaisesSIGPIPENorLeavesItListed() async throws {
+        let counter = SigpipeCounter()
+        let server = makeServer()
+        try server.start()
+        defer { server.stop() }
+        let client = try #require(YouTubeTestClient(path: path))
+        await sendPlayback(from: client)
+        shutdown(client.fd, SHUT_RDWR)
+        // Whether the server has noticed yet or not, none of these may end the process.
+        for _ in 0..<20 {
+            _ = server.send(.next)
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(counter.seen == 0, "a send to a closed socket must not raise SIGPIPE (SO_NOSIGPIPE)")
+        await waitUntil { server.connectionCount == 0 }
+        #expect(server.connectionCount == 0)
+        #expect(!server.send(.next))
+    }
+
+    @Test func everyConnectionIsGuardedAgainstSIGPIPEBecauseTheAppWritesToThem() async throws {
+        let server = makeServer()
+        try server.start()
+        defer { server.stop() }
+        let clients = try (0..<3).map { _ in try #require(YouTubeTestClient(path: path)) }
+        await waitUntil { server.connectionCount == 3 }
+        #expect(server.connectionCount == 3)
+        #expect(server.connectionsAreGuardedAgainstSIGPIPE)
+        withExtendedLifetime(clients) {}
+    }
+
+    @Test func theServerNeverSendsAnythingUnasked() async throws {
+        let server = makeServer()
+        try server.start()
+        defer { server.stop() }
+        let client = try #require(YouTubeTestClient(path: path))
+        for message in [YouTubeTestMessages.captions(), YouTubeTestMessages.playback(), YouTubeTestMessages.clear()] {
+            client.sendFrame(YouTubeTestMessages.json(message))
+        }
+        await waitUntil { received.count == 3 }
+        #expect(!client.hasData(within: 0.3))
+    }
+
+    @Test func aCommandReachesTheHostsStdoutAsANativeMessage() async throws {
+        let server = makeServer()
+        try server.start()
+        defer { server.stop() }
+        var stdin: [Int32] = [0, 0]
+        var stdout: [Int32] = [0, 0]
+        #expect(pipe(&stdin) == 0)
+        #expect(pipe(&stdout) == 0)
+        let socketPath = path
+        let finished = Finished()
+        let output = FileDescriptorWriter(fileDescriptor: stdout[1])
+        let input = stdin[0]
+        Thread.detachNewThread {
+            _ = YouTubeHostCLI.run(
+                stdin: FileDescriptorReader(fileDescriptor: input), socketPath: socketPath, reconnectInterval: 0.05,
+                log: .silent, commandOutput: output
+            )
+            close(input)
+            finished.flag.withLock { $0 = true }
+        }
+        await waitUntil { server.connectionCount == 1 }
+        // The page's playback tells the server which connection to use, and the command comes back the same way.
+        let json = YouTubeTestMessages.json(YouTubeTestMessages.playback())
+        let frame = withUnsafeBytes(of: UInt32(json.count)) { Data($0) } + json
+        frame.withUnsafeBytes { _ = write(stdin[1], $0.baseAddress, $0.count) }
+        await waitUntil { received.count == 1 }
+        #expect(server.send(.next))
+        var poller = pollfd(fd: stdout[0], events: Int16(POLLIN), revents: 0)
+        #expect(poll(&poller, 1, 5000) > 0, "the command did not come out of the host")
+        var reader = NativeMessageReader(source: FileDescriptorReader(fileDescriptor: stdout[0]))
+        #expect(reader.next() == .message(YouTubeCommand.next.json))
+        close(stdin[1])
+        #expect(await waitUntil { finished.flag.withLock { $0 } })
+        close(stdout[0])
+        close(stdout[1])
     }
 
     // MARK: lifecycle

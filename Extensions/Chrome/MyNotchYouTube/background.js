@@ -8,6 +8,8 @@
  * After an install or an update it also injects the content scripts into the YouTube tabs that
  * were already open, which Chrome does not do on its own, and it says whether Chrome withholds
  * the extension's access to YouTube (site access "On click"), injecting once that is granted.
+ * The one thing the host can say to the worker is a command from the app (next or previous): the
+ * worker validates it and passes it to the tab that last sent playback.
  */
 importScripts("captions.js", "bridge.js");
 
@@ -36,7 +38,11 @@ importScripts("captions.js", "bridge.js");
       console.warn("[MyNotch YouTube Bridge] " + text);
     },
     errorCode: C.errorCode,
-    buildDiag: C.buildDiag
+    buildDiag: C.buildDiag,
+    // What the native host writes to Chrome (a command from the app) goes to the relay, which validates it.
+    onHostMessage: function (message) {
+      relay.onHostMessage(message);
+    }
   });
 
   var relay = B.createRelay({
@@ -47,6 +53,10 @@ importScripts("captions.js", "bridge.js");
       return Date.now();
     },
     version: chrome.runtime.getManifest().version,
+    // The top frame of the tab only: that is where the content script runs.
+    sendToTab: function (tabId, message) {
+      return chrome.tabs.sendMessage(tabId, message, { frameId: 0 });
+    },
     log: log
   });
 

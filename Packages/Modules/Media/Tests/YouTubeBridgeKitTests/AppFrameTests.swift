@@ -54,6 +54,19 @@ import Testing
         #expect(decoder.next() == .tooLarge(AppFrame.maxLength + 1))
     }
 
+    @Test func aDecoderMayHaveALimitOfItsOwn() throws {
+        var decoder = AppFrameDecoder(maxLength: 8)
+        decoder.append(try #require(AppFrame.encode(Data(repeating: 0x20, count: 8))))
+        #expect(decoder.next() == .frame(Data(repeating: 0x20, count: 8)))
+        decoder.append(Data([0, 0, 0, 9]) + Data(repeating: 0x20, count: 9))
+        #expect(decoder.next() == .tooLarge(9))
+        decoder.append(Data([0, 0, 0, 1, 1]))
+        #expect(decoder.next() == .tooLarge(9), "and stays so")
+        var standard = AppFrameDecoder()
+        standard.append(Data([0, 0, 0, 9]) + Data(repeating: 0x20, count: 9))
+        #expect(standard.next() == .frame(Data(repeating: 0x20, count: 9)), "the default is the frame limit")
+    }
+
     @Test func aFrameOfExactlyTheLimitIsAccepted() throws {
         var decoder = AppFrameDecoder()
         decoder.append(try #require(AppFrame.encode(Data(repeating: 0x20, count: AppFrame.maxLength))))

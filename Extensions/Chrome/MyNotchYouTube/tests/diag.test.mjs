@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ID_TOKEN, assertSafeDiag, loadCaptions } from "./helpers.mjs";
+import { ID_TOKEN, assertSafeDiag, loadCaptions, scannedForIds } from "./helpers.mjs";
 
 const C = loadCaptions();
 
@@ -21,6 +21,12 @@ const GOOD = [
   ["sw", "sw-inject tabs=3 injected=2 failed=1"],
   ["sw", "sw-inject tabs=0 injected=0 failed=0"],
   ["sw", "sw-inject tabs=999999 injected=999999 failed=0"],
+  ["sw", "sw-reject invalid command"],
+  ["sw", "sw-command-no-tab"],
+  ["content", "content-command next ok"],
+  ["content", "content-command next unavailable"],
+  ["content", "content-command previous ok"],
+  ["content", "content-command previous unavailable"],
   ["content", "content-start"],
   ["content", "content-no-lib"],
   ["content", "content-video-found"],
@@ -99,6 +105,37 @@ test("validateMessage rejects titles, URLs, ids, free text and malformed shapes"
     ["content", "content-alive videoid-present=maybe playing=false"],
     ["content", "content-alive  videoid-present=true playing=false"],
     ["content", "content-no-lib extra"],
+    ["content", "content-command"],
+    ["content", "content-command next"],
+    ["content", "content-command ok"],
+    ["content", "content-command skip ok"],
+    ["content", "content-command next maybe"],
+    ["content", "content-command next failed"],
+    ["content", "content-command NEXT ok"],
+    ["content", "content-command next OK"],
+    ["content", "content-command ok next"], // the order is fixed
+    ["content", "content-command next ok extra"],
+    ["content", "content-command next  ok"],
+    ["content", "content-command next ok "],
+    ["content", "content-command next ok abcdefghijk"],
+    ["content", "content-command next=ok"],
+    ["content", "content-command next ok https://www.youtube.com/watch"],
+    ["sw", "content-command next ok"], // only the content script performs commands
+    ["page", "content-command next ok"],
+    ["sw", "sw-command-no-tab extra"],
+    ["sw", "sw-command-no-tab "],
+    ["sw", "sw-command-no-tab tab=1"],
+    ["content", "sw-command-no-tab"], // only the service worker knows whether a tab is there
+    ["page", "sw-command-no-tab"],
+    // "unavailable" has eleven letters: it is allowed in content-command's closed list and nowhere else
+    ["sw", "sw-reconnect after=unavailable failures=1"],
+    ["content", "content-send-error unavailable count=1"],
+    ["content", "content-tick-error unavailable"],
+    ["content", "content-command unavailable ok"],
+    ["content", "content-command next unavailable unavailable"],
+    ["sw", "sw-reject invalid unavailable"],
+    ["sw", "sw-reject invalid commands"],
+    ["sw", "sw-reject invalid Command"],
     ["content", "content-no-lib "],
     ["page", "content-no-lib"],
     ["sw", "content-no-lib"],
@@ -137,7 +174,7 @@ test("validateMessage rejects titles, URLs, ids, free text and malformed shapes"
 
 test("no event of the closed list can be exactly 11 characters long as a token (id lookalike)", () => {
   // The code names themselves never trip the id-lookalike rule.
-  for (const [where, event] of GOOD) assert.equal(ID_TOKEN.test(event), false, event);
+  for (const [where, event] of GOOD) assert.equal(ID_TOKEN.test(scannedForIds(event)), false, event);
 });
 
 test("errorCode: known Chrome errors become fixed codes, everything else a safe token", () => {
