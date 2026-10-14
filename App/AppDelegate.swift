@@ -120,10 +120,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setPermissionPolling(_ enabled: Bool) {
         if enabled, permissionPolling == nil {
-            permissionPolling = Task { [registry] in
+            permissionPolling = Task { [registry, overview = permissionOverview] in
                 // `Task.sleep` throws once the task is cancelled, which ends the loop.
                 while (try? await Task.sleep(for: .seconds(2))) != nil {
                     await registry.refreshPermissions()
+                    // The same poll keeps the status-bar dot and the sidebar badge honest after a grant in System Settings.
+                    overview.refresh()
                 }
             }
         } else if !enabled {

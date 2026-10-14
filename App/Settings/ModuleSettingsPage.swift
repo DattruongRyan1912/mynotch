@@ -66,15 +66,11 @@ private struct PermissionRow: View {
         LabeledContent(permission.displayName) {
             TimelineView(.periodic(from: .now, by: 2)) { _ in
                 let status = permissions.status(of: permission)
+                let action = permission.grantAction(for: status)
                 HStack {
-                    switch status {
-                    case .granted: Text("Đã cấp").foregroundStyle(.green)
-                    case .denied: Text("Chưa cấp").foregroundStyle(.orange)
-                    case .notDetermined: Text("Chưa xin").foregroundStyle(.secondary)
-                    case .unknown: Text("Chưa kiểm tra được").foregroundStyle(.secondary)
-                    }
+                    StatusPill(status: status)
                     if status != .granted {
-                        Button("Cấp quyền") {
+                        Button(action == .openSettings ? "Mở Cài đặt" : "Cấp quyền") {
                             isGranting = true
                             Task {
                                 await registry.grant(permission)
@@ -82,7 +78,7 @@ private struct PermissionRow: View {
                             }
                         }
                         .disabled(isGranting)
-                        .accessibilityLabel("Cấp quyền \(permission.displayName)")
+                        .accessibilityLabel("\(action == .openSettings ? "Mở Cài đặt cho" : "Cấp quyền") \(permission.displayName)")
                     }
                 }
             }

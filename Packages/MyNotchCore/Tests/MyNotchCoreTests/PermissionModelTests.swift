@@ -23,7 +23,7 @@ import Testing
         (.reminders, "Lời nhắc"),
         (.bluetooth, "Bluetooth"),
         (.automation(bundleID: "com.spotify.client"), "Điều khiển com.spotify.client"),
-        (.microphone, "Micro"),
+        (.microphone, "Micrô"),
         (.systemAudio, "Ghi âm thanh hệ thống"),
         (.downloadsFolder, "Thư mục Downloads"),
         (.desktopFolder, "Thư mục Desktop"),
@@ -90,6 +90,30 @@ import Testing
         for status in [PermissionStatus.denied, .notDetermined, .unknown] {
             #expect(Permission.systemAudio.grantAction(for: status) == .openSettings)
             #expect(Permission.pasteboard.grantAction(for: status) == .openSettings)
+        }
+    }
+
+    @Test func theInstructionShowsWhereOnlySystemSettingsCanHelp() {
+        for status in [PermissionStatus.denied, .notDetermined, .unknown] {
+            #expect(Permission.systemAudio.showsInstruction(for: status))
+            #expect(Permission.pasteboard.showsInstruction(for: status))
+            #expect(Permission.accessibility.showsInstruction(for: status))
+            #expect(Permission.screenRecording.showsInstruction(for: status))
+        }
+        #expect(Permission.calendars.showsInstruction(for: .denied))
+        #expect(Permission.bluetooth.showsInstruction(for: .denied))
+    }
+
+    @Test func theInstructionShowsForFoldersWhoseStatusMacOSCannotSay() {
+        #expect(Permission.downloadsFolder.showsInstruction(for: .unknown))
+        #expect(Permission.desktopFolder.showsInstruction(for: .unknown))
+    }
+
+    @Test func noInstructionWhileAPromptWillStillAskOrOnceGranted() {
+        #expect(!Permission.calendars.showsInstruction(for: .notDetermined))
+        #expect(!Permission.reminders.showsInstruction(for: .notDetermined))
+        for permission in Self.everyPermission {
+            #expect(!permission.showsInstruction(for: .granted))
         }
     }
 }

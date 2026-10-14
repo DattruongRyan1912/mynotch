@@ -53,6 +53,8 @@ struct PermissionsPage: View {
                     Text(step.permission.instruction).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button("Mở Cài đặt") { Task { await overview.grant(step.permission) } }
+                    .disabled(overview.granting.contains(step.permission))
                 Button("Bỏ qua") { overview.skipWalkthroughStep() }
                 Button("Dừng") { overview.stopWalkthrough() }
             }
@@ -91,7 +93,7 @@ private struct PermissionRequirementRow: View {
                 ForEach(requirement.uses, id: \.module) { use in
                     Text("\(use.moduleName): \(use.reason)").font(.caption).foregroundStyle(.secondary)
                 }
-                if status.isMissing && (action == .openSettings || permission.isSettingsOnly) {
+                if permission.showsInstruction(for: status) {
                     Text(permission.instruction).font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -107,7 +109,8 @@ private struct PermissionRequirementRow: View {
     }
 }
 
-private struct StatusPill: View {
+/// Shared with the module pages so a permission reads the same everywhere.
+struct StatusPill: View {
     let status: PermissionStatus
 
     var body: some View {

@@ -24,7 +24,7 @@ nonisolated public enum Permission: Hashable, Sendable {
         case .reminders: "Lời nhắc"
         case .bluetooth: "Bluetooth"
         case .automation(let bundleID): "Điều khiển \(bundleID)"
-        case .microphone: "Micro"
+        case .microphone: "Micrô"
         case .systemAudio: "Ghi âm thanh hệ thống"
         case .downloadsFolder: "Thư mục Downloads"
         case .desktopFolder: "Thư mục Desktop"
@@ -85,8 +85,8 @@ nonisolated public enum Permission: Hashable, Sendable {
         case .calendars: "Lịch (Calendars)"
         case .reminders: "Lời nhắc (Reminders)"
         case .bluetooth: "Bluetooth"
-        case .automation: "Tự động hoá (Automation)"
-        case .microphone: "Micro (Microphone)"
+        case .automation: "Tự động hóa (Automation)"
+        case .microphone: "Micrô (Microphone)"
         case .downloadsFolder, .desktopFolder: "Tệp và thư mục (Files & Folders)"
         case .systemAudio: "Chỉ ghi âm thanh hệ thống (System Audio Recording Only)"
         case .pasteboard: "Dán từ app khác (Paste from Other Apps)"
@@ -116,6 +116,12 @@ nonisolated public enum Permission: Hashable, Sendable {
         if isPaneOnly { return .openSettings }
         if isSettingsOnly { return .request }
         return status == .denied ? .openSettings : .request
+    }
+
+    /// Whether the page spells out the step in System Settings: the permission is not granted and the pane is where it
+    /// gets granted (alone, or after the request), or macOS cannot say (`unknown`), so the user may need the pane too.
+    public func showsInstruction(for status: PermissionStatus) -> Bool {
+        status != .granted && (status == .unknown || isSettingsOnly || grantAction(for: status) == .openSettings)
     }
 
     /// Deep link into the matching System Settings privacy pane.

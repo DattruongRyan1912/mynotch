@@ -224,6 +224,21 @@ private nonisolated final class ChangeCount: Sendable {
         #expect(harness.permissions.requested == [.calendars])
     }
 
+    @Test func aSecondGrantWhileOneIsRunningDoesNothing() async {
+        let harness = Harness([FakeModule("m", permissions: [.calendars])])
+        harness.permissions.statuses[.calendars] = .notDetermined
+        let prompt = openPrompt(on: harness)
+        let overview = overview(harness)
+        let first = Task { await overview.grant(.calendars) }
+        await waitForPrompt(prompt)
+        await overview.grant(.calendars)
+        #expect(overview.granting == [.calendars])
+        prompt.open()
+        await first.value
+        #expect(harness.permissions.requested == [.calendars])
+        #expect(overview.granting.isEmpty)
+    }
+
     // MARK: "Cấp lần lượt"
 
     private func walkthroughHarness() -> Harness {
@@ -283,6 +298,17 @@ private nonisolated final class ChangeCount: Sendable {
         overview.startWalkthrough()
         await overview.walkthroughSettled()
         #expect(harness.permissions.openedSettings.isEmpty)
+        #expect(overview.walkthrough == .waiting(.init(permission: .calendars, position: 1, total: 1)))
+    }
+
+    @Test func aDeniedPromptablePermissionOpensSettingsAndWaits() async {
+        let harness = Harness([FakeModule("m", permissions: [.calendars])])
+        harness.permissions.statuses[.calendars] = .denied
+        let overview = overview(harness)
+        overview.startWalkthrough()
+        await overview.walkthroughSettled()
+        #expect(harness.permissions.requested.isEmpty)
+        #expect(harness.permissions.openedSettings == [.calendars])
         #expect(overview.walkthrough == .waiting(.init(permission: .calendars, position: 1, total: 1)))
     }
 
