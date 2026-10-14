@@ -5,12 +5,12 @@ enum UnixStreamSocket {
     /// How long a send may wait for a slow app before the connection is given up.
     static let sendTimeoutSeconds = 5
 
-    /// A connected socket, or nil when nothing listens, the path does not fit, or the socket file is not a socket of
-    /// `expectedOwner`: a folder in `/tmp` can be made by anyone, and captions are not sent to another user's socket.
+    /// A connected socket, or nil when nothing listens, the path does not fit, or the one that listens belongs to
+    /// someone other than `expectedOwner`: a folder in `/tmp` can be made by anyone, and captions are not sent to another
+    /// user's socket. The owner is asked of the connection itself, so a socket file swapped in after the path was
+    /// looked at makes no difference; nothing is sent before that.
     static func connect(to path: String, expectedOwner: uid_t) -> Int32? {
         guard var address = UnixSocketAddress(path: path)?.value else { return nil }
-        var info = stat()
-        guard stat(path, &info) == 0, info.st_mode & S_IFMT == S_IFSOCK, info.st_uid == expectedOwner else { return nil }
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
         var yes: Int32 = 1
@@ -27,7 +27,9 @@ enum UnixStreamSocket {
         let connected = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Foundation.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
-        guard connected == 0, fcntl(fd, F_SETFL, 0) == 0 else {
+        var owner: uid_t = 0
+        var group: gid_t = 0
+        guard connected == 0, getpeereid(fd, &owner, &group) == 0, owner == expectedOwner, fcntl(fd, F_SETFL, 0) == 0 else {
             close(fd)
             return nil
         }

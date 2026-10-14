@@ -18,8 +18,8 @@ import Testing
         ["v": 1, "type": "clear", "videoId": videoID]
     }
 
-    func start(expectedOwner: uid_t = geteuid()) -> HostRun {
-        HostRun(socketPath: server.path, clock: clock, expectedOwner: expectedOwner)
+    func start(on path: String? = nil, expectedOwner: uid_t = geteuid()) -> HostRun {
+        HostRun(socketPath: path ?? server.path, clock: clock, expectedOwner: expectedOwner)
     }
 
     // MARK: forwarding
@@ -120,13 +120,62 @@ import Testing
         #expect(await host.finish() == 0)
     }
 
-    @Test func aSocketOfAnotherUserIsNeverConnectedTo() async throws {
+    @Test func aSocketOfAnotherUserGetsNothingNotEvenTheReplay() async throws {
         defer { server.remove() }
         try server.start()
         let host = start(expectedOwner: geteuid() &+ 1)
+        // Captions are what a connection would replay at once, and a clear what a live one would carry.
+        host.sendJSON(Self.captions("aaaaaaaaaaa"))
+        host.sendJSON(Self.clear("bbbbbbbbbbb"))
+        // The host may connect to find out whose socket it is, but it hangs up before it sends anything.
+        await waitUntil { server.connectionCount >= 2 }
+        #expect(server.connectionCount >= 2)
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(server.frames.isEmpty)
+        #expect(await host.finish() == 0)
+    }
+
+    // MARK: an app that closes the socket
+
+    @Test func aSendToAPeerThatHasClosedFailsInsteadOfRaisingSIGPIPE() async throws {
+        let watch = SigpipeWatch()
+        let closing = FrameServer(closesClientsAtOnce: true)
+        defer { closing.remove() }
+        try closing.start()
+        // The host connects once, at the start, and does not look at the socket again for a minute.
+        let host = HostRun(socketPath: closing.path, reconnectInterval: 60, clock: clock)
+        await waitUntil { closing.hangUpCount == 1 }
+        #expect(closing.hangUpCount == 1)
+        // These go to a socket whose other end is closed.
         host.sendJSON(Self.clear("aaaaaaaaaaa"))
-        try await Task.sleep(for: .milliseconds(400))
-        #expect(server.connectionCount == 0)
+        host.sendJSON(Self.playback())
+        host.sendJSON(Self.captions("bbbbbbbbbbb"))
+        #expect(await host.finish() == 0)
+        #expect(watch.count == 0, "a send to a closed socket must not raise SIGPIPE (SO_NOSIGPIPE)")
+    }
+
+    @Test func theHostKeepsRunningAndReplaysToTheNextAppAfterOneThatHungUp() async throws {
+        let watch = SigpipeWatch()
+        let closing = FrameServer(closesClientsAtOnce: true)
+        defer { closing.remove() }
+        try closing.start()
+        let host = start(on: closing.path)
+        let captions = host.sendJSON(Self.captions("aaaaaaaaaaa"))
+        // Each reconnection replays the captions to a peer that has just gone, and live messages hit the dead ones too.
+        await waitUntil { closing.hangUpCount >= 3 }
+        for _ in 0..<20 {
+            host.sendJSON(Self.clear("bbbbbbbbbbb"))
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(closing.hangUpCount >= 3)
+
+        closing.stop()
+        let real = FrameServer(directory: closing.directory)
+        defer { real.stop() }
+        try real.start()
+        await waitUntil { real.frames.count == 1 }
+        #expect(real.frames == [captions])
+        #expect(watch.count == 0, "a send to a closed socket must not raise SIGPIPE (SO_NOSIGPIPE)")
         #expect(await host.finish() == 0)
     }
 

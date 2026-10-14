@@ -87,7 +87,8 @@ final class HostRelay: Sendable {
     /// Checks a native message and, when it is valid and fits a frame, remembers what a later connection needs of it
     /// and sends it now. While the app is away nothing is sent: it is dropped.
     func submit(_ message: Data) {
-        guard let parsed = YouTubeMessage.decode(message), let frame = AppFrame.encode(message) else { return }
+        // The size comes first: a padded message of up to 64 MiB should be dropped, not parsed.
+        guard let frame = AppFrame.encode(message), let parsed = YouTubeMessage.decode(message) else { return }
         state.withLock { state in
             switch parsed {
             case .captions(let captions):

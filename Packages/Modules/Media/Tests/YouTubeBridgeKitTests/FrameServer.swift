@@ -3,27 +3,33 @@ import Synchronization
 @testable import YouTubeBridgeKit
 
 /// Stands in for the app: listens on a stream socket in a short `/tmp/mn-<id>` folder and collects the frames each
-/// client sends. Plain threads and blocking calls, so the host's own behaviour is all that is under test.
+/// client sends. Plain threads and blocking calls, so the host's own behaviour is all that is under test. With
+/// `closesClientsAtOnce` it is an app that accepts every connection and hangs up, as one that is quitting does.
 final class FrameServer: Sendable {
     private struct State {
         var frames: [Data] = []
         var connections = 0
+        var hangUps = 0
         var clients: [Int32] = []
         var listener: Int32 = -1
     }
 
     let directory: URL
     var path: String { directory.appending(path: YouTubeSocket.fileName).path }
+    private let closesClientsAtOnce: Bool
     private let state = Mutex(State())
 
     /// A private folder with a path short enough for a socket (`directory` to reuse one); the socket file is made by `start`.
-    init(directory: URL? = nil) {
+    init(directory: URL? = nil, closesClientsAtOnce: Bool = false) {
+        self.closesClientsAtOnce = closesClientsAtOnce
         self.directory = directory ?? URL(filePath: "/tmp/mn-\(UUID().uuidString.prefix(8))", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
     }
 
     var frames: [Data] { state.withLock { $0.frames } }
     var connectionCount: Int { state.withLock { $0.connections } }
+    /// Connections that were accepted and closed again at once.
+    var hangUpCount: Int { state.withLock { $0.hangUps } }
 
     func start() throws {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -60,17 +66,22 @@ final class FrameServer: Sendable {
             let client = state.withLock { state -> Int32? in
                 guard state.listener == listener else { return nil }
                 let client = Foundation.accept(listener, nil, nil)
-                if client >= 0 {
-                    // A socket accepted from a non-blocking listener is non-blocking too on macOS.
-                    _ = fcntl(client, F_SETFL, 0)
-                    state.connections += 1
-                    state.clients.append(client)
+                guard client >= 0 else { return client }
+                state.connections += 1
+                if closesClientsAtOnce {
+                    // The peer's end is closed by the time `hangUpCount` shows it.
+                    close(client)
+                    state.hangUps += 1
+                    return -2
                 }
+                // A socket accepted from a non-blocking listener is non-blocking too on macOS.
+                _ = fcntl(client, F_SETFL, 0)
+                state.clients.append(client)
                 return client
             }
             guard let client else { return }
             if client < 0 {
-                usleep(5_000)
+                if client == -1 { usleep(5_000) }
                 continue
             }
             Thread.detachNewThread { [self] in read(from: client) }

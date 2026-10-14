@@ -157,8 +157,6 @@ final class YouTubeBridgeServer {
                 close(fd)
                 continue
             }
-            var noSigPipe: Int32 = 1
-            _ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
             let reader = Reader()
             let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
             let handler: @Sendable () -> Void = {
