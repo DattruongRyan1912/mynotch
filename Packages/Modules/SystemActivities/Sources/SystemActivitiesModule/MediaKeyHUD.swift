@@ -18,36 +18,50 @@ nonisolated struct MediaKeySelection: Equatable, Sendable {
 /// Takes over the volume, brightness and keyboard light keys: swallows them, makes the change itself and reports it
 /// as an activity, so MyNotch's bar shows instead of the macOS one.
 ///
-/// Every control sits behind a protocol, and a key whose control is missing (no built-in display, no backlit keyboard,
-/// a private framework that changed) is never swallowed. Without Accessibility there is no tap at all, so every key
-/// stays the system's; the HUD asks again every 2 s, which is how it notices the permission being granted.
+/// The tap callback runs on the main thread and holds up every system-defined event of the session while it works,
+/// so it only decides: whether to swallow a key comes from the sub-toggles and from what the last look at the
+/// hardware found, and the change itself is made later on the hardware queue. A key whose control is missing (no
+/// built-in display, no backlit keyboard, a private framework that changed) is therefore not swallowed, and one that
+/// fails after all gives its kind back to the system from the next press on; the press that found out is lost.
+///
+/// Without Accessibility there is no tap at all, so every key stays the system's; the HUD asks again every 2 s, which
+/// is how it notices the permission being granted. A tap that is up is checked every 10 s, because macOS does not
+/// always say when it switches one off.
 final class MediaKeyHUD {
     /// How long the bar stays after the last key press.
     static let displayDuration: Duration = .milliseconds(1_500)
     static let retryInterval: Duration = .seconds(2)
+    /// How often a tap that is up is checked, and what the keys can do is looked at again.
+    static let checkInterval: Duration = .seconds(10)
 
     private let tap: any EventTapping
-    private let volume: any VolumeControlling
-    private let brightness: any LevelControlling
-    private let keyboardLight: any LevelControlling
+    private let queue: any HardwareQueue
+    private let changes: any HardwareChangeSource
+    private let hardware: MediaKeyHardware
     private let isTrusted: () -> Bool
     private let scheduler: any Scheduler
     private var enabled: (() -> MediaKeySelection)?
     private var onChange: (@MainActor (SystemActivityContent) -> Void)?
-    private var retry: ScheduledAction?
+    /// The wait for the permission, or the next check of the tap.
+    private var timer: ScheduledAction?
+    /// What the keys can do. Nothing until the first look at the hardware returns, so until then they stay the system's.
+    private var availability = MediaKeyAvailability()
+    /// Whether each key that is down was swallowed, so its repeats and its release go the way its press went.
+    private var held: [MediaKey: Bool] = [:]
+    /// Tells the answers of the hardware queue that belong to an earlier run from this run's.
+    private var run = 0
     /// The volume this HUD set last, which the volume monitor reports back a moment later.
     private var lastVolume: VolumeState?
-    /// The keyboard light's level before the toggle key switched it off, for switching it back on.
-    private var lightBeforeToggle: Float?
 
     init(
-        tap: any EventTapping, volume: any VolumeControlling, brightness: any LevelControlling,
-        keyboardLight: any LevelControlling, isTrusted: @escaping () -> Bool, scheduler: any Scheduler
+        tap: any EventTapping, queue: any HardwareQueue, changes: any HardwareChangeSource,
+        volume: any VolumeControlling, brightness: any LevelControlling, keyboardLight: any LevelControlling,
+        isTrusted: @escaping () -> Bool, scheduler: any Scheduler
     ) {
         self.tap = tap
-        self.volume = volume
-        self.brightness = brightness
-        self.keyboardLight = keyboardLight
+        self.queue = queue
+        self.changes = changes
+        hardware = MediaKeyHardware(volume: volume, brightness: brightness, keyboardLight: keyboardLight)
         self.isTrusted = isTrusted
         self.scheduler = scheduler
     }
@@ -61,13 +75,14 @@ final class MediaKeyHUD {
     }
 
     func stop() {
-        retry?.cancel()
-        retry = nil
-        tap.uninstall()
+        timer?.cancel()
+        timer = nil
+        detach()
+        run += 1
+        availability = MediaKeyAvailability()
         enabled = nil
         onChange = nil
         lastVolume = nil
-        lightBeforeToggle = nil
     }
 
     /// Whether `state` is the volume this HUD just set, which the volume monitor reports back. Any other volume is
@@ -83,23 +98,44 @@ final class MediaKeyHUD {
     // MARK: tap
 
     /// Without Accessibility macOS refuses the tap, so it is not even attempted; either way it is tried again later.
+    /// With the tap up, the HUD starts to look at the hardware and checks the tap from time to time.
     private func attach() {
-        retry?.cancel()
-        retry = nil
-        if isTrusted(), tap.install({ [weak self] in self?.receive($0) ?? false }) { return }
-        retry = scheduler.schedule(after: Self.retryInterval) { [weak self] in self?.attach() }
+        timer?.cancel()
+        timer = nil
+        if isTrusted(), tap.install({ [weak self] in self?.receive($0) ?? false }) {
+            held = [:]
+            changes.start { [weak self] in self?.look() }
+            look()
+            timer = scheduler.schedule(after: Self.checkInterval) { [weak self] in self?.check() }
+        } else {
+            timer = scheduler.schedule(after: Self.retryInterval) { [weak self] in self?.attach() }
+        }
+    }
+
+    private func detach() {
+        tap.uninstall()
+        changes.stop()
+        held = [:]
+    }
+
+    /// With Accessibility gone, switching a tap back on would not help: wait for the permission instead.
+    private func lose() {
+        detach()
+        attach()
+    }
+
+    private func check() {
+        guard isTrusted() else { return lose() }
+        if !tap.isAlive { tap.reenable() }
+        guard tap.isAlive else { return lose() }
+        look()
+        timer = scheduler.schedule(after: Self.checkInterval) { [weak self] in self?.check() }
     }
 
     private func receive(_ input: EventTapInput) -> Bool {
         switch input {
         case .disabled:
-            // With Accessibility gone, switching it back on would not help: wait for the permission instead.
-            if isTrusted() {
-                tap.reenable()
-            } else {
-                tap.uninstall()
-                attach()
-            }
+            if isTrusted() { tap.reenable() } else { lose() }
             return false
         case .systemDefined(let subtype, let data1, let modifiers):
             guard let event = MediaKeyEvent(subtype: subtype, data1: data1, modifiers: modifiers) else { return false }
@@ -109,67 +145,53 @@ final class MediaKeyHUD {
 
     // MARK: keys
 
-    /// True when the event is swallowed: its kind is switched on and its control is there. The release of a key is
-    /// swallowed like its press, so the system never sees half a key stroke.
+    /// True when the event is swallowed. A press is decided here, from what is known already; the repeats of a held
+    /// key and its release follow that decision, so the system never sees half a key stroke.
     private func handle(_ event: MediaKeyEvent) -> Bool {
-        guard enabled?().contains(event.key.target) == true, isAvailable(event.key) else { return false }
-        guard event.isDown else { return true }
+        let key = event.key
+        guard event.isDown else { return held.removeValue(forKey: key) ?? false }
+        let swallow = (event.isRepeat ? held[key] : nil) ?? decide(key)
+        held[key] = swallow
+        if swallow { perform(event) }
+        return swallow
+    }
+
+    private func decide(_ key: MediaKey) -> Bool {
+        enabled?().contains(key.target) == true && availability.allows(key)
+    }
+
+    /// The change itself is made on the hardware queue, and shown when it comes back.
+    private func perform(_ event: MediaKeyEvent) {
+        let hardware = hardware
+        let key = event.key
         let steps = LevelStep.steps(fine: event.isFine)
-        switch event.key {
-        case .volumeUp: moveVolume(up: true, steps: steps)
-        case .volumeDown: moveVolume(up: false, steps: steps)
-        case .mute: toggleMute()
-        case .brightnessUp: move(brightness, up: true, steps: steps, show: SystemActivityContent.brightness)
-        case .brightnessDown: move(brightness, up: false, steps: steps, show: SystemActivityContent.brightness)
-        case .keyboardLightUp: move(keyboardLight, up: true, steps: steps, show: SystemActivityContent.keyboardLight)
-        case .keyboardLightDown: move(keyboardLight, up: false, steps: steps, show: SystemActivityContent.keyboardLight)
-        case .keyboardLightToggle: toggleKeyboardLight()
+        let run = run
+        queue.run({ hardware.perform(key, steps: steps) }, then: { [weak self] outcome in
+            guard let self, self.run == run else { return }
+            finish(outcome)
+        })
+    }
+
+    private func finish(_ outcome: MediaKeyOutcome) {
+        switch outcome {
+        case .volume(let state):
+            lastVolume = state
+            onChange?(.volume(state))
+        case .brightness(let level): onChange?(.brightness(level))
+        case .keyboardLight(let level): onChange?(.keyboardLight(level))
+        // Looking again right now would find a control that reads but does not write working: the next look, on a
+        // change or with the check, decides.
+        case .failed(let target): availability.lose(target)
         }
-        return true
     }
 
-    private func isAvailable(_ key: MediaKey) -> Bool {
-        switch key.target {
-        case .volume: volume.read() != nil && (key != .mute || volume.canMute)
-        case .brightness: brightness.read() != nil
-        case .keyboardLight: keyboardLight.read() != nil
-        }
-    }
-
-    /// A volume key while muted unmutes, like the system's own.
-    private func moveVolume(up: Bool, steps: Int) {
-        guard let current = volume.read() else { return }
-        let level = LevelStep.moved(current.level, up: up, steps: steps)
-        guard volume.setLevel(level) else { return }
-        let stillMuted = current.muted && !volume.setMuted(false)
-        showVolume(VolumeState(level: level, muted: stillMuted))
-    }
-
-    private func toggleMute() {
-        guard let current = volume.read(), volume.setMuted(!current.muted) else { return }
-        showVolume(VolumeState(level: current.level, muted: !current.muted))
-    }
-
-    private func showVolume(_ state: VolumeState) {
-        lastVolume = state
-        onChange?(.volume(state))
-    }
-
-    private func move(_ control: any LevelControlling, up: Bool, steps: Int, show: (Float) -> SystemActivityContent) {
-        guard let current = control.read() else { return }
-        let level = LevelStep.moved(current, up: up, steps: steps)
-        if control.write(level) { onChange?(show(level)) }
-    }
-
-    private func toggleKeyboardLight() {
-        guard let current = keyboardLight.read() else { return }
-        let level: Float
-        if current > 0 {
-            lightBeforeToggle = current
-            level = 0
-        } else {
-            level = lightBeforeToggle ?? 1
-        }
-        if keyboardLight.write(level) { onChange?(.keyboardLight(level)) }
+    /// Looks at which controls work now, off the main thread.
+    private func look() {
+        let hardware = hardware
+        let run = run
+        queue.run({ hardware.probe() }, then: { [weak self] found in
+            guard let self, self.run == run else { return }
+            availability = found
+        })
     }
 }

@@ -3,8 +3,8 @@ import Foundation
 
 /// The built-in display's brightness through the private DisplayServices framework, loaded with `dlopen` and `dlsym`
 /// so nothing links against it. A missing function, or no built-in display, makes it unavailable: `read` is nil and
-/// the brightness keys stay the system's.
-final class DisplayServicesBrightness: LevelControlling {
+/// the brightness keys stay the system's. The display is looked up once, and again after `refresh()`.
+nonisolated final class DisplayServicesBrightness: LevelControlling {
     static let libraryPath = "/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices"
 
     private struct Functions {
@@ -23,6 +23,11 @@ final class DisplayServicesBrightness: LevelControlling {
         }
     }
 
+    private struct Lookup {
+        let display: CGDirectDisplayID?
+    }
+
+    private var lookup: Lookup?
     /// Resolved on first use, so creating this loads nothing.
     private lazy var functions = Functions(resolve: resolve)
     private let resolve: (String) -> UnsafeMutableRawPointer?
@@ -41,6 +46,8 @@ final class DisplayServicesBrightness: LevelControlling {
         self.builtInDisplay = builtInDisplay
     }
 
+    func refresh() { lookup = nil }
+
     func read() -> Float? {
         guard let functions, let display = controllableDisplay(functions) else { return nil }
         var level: Float = 0
@@ -53,9 +60,13 @@ final class DisplayServicesBrightness: LevelControlling {
         return functions.set(display, min(max(level, 0), 1)) == 0
     }
 
+    /// The display found at the first use after a `refresh()`, nil when there is none: looking for it on every key
+    /// press would list the displays each time.
     private func controllableDisplay(_ functions: Functions) -> CGDirectDisplayID? {
-        guard let display = builtInDisplay(), functions.canChange?(display) ?? true else { return nil }
-        return display
+        if lookup == nil {
+            lookup = Lookup(display: builtInDisplay().flatMap { functions.canChange?($0) ?? true ? $0 : nil })
+        }
+        return lookup?.display
     }
 
     /// The built-in display while it is on (not with the lid closed); external ones are not driven.

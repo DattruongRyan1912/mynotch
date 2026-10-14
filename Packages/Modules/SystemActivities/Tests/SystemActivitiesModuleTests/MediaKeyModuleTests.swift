@@ -6,10 +6,17 @@ import Testing
 extension SystemActivitiesModuleTests {
     func settleTapInstalled() async { await settle { fakes.tap.isInstalled } }
 
+    /// The module started, and the first look at what the keys can do finished.
+    func startWithHUD() async {
+        setting("replaceHUD", true)
+        await start()
+        fakes.hardware.drain()
+    }
+
     @Test func theHUDIsOffByDefaultSoTheKeysStayTheSystems() async {
         await start()
         #expect(fakes.tap.installCount == 0)
-        #expect(!fakes.tap.press(.volumeUp))
+        #expect(!fakes.press(.volumeUp))
         #expect(fakes.systemVolume.writeCount == 0)
         #expect(entries.isEmpty)
     }
@@ -19,32 +26,32 @@ extension SystemActivitiesModuleTests {
         setting("replaceHUD", true)
         await settleTapInstalled()
         #expect(fakes.tap.isInstalled)
+        #expect(fakes.hardwareChanges.isListening)
         setting("replaceHUD", false)
         await settle { !fakes.tap.isInstalled }
         #expect(!fakes.tap.isInstalled)
-        #expect(!fakes.tap.press(.volumeUp))
+        #expect(!fakes.press(.volumeUp))
     }
 
     @Test func aModuleStartedWithItOnTakesTheKeysAtOnce() async {
-        setting("replaceHUD", true)
-        await start()
+        await startWithHUD()
         #expect(fakes.tap.isInstalled)
+        #expect(fakes.press(.volumeUp))
     }
 
     @Test func stoppingTheModuleRemovesTheTap() async {
-        setting("replaceHUD", true)
-        await start()
+        await startWithHUD()
         #expect(fakes.tap.isInstalled)
         await harness.registry.setEnabled(false, for: "system")
         #expect(!fakes.tap.isInstalled)
+        #expect(!fakes.hardwareChanges.isListening)
     }
 
     @Test func aKeyPressChangesTheVolumeAndShowsTheBarForOneAndAHalfSeconds() async {
-        setting("replaceHUD", true)
-        await start()
+        await startWithHUD()
         // The configured duration is for the other activities, not for this bar.
         harness.settings.set(4.0, for: SettingKey("module.system.durationSeconds", default: 2.5, clampedTo: 1...6))
-        #expect(fakes.tap.press(.volumeUp))
+        #expect(fakes.press(.volumeUp))
         #expect(fakes.systemVolume.state?.level == 0.5625)
         #expect(entries.map(\.id) == ["system/volume"])
         #expect(entries.first?.activity.expiresAfter == .milliseconds(1_500))
@@ -55,23 +62,21 @@ extension SystemActivitiesModuleTests {
     }
 
     @Test func eachKindHasItsOwnActivityThatIsUpdatedInPlace() async {
-        setting("replaceHUD", true)
-        await start()
-        fakes.tap.press(.brightnessUp)
-        fakes.tap.press(.keyboardLightUp)
-        fakes.tap.press(.volumeUp)
+        await startWithHUD()
+        fakes.press(.brightnessUp)
+        fakes.press(.keyboardLightUp)
+        fakes.press(.volumeUp)
         #expect(Set(entries.map(\.id)) == ["system/brightness", "system/keyboardLight", "system/volume"])
-        fakes.tap.press(.brightnessUp)
-        fakes.tap.press(.brightnessUp)
+        fakes.press(.brightnessUp)
+        fakes.press(.brightnessUp)
         #expect(entries.count == 3)
         #expect(entries.allSatisfy { $0.activity.expiresAfter == .milliseconds(1_500) && $0.activity.priority == .normal })
     }
 
     @Test func aHeldKeyKeepsTheBarUpAndItGoesOneAndAHalfSecondsAfterTheLastPress() async {
-        setting("replaceHUD", true)
-        await start()
+        await startWithHUD()
         for _ in 0..<4 {
-            fakes.tap.press(.brightnessUp)
+            fakes.press(.brightnessUp)
             harness.scheduler.advance(by: .seconds(1))
         }
         #expect(entries.map(\.id) == ["system/brightness"])
@@ -83,20 +88,18 @@ extension SystemActivitiesModuleTests {
         ("hudVolume", MediaKey.volumeUp), ("hudBrightness", .brightnessUp), ("hudKeyboardLight", .keyboardLightUp),
     ])
     func eachSubToggleSwitchesItsKeysBackToTheSystem(name: String, key: MediaKey) async {
-        setting("replaceHUD", true)
-        await start()
+        await startWithHUD()
         // On by default, like the main setting being on.
-        #expect(fakes.tap.press(key))
+        #expect(fakes.press(key))
         setting(name, false)
-        #expect(!fakes.tap.press(key))
-        #expect(!fakes.tap.press(key, down: false))
+        #expect(!fakes.press(key))
+        #expect(!fakes.press(key, down: false))
         setting(name, true)
-        #expect(fakes.tap.press(key))
+        #expect(fakes.press(key))
     }
 
     @Test func aSubToggleDoesNotNeedTheTapToBeInstalledAgain() async {
-        setting("replaceHUD", true)
-        await start()
+        await startWithHUD()
         setting("hudBrightness", false)
         setting("hudBrightness", true)
         #expect(fakes.tap.installCount == 1)
@@ -107,20 +110,20 @@ extension SystemActivitiesModuleTests {
         setting("replaceHUD", true)
         await start()
         #expect(fakes.tap.installCount == 0)
-        #expect(!fakes.tap.press(.volumeUp))
+        #expect(!fakes.press(.volumeUp))
         harness.scheduler.advance(by: .seconds(2))
         #expect(!fakes.tap.isInstalled)
 
         fakes.trusted = true
         harness.scheduler.advance(by: .seconds(2))
         #expect(fakes.tap.isInstalled)
-        #expect(fakes.tap.press(.volumeUp))
+        fakes.hardware.drain()
+        #expect(fakes.press(.volumeUp))
     }
 
     @Test func theVolumeMonitorReportingTheHUDsOwnChangeDoesNotKeepTheBarUpLonger() async {
-        setting("replaceHUD", true)
-        await start()
-        fakes.tap.press(.volumeUp)
+        await startWithHUD()
+        fakes.press(.volumeUp)
         harness.scheduler.advance(by: .seconds(1))
         // CoreAudio tells the monitor about the change the HUD just made.
         fakes.volume.send(level: 0.5625)
@@ -129,9 +132,8 @@ extension SystemActivitiesModuleTests {
     }
 
     @Test func aVolumeChangeFromElsewhereStillShowsForTheConfiguredDuration() async {
-        setting("replaceHUD", true)
-        await start()
-        fakes.tap.press(.volumeUp)
+        await startWithHUD()
+        fakes.press(.volumeUp)
         fakes.volume.send(level: 0.2)
         #expect(entries.first?.activity.expiresAfter == .seconds(2.5))
         // And the HUD's own value is no longer an echo once somebody else changed it.
@@ -148,10 +150,54 @@ extension SystemActivitiesModuleTests {
 
     @Test func theHUDWorksWhileTheVolumeActivityIsOff() async {
         setting("volume", false)
-        setting("replaceHUD", true)
-        await start()
+        await startWithHUD()
         #expect(!fakes.volume.isRunning)
-        #expect(fakes.tap.press(.volumeUp))
+        #expect(fakes.press(.volumeUp))
         #expect(entries.map(\.id) == ["system/volume"])
+    }
+
+    // MARK: the tap callback only decides; the hardware work comes after
+
+    @Test func aKeyPressIsSwallowedAtOnceAndTheWorkAndTheBarComeWhenTheHardwareQueueRuns() async {
+        await startWithHUD()
+        #expect(fakes.tap.press(.volumeUp))
+        #expect(fakes.hardware.pendingCount == 1)
+        #expect(fakes.systemVolume.state?.level == 0.5)
+        #expect(entries.isEmpty)
+        fakes.hardware.drain()
+        #expect(fakes.systemVolume.state?.level == 0.5625)
+        #expect(entries.map(\.id) == ["system/volume"])
+    }
+
+    @Test func turningTheHUDOffTakesItsBarsAwayAtOnce() async {
+        await startWithHUD()
+        fakes.press(.volumeUp)
+        fakes.press(.brightnessUp)
+        fakes.press(.keyboardLightUp)
+        #expect(Set(entries.map(\.id)) == ["system/volume", "system/brightness", "system/keyboardLight"])
+        setting("replaceHUD", false)
+        await settle { !fakes.tap.isInstalled }
+        #expect(entries.isEmpty)
+    }
+
+    @Test func anAnswerFromTheHardwareThatComesAfterTheHUDWasTurnedOffShowsNothing() async {
+        await startWithHUD()
+        #expect(fakes.tap.press(.brightnessUp))
+        setting("replaceHUD", false)
+        await settle { !fakes.tap.isInstalled }
+        fakes.hardware.drain()
+        #expect(entries.isEmpty)
+    }
+
+    @Test func aDisplayOrDeviceChangeLooksAtWhatTheKeysCanDoAgain() async {
+        await startWithHUD()
+        fakes.brightness.level = nil
+        fakes.hardwareChanges.fire()
+        fakes.hardware.drain()
+        #expect(!fakes.press(.brightnessUp))
+        fakes.brightness.level = 0.5
+        fakes.hardwareChanges.fire()
+        fakes.hardware.drain()
+        #expect(fakes.press(.brightnessUp))
     }
 }

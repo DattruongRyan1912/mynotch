@@ -33,10 +33,23 @@ private func data1(key: Int, state: Int, isRepeat: Bool = false) -> Int {
             MediaKeyEvent(subtype: 8, data1: data1(key: 0, state: 0xA), modifiers: modifiers)?.isFine
         }
         #expect(isFine([.option, .shift]) == true)
-        #expect(isFine([.option, .shift, .command]) == true)
         #expect(isFine([.option]) == false)
         #expect(isFine([.shift]) == false)
         #expect(isFine([]) == false)
+        #expect(isFine([.capsLock, .function]) == false)
+    }
+
+    @Test(arguments: [NSEvent.ModifierFlags.command, .control, [.command, .shift], [.control, .option], [.option, .shift, .command]])
+    func aKeyPressedWithCommandOrControlIsNotOursAndPassesUntouched(modifiers: NSEvent.ModifierFlags) {
+        // The system gives those combinations their own meaning, e.g. display mirroring.
+        #expect(MediaKeyEvent(subtype: 8, data1: data1(key: 0, state: 0xA), modifiers: modifiers) == nil)
+        #expect(MediaKeyEvent(subtype: 8, data1: data1(key: 2, state: 0xB), modifiers: modifiers) == nil)
+    }
+
+    @Test func theDeviceDependentBitsOfAnEventsFlagsAreNotModifiers() {
+        // A system-defined event carries 0xA00 (its key state) in the flags' low bits.
+        let flags = NSEvent.ModifierFlags(rawValue: 0xA00)
+        #expect(MediaKeyEvent(subtype: 8, data1: data1(key: 0, state: 0xA), modifiers: flags)?.isFine == false)
     }
 
     @Test func ignoresOtherSubtypes() {

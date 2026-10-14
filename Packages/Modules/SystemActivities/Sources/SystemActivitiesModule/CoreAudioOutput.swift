@@ -3,7 +3,7 @@ import CoreAudio
 
 /// The default output device and its volume and mute properties, shared by the monitor that listens to them and the
 /// control that sets them.
-enum CoreAudioOutput {
+nonisolated enum CoreAudioOutput {
     static let defaultDevice = AudioObjectPropertyAddress(
         mSelector: kAudioHardwarePropertyDefaultOutputDevice, mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain)

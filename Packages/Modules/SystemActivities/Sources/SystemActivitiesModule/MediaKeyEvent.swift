@@ -43,13 +43,15 @@ nonisolated struct MediaKeyEvent: Equatable, Sendable {
     /// ⌥⇧ held: the step is a quarter of the usual one.
     var isFine: Bool
 
-    /// nil for any other event, which then passes through untouched. `data1` holds the key code in its high 16 bits
+    /// nil for any other event, which then passes through untouched, as does a key pressed with ⌘ or ⌃. `data1` holds the key code in its high 16 bits
     /// and the flags in its low 16: the key state in their high byte (0xA down, 0xB up) and the repeat flag in bit 0.
     init?(subtype: Int, data1: Int, modifiers: NSEvent.ModifierFlags) {
         guard subtype == Int(NX_SUBTYPE_AUX_CONTROL_BUTTONS), let key = MediaKey(code: (data1 & 0xFFFF_0000) >> 16) else { return nil }
         let flags = data1 & 0xFFFF
         let state = (flags & 0xFF00) >> 8
         guard state == 0xA || state == 0xB else { return nil }
+        // ⌘ and ⌃ with these keys mean something to the system (mirroring, an external display's own controls).
+        guard modifiers.isDisjoint(with: [.command, .control]) else { return nil }
         self.init(key: key, isDown: state == 0xA, isRepeat: flags & 1 != 0, isFine: modifiers.isSuperset(of: [.option, .shift]))
     }
 

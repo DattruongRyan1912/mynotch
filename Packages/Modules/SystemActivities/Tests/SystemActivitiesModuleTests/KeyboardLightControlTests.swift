@@ -40,7 +40,37 @@ import Testing
         #expect(light.read() == 0.5)
         #expect(light.write(0.25))
         #expect(client.level == 0.25)
-        #expect(client.calls == ["ids", "get 95", "ids", "set 95 0.25"])
+        // The keyboard is asked for once, not at every key press.
+        #expect(client.calls == ["ids", "get 95", "set 95 0.25"])
+    }
+
+    @Test func theKeyboardIsLookedUpAgainAfterARefresh() {
+        let client = FakeKeyboardBrightnessClient()
+        let light = CoreBrightnessKeyboardLight(makeClient: { client })
+        #expect(light.read() == 0.5)
+        client.ids = [96]
+        #expect(light.read() == 0.5)
+        light.refresh()
+        #expect(light.read() == 0.5)
+        #expect(client.calls == ["ids", "get 95", "get 95", "ids", "get 96"])
+    }
+
+    @Test func aMacWithoutAKeyboardBacklightIsAskedAgainAfterARefresh() {
+        let client = FakeKeyboardBrightnessClient()
+        client.ids = []
+        let light = CoreBrightnessKeyboardLight(makeClient: { client })
+        #expect(light.read() == nil)
+        client.ids = [95]
+        #expect(light.read() == nil)
+        light.refresh()
+        #expect(light.read() == 0.5)
+    }
+
+    @Test func aRefreshBeforeAnyUseMakesNoClient() {
+        nonisolated(unsafe) var made = 0
+        let light = CoreBrightnessKeyboardLight(makeClient: { made += 1; return nil })
+        light.refresh()
+        #expect(made == 0)
     }
 
     @Test func aLevelOutsideZeroToOneIsHeldWithinIt() {
@@ -90,7 +120,7 @@ import Testing
         let light = CoreBrightnessKeyboardLight(makeClient: { client })
         #expect(light.read() == nil)
         #expect(!light.write(0.5))
-        #expect(client.calls == ["ids", "ids"])
+        #expect(client.calls == ["ids"])
     }
 
     @Test(arguments: [-1.0, 1.5] as [Float])

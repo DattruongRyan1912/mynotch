@@ -12,6 +12,8 @@ import Testing
         let network = FakeNetworkMonitor()
         let downloads = FakeDownloadsWatcher()
         let tap = FakeEventTap()
+        let hardware = FakeHardwareQueue()
+        let hardwareChanges = FakeHardwareChanges()
         let systemVolume = FakeVolumeControl()
         let brightness = FakeLevelControl()
         let keyboardLight = FakeLevelControl()
@@ -22,8 +24,16 @@ import Testing
             SystemMonitors(
                 bluetooth: bluetooth, volume: volume, capsLock: capsLock, network: network, downloads: downloads,
                 mediaKeys: MediaKeyHUD(
-                    tap: tap, volume: systemVolume, brightness: brightness, keyboardLight: keyboardLight,
-                    isTrusted: { [unowned self] in trusted }, scheduler: scheduler))
+                    tap: tap, queue: hardware, changes: hardwareChanges, volume: systemVolume, brightness: brightness,
+                    keyboardLight: keyboardLight, isTrusted: { [unowned self] in trusted }, scheduler: scheduler))
+        }
+
+        /// A key press, and the hardware work it queued run to the end. True when the HUD swallowed it.
+        @discardableResult
+        func press(_ key: MediaKey, down: Bool = true, isRepeat: Bool = false, fine: Bool = false) -> Bool {
+            let swallowed = tap.press(key, down: down, isRepeat: isRepeat, fine: fine)
+            hardware.drain()
+            return swallowed
         }
     }
 

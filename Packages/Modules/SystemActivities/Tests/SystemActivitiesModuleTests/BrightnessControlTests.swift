@@ -63,7 +63,41 @@ private nonisolated let canChangeName = "DisplayServicesCanChangeBrightness"
         #expect(brightness.read() == 0.5)
         #expect(brightness.write(0.75))
         #expect(brightness.read() == 0.75)
-        #expect(displayLog == ["canChange 7", "get 7", "canChange 7", "set 7 0.75", "canChange 7", "get 7"])
+        // Which display it is, and whether it can change, is asked once and not at every key press.
+        #expect(displayLog == ["canChange 7", "get 7", "set 7 0.75", "get 7"])
+    }
+
+    @Test func theDisplayIsLookedUpAgainAfterARefresh() {
+        nonisolated(unsafe) var builtIn: CGDirectDisplayID? = 7
+        let brightness = DisplayServicesBrightness(resolve: symbols(), builtInDisplay: { builtIn })
+        #expect(brightness.read() == 0.5)
+        builtIn = nil
+        // Still the display found before: the lid closing is noticed by a refresh, not by every read.
+        #expect(brightness.read() == 0.5)
+        brightness.refresh()
+        #expect(brightness.read() == nil)
+        #expect(!brightness.write(0.5))
+        builtIn = 9
+        brightness.refresh()
+        #expect(brightness.write(0.25))
+        #expect(displayLog.last == "set 9 0.25")
+    }
+
+    @Test func aDisplayThatCouldNotChangeIsAskedAgainAfterARefresh() {
+        displayCanChange = false
+        let brightness = control(resolve: symbols())
+        #expect(brightness.read() == nil)
+        displayCanChange = true
+        #expect(brightness.read() == nil)
+        brightness.refresh()
+        #expect(brightness.read() == 0.5)
+    }
+
+    @Test func aRefreshBeforeAnyUseLoadsNothing() {
+        nonisolated(unsafe) var lookups = 0
+        let brightness = DisplayServicesBrightness(resolve: { _ in lookups += 1; return nil }, builtInDisplay: { 7 })
+        brightness.refresh()
+        #expect(lookups == 0)
     }
 
     @Test func aLevelOutsideZeroToOneIsHeldWithinIt() {

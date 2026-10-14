@@ -33,6 +33,11 @@ final class SystemEventTap: EventTapping {
         if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
     }
 
+    var isAlive: Bool {
+        guard let tap else { return false }
+        return CFMachPortIsValid(tap) && CGEvent.tapIsEnabled(tap: tap)
+    }
+
     func uninstall() {
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: false)
@@ -45,7 +50,7 @@ final class SystemEventTap: EventTapping {
     }
 
     /// What the HUD reads of an event; nil for any other, which passes through.
-    fileprivate nonisolated static func input(for type: CGEventType, _ event: CGEvent) -> EventTapInput? {
+    nonisolated static func input(for type: CGEventType, _ event: CGEvent) -> EventTapInput? {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             return .disabled

@@ -2,8 +2,9 @@ import Foundation
 
 /// The keyboard backlight through `KeyboardBrightnessClient`, a class of the private CoreBrightness framework that is
 /// looked up at runtime so nothing links against it. A missing class or method, or a Mac without a backlit keyboard,
-/// makes it unavailable: `read` is nil and the keyboard light keys stay the system's.
-final class CoreBrightnessKeyboardLight: LevelControlling {
+/// makes it unavailable: `read` is nil and the keyboard light keys stay the system's. The keyboard is looked up once,
+/// and again after `refresh()`.
+nonisolated final class CoreBrightnessKeyboardLight: LevelControlling {
     static let libraryPath = "/System/Library/PrivateFrameworks/CoreBrightness.framework/CoreBrightness"
 
     private static let keyboardIDs = Selector(("copyKeyboardBacklightIDs"))
@@ -37,6 +38,11 @@ final class CoreBrightnessKeyboardLight: LevelControlling {
         }
     }
 
+    private struct Lookup {
+        let id: UInt64?
+    }
+
+    private var lookup: Lookup?
     /// Made on first use, so creating this loads nothing.
     private lazy var client = Client(makeClient())
     private let makeClient: () -> NSObject?
@@ -54,14 +60,23 @@ final class CoreBrightnessKeyboardLight: LevelControlling {
         self.makeClient = makeClient
     }
 
+    func refresh() { lookup = nil }
+
     func read() -> Float? {
-        guard let client, let id = client.keyboardID else { return nil }
+        guard let client, let id = keyboardID(client) else { return nil }
         let level = client.get(client.object, Self.getBrightness, id)
         return (0...1).contains(level) ? level : nil
     }
 
     func write(_ level: Float) -> Bool {
-        guard let client, let id = client.keyboardID else { return false }
+        guard let client, let id = keyboardID(client) else { return false }
         return client.set(client.object, Self.setBrightness, min(max(level, 0), 1), id)
+    }
+
+    /// Asked of the client once, and again after `refresh()`: it is a round trip to the keyboard's daemon, which a key
+    /// press should not make every time.
+    private func keyboardID(_ client: Client) -> UInt64? {
+        if lookup == nil { lookup = Lookup(id: client.keyboardID) }
+        return lookup?.id
     }
 }

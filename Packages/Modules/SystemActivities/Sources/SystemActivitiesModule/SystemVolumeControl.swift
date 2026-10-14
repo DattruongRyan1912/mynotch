@@ -2,7 +2,7 @@ import CoreAudio
 
 /// Sets the default output device's volume and mute through CoreAudio. Nothing is cached: the default device can
 /// change between two key presses.
-final class SystemVolumeControl: VolumeControlling {
+nonisolated final class SystemVolumeControl: VolumeControlling {
     init() {}
 
     /// nil when the device has no volume that can be set: many HDMI and aggregate devices only report one.

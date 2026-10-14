@@ -20,7 +20,8 @@ struct SystemMonitors {
             network: NetworkMonitor(source: NWPathSource(), scheduler: scheduler),
             downloads: DownloadsWatcher(scheduler: scheduler),
             mediaKeys: MediaKeyHUD(
-                tap: SystemEventTap(), volume: SystemVolumeControl(), brightness: DisplayServicesBrightness(),
+                tap: SystemEventTap(), queue: SerialHardwareQueue(), changes: HardwareChangeNotifier(),
+                volume: SystemVolumeControl(), brightness: DisplayServicesBrightness(),
                 keyboardLight: CoreBrightnessKeyboardLight(), isTrusted: { AXIsProcessTrusted() }, scheduler: scheduler))
     }
 }
@@ -45,6 +46,8 @@ public final class SystemActivitiesModule: FeatureModule {
 
     private struct Kind {
         let key: SettingKey<Bool>
+        /// The activities this kind shows, dropped when it is turned off; its own id when nil.
+        var shows: [String]?
         /// Returns false when the monitor could not start.
         let start: () -> Bool
         let stop: () -> Void
@@ -108,7 +111,7 @@ public final class SystemActivitiesModule: FeatureModule {
                 if running.contains(activityID) {
                     kind.stop()
                     running.remove(activityID)
-                    context.activities.clear(id: activityID)
+                    for id in kind.shows ?? [activityID] { context.activities.clear(id: id) }
                 }
             }
         }
@@ -147,6 +150,8 @@ public final class SystemActivitiesModule: FeatureModule {
                 stop: monitors.volume.stop),
             "mediaKeys": Kind(
                 key: keys.replaceHUD,
+                // The HUD has no activity of its own: it shows the same bars as the volume monitor, and two more.
+                shows: ["volume", "brightness", "keyboardLight"],
                 start: { [weak self] in self?.startMediaKeys(monitors.mediaKeys); return true },
                 stop: monitors.mediaKeys.stop),
         ]
