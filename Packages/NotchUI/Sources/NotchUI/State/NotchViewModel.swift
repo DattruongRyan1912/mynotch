@@ -55,6 +55,9 @@ public final class NotchViewModel {
         }
     }
     public private(set) var isDragging = false
+    /// Set by the window controller: the notch's window can be seen (shown, not covered, its display awake and its screen
+    /// unlocked). Views that tick or animate stop while it is false; see `notchIsOnScreen`.
+    public var isOnScreen = true
     /// The open tab a toast covers; the toast returns to it instead of closing the notch, and the view keeps
     /// it alive underneath so its state (search text, focus, scroll position) survives the toast.
     public private(set) var tabUnderToast: ModuleID?

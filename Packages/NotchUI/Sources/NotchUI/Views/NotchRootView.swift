@@ -102,6 +102,7 @@ struct NotchRootView: View {
             bubbles
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .environment(\.notchIsOnScreen, model.isOnScreen)
     }
 
     /// The bubbles of the other live activities, beside the collapsed notch only. They appear and go with the pill's

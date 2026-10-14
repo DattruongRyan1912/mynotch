@@ -17,6 +17,8 @@ final class NotchWindowController {
     #if DEBUG
     private let trace: NotchWindowTrace
     #endif
+    /// Tells the model when the window can be seen, which stops the timers and animations in it while it cannot.
+    private var occlusionObserver: NSObjectProtocol?
     /// Last keyboard focus decision; the panel makes itself key only when it turns true.
     private var lastFocus = false
     /// Created on the first hand-back; see `KeyboardReturn`.
@@ -53,6 +55,13 @@ final class NotchWindowController {
         trace = NotchWindowTrace(panel)
         #endif
         NotchPerf.start()
+        updateOnScreen()
+        // Also for what no one here does: a display that sleeps, a screen that locks, a window covered.
+        occlusionObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification, object: panel, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateOnScreen() }
+        }
         panel.onCancel = { [weak model] in model?.close() }
         panel.onResignKey = { [weak self] in self?.panelDidResignKey() }
         observe()
@@ -93,6 +102,14 @@ final class NotchWindowController {
             panel.ignoresMouseEvents = true
             orderOut("hidden")
         }
+        updateOnScreen()
+    }
+
+    private func updateOnScreen() {
+        let onScreen = NotchPresence.isOnScreen(isVisible: isVisible && panel.isVisible, occlusion: panel.occlusionState)
+        guard onScreen != model.isOnScreen else { return }
+        NotchLog.record("onScreen \(onScreen) \(panel.logSummary)")
+        model.isOnScreen = onScreen
     }
 
     /// Called for every pointer move; flips click-through and drives hover and drag state. `dragTypes` are the
@@ -138,6 +155,8 @@ final class NotchWindowController {
     func close() {
         observation?.cancel()
         observation = nil
+        occlusionObserver.map(NotificationCenter.default.removeObserver)
+        occlusionObserver = nil
         panel.allowsKeyStatus = false
         orderOut("controller closed")
         panel.close()
