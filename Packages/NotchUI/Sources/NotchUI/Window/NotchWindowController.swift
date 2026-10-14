@@ -52,6 +52,7 @@ final class NotchWindowController {
         #if DEBUG
         trace = NotchWindowTrace(panel)
         #endif
+        NotchPerf.start()
         panel.onCancel = { [weak model] in model?.close() }
         panel.onResignKey = { [weak self] in self?.panelDidResignKey() }
         observe()

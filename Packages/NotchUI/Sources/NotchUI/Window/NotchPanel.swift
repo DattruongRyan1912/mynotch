@@ -45,4 +45,12 @@ final class NotchPanel: NSPanel {
 /// Hosting view that accepts the first click even though the app is not active.
 final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    #if DEBUG
+    /// SwiftUI evaluates and lays out whatever changed inside this pass, so counting them shows how busy the notch is.
+    override func layout() {
+        NotchPerf.count(.layouts)
+        super.layout()
+    }
+    #endif
 }

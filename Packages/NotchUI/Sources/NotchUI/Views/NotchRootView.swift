@@ -74,6 +74,7 @@ struct NotchRootView: View {
         let bottom = bottomHeight(accessories)
         let size = geometry.shapeSize(for: state, contentHeight: contentHeight, bottomHeight: bottom)
         let radii = geometry.cornerRadii(for: state)
+        let _ = NotchPerf.count(.bodies)
         let _ = NotchLog.record(
             "body display=\(state.logDescription) size=\(size.width)x\(size.height) strip=\(activities.stripHeight) "
                 + "bottom=\(bottom) bubbles=\(accessories.bubbles) list=\(accessories.listRows) shownTab=\(shownTab?.id.rawValue ?? "-")"
