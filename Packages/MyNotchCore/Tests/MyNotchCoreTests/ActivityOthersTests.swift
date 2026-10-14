@@ -8,10 +8,6 @@ import MyNotchTestSupport
 @Suite struct ActivityOthersTests {
     func ids(_ entries: [ActivityCenter.Entry]) -> [String] { entries.map(\.id) }
 
-    func described(_ id: String, summary: String) -> LiveActivity {
-        LiveActivity(id: id, leading: AnyView(EmptyView()), trailing: AnyView(EmptyView()), summary: summary)
-    }
-
     @Test func nothingLiveMeansNoPrimaryAndNoOthers() {
         let center = ActivityCenter(scheduler: ManualScheduler())
         #expect(center.current == nil && center.others.isEmpty && center.ordered.isEmpty)
@@ -227,12 +223,48 @@ import MyNotchTestSupport
         #expect(changes == 1)
         watch()
         // Content of a bubble changed (the summary stands in for it: views can't be compared): its view has to be redrawn.
-        center.set(described("a2", summary: "new"), from: "m")
+        center.set(activity("a2", summary: "new"), from: "m")
         #expect(changes == 2)
         watch()
         // Content of the primary changed: the bubbles stay as they are.
-        center.set(described("a1", summary: "new"), from: "m")
+        center.set(activity("a1", summary: "new"), from: "m")
         #expect(changes == 2)
+    }
+
+    @Test func hiddenCountIsWhatNeitherThePrimaryNorTheBubblesShow() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        #expect(center.hiddenCount == 0)
+        for index in 1...4 { center.set(activity("a\(index)"), from: "m") }
+        #expect(center.hiddenCount == 0)
+        center.set(activity("a5"), from: "m")
+        center.set(activity("a6"), from: "m")
+        #expect(center.hiddenCount == 2)
+        center.clear(id: "a2", from: "m")
+        #expect(center.hiddenCount == 1)
+        center.clearAll(from: "m")
+        #expect(center.hiddenCount == 0)
+    }
+
+    @Test func hiddenCountFollowsTheCap() {
+        let center = ActivityCenter(scheduler: ManualScheduler(), maxOthers: 1)
+        for index in 1...4 { center.set(activity("a\(index)"), from: "m") }
+        #expect(center.hiddenCount == 2)
+    }
+
+    @Test func hiddenCountNotifiesOnlyWhenItChanges() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        for index in 1...5 { center.set(activity("a\(index)"), from: "m") }
+        nonisolated(unsafe) var changes = 0
+        func watch() { withObservationTracking { _ = center.hiddenCount } onChange: { changes += 1 } }
+        watch()
+        // Content updates of any activity and a reshuffle among the shown ones: the number stays, so a view reading it stays put.
+        center.set(activity("a1", summary: "new"), from: "m")
+        center.set(activity("a5", summary: "new"), from: "m")
+        center.set(activity("a3", expiresAfter: .seconds(2)), from: "m")
+        center.set(activity("a3"), from: "m")
+        #expect(changes == 0)
+        center.set(activity("a6"), from: "m")
+        #expect(changes == 1 && center.hiddenCount == 2)
     }
 
     @Test func promotingTheFirstBubbleNotifiesBothCurrentAndOthers() {

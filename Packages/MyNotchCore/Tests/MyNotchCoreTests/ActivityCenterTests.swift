@@ -93,13 +93,13 @@ import MyNotchTestSupport
         let before = center.current
         nonisolated(unsafe) var changes = 0
         withObservationTracking { _ = center.current } onChange: { changes += 1 }
-        // expiresAfter stands in for new content: AnyView leading/trailing can't be compared.
-        center.set(activity("a", expiresAfter: .seconds(10)), from: "m")
+        // The summary stands in for new content: AnyView leading/trailing can't be compared.
+        center.set(activity("a", summary: "new"), from: "m")
         #expect(changes == 1)
         #expect(center.current?.id == "m/a")
         #expect(center.current?.sequence == before?.sequence)
         #expect(center.current?.revision != before?.revision)
-        #expect(center.current?.activity.expiresAfter == .seconds(10))
+        #expect(center.current?.activity.summary == "new")
         #expect(center.entries.map(\.id) == ["m/a", "m/b"])
     }
 

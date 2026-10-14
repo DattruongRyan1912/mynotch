@@ -15,6 +15,17 @@ public final class ActivityCenter {
         public static func == (lhs: Self, rhs: Self) -> Bool {
             (lhs.id, lhs.sequence, lhs.revision) == (rhs.id, rhs.sequence, rhs.revision)
         }
+
+        /// The one display order: priority first; then an entry that was raised (the most recently raised first), then
+        /// notices (the most recently set first), then everything else in the order it became live.
+        func precedes(_ other: Self) -> Bool {
+            if activity.priority != other.activity.priority { return activity.priority > other.activity.priority }
+            let (isRaised, otherIsRaised) = (sequence < 0, other.sequence < 0)
+            if isRaised || otherIsRaised { return isRaised && (!otherIsRaised || sequence < other.sequence) }
+            let (isNotice, otherIsNotice) = (activity.expiresAfter != nil, other.activity.expiresAfter != nil)
+            if isNotice != otherIsNotice { return isNotice }
+            return isNotice ? revision > other.revision : sequence < other.sequence
+        }
     }
 
     /// The primary activity: the highest priority entry. A tie goes to a notice (an activity with an expiry: a volume
@@ -24,8 +35,12 @@ public final class ActivityCenter {
     public private(set) var current: Entry?
     /// The activities after `current`, in the same order, at most `maxOthers`: what the notch shows as bubbles.
     public private(set) var others: [Entry] = []
-    /// Every live activity in display order, `current` first, with no cap: what a list of all of them shows.
+    /// Every live activity in display order, `current` first, with no cap: what a list of all of them shows. It
+    /// changes with every `set`, so a view that only needs a count reads `hiddenCount` instead.
     public private(set) var ordered: [Entry] = []
+    /// How many activities are neither `current` nor in `others`: what a "+N" beside the notch adds up. Assigned only
+    /// when the number changes, so a view that reads it is not redrawn by content updates.
+    public private(set) var hiddenCount = 0
     /// Every live activity in the order it was added.
     public private(set) var entries: [Entry] = []
 
@@ -94,25 +109,16 @@ public final class ActivityCenter {
 
     private static func key(_ id: String, _ module: ModuleID) -> String { "\(module.rawValue)/\(id)" }
 
-    /// Priority first; then a raised entry (the most recently raised first), then notices (the most recently set
-    /// first), then everything else in the order it became live.
-    private static func isShownBefore(_ lhs: Entry, _ rhs: Entry) -> Bool {
-        if lhs.activity.priority != rhs.activity.priority { return lhs.activity.priority > rhs.activity.priority }
-        let (lhsRaised, rhsRaised) = (lhs.sequence < 0, rhs.sequence < 0)
-        if lhsRaised || rhsRaised { return lhsRaised && (!rhsRaised || lhs.sequence < rhs.sequence) }
-        let (lhsNotice, rhsNotice) = (lhs.activity.expiresAfter != nil, rhs.activity.expiresAfter != nil)
-        if lhsNotice != rhsNotice { return lhsNotice }
-        return lhsNotice ? lhs.revision > rhs.revision : lhs.sequence < rhs.sequence
-    }
-
     /// Assigns each property only when it changes, so removing an entry nobody shows doesn't redraw a view.
     private func recompute() {
-        let sorted = entries.sorted(by: Self.isShownBefore)
+        let sorted = entries.sorted { $0.precedes($1) }
         let winner = sorted.first
         let bubbles = Array(sorted.dropFirst().prefix(maxOthers))
+        let hidden = max(sorted.count - 1 - bubbles.count, 0)
         if sorted != ordered { ordered = sorted }
         if winner != current { current = winner }
         if bubbles != others { others = bubbles }
+        if hidden != hiddenCount { hiddenCount = hidden }
     }
 }
 
