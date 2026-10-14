@@ -85,9 +85,11 @@ struct NotchRootView: View {
                             .opacity(isOpen ? 1 : 0)
                             .allowsHitTesting(isOpen)
                             .accessibilityHidden(!isOpen)
+                            .animation(NotchTokens.swap, value: isOpen)
                     }
                     if !isOpen {
                         model.toastContent.frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .transition(.opacity.animation(NotchTokens.swap))
                     }
                 }
             }
