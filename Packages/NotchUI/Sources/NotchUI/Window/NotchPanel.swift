@@ -47,9 +47,14 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     #if DEBUG
+    /// Layout passes of this view alone; `NotchPerf` counts all of them together, which a test in a process that
+    /// animates other notches (they run free without a display link) cannot use.
+    private(set) var layoutPasses = 0
+
     /// SwiftUI evaluates and lays out whatever changed inside this pass, so counting them shows how busy the notch is.
     override func layout() {
         NotchPerf.count(.layouts)
+        layoutPasses += 1
         super.layout()
     }
     #endif

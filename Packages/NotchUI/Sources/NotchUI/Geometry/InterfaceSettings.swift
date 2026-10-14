@@ -16,6 +16,8 @@ public enum InterfaceSettings {
     public static let openDelayMs = SettingKey("interface.openDelayMs", default: 150, clampedTo: 0...1000)
     public static let closeDelayMs = SettingKey("interface.closeDelayMs", default: 300, clampedTo: 0...1000)
     public static let hideInFullscreen = SettingKey("interface.hideInFullscreen", default: true)
+    /// Whether the notch's windows stay out of screen recordings and shared screens.
+    public static let hideFromCapture = SettingKey("interface.hideFromCapture", default: CaptureHiding.never)
 }
 
 /// Geometry inputs read from settings.

@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import KeyboardShortcuts
 import MyNotchCore
+import NotchUI
 import SwiftUI
 
 struct GeneralSettingsPage: View {
@@ -37,6 +38,15 @@ struct GeneralSettingsPage: View {
                 }
                 Toggle("Hiện icon trên menu bar", isOn: settings.binding(AppSettings.showMenuBarIcon))
                 Text("Khi ẩn icon, mở lại MyNotch từ Finder để vào Settings.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Quay và chia sẻ màn hình") {
+                Picker("Ẩn MyNotch khi quay hoặc chia sẻ màn hình", selection: settings.binding(InterfaceSettings.hideFromCapture)) {
+                    Text("Không ẩn").tag(CaptureHiding.never)
+                    Text("Chỉ khi notch đóng").tag(CaptureHiding.whenCollapsed)
+                    Text("Luôn ẩn").tag(CaptureHiding.always)
+                }
+                Text("Chỉ áp dụng cho notch. Cửa sổ thư viện clipboard và các cửa sổ nổi vẫn hiện.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Phím tắt") {

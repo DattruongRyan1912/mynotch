@@ -100,9 +100,9 @@ import Testing
     @Test func pulsingNeverMakesTheHostingViewLayOutAgain() {
         let (hosting, window) = host(glyph().notchPulse(isActive: true))
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        let settled = NotchPerf.counted(.layouts)
+        let settled = hosting.layoutPasses
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
-        #expect(NotchPerf.counted(.layouts) == settled)
+        #expect(hosting.layoutPasses == settled)
         #expect(!hosting.needsLayout)
         window.contentView = nil
     }

@@ -80,7 +80,8 @@ public final class ScreenManager {
             } else {
                 controllers[uuid] = NotchWindowController(
                     displayID: displayID, screen: descriptor, config: config, scheduler: scheduler,
-                    registry: registry, activities: activities, delays: { [settings] in Self.delays(settings) }
+                    registry: registry, activities: activities, delays: { [settings] in Self.delays(settings) },
+                    captureHiding: { [settings] in settings.value(InterfaceSettings.hideFromCapture) }
                 )
             }
         }

@@ -8,11 +8,13 @@ final class NotchWindowController {
     let model: NotchViewModel
     private(set) var geometry: NotchGeometry
     private(set) var isVisible = false
+    var sharingType: NSWindow.SharingType { panel.sharingType }
     private var screenFrame: CGRect
     private let panel: NotchPanel
     private let hosting: FirstMouseHostingView<NotchRootView>
     private let registry: ModuleRegistry
     private let activities: ActivityCenter
+    private let captureHiding: () -> CaptureHiding
     private var observation: Task<Void, Never>?
     #if DEBUG
     private let trace: NotchWindowTrace
@@ -39,11 +41,13 @@ final class NotchWindowController {
         scheduler: any Scheduler,
         registry: ModuleRegistry,
         activities: ActivityCenter,
-        delays: @escaping () -> (open: Duration, close: Duration)
+        delays: @escaping () -> (open: Duration, close: Duration),
+        captureHiding: @escaping () -> CaptureHiding
     ) {
         self.displayID = displayID
         self.registry = registry
         self.activities = activities
+        self.captureHiding = captureHiding
         screenFrame = screen.frame
         geometry = NotchGeometry(screen: screen, config: config)
         model = NotchViewModel(scheduler: scheduler, availableTabs: { [weak registry] in registry?.tabs.map(\.id) ?? [] }, delays: delays)
@@ -56,6 +60,8 @@ final class NotchWindowController {
         #endif
         NotchPerf.start()
         updateOnScreen()
+        // Before the panel can be shown, so a recorder never sees a frame of a notch that was meant to be hidden.
+        refreshSharingType()
         // Also for what no one here does: a display that sleeps, a screen that locks, a window covered.
         occlusionObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didChangeOcclusionStateNotification, object: panel, queue: .main
@@ -90,6 +96,7 @@ final class NotchWindowController {
         guard visible != isVisible else { return }
         isVisible = visible
         if visible {
+            refreshSharingType()
             orderFront("visible")
             refreshHitTesting()
         } else {
@@ -110,6 +117,19 @@ final class NotchWindowController {
         guard onScreen != model.isOnScreen else { return }
         NotchLog.record("onScreen \(onScreen) \(panel.logSummary)")
         model.isOnScreen = onScreen
+    }
+
+    /// Applies the setting to the notch's state right now, for the moments the observation loop would be too late.
+    func refreshSharingType() {
+        applySharingType(captureHiding().sharingType(for: model.displayState))
+    }
+
+    private func applySharingType(_ type: NSWindow.SharingType) {
+        guard panel.sharingType != type else { return }
+        NotchLog.record(
+            "sharing \(panel.sharingType.logName) -> \(type.logName) hiding=\(captureHiding().rawValue) display=\(model.displayState.logDescription)"
+        )
+        panel.sharingType = type
     }
 
     /// Called for every pointer move; flips click-through and drives hover and drag state. `dragTypes` are the
@@ -259,6 +279,8 @@ final class NotchWindowController {
         var wantsKeyboard: Bool
         var focusesKeyboard: Bool
         var isDragging: Bool
+        /// Read through the setting, so a change of the setting runs the loop too.
+        var sharingType: NSWindow.SharingType
     }
 
     private func observe() {
@@ -283,7 +305,8 @@ final class NotchWindowController {
                     focusesKeyboard: NotchKeyboardPolicy.focusesKeyboard(
                         state: state, tabUnderToast: covered, tabs: registry.tabs, onPurpose: model.isOpenedOnPurpose
                     ),
-                    isDragging: model.isDragging
+                    isDragging: model.isDragging,
+                    sharingType: self?.captureHiding().sharingType(for: state) ?? .readOnly
                 )
             }) {
                 guard let self else { return }
@@ -306,6 +329,7 @@ final class NotchWindowController {
                 }
                 // A finished drag (drop, or the pointer left) must not leave its types behind for later refreshes.
                 if !observed.isDragging { self.dragTypes = [] }
+                self.applySharingType(observed.sharingType)
                 self.refreshHitTesting()
                 self.updateKeyboard(wants: observed.wantsKeyboard, focuses: observed.focusesKeyboard)
             }
