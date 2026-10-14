@@ -20,19 +20,6 @@ protocol VolumeMonitoring: AnyObject {
 final class VolumeMonitor: VolumeMonitoring {
     private typealias Listener = (object: AudioObjectID, address: AudioObjectPropertyAddress, block: AudioObjectPropertyListenerBlock)
 
-    private static let defaultDevice = AudioObjectPropertyAddress(
-        mSelector: kAudioHardwarePropertyDefaultOutputDevice, mScope: kAudioObjectPropertyScopeGlobal,
-        mElement: kAudioObjectPropertyElementMain)
-    private static let volume = AudioObjectPropertyAddress(
-        mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume, mScope: kAudioDevicePropertyScopeOutput,
-        mElement: kAudioObjectPropertyElementMain)
-    private static let mute = AudioObjectPropertyAddress(
-        mSelector: kAudioDevicePropertyMute, mScope: kAudioDevicePropertyScopeOutput,
-        mElement: kAudioObjectPropertyElementMain)
-    /// Some devices expose mute only per channel; channel 1 is the left one.
-    private static let muteChannel1 = AudioObjectPropertyAddress(
-        mSelector: kAudioDevicePropertyMute, mScope: kAudioDevicePropertyScopeOutput, mElement: 1)
-
     private var onChange: (@MainActor (VolumeState) -> Void)?
     private var systemListener: Listener?
     private var deviceListeners: [Listener] = []
@@ -46,7 +33,7 @@ final class VolumeMonitor: VolumeMonitoring {
     func start(_ onChange: @escaping @MainActor (VolumeState) -> Void) {
         stop()
         self.onChange = onChange
-        systemListener = add(AudioObjectID(kAudioObjectSystemObject), Self.defaultDevice) { [weak self] in self?.bind() }
+        systemListener = add(AudioObjectID(kAudioObjectSystemObject), CoreAudioOutput.defaultDevice) { [weak self] in self?.bind() }
         bind()
     }
 
@@ -62,15 +49,9 @@ final class VolumeMonitor: VolumeMonitoring {
         deviceListeners.forEach(remove)
         deviceListeners = []
         muteAddress = nil
-        var address = Self.defaultDevice
-        var device = AudioObjectID(kAudioObjectUnknown)
-        var size = UInt32(MemoryLayout<AudioObjectID>.size)
-        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device) == noErr,
-              device != kAudioObjectUnknown else { return }
-        var volume = Self.volume
-        guard AudioObjectHasProperty(device, &volume) else { return }
-        muteAddress = [Self.mute, Self.muteChannel1].first { var address = $0; return AudioObjectHasProperty(device, &address) }
-        for address in [Self.volume] + [muteAddress].compactMap({ $0 }) {
+        guard let device = CoreAudioOutput.defaultDeviceID(), CoreAudioOutput.has(device, CoreAudioOutput.volume) else { return }
+        muteAddress = CoreAudioOutput.muteAddresses(of: device).first
+        for address in [CoreAudioOutput.volume] + [muteAddress].compactMap({ $0 }) {
             if let listener = add(device, address, { [weak self] in self?.report(device) }) {
                 deviceListeners.append(listener)
             }
@@ -78,17 +59,9 @@ final class VolumeMonitor: VolumeMonitoring {
     }
 
     private func report(_ device: AudioObjectID) {
-        guard let level = Self.read(Float32.self, device, Self.volume) else { return }
-        let muted = muteAddress.flatMap { Self.read(UInt32.self, device, $0) }.map { $0 != 0 } ?? false
+        guard let level = CoreAudioOutput.read(Float32.self, device, CoreAudioOutput.volume) else { return }
+        let muted = muteAddress.flatMap { CoreAudioOutput.read(UInt32.self, device, $0) }.map { $0 != 0 } ?? false
         onChange?(VolumeState(level: min(max(level, 0), 1), muted: muted))
-    }
-
-    private static func read<T: Numeric & BitwiseCopyable>(_ type: T.Type, _ object: AudioObjectID, _ address: AudioObjectPropertyAddress) -> T? {
-        var address = address
-        var value: T = 0
-        var size = UInt32(MemoryLayout<T>.size)
-        guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr else { return nil }
-        return value
     }
 
     private func add(_ object: AudioObjectID, _ address: AudioObjectPropertyAddress, _ action: @escaping @MainActor () -> Void) -> Listener? {

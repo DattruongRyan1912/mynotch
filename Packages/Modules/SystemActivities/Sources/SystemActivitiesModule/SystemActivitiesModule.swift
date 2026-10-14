@@ -1,3 +1,4 @@
+import ApplicationServices
 import MyNotchCore
 import Observation
 import SwiftUI
@@ -9,6 +10,7 @@ struct SystemMonitors {
     var capsLock: any CapsLockMonitoring
     var network: any NetworkMonitoring
     var downloads: any DownloadsWatching
+    var mediaKeys: MediaKeyHUD
 
     /// Creating them touches nothing; each only reaches the system when started.
     static func live(scheduler: any Scheduler) -> SystemMonitors {
@@ -16,22 +18,27 @@ struct SystemMonitors {
             bluetooth: BluetoothMonitor(scheduler: scheduler), volume: VolumeMonitor(),
             capsLock: CapsLockMonitor(scheduler: scheduler),
             network: NetworkMonitor(source: NWPathSource(), scheduler: scheduler),
-            downloads: DownloadsWatcher(scheduler: scheduler))
+            downloads: DownloadsWatcher(scheduler: scheduler),
+            mediaKeys: MediaKeyHUD(
+                tap: SystemEventTap(), volume: SystemVolumeControl(), brightness: DisplayServicesBrightness(),
+                keyboardLight: CoreBrightnessKeyboardLight(), isTrusted: { AXIsProcessTrusted() }, scheduler: scheduler))
     }
 }
 
 /// Short live activities for system events: Bluetooth devices, network, Caps Lock, finished downloads and volume.
-/// Each kind has its own switch, and its monitor runs only while the switch is on.
+/// Each kind has its own switch, and its monitor runs only while the switch is on. A further switch, off by default,
+/// takes over the volume, brightness and keyboard light keys so MyNotch's bar shows instead of the macOS one.
 public final class SystemActivitiesModule: FeatureModule {
     public let descriptor = ModuleDescriptor(
         id: "system",
         displayName: "Hệ thống",
         systemImage: "gauge.with.dots.needle.33percent",
         defaultEnabled: true,
-        optionalPermissions: [.bluetooth, .downloadsFolder],
+        optionalPermissions: [.bluetooth, .downloadsFolder, .accessibility],
         permissionReasons: [
             .bluetooth: "Hiện thiết bị Bluetooth vừa kết nối hoặc ngắt, kèm pin.",
             .downloadsFolder: "Báo khi file tải xong trong Downloads.",
+            .accessibility: "Bắt phím âm lượng, độ sáng và đèn bàn phím để hiện thanh của MyNotch thay cho HUD của macOS.",
         ],
         order: 700
     )
@@ -69,7 +76,7 @@ public final class SystemActivitiesModule: FeatureModule {
         let keys = SystemActivitiesKeys(settings)
         context.run { [weak self] in
             for await _ in Observations({
-                [keys.bluetooth, keys.network, keys.capsLock, keys.downloads, keys.volume].map { settings.value($0) }
+                [keys.bluetooth, keys.network, keys.capsLock, keys.downloads, keys.volume, keys.replaceHUD].map { settings.value($0) }
             }) {
                 self?.reconcile()
             }
@@ -85,7 +92,8 @@ public final class SystemActivitiesModule: FeatureModule {
     public func makeTab() -> NotchTab? { nil }
 
     public func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? {
-        AnyView(SystemActivitiesSettingsView(keys: SystemActivitiesKeys(environment.settings), settings: environment.settings))
+        AnyView(SystemActivitiesSettingsView(
+            keys: SystemActivitiesKeys(environment.settings), settings: environment.settings, permissions: environment.permissions))
     }
 
     /// Starts the monitors of enabled kinds and stops the others, dropping the activity of a kind that was turned off.
@@ -135,9 +143,28 @@ public final class SystemActivitiesModule: FeatureModule {
                 stop: { [weak self] in self?.stopDownloads(monitors.downloads) }),
             "volume": Kind(
                 key: keys.volume,
-                start: { monitors.volume.start { [weak self] in self?.publish(.volume($0)) }; return true },
+                start: { monitors.volume.start { [weak self] in self?.volumeChanged($0) }; return true },
                 stop: monitors.volume.stop),
+            "mediaKeys": Kind(
+                key: keys.replaceHUD,
+                start: { [weak self] in self?.startMediaKeys(monitors.mediaKeys); return true },
+                stop: monitors.mediaKeys.stop),
         ]
+    }
+
+    /// The HUD without Accessibility keeps the keys with the system and waits for the permission, so this never fails.
+    private func startMediaKeys(_ mediaKeys: MediaKeyHUD) {
+        guard let settings = context?.settings else { return }
+        let keys = SystemActivitiesKeys(settings)
+        mediaKeys.start(
+            enabled: { keys.mediaKeySelection(settings) },
+            onChange: { [weak self] in self?.publish($0, duration: MediaKeyHUD.displayDuration) })
+    }
+
+    /// The monitor also reports the change the HUD itself made a moment ago, which would only keep its bar up longer.
+    private func volumeChanged(_ state: VolumeState) {
+        guard monitors?.mediaKeys.isEcho(state) != true else { return }
+        publish(.volume(state))
     }
 
     /// The first read of Downloads blocks until the user answers macOS's access prompt, so the watcher starts in a
@@ -165,9 +192,10 @@ public final class SystemActivitiesModule: FeatureModule {
         context?.logger.error("Downloads folder cannot be watched")
     }
 
-    private func publish(_ content: SystemActivityContent) {
+    /// Shown for `duration`, or for the time set in Settings.
+    private func publish(_ content: SystemActivityContent, duration: Duration? = nil) {
         guard let context else { return }
         let seconds = context.settings.value(SystemActivitiesKeys(context.settings).durationSeconds)
-        context.activities.set(content.liveActivity(duration: .seconds(seconds)))
+        context.activities.set(content.liveActivity(duration: duration ?? .seconds(seconds)))
     }
 }

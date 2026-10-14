@@ -54,4 +54,18 @@ import Testing
         #expect((muted.glyph, muted.trailing) == (.symbol("speaker.slash.fill"), .level(0)))
         #expect(SystemActivityContent.volume(VolumeState(level: 0, muted: false)).glyph == .symbol("speaker.slash.fill"))
     }
+
+    @Test func brightnessShowsTheSunAndTheLevel() {
+        let bright = SystemActivityContent.brightness(0.8)
+        #expect((bright.id, bright.glyph, bright.trailing) == ("brightness", .symbol("sun.max.fill"), .level(0.8)))
+        #expect(SystemActivityContent.brightness(0.2).glyph == .symbol("sun.min.fill"))
+        #expect(SystemActivityContent.brightness(0.2).trailing == .level(0.2))
+    }
+
+    @Test func keyboardLightShowsTheLightAndTheLevel() {
+        let on = SystemActivityContent.keyboardLight(0.5)
+        #expect((on.id, on.glyph, on.trailing) == ("keyboardLight", .symbol("light.max"), .level(0.5)))
+        let off = SystemActivityContent.keyboardLight(0)
+        #expect((off.glyph, off.trailing) == (.symbol("light.min"), .level(0)))
+    }
 }

@@ -11,9 +11,19 @@ import Testing
         let capsLock = FakeCapsLockMonitor()
         let network = FakeNetworkMonitor()
         let downloads = FakeDownloadsWatcher()
+        let tap = FakeEventTap()
+        let systemVolume = FakeVolumeControl()
+        let brightness = FakeLevelControl()
+        let keyboardLight = FakeLevelControl()
+        /// Whether Accessibility is allowed, which the HUD checks before it installs the tap.
+        var trusted = true
 
-        var monitors: SystemMonitors {
-            SystemMonitors(bluetooth: bluetooth, volume: volume, capsLock: capsLock, network: network, downloads: downloads)
+        func monitors(scheduler: any Scheduler) -> SystemMonitors {
+            SystemMonitors(
+                bluetooth: bluetooth, volume: volume, capsLock: capsLock, network: network, downloads: downloads,
+                mediaKeys: MediaKeyHUD(
+                    tap: tap, volume: systemVolume, brightness: brightness, keyboardLight: keyboardLight,
+                    isTrusted: { [unowned self] in trusted }, scheduler: scheduler))
         }
     }
 
@@ -25,7 +35,7 @@ import Testing
 
     init() {
         let fakes = fakes
-        harness = RegistryHarness([SystemActivitiesModule(makeMonitors: { _ in fakes.monitors })])
+        harness = RegistryHarness([SystemActivitiesModule(makeMonitors: { fakes.monitors(scheduler: $0) })])
     }
 
     /// Downloads start after the module has: the folder probe runs off the main thread.
@@ -56,10 +66,11 @@ import Testing
     @Test func declaresThePermissionsItUsesAndWhy() {
         let descriptor = SystemActivitiesModule().descriptor
         #expect(descriptor.permissions.isEmpty)
-        #expect(descriptor.optionalPermissions == [.bluetooth, .downloadsFolder])
+        #expect(descriptor.optionalPermissions == [.bluetooth, .downloadsFolder, .accessibility])
         #expect(descriptor.permissionReasons == [
             .bluetooth: "Hiện thiết bị Bluetooth vừa kết nối hoặc ngắt, kèm pin.",
             .downloadsFolder: "Báo khi file tải xong trong Downloads.",
+            .accessibility: "Bắt phím âm lượng, độ sáng và đèn bàn phím để hiện thanh của MyNotch thay cho HUD của macOS.",
         ])
     }
 

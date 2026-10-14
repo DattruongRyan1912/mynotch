@@ -68,4 +68,14 @@ nonisolated struct SystemActivityContent: Equatable, Sendable {
         }
         return SystemActivityContent(id: "volume", glyph: .symbol(symbol), trailing: .level(state.muted ? 0 : state.level))
     }
+
+    /// Shown when the brightness keys are taken over (see `MediaKeyHUD`).
+    static func brightness(_ level: Float) -> SystemActivityContent {
+        SystemActivityContent(id: "brightness", glyph: .symbol(level < 0.5 ? "sun.min.fill" : "sun.max.fill"), trailing: .level(level))
+    }
+
+    /// Shown when the keyboard light keys are taken over; the light is drawn dim only while it is off.
+    static func keyboardLight(_ level: Float) -> SystemActivityContent {
+        SystemActivityContent(id: "keyboardLight", glyph: .symbol(level > 0 ? "light.max" : "light.min"), trailing: .level(level))
+    }
 }
