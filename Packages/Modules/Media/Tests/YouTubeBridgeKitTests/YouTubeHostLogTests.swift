@@ -9,9 +9,10 @@ import Testing
     let recorder = LogRecorder()
 
     func start(
-        launch: YouTubeHostLaunch = YouTubeHostLaunch(argumentCount: 2, parentName: "Google Chrome"), on path: String? = nil
+        launch: YouTubeHostLaunch = YouTubeHostLaunch(argumentCount: 2, parentName: "Google Chrome"), on path: String? = nil,
+        readDelay: TimeInterval = 0
     ) -> HostRun {
-        HostRun(socketPath: path ?? server.path, clock: clock, log: recorder.log, launch: launch)
+        HostRun(socketPath: path ?? server.path, clock: clock, readDelay: readDelay, log: recorder.log, launch: launch)
     }
 
     static func diag(_ origin: String, _ event: String) -> [String: Any] {
@@ -53,7 +54,9 @@ import Testing
     @Test func theAppBeingAwayIsSaidOnceThenRemindedEveryThirtySecondsAndTheConnectionIsLogged() async throws {
         defer { server.remove() }
         let host = start()
-        try await Task.sleep(for: .milliseconds(300))
+        await waitUntil { !recorder.lines(containing: "app socket unavailable").isEmpty }
+        // A few more tries (every 50 ms here) that must not say it again.
+        try await Task.sleep(for: .milliseconds(200))
         #expect(recorder.lines(containing: "app socket unavailable").count == 1)
         #expect(recorder.lines(containing: "app socket unavailable").first == "app socket unavailable reason=no-socket, trying again every 0s")
         #expect(recorder.lines(containing: "still unavailable").isEmpty, "not before thirty seconds")
@@ -76,13 +79,13 @@ import Testing
         #expect(await host.finish() == 0)
     }
 
-    @Test func aConnectionWithAReplayNamesWhatItReplayed() async throws {
+    @Test(arguments: YouTubeHostCLITests.readDelays) func aConnectionWithAReplayNamesWhatItReplayed(readDelay: TimeInterval) async throws {
         defer { server.remove() }
-        let host = start()
+        let host = start(readDelay: readDelay)
         host.sendJSON(YouTubeHostCLITests.captions("aaaaaaaaaaa"))
         host.sendJSON(YouTubeHostCLITests.captions("bbbbbbbbbbb"))
         host.sendJSON(YouTubeHostCLITests.playback())
-        try await Task.sleep(for: .milliseconds(100))
+        await host.waitUntilHandled()
         try server.start()
         await waitUntil { !recorder.lines(containing: "app socket connected").isEmpty }
         #expect(recorder.lines(containing: "app socket connected").first?.hasPrefix("app socket connected replayed-captions=2 replayed-playback=true") == true)
@@ -120,14 +123,15 @@ import Testing
         #expect(await host.finish() == 0)
     }
 
-    @Test func aDiagIsAboutNowSoItIsNeverReplayed() async throws {
+    @Test(arguments: YouTubeHostCLITests.readDelays) func aDiagIsAboutNowSoItIsNeverReplayed(readDelay: TimeInterval) async throws {
         defer { server.remove() }
-        let host = start()
+        let host = start(readDelay: readDelay)
         host.sendJSON(Self.diag("sw", "sw-start v=0.1.1"))
-        try await Task.sleep(for: .milliseconds(100))
+        // Dealt with while the app is away, whatever the pipe says.
+        await host.waitUntilHandled()
         try server.start()
-        await waitUntil { server.connectionCount == 1 }
-        try await Task.sleep(for: .milliseconds(100))
+        // The line says nothing was replayed, and is written once the replay is over.
+        await host.waitForLog(containing: "app socket connected replayed-captions=0 replayed-playback=false")
         #expect(server.frames.isEmpty)
         // It was still logged when it came, and counted as dropped for the app.
         #expect(recorder.lines.contains("extension diag where=sw event=sw-start v=0.1.1"))
@@ -167,7 +171,7 @@ import Testing
         host.sendJSON(YouTubeHostCLITests.clear("aaaaaaaaaaa"))
         host.sendJSON(Self.diag("page", "page-seen fetch"))
         await waitUntil { server.frames.count == 5 }
-        try await Task.sleep(for: .milliseconds(150))
+        await host.waitUntilHandled()
         #expect(recorder.lines(containing: "host frames").isEmpty, "not before ten seconds")
         clock.advance(by: 10)
         await waitUntil { !recorder.lines(containing: "host frames").isEmpty }
@@ -193,9 +197,9 @@ import Testing
 
     // MARK: nothing private
 
-    @Test func noLineHoldsATitleAVideoIdCaptionTextAUrlOrAPath() async throws {
+    @Test(arguments: YouTubeHostCLITests.readDelays) func noLineHoldsATitleAVideoIdCaptionTextAUrlOrAPath(readDelay: TimeInterval) async throws {
         defer { server.remove() }
-        let host = start()
+        let host = start(readDelay: readDelay)
         let secretID = "abcdefghijk"
         let secretTitle = "Zebra Quartz Secret Title"
         let secretWords = "hidden caption words"
@@ -205,14 +209,14 @@ import Testing
         host.sendJSON(Self.diag("content", "content-tick-error https://www.youtube.com/watch?v=\(secretID)"))
         host.sendJSON(Self.diag("content", "content-tick-error \(secretID)"))
         host.sendJSON(Self.diag("page", "page-timedtext json3 events=1"))
-        try await Task.sleep(for: .milliseconds(100))
+        await host.waitUntilHandled()
         try server.start()
         await waitUntil { server.frames.count >= 2 }
         host.sendJSON(YouTubeMessageTests.playback(videoID: secretID, title: secretTitle))
         host.sendJSON(["v": 1, "type": "clear", "videoId": secretID])
         host.send(Data("title=\(secretTitle) \(secretID)".utf8))
         server.stop()
-        try await Task.sleep(for: .milliseconds(150))
+        await host.waitForLog(containing: "app socket disconnected")
         #expect(await host.finish() == 0)
 
         #expect(recorder.lines.count >= 7, "\(recorder.lines)")

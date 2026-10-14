@@ -18,8 +18,13 @@ import Testing
         ["v": 1, "type": "clear", "videoId": videoID]
     }
 
-    func start(on path: String? = nil, expectedOwner: uid_t = geteuid()) -> HostRun {
-        HostRun(socketPath: path ?? server.path, clock: clock, expectedOwner: expectedOwner)
+    /// How late the host gets to what is written to its stdin: none, and a thread that is slow to run. The tests that
+    /// change what the host sees (start or stop the app, move the clock) after sending something run with both, since
+    /// a message in the pipe is not yet a message the host has dealt with.
+    static let readDelays: [TimeInterval] = [0, 0.15]
+
+    func start(on path: String? = nil, expectedOwner: uid_t = geteuid(), readDelay: TimeInterval = 0) -> HostRun {
+        HostRun(socketPath: path ?? server.path, clock: clock, expectedOwner: expectedOwner, readDelay: readDelay)
     }
 
     // MARK: forwarding
@@ -87,12 +92,13 @@ import Testing
         #expect(YouTubeHostCLI.reconnectInterval == 2)
     }
 
-    @Test func theAppMayStartAfterTheHostAndMessagesInBetweenAreDropped() async throws {
+    @Test(arguments: readDelays) func theAppMayStartAfterTheHostAndMessagesInBetweenAreDropped(readDelay: TimeInterval) async throws {
         defer { server.remove() }
-        let host = start()
+        let host = start(readDelay: readDelay)
         // Nothing is listening: a clear is not kept for later, unlike captions and playback.
         host.sendJSON(Self.clear("aaaaaaaaaaa"))
-        try await Task.sleep(for: .milliseconds(200))
+        // The host has dealt with it, so it was dropped, before the app appears.
+        await host.waitUntilHandled()
         try server.start()
         await waitUntil { server.connectionCount == 1 }
         #expect(server.connectionCount == 1)
@@ -102,15 +108,17 @@ import Testing
         #expect(await host.finish() == 0)
     }
 
-    @Test func anAppThatQuitsAndComesBackIsReconnectedTo() async throws {
+    @Test(arguments: readDelays) func anAppThatQuitsAndComesBackIsReconnectedTo(readDelay: TimeInterval) async throws {
         defer { server.remove() }
         try server.start()
-        let host = start()
+        let host = start(readDelay: readDelay)
         await waitUntil { server.connectionCount == 1 }
         server.stop()
         // The host notices on its own, while nothing is being sent, and a message sent meanwhile is lost.
-        try await Task.sleep(for: .milliseconds(300))
+        await host.waitForLog(containing: "app socket disconnected: peer closed")
         host.sendJSON(Self.clear("aaaaaaaaaaa"))
+        // Dealt with while the app is away: the pipe alone does not say the host has read it.
+        await host.waitUntilHandled()
         try server.start()
         await waitUntil { server.connectionCount == 2 }
         #expect(server.connectionCount == 2)
@@ -120,17 +128,19 @@ import Testing
         #expect(await host.finish() == 0)
     }
 
-    @Test func aSocketOfAnotherUserGetsNothingNotEvenTheReplay() async throws {
+    @Test(arguments: readDelays) func aSocketOfAnotherUserGetsNothingNotEvenTheReplay(readDelay: TimeInterval) async throws {
         defer { server.remove() }
         try server.start()
-        let host = start(expectedOwner: geteuid() &+ 1)
+        let host = start(expectedOwner: geteuid() &+ 1, readDelay: readDelay)
         // Captions are what a connection would replay at once, and a clear what a live one would carry.
         host.sendJSON(Self.captions("aaaaaaaaaaa"))
         host.sendJSON(Self.clear("bbbbbbbbbbb"))
         // The host may connect to find out whose socket it is, but it hangs up before it sends anything.
         await waitUntil { server.connectionCount >= 2 }
         #expect(server.connectionCount >= 2)
-        try await Task.sleep(for: .milliseconds(200))
+        // It has looked at whose socket this is, found it is not the user's, and dealt with both messages.
+        await host.waitForLog(containing: "app socket unavailable reason=other-user")
+        await host.waitUntilHandled()
         #expect(server.frames.isEmpty)
         #expect(await host.finish() == 0)
     }
@@ -168,6 +178,8 @@ import Testing
             try await Task.sleep(for: .milliseconds(5))
         }
         #expect(closing.hangUpCount >= 3)
+        // All of those were dealt with against dead peers; none may be left to go to the next app.
+        await host.waitUntilHandled()
 
         closing.stop()
         let real = FrameServer(directory: closing.directory)
@@ -181,13 +193,13 @@ import Testing
 
     // MARK: replay
 
-    @Test func theLatestCaptionsOfEachVideoAndThenThePlaybackAreReplayedOnConnecting() async throws {
+    @Test(arguments: readDelays) func theLatestCaptionsOfEachVideoAndThenThePlaybackAreReplayedOnConnecting(readDelay: TimeInterval) async throws {
         defer { server.remove() }
-        let host = start()
+        let host = start(readDelay: readDelay)
         let first = host.sendJSON(Self.captions("aaaaaaaaaaa"))
         let second = host.sendJSON(Self.captions("bbbbbbbbbbb"))
         let playing = host.sendJSON(Self.playback("bbbbbbbbbbb"))
-        try await Task.sleep(for: .milliseconds(100))
+        await host.waitUntilHandled()
         try server.start()
         await waitUntil { server.frames.count == 3 }
         #expect(server.frames == [first, second, playing])
@@ -198,75 +210,77 @@ import Testing
         #expect(await host.finish() == 0)
     }
 
-    @Test func aVideoHasOnlyItsLatestCaptionsAndOnlyTheLatestPlaybackIsKept() async throws {
+    @Test(arguments: readDelays) func aVideoHasOnlyItsLatestCaptionsAndOnlyTheLatestPlaybackIsKept(readDelay: TimeInterval) async throws {
         defer { server.remove() }
-        let host = start()
+        let host = start(readDelay: readDelay)
         host.sendJSON(Self.captions("aaaaaaaaaaa", text: "old"))
         host.sendJSON(Self.playback(playing: false))
         let newer = host.sendJSON(Self.captions("aaaaaaaaaaa", text: "new"))
         let latest = host.sendJSON(Self.playback(playing: true))
-        try await Task.sleep(for: .milliseconds(100))
+        await host.waitUntilHandled()
         try server.start()
+        // The line says how much was replayed, and it is written once all of it has been sent.
+        await host.waitForLog(containing: "app socket connected replayed-captions=1 replayed-playback=true")
         await waitUntil { server.frames.count == 2 }
-        try await Task.sleep(for: .milliseconds(100))
         #expect(server.frames == [newer, latest])
         #expect(await host.finish() == 0)
     }
 
-    @Test func clearDropsThatVideosCaptionsFromTheReplay() async throws {
+    @Test(arguments: readDelays) func clearDropsThatVideosCaptionsFromTheReplay(readDelay: TimeInterval) async throws {
         defer { server.remove() }
-        let host = start()
+        let host = start(readDelay: readDelay)
         host.sendJSON(Self.captions("aaaaaaaaaaa"))
         let kept = host.sendJSON(Self.captions("bbbbbbbbbbb"))
         host.sendJSON(Self.clear("aaaaaaaaaaa"))
-        try await Task.sleep(for: .milliseconds(100))
+        await host.waitUntilHandled()
         try server.start()
+        await host.waitForLog(containing: "app socket connected replayed-captions=1 replayed-playback=false")
         await waitUntil { !server.frames.isEmpty }
-        try await Task.sleep(for: .milliseconds(100))
         #expect(server.frames == [kept])
         #expect(await host.finish() == 0)
     }
 
-    @Test func atMostThreeVideosAreKeptTheOldestGoingFirst() async throws {
+    @Test(arguments: readDelays) func atMostThreeVideosAreKeptTheOldestGoingFirst(readDelay: TimeInterval) async throws {
         defer { server.remove() }
-        let host = start()
+        let host = start(readDelay: readDelay)
         host.sendJSON(Self.captions("aaaaaaaaaaa"))
         let second = host.sendJSON(Self.captions("bbbbbbbbbbb"))
         let third = host.sendJSON(Self.captions("ccccccccccc"))
         let fourth = host.sendJSON(Self.captions("ddddddddddd"))
-        try await Task.sleep(for: .milliseconds(100))
+        await host.waitUntilHandled()
         try server.start()
+        await host.waitForLog(containing: "app socket connected replayed-captions=3 replayed-playback=false")
         await waitUntil { server.frames.count == 3 }
-        try await Task.sleep(for: .milliseconds(100))
         #expect(server.frames == [second, third, fourth])
         #expect(await host.finish() == 0)
     }
 
-    @Test func aPlaybackOlderThanTenSecondsIsNotReplayedButCaptionsAre() async throws {
+    @Test(arguments: readDelays) func aPlaybackOlderThanTenSecondsIsNotReplayedButCaptionsAre(readDelay: TimeInterval) async throws {
         defer { server.remove() }
-        let host = start()
+        let host = start(readDelay: readDelay)
         let captions = host.sendJSON(Self.captions("aaaaaaaaaaa"))
         host.sendJSON(Self.playback("aaaaaaaaaaa"))
-        try await Task.sleep(for: .milliseconds(100))
+        // The playback has to be stamped before the clock moves on.
+        await host.waitUntilHandled()
         clock.advance(by: 10.5)
         try server.start()
+        await host.waitForLog(containing: "app socket connected replayed-captions=1 replayed-playback=false")
         await waitUntil { !server.frames.isEmpty }
-        try await Task.sleep(for: .milliseconds(100))
         #expect(server.frames == [captions])
         #expect(await host.finish() == 0)
     }
 
-    @Test func restartingOnlyTheAppReplaysAgain() async throws {
+    @Test(arguments: readDelays) func restartingOnlyTheAppReplaysAgain(readDelay: TimeInterval) async throws {
         defer { server.remove() }
         try server.start()
-        let host = start()
+        let host = start(readDelay: readDelay)
         await waitUntil { server.connectionCount == 1 }
         let captions = host.sendJSON(Self.captions("aaaaaaaaaaa"))
         let playing = host.sendJSON(Self.playback("aaaaaaaaaaa"))
         await waitUntil { server.frames.count == 2 }
         #expect(server.frames == [captions, playing])
         server.stop()
-        try await Task.sleep(for: .milliseconds(200))
+        await host.waitForLog(containing: "app socket disconnected")
 
         // A fresh app instance on the same path.
         let restarted = FrameServer(directory: server.directory)
@@ -277,16 +291,17 @@ import Testing
         #expect(await host.finish() == 0)
     }
 
-    @Test func aClearAndAStalePausedPlaybackLeaveNothingToReplay() async throws {
+    @Test(arguments: readDelays) func aClearAndAStalePausedPlaybackLeaveNothingToReplay(readDelay: TimeInterval) async throws {
         defer { server.remove() }
-        let host = start()
+        let host = start(readDelay: readDelay)
         host.sendJSON(Self.clear("aaaaaaaaaaa"))
         host.sendJSON(Self.playback(playing: false))
-        try await Task.sleep(for: .milliseconds(100))
+        // The playback has to be stamped before the clock moves on.
+        await host.waitUntilHandled()
         clock.advance(by: 60)
         try server.start()
         await waitUntil { server.connectionCount == 1 }
-        try await Task.sleep(for: .milliseconds(100))
+        await host.waitForLog(containing: "app socket connected replayed-captions=0 replayed-playback=false")
         #expect(server.frames.isEmpty)
         #expect(await host.finish() == 0)
     }

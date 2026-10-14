@@ -27,6 +27,25 @@ public enum YouTubeHostCLI {
         log: YouTubeBridgeLog = .system,
         launch: YouTubeHostLaunch = .current
     ) -> Int32 {
+        run(
+            stdin: stdin, socketPath: socketPath, reconnectInterval: reconnectInterval, now: now, expectedOwner: expectedOwner,
+            log: log, launch: launch, didHandle: nil
+        )
+    }
+
+    /// `run` with a hook that is called after each native message has been dealt with (forwarded, kept for the replay or
+    /// dropped). It is how a test learns that the host has got to a message, which the pipe alone does not say: a
+    /// message written to stdin may not have been read yet.
+    static func run<Source: ByteReading>(
+        stdin: Source,
+        socketPath: String,
+        reconnectInterval: TimeInterval,
+        now: @escaping @Sendable () -> TimeInterval,
+        expectedOwner: uid_t,
+        log: YouTubeBridgeLog,
+        launch: YouTubeHostLaunch,
+        didHandle: (@Sendable () -> Void)?
+    ) -> Int32 {
         log("host start argc=\(launch.argumentCount) parent=\(launch.parentName ?? "unknown")")
         let relay = HostRelay(socketPath: socketPath, expectedOwner: expectedOwner, retryInterval: reconnectInterval, now: now, log: log)
         relay.start(reconnectingEvery: reconnectInterval)
@@ -35,6 +54,7 @@ public enum YouTubeHostCLI {
             switch reader.next() {
             case .message(let message):
                 relay.submit(message)
+                didHandle?()
             case .tooLarge:
                 // A length Chrome never sends means the stream is out of step: nothing more can be read from it.
                 log("host stdin out of step: length above the limit")
