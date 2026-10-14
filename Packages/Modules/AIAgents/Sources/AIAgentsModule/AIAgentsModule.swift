@@ -47,6 +47,9 @@ public final class AIAgentsModule: FeatureModule {
     )
 
     static let activityID = "agent"
+    /// How much later than the store's timer the finished check expires on the center, so the store's timer, which the
+    /// module follows, always acts first.
+    static let finishedExpiryMargin = Duration.seconds(1)
 
     /// Set while running.
     private(set) var store: AgentSessionStore?
@@ -276,10 +279,11 @@ public final class AIAgentsModule: FeatureModule {
             return
         }
         // The finished check is a notice: with an expiry it takes the notch for its few seconds and playing media steps
-        // back in. The store's own timer stays, since it also ends the session's finished state; whichever of the two
-        // comes first clears the activity.
+        // back in. The store's timer, armed when the turn ended, ends the session's finished state first and this module
+        // then clears the activity, so `publishedActivity` never outlives what the center shows; the expiry is a margin
+        // later, only what marks the activity as a notice and a backstop.
         let lifetime: Duration? = content.kind == .finished
-            ? .seconds(context.settings.value(AIAgentsSettingsKeys(context.settings).finishedSeconds)) : nil
+            ? .seconds(context.settings.value(AIAgentsSettingsKeys(context.settings).finishedSeconds)) + Self.finishedExpiryMargin : nil
         context.activities.set(LiveActivity(
             id: Self.activityID,
             priority: content.priority,
