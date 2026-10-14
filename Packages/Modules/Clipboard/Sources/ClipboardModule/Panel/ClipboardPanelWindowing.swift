@@ -14,7 +14,12 @@ protocol ClipboardPanelWindowing: AnyObject {
     func show(_ content: AnyView, model: ClipboardPanelModel, restoringOrigin: CGPoint?, onClose: @escaping () -> Void)
     /// Gives the keyboard back to the panel, e.g. for a pinned one that handed it to the app behind.
     func focus()
-    /// Lets the app behind the panel take the keyboard while the panel stays on screen.
-    func returnKeyboard()
+    /// Lets the app that is in front take the keyboard while the panel stays on screen. True when, as far as AppKit can
+    /// tell, no window of MyNotch has the keyboard afterwards and that app is still in front. False means a key press
+    /// would reach the panel or nobody, so nothing may be sent to the app behind.
+    func returnKeyboard() -> Bool
+    /// The same question for a panel that has already left the screen: no window of MyNotch has the keyboard, and the
+    /// app in front is not MyNotch itself.
+    func keyboardIsWithFrontApp() -> Bool
     func close()
 }

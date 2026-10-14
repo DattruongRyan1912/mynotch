@@ -86,6 +86,54 @@ import Testing
         #expect(keystrokes.pasteCount == 0)
     }
 
+    // MARK: Waiting for the keyboard
+
+    /// The floating panel hands the keyboard back between the write and the key press, and says whether it worked.
+    @Test func theKeyboardCheckRunsAfterTheWriteAndBeforeCommandVIsScheduled() {
+        var seen: [(writes: Int, pending: Int)] = []
+        let outcome = paster.perform(Self.item, imageURL: nil, paste: true) { [unowned self] in
+            seen.append((pasteboard.writes.count, scheduler.pendingCount))
+            return true
+        }
+
+        #expect(outcome == .pasted)
+        #expect(seen.count == 1)
+        #expect(seen.first?.writes == 1)
+        #expect(seen.first?.pending == 0)
+        scheduler.advance(by: .milliseconds(80))
+        #expect(keystrokes.pasteCount == 1)
+    }
+
+    @Test func aKeyboardThatIsNotBackCopiesWithoutPasting() {
+        let outcome = paster.perform(Self.item, imageURL: nil, paste: true) { false }
+        scheduler.advance(by: .seconds(1))
+
+        #expect(outcome == .copied)
+        #expect(pasteboard.writes.count == 1)
+        #expect(keystrokes.pasteCount == 0)
+        #expect(scheduler.pendingCount == 0)
+    }
+
+    @Test func aRefusedPasteAlsoCancelsACommandVStillWaiting() {
+        paster.perform(Self.item, imageURL: nil, paste: true)
+        scheduler.advance(by: .milliseconds(40))
+        let outcome = paster.perform(Self.item, imageURL: nil, paste: true) { false }
+        scheduler.advance(by: .seconds(1))
+
+        #expect(outcome == .copied)
+        #expect(keystrokes.pasteCount == 0)
+    }
+
+    @Test func theKeyboardCheckIsNotAskedWhenNothingWouldBePasted() {
+        var asked = 0
+        paster.perform(Self.item, imageURL: nil, paste: false) { asked += 1; return true }
+        trusted = false
+        let outcome = paster.perform(Self.item, imageURL: nil, paste: true) { asked += 1; return true }
+
+        #expect(outcome == .copiedNeedsPermission)
+        #expect(asked == 0)
+    }
+
     /// Uses a private named pasteboard so the real write path decides; the system pasteboard is never touched.
     @Test func anUnreadableImageFailsWithoutTouchingThePasteboardOrPasting() {
         let named = NSPasteboard(name: .init("MyNotchTests.\(UUID().uuidString)"))

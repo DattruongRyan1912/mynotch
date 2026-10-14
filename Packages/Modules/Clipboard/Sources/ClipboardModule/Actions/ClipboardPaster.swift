@@ -57,8 +57,14 @@ final class ClipboardPaster {
 
     /// Always writes the item first, keeping its source app; with `paste`, ⌘V follows after `pasteDelay` (or the
     /// `delay` of this call, for a window that needs longer to give the keyboard back) when Accessibility is granted.
+    /// `beforePaste` is for a window that holds the keyboard: it runs after the write and the permission check, before
+    /// ⌘V is scheduled, hands the keyboard back and says whether a key press would now reach the app in front. When it
+    /// says no, nothing is pasted (the item stays on the pasteboard for the user's own ⌘V) and the outcome is `.copied`.
     @discardableResult
-    func perform(_ item: ClipboardItem, imageURL: URL?, paste: Bool, plainTextOnly: Bool = false, delay: Duration? = nil) -> Outcome {
+    func perform(
+        _ item: ClipboardItem, imageURL: URL?, paste: Bool, plainTextOnly: Bool = false, delay: Duration? = nil,
+        beforePaste: (() -> Bool)? = nil
+    ) -> Outcome {
         let written = pasteboard.write(
             item.content, imageURL: imageURL, plainTextOnly: plainTextOnly, sourceBundleID: item.sourceBundleID
         )
@@ -68,6 +74,7 @@ final class ClipboardPaster {
         pendingPaste = nil
         guard paste else { return .copied }
         guard isTrusted() else { return .copiedNeedsPermission }
+        if let beforePaste, !beforePaste() { return .copied }
         let keystrokes = keystrokes
         pendingPaste = scheduler.schedule(after: delay ?? pasteDelay) { keystrokes.sendPaste() }
         return .pasted

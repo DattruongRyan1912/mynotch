@@ -4,8 +4,10 @@ import Observation
 
 /// What the panel asks of the module. A protocol so the panel's tests never touch a pasteboard.
 protocol ClipboardPanelActions: AnyObject {
-    /// The click action from Settings: copy, or copy and paste. nil while the module is stopped.
-    @discardableResult func activate(_ item: ClipboardItem) -> ClipboardPaster.Outcome?
+    /// The click action from Settings: copy, or copy and paste. nil while the module is stopped. When it pastes, it calls
+    /// `beforePaste` after writing the pasteboard and before sending ⌘V, to get the keyboard out of the panel; if that
+    /// answers false it pastes nothing and answers `.copied`.
+    @discardableResult func activate(_ item: ClipboardItem, beforePaste: @escaping () -> Bool) -> ClipboardPaster.Outcome?
 }
 
 extension ClipboardModule: ClipboardPanelActions {}
@@ -45,7 +47,10 @@ final class ClipboardPanelModel {
     /// Closes the window. The panel asks for it at most once.
     @ObservationIgnored var onClose: (() -> Void)?
     /// Takes the keyboard from the panel and gives it to the app in front, for a pinned panel that stays on screen.
-    @ObservationIgnored var onReturnKeyboard: (() -> Void)?
+    /// True when it worked: no window of MyNotch has the keyboard afterwards and the app in front is still in front.
+    @ObservationIgnored var onReturnKeyboard: (() -> Bool)?
+    /// The same question for an unpinned panel, asked once it has left the screen.
+    @ObservationIgnored var isKeyboardBack: (() -> Bool)?
     @ObservationIgnored var onPinnedChange: ((Bool) -> Void)?
     /// Where the user dragged a pinned panel to: its frame's origin.
     @ObservationIgnored var onMove: ((CGPoint) -> Void)?
@@ -162,18 +167,33 @@ final class ClipboardPanelModel {
         return true
     }
 
-    /// Return, ⌘N and a click: the module's click action on the item. An unpinned panel closes behind it, so the
-    /// keyboard is back in the app in front before ⌘V is sent; a pinned one stays and hands the keyboard back instead.
+    /// Return, ⌘N and a click: the module's click action on the item. A paste needs the keyboard out of the panel first,
+    /// or ⌘V would go to its own search field: an unpinned panel closes, a pinned one hands the keyboard back, and ⌘V is
+    /// sent only if that is checked to have worked (otherwise the item is only copied, and the user is told to press ⌘V).
     /// A copy that failed changes nothing and says so.
     func activate(_ id: UUID) {
         guard !isClosed, let item = items.first(where: { $0.id == id }) else { return }
         chosenID = id
-        switch actions.activate(item) {
-        case .pasted: finishAction(nil)
-        case .copied: finishAction(("Đã chép", "checkmark.circle.fill"))
-        case .copiedNeedsPermission: finishAction(("Đã chép — nhấn ⌘V để dán", "doc.on.clipboard"))
-        case .failed: post("Không chép được mục này", systemImage: "exclamationmark.triangle.fill")
-        case nil: requestClose()
+        var keyboardBack: Bool?
+        let outcome = actions.activate(item) { [self] in
+            let isBack = giveBackKeyboard()
+            keyboardBack = isBack
+            return isBack
+        }
+        switch outcome {
+        case .pasted:
+            finishAction(nil, keyboardIsBack: true)
+        case .copied:
+            // `keyboardBack == false`: a paste was asked for but the keyboard did not come back, so nothing was pasted.
+            finishAction(
+                keyboardBack == false ? Self.pressPaste : ("Đã chép", "checkmark.circle.fill"), keyboardIsBack: keyboardBack != nil
+            )
+        case .copiedNeedsPermission:
+            finishAction(Self.pressPaste, keyboardIsBack: false)
+        case .failed:
+            post("Không chép được mục này", systemImage: "exclamationmark.triangle.fill")
+        case nil:
+            requestClose()
         }
     }
 
@@ -220,13 +240,25 @@ final class ClipboardPanelModel {
 
     // MARK: Private
 
-    private func finishAction(_ outcome: (text: String, systemImage: String)?) {
+    private static let pressPaste = (text: "Đã chép — nhấn ⌘V để dán", systemImage: "doc.on.clipboard")
+
+    /// Before a paste: an unpinned panel leaves the screen, which returns the keyboard to the app in front, and a pinned
+    /// one hands it back. Whether the keyboard is really back is checked either way.
+    private func giveBackKeyboard() -> Bool {
+        if isPinned { return onReturnKeyboard?() ?? false }
+        requestClose()
+        return isKeyboardBack?() ?? false
+    }
+
+    /// `keyboardIsBack`: a paste already got the keyboard out of the panel; a copy has not, and the user will press ⌘V in
+    /// the app behind by hand, so a pinned panel hands it back now.
+    private func finishAction(_ outcome: (text: String, systemImage: String)?, keyboardIsBack: Bool) {
         guard isPinned else {
             requestClose()
             return
         }
         if let outcome { post(outcome.text, systemImage: outcome.systemImage) }
-        onReturnKeyboard?()
+        if !keyboardIsBack { _ = onReturnKeyboard?() }
     }
 
     private func post(_ text: String, systemImage: String) {

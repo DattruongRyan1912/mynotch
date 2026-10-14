@@ -13,6 +13,8 @@ final class FakePasteboard: PasteboardAccess {
     private(set) var changeCount = 0
     private(set) var snapshotCount = 0
     private(set) var writes: [Write] = []
+    /// False makes every write fail, like an image file that is gone.
+    var writesSucceed = true
     private var current: PasteboardSnapshot?
 
     /// Another app copying: new content under a new change count.
@@ -27,6 +29,7 @@ final class FakePasteboard: PasteboardAccess {
     }
 
     func write(_ content: ClipboardContent, imageURL: URL?, plainTextOnly: Bool, sourceBundleID: String?) -> Bool {
+        guard writesSucceed else { return false }
         writes.append(Write(content: content, imageURL: imageURL, plainTextOnly: plainTextOnly, sourceBundleID: sourceBundleID))
         copy(PasteboardSnapshot(types: [ClipboardClassifier.ownWriteType, "public.utf8-plain-text"], string: content.plainText))
         return true

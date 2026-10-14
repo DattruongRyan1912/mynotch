@@ -2,14 +2,25 @@ import Foundation
 import Testing
 @testable import ClipboardModule
 
-/// Stands in for the module: records what the panel asks for.
+/// Stands in for the module: records what the panel asks for, in order. Like the module, it asks for the keyboard only
+/// when it would paste, after the write and before the key press.
 final class FakePanelActions: ClipboardPanelActions {
     var outcome: ClipboardPaster.Outcome? = .pasted
     private(set) var activated: [UUID] = []
+    /// What happened to the pasteboard and the key press, to check against the keyboard's hand-back.
+    private(set) var events: [String] = []
 
-    func activate(_ item: ClipboardItem) -> ClipboardPaster.Outcome? {
+    func activate(_ item: ClipboardItem, beforePaste: @escaping () -> Bool) -> ClipboardPaster.Outcome? {
         activated.append(item.id)
-        return outcome
+        events.append("write")
+        guard outcome == .pasted else { return outcome }
+        guard beforePaste() else { return .copied }
+        events.append("paste")
+        return .pasted
+    }
+
+    func note(_ event: String) {
+        events.append(event)
     }
 }
 
@@ -25,6 +36,10 @@ final class FakePanelActions: ClipboardPanelActions {
     private var model: ClipboardPanelModel!
     var closeCount = 0
     var keyboardReturns = 0
+    var keyboardChecks = 0
+    /// What the window says of the keyboard after a hand-back, and after the panel closed.
+    var handBackWorks = true
+    var keyboardIsBackAfterClose = true
     private(set) var pinChanges: [Bool] = []
     private(set) var moves: [CGPoint] = []
 
@@ -55,8 +70,20 @@ final class FakePanelActions: ClipboardPanelActions {
     func makeModel(pinned: Bool) -> ClipboardPanelModel {
         let start = Self.start
         let model = ClipboardPanelModel(state: state, actions: actions, isPinned: pinned, now: { start })
-        model.onClose = { [unowned self] in closeCount += 1 }
-        model.onReturnKeyboard = { [unowned self] in keyboardReturns += 1 }
+        model.onClose = { [unowned self] in
+            closeCount += 1
+            actions.note("close")
+        }
+        model.onReturnKeyboard = { [unowned self] in
+            keyboardReturns += 1
+            actions.note("hand back")
+            return handBackWorks
+        }
+        model.isKeyboardBack = { [unowned self] in
+            keyboardChecks += 1
+            actions.note("check")
+            return keyboardIsBackAfterClose
+        }
         model.onPinnedChange = { [unowned self] in pinChanges.append($0) }
         model.onMove = { [unowned self] in moves.append($0) }
         return model
@@ -273,19 +300,64 @@ final class FakePanelActions: ClipboardPanelActions {
 
     // MARK: Pinned or not
 
-    @Test(arguments: [ClipboardPaster.Outcome.pasted, .copied, .copiedNeedsPermission])
-    func anActionClosesAnUnpinnedPanelWithoutTouchingTheKeyboardHandBack(outcome: ClipboardPaster.Outcome) {
-        actions.outcome = outcome
+    @Test func anUnpinnedPasteClosesThePanelThenChecksTheKeyboardThenPastes() {
         model.activate(text)
+
+        #expect(actions.events == ["write", "close", "check", "paste"])
         #expect(closeCount == 1)
         #expect(keyboardReturns == 0)
+        #expect(keyboardChecks == 1)
     }
 
-    @Test(arguments: [ClipboardPaster.Outcome.pasted, .copied, .copiedNeedsPermission])
-    func anActionKeepsAPinnedPanelOpenAndHandsTheKeyboardBack(outcome: ClipboardPaster.Outcome) {
+    @Test func aPinnedPasteHandsTheKeyboardBackThenPastesAndKeepsThePanelOpen() {
+        pin()
+        model.activate(text)
+
+        #expect(actions.events == ["write", "hand back", "paste"])
+        #expect(closeCount == 0)
+        #expect(keyboardReturns == 1)
+        #expect(keyboardChecks == 0)
+        #expect(model.notice == nil)
+    }
+
+    /// The panel would still be the one to get ⌘V, so nothing is pasted; the item is on the pasteboard and the user is told.
+    @Test func aPinnedPanelThatCouldNotHandTheKeyboardBackDoesNotPasteAndSaysSo() {
+        pin()
+        handBackWorks = false
+        model.activate(text)
+
+        #expect(actions.events == ["write", "hand back"])
+        #expect(closeCount == 0)
+        #expect(keyboardReturns == 1)
+        #expect(model.notice?.text == "Đã chép — nhấn ⌘V để dán")
+    }
+
+    @Test func anUnpinnedPanelWhoseKeyboardDidNotComeBackDoesNotPaste() {
+        keyboardIsBackAfterClose = false
+        model.activate(text)
+
+        #expect(actions.events == ["write", "close", "check"])
+        #expect(closeCount == 1)
+    }
+
+    @Test(arguments: [ClipboardPaster.Outcome.copied, .copiedNeedsPermission])
+    func aCopyClosesAnUnpinnedPanelWithoutAskingForTheKeyboard(outcome: ClipboardPaster.Outcome) {
+        actions.outcome = outcome
+        model.activate(text)
+
+        #expect(actions.events == ["write", "close"])
+        #expect(keyboardReturns == 0)
+        #expect(keyboardChecks == 0)
+    }
+
+    /// The user presses ⌘V in the app behind by hand, so the keyboard has to be there.
+    @Test(arguments: [ClipboardPaster.Outcome.copied, .copiedNeedsPermission])
+    func aCopyKeepsAPinnedPanelOpenAndHandsTheKeyboardBack(outcome: ClipboardPaster.Outcome) {
         pin()
         actions.outcome = outcome
         model.activate(text)
+
+        #expect(actions.events == ["write", "hand back"])
         #expect(closeCount == 0)
         #expect(keyboardReturns == 1)
     }

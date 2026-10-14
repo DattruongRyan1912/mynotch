@@ -1,6 +1,5 @@
 import AppKit
 import MyNotchCore
-import NotchUI
 import Observation
 import SwiftUI
 
@@ -54,9 +53,6 @@ public final class ClipboardModule: FeatureModule {
     var diskWork: Task<Void, Never>?
 
     public convenience init() {
-        // The app-wide "hide from screen recording" setting is not a module's own, so a module cannot read it through
-        // `ModuleSettings`; the app keeps it in the standard defaults.
-        let interfaceSettings = SettingsStore(defaults: .standard)
         self.init(
             pasteboard: SystemPasteboard(),
             keystrokes: CGEventKeystrokeSender(),
@@ -68,7 +64,7 @@ public final class ClipboardModule: FeatureModule {
             // Reading the behavior does not read the pasteboard, so it never prompts.
             pasteboardAccessBehavior: { NSPasteboard.general.accessBehavior },
             libraryWindow: ClipboardLibraryWindowController(),
-            panelWindow: ClipboardPanelController(captureHiding: { interfaceSettings.value(InterfaceSettings.hideFromCapture) })
+            panelWindow: ClipboardPanelController()
         )
     }
 
@@ -251,7 +247,8 @@ public final class ClipboardModule: FeatureModule {
         let pinned = settings.value(keys.panelPinned)
         let model = ClipboardPanelModel(state: state, actions: self, isPinned: pinned, now: now)
         model.onClose = { [weak self] in self?.closePanel() }
-        model.onReturnKeyboard = { [weak panelWindow] in panelWindow?.returnKeyboard() }
+        model.onReturnKeyboard = { [weak panelWindow] in panelWindow?.returnKeyboard() ?? false }
+        model.isKeyboardBack = { [weak panelWindow] in panelWindow?.keyboardIsWithFrontApp() ?? false }
         model.onPinnedChange = { [weak self] pinned in self?.panelPinChanged(pinned) }
         model.onMove = { origin in settings.set(ClipboardPanelPosition(origin), for: keys.panelPosition) }
         panel = model
@@ -303,6 +300,15 @@ public final class ClipboardModule: FeatureModule {
     func activate(_ item: ClipboardItem) -> ClipboardPaster.Outcome? {
         guard let context, let keys else { return nil }
         return put(item, paste: context.settings.value(keys.clickAction) == .paste)
+    }
+
+    /// The floating panel's click action: the same, except that a paste first lets the panel get the keyboard out of the
+    /// way. `beforePaste` runs after the pasteboard is written and before ⌘V is sent; when it answers false nothing is
+    /// pasted, the item stays on the pasteboard, and a hint says to press ⌘V. nil while stopped.
+    @discardableResult
+    func activate(_ item: ClipboardItem, beforePaste: @escaping () -> Bool) -> ClipboardPaster.Outcome? {
+        guard let context, let keys else { return nil }
+        return put(item, paste: context.settings.value(keys.clickAction) == .paste, beforePaste: beforePaste)
     }
 
     @discardableResult
@@ -517,32 +523,41 @@ public final class ClipboardModule: FeatureModule {
     /// Puts the item on the pasteboard and moves it to the top. A paste always closes the notch, at once, so keyboard
     /// focus is back in the previous app before ⌘V is sent; a copy closes it when "close after action" is on.
     /// A failed write changes nothing and keeps the notch open. A paste from the library window hands the keyboard
-    /// back to the app behind it and waits longer for that before sending ⌘V.
+    /// back to the app behind it and waits longer for that before sending ⌘V. `beforePaste` is the floating panel's way to
+    /// get the keyboard out of its own window between the write and ⌘V; a refusal pastes nothing and asks the user to
+    /// press ⌘V.
     @discardableResult
-    private func put(_ item: ClipboardItem, paste: Bool, plainTextOnly: Bool = false) -> ClipboardPaster.Outcome? {
+    private func put(
+        _ item: ClipboardItem, paste: Bool, plainTextOnly: Bool = false, beforePaste: (() -> Bool)? = nil
+    ) -> ClipboardPaster.Outcome? {
         guard let context, let keys, let paster else { return nil }
         let fromLibrary = paste && libraryWindow?.isFrontmost == true
+        // Remembers a refusal, which comes back as a plain `.copied`.
+        var keyboardRefused = false
         let outcome = paster.perform(
             item, imageURL: imageURL(of: item), paste: paste, plainTextOnly: plainTextOnly,
-            delay: fromLibrary ? Self.libraryPasteDelay : nil
+            delay: fromLibrary ? Self.libraryPasteDelay : nil,
+            beforePaste: beforePaste.map { ask in
+                {
+                    let isBack = ask()
+                    if !isBack { keyboardRefused = true }
+                    return isBack
+                }
+            }
         )
         let closeAfterAction = context.settings.value(keys.closeAfterAction)
         switch outcome {
         case .pasted:
             context.presenter.close()
         case .copiedNeedsPermission:
-            // Closed like a paste: the user pastes into the previous app, and activities show only beside the closed notch.
-            context.presenter.close()
-            context.activities.set(LiveActivity(
-                id: "pasteHint", expiresAfter: .seconds(3),
-                leading: AnyView(ClipboardActivityIcon(systemImage: "doc.on.clipboard.fill")),
-                trailing: AnyView(ClipboardPasteKeyHint())
-            ))
-            // A newcomer no longer takes the notch from an activity of the same priority that is already live (the
-            // "copied" one, or music), but the user has to see this one to know ⌘V is theirs to press.
-            context.activities.raise(id: "pasteHint")
+            askToPressPaste(context)
         case .copied:
-            if closeAfterAction { context.presenter.close() }
+            // The keyboard did not leave the panel, so nothing was pasted: the user pastes by hand, as without Accessibility.
+            if keyboardRefused {
+                askToPressPaste(context)
+            } else if closeAfterAction {
+                context.presenter.close()
+            }
         case .failed:
             // The notch stays open, where only a toast is visible.
             context.presenter.showToast(
@@ -557,6 +572,20 @@ public final class ClipboardModule: FeatureModule {
             return []
         }
         return outcome
+    }
+
+    /// The item is on the pasteboard but was not pasted: closes the notch like a paste, since the user pastes into the
+    /// previous app, and tells them so beside it (activities show only beside the closed notch).
+    private func askToPressPaste(_ context: ModuleContext) {
+        context.presenter.close()
+        context.activities.set(LiveActivity(
+            id: "pasteHint", expiresAfter: .seconds(3),
+            leading: AnyView(ClipboardActivityIcon(systemImage: "doc.on.clipboard.fill")),
+            trailing: AnyView(ClipboardPasteKeyHint())
+        ))
+        // A newcomer no longer takes the notch from an activity of the same priority that is already live (the
+        // "copied" one, or music), but the user has to see this one to know ⌘V is theirs to press.
+        context.activities.raise(id: "pasteHint")
     }
 
     private func imageURL(of item: ClipboardItem) -> URL? {

@@ -14,6 +14,13 @@ final class FakePanelWindow: ClipboardPanelWindowing {
     private(set) var showCount = 0
     private(set) var focusCount = 0
     private(set) var keyboardReturnCount = 0
+    private(set) var keyboardCheckCount = 0
+    /// Whether handing the keyboard back leaves the panel without it, which a real window can fail to do.
+    var handBackWorks = true
+    /// Whether, once the panel has left the screen, the keyboard is with the app in front and not with a window of MyNotch.
+    var frontAppHasKeyboardAfterClose = true
+    /// Runs when the keyboard is handed back, so a test can look at what had happened by then.
+    var onReturnKeyboard: (() -> Void)?
     private(set) var closeCount = 0
     private(set) var model: ClipboardPanelModel?
     private(set) var restoredOrigin: CGPoint?
@@ -33,9 +40,16 @@ final class FakePanelWindow: ClipboardPanelWindowing {
         isKey = true
     }
 
-    func returnKeyboard() {
+    func returnKeyboard() -> Bool {
         keyboardReturnCount += 1
-        isKey = false
+        onReturnKeyboard?()
+        if handBackWorks { isKey = false }
+        return !isKey
+    }
+
+    func keyboardIsWithFrontApp() -> Bool {
+        keyboardCheckCount += 1
+        return !isKey && frontAppHasKeyboardAfterClose
     }
 
     /// The window closing, whether the user closed it or the module asked.
@@ -222,6 +236,110 @@ extension ClipboardModuleTests {
         module.panel?.activate(older.id)
 
         #expect(items.first?.id == older.id)
+    }
+
+    // MARK: The keyboard first, then ⌘V
+
+    @Test func theKeyboardIsHandedBackAfterTheWriteAndBeforeCommandVIsScheduled() async throws {
+        let (settings, keys) = try settings()
+        settings.set(.paste, for: keys.clickAction)
+        settings.set(true, for: keys.panelPinned)
+        await start()
+        copy("Xin chào")
+        let item = try #require(items.first)
+        module.togglePanel()
+        let pendingBefore = harness.scheduler.pendingCount
+        var seen: (writes: Int, pending: Int)?
+        panelWindow.onReturnKeyboard = { [self] in seen = (pasteboard.writes.count, harness.scheduler.pendingCount) }
+
+        try #require(module.panel).activate(item.id)
+
+        #expect(seen?.writes == 1)
+        #expect(seen?.pending == pendingBefore)
+        // ⌘V is scheduled only now.
+        #expect(harness.scheduler.pendingCount == pendingBefore + 1)
+        harness.scheduler.advance(by: .milliseconds(80))
+        #expect(keystrokes.pasteCount == 1)
+    }
+
+    /// The panel is still key, so ⌘V would land in its own search field: the item stays on the pasteboard instead.
+    @Test func aPinnedPanelThatCannotHandTheKeyboardBackOnlyCopies() async throws {
+        let (settings, keys) = try settings()
+        settings.set(.paste, for: keys.clickAction)
+        settings.set(true, for: keys.panelPinned)
+        await start()
+        copy("Xin chào")
+        let item = try #require(items.first)
+        module.togglePanel()
+        panelWindow.handBackWorks = false
+
+        let panel = try #require(module.panel)
+        panel.activate(item.id)
+        harness.scheduler.advance(by: .seconds(1))
+
+        #expect(pasteboard.writes.last?.content == .text("Xin chào"))
+        #expect(keystrokes.pasteCount == 0)
+        #expect(panelWindow.keyboardReturnCount == 1)
+        #expect(panelWindow.isOpen)
+        #expect(panel.notice?.text == "Đã chép — nhấn ⌘V để dán")
+        // The same hint as for a paste without Accessibility, beside the notch.
+        #expect(harness.activities.entries.contains { $0.id == "clipboard/pasteHint" })
+    }
+
+    /// MyNotch's own window (the library, Settings) is the one that gets the keyboard once the panel is gone.
+    @Test func anUnpinnedPanelThatLeavesTheKeyboardWithAWindowOfMyNotchOnlyCopies() async throws {
+        let (settings, keys) = try settings()
+        settings.set(.paste, for: keys.clickAction)
+        await start()
+        copy("Xin chào")
+        let item = try #require(items.first)
+        module.togglePanel()
+        panelWindow.frontAppHasKeyboardAfterClose = false
+
+        try #require(module.panel).activate(item.id)
+        harness.scheduler.advance(by: .seconds(1))
+
+        #expect(panelWindow.closeCount == 1)
+        #expect(panelWindow.keyboardCheckCount == 1)
+        #expect(pasteboard.writes.last?.content == .text("Xin chào"))
+        #expect(keystrokes.pasteCount == 0)
+        #expect(harness.activities.entries.contains { $0.id == "clipboard/pasteHint" })
+    }
+
+    @Test func aPasteThatWorksShowsNoHintAndAskedForTheKeyboardOnce() async throws {
+        let (settings, keys) = try settings()
+        settings.set(.paste, for: keys.clickAction)
+        await start()
+        copy("Xin chào")
+        let item = try #require(items.first)
+        module.togglePanel()
+
+        try #require(module.panel).activate(item.id)
+        harness.scheduler.advance(by: .seconds(1))
+
+        #expect(keystrokes.pasteCount == 1)
+        #expect(panelWindow.keyboardCheckCount == 1)
+        #expect(!harness.activities.entries.contains { $0.id == "clipboard/pasteHint" })
+    }
+
+    @Test func aWriteThatFailsKeepsThePanelOpenWithTheKeyboardAndPastesNothing() async throws {
+        let (settings, keys) = try settings()
+        settings.set(.paste, for: keys.clickAction)
+        settings.set(true, for: keys.panelPinned)
+        await start()
+        copy("Xin chào")
+        let item = try #require(items.first)
+        module.togglePanel()
+        pasteboard.writesSucceed = false
+
+        let panel = try #require(module.panel)
+        panel.activate(item.id)
+        harness.scheduler.advance(by: .seconds(1))
+
+        #expect(panelWindow.isOpen)
+        #expect(panelWindow.keyboardReturnCount == 0)
+        #expect(keystrokes.pasteCount == 0)
+        #expect(panel.notice?.text == "Không chép được mục này")
     }
 
     // MARK: Remembering

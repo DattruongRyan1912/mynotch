@@ -8,7 +8,6 @@ final class ClipboardFloatingPanel: NSPanel {
     var onQuickPick: ((Int) -> Bool)?
     /// Esc that no view handled.
     var onCancel: (() -> Void)?
-    var onBecomeKey: (() -> Void)?
     /// Called after key status moved elsewhere, e.g. the user clicked into another app.
     var onResignKey: (() -> Void)?
 
@@ -34,7 +33,7 @@ final class ClipboardFloatingPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if let number = ClipboardPanelKeys.quickPickNumber(characters: event.charactersIgnoringModifiers, modifiers: event.modifierFlags) {
+        if let number = ClipboardPanelKeys.quickPickNumber(keyCode: event.keyCode, modifiers: event.modifierFlags) {
             _ = onQuickPick?(number)
             return true
         }
@@ -45,37 +44,10 @@ final class ClipboardFloatingPanel: NSPanel {
         onCancel?()
     }
 
-    override func becomeKey() {
-        super.becomeKey()
-        onBecomeKey?()
-    }
-
     override func resignKey() {
         super.resignKey()
         onResignKey?()
     }
-}
-
-/// Invisible 1 pt panel that only takes key status from the clipboard panel and leaves again. A key window that leaves
-/// the screen returns the keyboard to the app in front, and doing it with this panel keeps the clipboard panel on
-/// screen. The notch hands its keyboard back the same way.
-final class ClipboardKeySinkPanel: NSPanel {
-    init() {
-        super.init(contentRect: CGRect(x: 0, y: 0, width: 1, height: 1), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
-        isOpaque = false
-        backgroundColor = .clear
-        hasShadow = false
-        level = .floating
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
-        ignoresMouseEvents = true
-        isReleasedWhenClosed = false
-        hidesOnDeactivate = false
-        animationBehavior = .none
-        isExcludedFromWindowsMenu = true
-    }
-
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
 }
 
 /// Hosting view that accepts the first click even though the app is not active.
