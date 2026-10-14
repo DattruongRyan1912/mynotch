@@ -15,8 +15,10 @@ settingGroups:
   # Shared by the app and the frameworks it embeds, so both always sign the same way.
   signing:
     CODE_SIGN_STYLE: Automatic
-    # Ad-hoc ("Sign to Run Locally"). For stable TCC permissions set DEVELOPMENT_TEAM and change CODE_SIGN_IDENTITY to "Apple Development".
-    CODE_SIGN_IDENTITY: "-"
+    # Apple Development keeps the designated requirement stable across builds, so macOS remembers granted permissions.
+    # Needs the Apple WWDR G3 intermediate certificate in the keychain; without it, switch back to ad-hoc ("-").
+    CODE_SIGN_IDENTITY: "Apple Development"
+    DEVELOPMENT_TEAM: B394MAY4QN
 packages:
   MyNotchCore:
     path: Packages/MyNotchCore

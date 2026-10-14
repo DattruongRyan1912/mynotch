@@ -92,13 +92,9 @@ Không dùng `cp -R` đè lên bản cũ: macOS sẽ giết app khi mở vì ch�
 
 ## Ký app
 
-Hiện app được ký **ad-hoc** ("Sign to Run Locally"): `CODE_SIGN_IDENTITY: "-"` trong `project.yml`. Với ký ad-hoc, macOS quên các quyền đã cấp (Accessibility, Screen Recording, Lịch…) mỗi lần build lại.
+App, helper `mynotch-hook` và framework MediaRemoteAdapter được ký bằng chứng chỉ **Apple Development** (`CODE_SIGN_IDENTITY: "Apple Development"`, `DEVELOPMENT_TEAM: B394MAY4QN` trong `project.yml`, có hardened runtime). Nhờ vậy macOS nhớ các quyền đã cấp (Accessibility, Screen Recording, Lịch…) qua các lần build lại.
 
-Để macOS nhớ quyền, chuyển sang chứng chỉ **Apple Development**. Máy này đã có chứng chỉ nhưng còn thiếu chứng chỉ trung gian WWDR G3 (`AppleWWDRCAG3.cer`), nên chưa dùng được:
-
-1. Tải `AppleWWDRCAG3.cer` từ trang chứng chỉ của Apple và cài vào keychain (người dùng tự làm, không qua script).
-2. Kiểm tra: `security find-identity -v -p codesigning` phải liệt kê một danh tính "Apple Development".
-3. Trong `project.yml` đặt `CODE_SIGN_IDENTITY: "Apple Development"` và `DEVELOPMENT_TEAM: B394MAY4QN` (Team ID), rồi `xcodegen generate`.
+Chứng chỉ này cần chứng chỉ trung gian **Apple WWDR G3** (`AppleWWDRCAG3.cer`) trong keychain **login** (cài bằng `security add-certificates -k ~/Library/Keychains/login.keychain-db AppleWWDRCAG3.cer`; keychain iCloud không nhận chứng chỉ, báo lỗi `-25294`). Kiểm tra: `security find-identity -v -p codesigning` phải báo `1 valid identities found`. Máy không có chứng chỉ thì đổi lại `CODE_SIGN_IDENTITY: "-"` (ad-hoc), khi đó macOS quên quyền sau mỗi lần build.
 
 Chứng chỉ Apple Development của Apple ID miễn phí có hạn (thường 1 năm); hết hạn thì macOS không mở app nữa: tạo chứng chỉ mới trong Xcode rồi build lại.
 
