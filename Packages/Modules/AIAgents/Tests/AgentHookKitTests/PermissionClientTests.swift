@@ -88,17 +88,23 @@ import Testing
     }
 
     @Test func aSocketFileNobodyListensOnIsUnreachable() throws {
-        let directory = "/tmp/mn-\(UUID().uuidString.prefix(8))"
-        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(atPath: directory) }
-        try Data("stale".utf8).write(to: URL(filePath: directory + "/perm.sock"))
-        #expect(PermissionClient.ask(request, socketPath: directory + "/perm.sock", timeout: 30) == .unreachable)
+        let folder = try SocketTrustTests.Folder()
+        // What a crashed app leaves: the socket file, with nothing behind it.
+        try folder.bindSocket()
+        folder.stopListening()
+        #expect(PermissionClient.ask(request, socketPath: folder.socketPath, timeout: 30) == .unreachable)
+    }
+
+    @Test func aFileThatIsNotASocketIsNotTalkedTo() throws {
+        let folder = try SocketTrustTests.Folder()
+        try Data("stale".utf8).write(to: URL(filePath: folder.socketPath))
+        #expect(PermissionClient.ask(request, socketPath: folder.socketPath, timeout: 30) == .untrusted)
     }
 
     @Test func aPathThatDoesNotFitAndARequestThatCannotBeMadeAreUnreachable() throws {
         #expect(PermissionClient.ask(request, socketPath: String(repeating: "a", count: 300), timeout: 30) == .unreachable)
         var big = request
-        big.tool = String(repeating: "t", count: 5_000)
+        big.tool = String(repeating: "t", count: 2 * PermissionWire.maxRequestLength)
         let app = try FakePermissionApp(behavior: .reply(#"{"decision":"allow"}"# + "\n"))
         #expect(PermissionClient.ask(big, socketPath: app.socketPath, timeout: 30) == .unreachable)
         #expect(app.connectionCount == 0)
@@ -107,5 +113,41 @@ import Testing
     @Test func aPeerThatClosesAsSoonAsItIsReachedIsNoAnswerEveryTimeAndNeverACrash() throws {
         let app = try FakePermissionApp(behavior: .hangUp)
         for _ in 0..<20 { #expect(PermissionClient.ask(request, socketPath: app.socketPath, timeout: 0.5) == .noAnswer) }
+    }
+
+    // MARK: Who is on the other end
+
+    /// The app answers "allow" to anything: only the check of who it is stands between that and the agent.
+    let allowAnything = #"{"decision":"allow"}"# + "\n"
+
+    @Test func aListenerOfAnotherUserIsNeverSentTheRequestNorBelieved() throws {
+        let app = try FakePermissionApp(behavior: .reply(allowAnything))
+        // The fake runs as this user; asking for another one is what meeting a listener of another user looks like.
+        let outcome = PermissionClient.ask(request, socketPath: app.socketPath, timeout: 30, trustedUser: geteuid() &+ 1)
+        #expect(outcome == .untrusted)
+        #expect(app.connectionCount == 0)
+        #expect(app.requests.isEmpty)
+    }
+
+    @Test func aFolderOthersCanOpenIsNeverTalkedTo() throws {
+        for mode in [0o755, 0o770, 0o777] {
+            let app = try FakePermissionApp(behavior: .reply(allowAnything), folderMode: mode)
+            #expect(PermissionClient.ask(request, socketPath: app.socketPath, timeout: 30) == .untrusted, "mode \(String(mode, radix: 8))")
+            #expect(app.connectionCount == 0)
+        }
+    }
+
+    @Test func aPeerThatIsNotTheUserIsGivenNothingEvenWhenTheFolderLooksRight() throws {
+        let app = try FakePermissionApp(behavior: .reply(allowAnything))
+        // The files are the user's; only the connected process is not, as for a listener started by another user in a
+        // folder that was made for the user in some other way.
+        #expect(SocketTrust.inspect(socketPath: app.socketPath) == .trusted)
+        let outcome = PermissionClient.ask(request, socketPath: app.socketPath, timeout: 30, trustedUser: geteuid(), peerUser: geteuid() &+ 1)
+        #expect(outcome == .untrusted)
+        // The connection was made and dropped before a byte was written.
+        let deadline = Date().addingTimeInterval(5)
+        while app.servedCount < 1, Date() < deadline { usleep(10_000) }
+        #expect(app.servedCount == 1)
+        #expect(app.requests.isEmpty)
     }
 }

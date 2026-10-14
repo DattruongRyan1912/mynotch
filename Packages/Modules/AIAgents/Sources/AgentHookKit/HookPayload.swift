@@ -18,10 +18,13 @@ public struct HookPayload: Codable, Equatable, Sendable {
     public var summary: String?
     public var notificationType: String?
     public var timestamp: Date
+    /// Set only on a permission request, and only on the stream socket: what the request asks to do, which the status
+    /// datagram never carries. A request without it is from a helper that predates it, and is never shown as whole.
+    public var detail: PermissionDetail?
 
     public init(
         source: String, event: String, sessionID: String, cwd: String? = nil, tool: String? = nil,
-        summary: String? = nil, notificationType: String? = nil, timestamp: Date
+        summary: String? = nil, notificationType: String? = nil, timestamp: Date, detail: PermissionDetail? = nil
     ) {
         self.source = source
         self.event = event
@@ -31,15 +34,29 @@ public struct HookPayload: Codable, Equatable, Sendable {
         self.summary = summary
         self.notificationType = notificationType
         self.timestamp = timestamp
+        self.detail = detail
     }
 
-    /// The JSON to send. Over the size limit the summary goes first, then the cwd; nil if it is still too large.
+    /// The JSON to send as a datagram, which is about status only and so never has the detail. Over the size limit the
+    /// summary goes first, then the cwd; nil if it is still too large.
     public func encodedDatagram() -> Data? {
+        var status = self
+        status.detail = nil
+        return status.encoded(within: Self.maxDatagramSize)
+    }
+
+    /// The JSON within `limit` bytes. What does not fit goes in this order: the summary, the cwd, the detail. Nil if it is
+    /// still too large.
+    func encoded(within limit: Int) -> Data? {
         var candidate = self
-        for step in 0...2 {
-            if step == 1 { candidate.summary = nil }
-            if step == 2 { candidate.cwd = nil }
-            if let data = try? Self.encoder.encode(candidate), data.count <= Self.maxDatagramSize { return data }
+        for step in 0...3 {
+            switch step {
+            case 1: candidate.summary = nil
+            case 2: candidate.cwd = nil
+            case 3: candidate.detail = nil
+            default: break
+            }
+            if let data = try? Self.encoder.encode(candidate), data.count <= limit { return data }
         }
         return nil
     }
@@ -75,10 +92,15 @@ public enum HookPayloadFilter {
               let sessionID = string(object["session_id"])
         else { return nil }
         let tool = string(object["tool_name"])
+        let input = object["tool_input"] as? [String: Any]
+        var detail = event == PermissionWire.eventName ? PermissionDetail.describing(tool: tool, input: input) : nil
+        // A name too long to show whole is cut, and then the request is not whole either.
+        if let tool, tool.count > PermissionDetail.maxToolLength { detail?.isComplete = false }
         return HookPayload(
-            source: source, event: event, sessionID: sessionID, cwd: string(object["cwd"]), tool: tool,
-            summary: summary(tool: tool, input: object["tool_input"] as? [String: Any]),
-            notificationType: string(object["notification_type"]), timestamp: now
+            source: source, event: event, sessionID: sessionID, cwd: string(object["cwd"]).map(HookText.cleanLine),
+            tool: tool.map { String(HookText.cleanLine($0).prefix(PermissionDetail.maxToolLength)) },
+            summary: summary(tool: tool, input: input), notificationType: string(object["notification_type"]), timestamp: now,
+            detail: detail
         )
     }
 
@@ -87,14 +109,16 @@ public enum HookPayloadFilter {
         return text
     }
 
+    /// A short line for the list of sessions: the first line of a command or the name of a file. The card of a permission
+    /// request shows the `detail`, not this.
     private static func summary(tool: String?, input: [String: Any]?) -> String? {
         guard let input else { return nil }
         let text: String
         if tool == "Bash", let command = string(input["command"]) {
-            let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = HookText.clean(command).trimmingCharacters(in: .whitespacesAndNewlines)
             text = trimmed.split(whereSeparator: \.isNewline).first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? ""
         } else if let path = string(input["file_path"]) ?? string(input["path"]) {
-            text = (path.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).lastPathComponent
+            text = (HookText.cleanLine(path).trimmingCharacters(in: .whitespacesAndNewlines) as NSString).lastPathComponent
         } else {
             return nil
         }

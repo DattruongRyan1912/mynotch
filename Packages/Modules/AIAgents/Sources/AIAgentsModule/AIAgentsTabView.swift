@@ -20,7 +20,7 @@ struct AIAgentsTabView: View {
             let state = AgentTabState(store: store, now: .now)
             VStack(alignment: .leading, spacing: 6) {
                 if let request = permissions.pending.first {
-                    PermissionCard(request: request, others: permissions.pending.count - 1, decide: actions.decide)
+                    PermissionCard(request: request, others: permissions.pending.count - 1, queue: permissions, placement: .tab, decide: actions.decide)
                         .padding(.horizontal, 8)
                         .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
                 }

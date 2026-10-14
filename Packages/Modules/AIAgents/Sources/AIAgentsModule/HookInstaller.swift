@@ -29,7 +29,8 @@ struct HookInstaller {
     /// What the Settings page and the confirmation say the permission hook does.
     static let permissionExplanation = "Khi Claude Code hoặc Codex xin quyền dùng một công cụ, hook PermissionRequest cho notch hiện thẻ "
         + "với nút Cho phép, Từ chối và Hỏi trong terminal, và chờ câu trả lời tối đa 60 giây. Hết giờ, không có MyNotch, "
-        + "hay chọn Hỏi trong terminal thì agent tự hỏi trong terminal như thường."
+        + "hay chọn Hỏi trong terminal thì agent tự hỏi trong terminal như thường. Nút Cho phép chỉ hiện khi thẻ cho thấy "
+        + "đủ yêu cầu (cả lệnh, cả đường dẫn); yêu cầu quá dài hay chưa rõ thì chỉ có Từ chối và Trả lời trong terminal."
 
     static func timeoutSeconds(for event: String) -> Int {
         event == PermissionWire.eventName ? permissionHookTimeoutSeconds : hookTimeoutSeconds

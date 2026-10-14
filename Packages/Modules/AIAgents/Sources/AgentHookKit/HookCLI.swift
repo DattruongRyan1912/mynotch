@@ -10,27 +10,32 @@ public enum HookCLI {
     /// - Parameters:
     ///   - arguments: the command line without the program name, e.g. `["--source", "claude"]`.
     ///   - permissionTimeout: how long a permission request waits for the user.
+    ///   - trustedUser: whose app is spoken to; the helper's own user. Nothing is sent to a folder or a listener that is
+    ///     not that user's, however the agent's hook is set up.
     ///   - output: where the decision JSON goes; standard output for the real helper.
     public static func run(
         arguments: [String], stdin: Data, socketPath: String, now: Date,
-        permissionTimeout: TimeInterval = PermissionClient.defaultTimeout, output: (Data) -> Void = writeToStandardOutput
+        permissionTimeout: TimeInterval = PermissionClient.defaultTimeout, trustedUser: uid_t = geteuid(),
+        output: (Data) -> Void = writeToStandardOutput
     ) -> Int32 {
         guard let flag = arguments.firstIndex(of: "--source"), arguments.indices.contains(flag + 1),
               let payload = HookPayloadFilter.make(source: arguments[flag + 1], hookJSON: stdin, now: now),
               let datagram = payload.encodedDatagram()
         else { return 0 }
         if payload.event == PermissionWire.eventName, let tool = payload.tool, !toolsThatAskTheUser.contains(tool) {
-            switch PermissionClient.ask(payload, socketPath: AgentSocket.permissionPath(besides: socketPath), timeout: permissionTimeout) {
+            let path = AgentSocket.permissionPath(besides: socketPath)
+            switch PermissionClient.ask(payload, socketPath: path, timeout: permissionTimeout, trustedUser: trustedUser) {
             case let .answered(answer):
                 if let decision = PermissionWire.hookOutput(for: answer) { output(decision) }
                 return 0
-            case .noAnswer:
+            case .noAnswer, .untrusted:
                 return 0
             case .unreachable:
                 break
             }
         }
-        HookDatagramSender.send(datagram, to: socketPath)
+        // The status goes only to the user's own app: the tool and the folder are not for whoever made the folder first.
+        if SocketTrust.inspect(socketPath: socketPath, user: trustedUser) == .trusted { HookDatagramSender.send(datagram, to: socketPath) }
         return 0
     }
 

@@ -4,17 +4,26 @@ import MyNotchCore
 import Observation
 
 /// One permission request an agent waits on: what the card shows, and nothing of the conversation. Built from the
-/// helper's filtered payload, which has only a tool name and a short summary of its command or file.
+/// helper's filtered payload, which has the tool name, a short summary for the list of sessions and the detail of what
+/// is asked: the whole command, the whole path, the URL, the arguments or the files of a patch.
 nonisolated struct PermissionRequest: Identifiable, Equatable, Sendable {
     /// Random and made here, never taken from the helper: a decision is accepted only for the exact id it names.
     let id: String
     let key: AgentSessionKey
     let cwd: String?
     let tool: String
-    /// At most 120 characters: the head of a shell command or a file name.
+    /// At most 120 characters: the head of a shell command or a file name. For the list of sessions, not for the card.
     let summary: String?
+    /// What the card shows as the thing to approve. Nil from a helper that predates it.
+    let detail: PermissionDetail?
 
     var source: AgentSource { key.source }
+    /// True only when everything the request asks for is on the card: nothing was cut, and the helper knew the tool. Only
+    /// then can it be allowed from the notch; otherwise the agent asks in the terminal, where the whole request is.
+    var canAllow: Bool {
+        guard let detail else { return false }
+        return detail.isComplete && detail.hiddenLines == 0 && !detail.text.isEmpty
+    }
     /// The last component of the working directory.
     var project: String? {
         guard let name = cwd.map({ ($0 as NSString).lastPathComponent }), !name.isEmpty else { return nil }
@@ -28,6 +37,7 @@ nonisolated struct PermissionRequest: Identifiable, Equatable, Sendable {
         cwd = payload.cwd
         self.tool = tool
         summary = payload.summary
+        detail = payload.detail
     }
 }
 
@@ -38,19 +48,33 @@ final class PermissionQueue {
     /// A little more than the helper's own wait (`PermissionClient.defaultTimeout`): the helper gives up first and
     /// its leaving removes the request; this is only for a helper that hangs without leaving.
     static let lifetime = Duration.seconds(PermissionClient.defaultTimeout) + .seconds(5)
+    /// How long a card that has just come up takes no answer. The system's double-click interval is half a second, so a
+    /// second click of a double click, or a click that began on the card that was there before, is over by then; it is
+    /// also under the time it takes to read a command, so it is hardly felt.
+    static let armingDelay = Duration.milliseconds(600)
 
     /// The first is the one on screen.
     private(set) var pending: [PermissionRequest] = []
+    /// The id of the card on screen once its delay is over; nil while it waits. Only this request takes an answer.
+    private(set) var armedID: String?
 
     @ObservationIgnored private let scheduler: any Scheduler
     @ObservationIgnored private let lifetime: Duration
     @ObservationIgnored private let makeID: () -> String
     @ObservationIgnored private var responders: [String: (PermissionAnswer) -> Void] = [:]
     @ObservationIgnored private var timers: [String: ScheduledAction] = [:]
+    @ObservationIgnored private let armingDelay: Duration
+    /// The request whose card is on screen, and the delay it is waiting out.
+    @ObservationIgnored private var headID: String?
+    @ObservationIgnored private var armingTimer: ScheduledAction?
 
-    init(scheduler: any Scheduler, lifetime: Duration = PermissionQueue.lifetime, makeID: @escaping () -> String = { UUID().uuidString }) {
+    init(
+        scheduler: any Scheduler, lifetime: Duration = PermissionQueue.lifetime, armingDelay: Duration = PermissionQueue.armingDelay,
+        makeID: @escaping () -> String = { UUID().uuidString }
+    ) {
         self.scheduler = scheduler
         self.lifetime = lifetime
+        self.armingDelay = armingDelay
         self.makeID = makeID
     }
 
@@ -61,13 +85,18 @@ final class PermissionQueue {
         pending.append(request)
         responders[request.id] = respond
         timers[request.id] = scheduler.schedule(after: lifetime) { [weak self] in self?.end(request.id, answering: .ask) }
+        headMayHaveChanged()
         return request
     }
 
-    /// Answers the request with exactly this id. False when there is none, as when it was already answered.
+    /// The user's answer to the request with exactly this id. False, and nothing happens, when there is none, as when it
+    /// was already answered; when it is not the card on screen or that card has not waited out its delay yet; and when the
+    /// answer is allow for a request that is not shown whole.
     @discardableResult
     func decide(_ id: String, _ answer: PermissionAnswer) -> Bool {
-        end(id, answering: answer)
+        guard armedID == id, let request = pending.first(where: { $0.id == id }) else { return false }
+        guard answer != .allow || request.canAllow else { return false }
+        return end(id, answering: answer)
     }
 
     /// The helper left (the user answered in the terminal, or the agent was stopped): nobody is left to tell.
@@ -94,7 +123,25 @@ final class PermissionQueue {
         pending.remove(at: index)
         timers.removeValue(forKey: id)?.cancel()
         let respond = responders.removeValue(forKey: id)
+        headMayHaveChanged()
         if let answer { respond?(answer) }
         return true
+    }
+
+    /// A card that comes up, whether it is the first or the one that moved up when the one before it went, takes no answer
+    /// until its delay is over.
+    private func headMayHaveChanged() {
+        let head = pending.first?.id
+        guard head != headID else { return }
+        headID = head
+        armedID = nil
+        armingTimer?.cancel()
+        armingTimer = nil
+        guard let head else { return }
+        armingTimer = scheduler.schedule(after: armingDelay) { [weak self] in
+            guard let self, headID == head else { return }
+            armedID = head
+            armingTimer = nil
+        }
     }
 }

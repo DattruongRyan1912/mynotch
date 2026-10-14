@@ -20,7 +20,7 @@ import Testing
 
     @Test func aValidInvocationSendsTheFilteredPayload() throws {
         let directory = "/tmp/mn-\(UUID().uuidString.prefix(8))"
-        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(atPath: directory) }
         let path = directory + "/agent.sock"
         let receiver = try TestDatagramReceiver(path: path)
@@ -51,7 +51,9 @@ final class TestDatagramReceiver {
 
     deinit { close(fd) }
 
-    func receive() -> Data? {
+    func receive(timeout: TimeInterval = 2) -> Data? {
+        var wait = timeval(tv_sec: Int(timeout), tv_usec: Int32((timeout - Double(Int(timeout))) * 1_000_000))
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
         var buffer = [UInt8](repeating: 0, count: 4_096)
         let count = recv(fd, &buffer, buffer.count, 0)
         return count > 0 ? Data(buffer[0..<count]) : nil

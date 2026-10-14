@@ -121,6 +121,29 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: server.socketPath))
     }
 
+    /// The folder under /tmp that a long user name falls back to may have been made by someone else with any mode.
+    @Test func aFolderOthersCouldOpenIsClosedBeforeTheSocketIsMade() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        chmod(directory.path, 0o777)
+        let server = server(Inbox())
+        try server.start()
+        defer { server.stop() }
+        let mode = try FileManager.default.attributesOfItem(atPath: directory.path)[.posixPermissions] as? Int
+        #expect(mode == 0o700)
+    }
+
+    /// The helper and the app check each other: what the app makes is what the helper accepts.
+    @Test func theFolderAndSocketTheAppMakesAreTheOnesTheHelperTrusts() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let server = server(Inbox())
+        try server.start()
+        defer { server.stop() }
+        #expect(SocketTrust.inspect(socketPath: server.socketPath) == .trusted)
+        server.stop()
+        #expect(SocketTrust.inspect(socketPath: server.socketPath) == .absent)
+    }
+
     @Test func onlyTheSameUserIsServed() {
         #expect(PermissionServer.serves(peerUser: geteuid()))
         #expect(!PermissionServer.serves(peerUser: geteuid() &+ 1))

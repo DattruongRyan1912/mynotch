@@ -3,6 +3,9 @@ import Foundation
 /// A client that connects to a stream socket by hand and writes `bytes`, so a test decides when it leaves. The caller
 /// closes the descriptor.
 func connectRaw(to path: String, send bytes: [UInt8]) throws -> Int32 {
+    // A server that closes the connection first makes the write below fail; on macOS the no-SIGPIPE option cannot be set
+    // on a socket whose peer is already gone, so the signal is ignored too.
+    signal(SIGPIPE, SIG_IGN)
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
     var address = sockaddr_un()
     address.sun_family = sa_family_t(AF_UNIX)

@@ -9,7 +9,7 @@ import Testing
     let hookJSON = Data("""
     {"hook_event_name":"PermissionRequest","session_id":"s1","cwd":"/Users/x/project","transcript_path":"/Users/x/.claude/t.jsonl",
      "permission_mode":"default","tool_name":"Bash",
-     "tool_input":{"command":"rm -rf build\\nSECRET second line","description":"SECRET description"},
+     "tool_input":{"command":"rm -rf build\\nsecond line stays","description":"SECRET description"},
      "prompt":"SECRET PROMPT","permission_suggestions":[{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"SECRET rule"}]}]}
     """.utf8)
 
@@ -31,6 +31,7 @@ import Testing
         let decoded = try #require(PermissionWire.decodeRequest(line))
         #expect(decoded.tool == "Bash")
         #expect(decoded.summary == "rm -rf build")
+        #expect(decoded.detail?.text == "rm -rf build\nsecond line stays")
         #expect(decoded.sessionID == "s1")
     }
 
@@ -54,9 +55,9 @@ import Testing
         var big = payload()
         big.cwd = String(repeating: "c", count: 5_000)
         big.summary = String(repeating: "s", count: 5_000)
-        // The datagram rules apply: the summary goes first, then the cwd, and what is still too large is nil.
+        // The summary goes first, then the cwd, and what is still too large is nil.
         #expect(PermissionWire.requestLine(big)?.count ?? 0 <= PermissionWire.maxRequestLength)
-        big.tool = String(repeating: "t", count: 5_000)
+        big.tool = String(repeating: "t", count: 2 * PermissionWire.maxRequestLength)
         #expect(PermissionWire.requestLine(big) == nil)
     }
 

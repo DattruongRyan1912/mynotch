@@ -13,16 +13,18 @@ public enum PermissionWire {
     /// The hook event this is about, in Claude Code and Codex alike.
     public static let eventName = "PermissionRequest"
     /// The most the app reads for a request, so a client that never stops cannot make it buffer without end. A real
-    /// request line is at most `HookPayload.maxDatagramSize` plus its newline.
-    public static let maxRequestLength = 4_096
+    /// request line is far under it: the detail is at most `PermissionDetail.maxLength` characters of four bytes each,
+    /// and the rest is a few hundred bytes.
+    public static let maxRequestLength = 16_384
 
     private static let sources: Set<String> = ["claude", "codex"]
     private static let newline = UInt8(ascii: "\n")
 
-    /// The request as the datagram rules cut it (summary, then cwd, dropped when too large), ended by a newline. The
-    /// JSON has no raw newline, so one line is one request. Nil when it is still too large.
+    /// The request, ended by a newline. What does not fit `maxRequestLength` goes in this order: the summary, the cwd, the
+    /// detail (a request without it is never shown as whole). The JSON has no raw newline, so one line is one request.
+    /// Nil when it is still too large.
     public static func requestLine(_ payload: HookPayload) -> Data? {
-        guard var line = payload.encodedDatagram() else { return nil }
+        guard var line = payload.encoded(within: maxRequestLength - 1) else { return nil }
         line.append(newline)
         return line
     }

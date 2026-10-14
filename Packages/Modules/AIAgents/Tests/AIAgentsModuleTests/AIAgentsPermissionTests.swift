@@ -10,8 +10,20 @@ extension AIAgentsModuleTests {
     var permissionSocketPath: String { AgentSocket.permissionPath(besides: socketPath) }
     var queue: PermissionQueue { module.permissions! }
 
-    func requestPayload(_ session: String = "s1", tool: String = "Bash", summary: String? = "npm test", source: String = "claude") -> HookPayload {
-        HookPayload(source: source, event: "PermissionRequest", sessionID: session, cwd: "/Users/x/Project/MyNotch", tool: tool, summary: summary, timestamp: Date())
+    /// A request whose text is shown whole, so it can be allowed; `complete: false` is one that was cut.
+    func requestPayload(
+        _ session: String = "s1", tool: String = "Bash", summary: String? = "npm test", source: String = "claude", complete: Bool = true
+    ) -> HookPayload {
+        HookPayload(
+            source: source, event: "PermissionRequest", sessionID: session, cwd: "/Users/x/Project/MyNotch", tool: tool, summary: summary,
+            timestamp: Date(),
+            detail: PermissionDetail(text: summary ?? "*** Update File: a.txt", hiddenLines: complete ? 0 : 2, isComplete: complete)
+        )
+    }
+
+    /// The card on screen has been there long enough to take an answer.
+    func arm() {
+        harness.scheduler.advance(by: PermissionQueue.armingDelay)
     }
 
     /// The helper asks, off the main actor, and waits.
@@ -92,11 +104,15 @@ extension AIAgentsModuleTests {
         #expect(module.publishedActivity?.ask?.others == 1)
         #expect(alerts.count == 2)
 
+        arm()
+
         module.decide(try head().id, .allow)
         #expect(await first.value == .answered(.allow))
         _ = await eventually { module.publishedActivity?.ask?.request.tool == "Edit" }
         #expect(module.publishedActivity?.ask?.request.tool == "Edit")
         #expect(module.publishedActivity?.ask?.others == 0)
+
+        arm()
 
         module.decide(try head().id, .deny)
         #expect(await second.value == .answered(.deny))
@@ -109,6 +125,7 @@ extension AIAgentsModuleTests {
         await startListening()
         let outcome = ask()
         #expect(await eventually { queue.pending.count == 1 })
+        arm()
         module.decide(try head().id, .allow)
         #expect(await outcome.value == .answered(.allow))
         #expect(queue.pending.isEmpty)
@@ -122,6 +139,7 @@ extension AIAgentsModuleTests {
         await startListening()
         let outcome = ask()
         #expect(await eventually { queue.pending.count == 1 })
+        arm()
         module.decide(try head().id, .deny)
         #expect(await outcome.value == .answered(.deny))
         #expect(store.sessions[key()]?.state == .working(tool: nil, summary: nil))
@@ -131,6 +149,7 @@ extension AIAgentsModuleTests {
         await startListening()
         let outcome = ask()
         #expect(await eventually { queue.pending.count == 1 })
+        arm()
         module.decide(try head().id, .ask)
         #expect(await outcome.value == .answered(.ask))
         #expect(queue.pending.isEmpty)
@@ -145,6 +164,7 @@ extension AIAgentsModuleTests {
         let outcome = ask()
         #expect(await eventually { queue.pending.count == 1 })
         let id = try head().id
+        arm()
         module.decide("00000000-0000-4000-8000-000000000000", .allow)
         module.decide(id.lowercased() + "0", .allow)
         #expect(queue.pending.count == 1)
@@ -165,6 +185,7 @@ extension AIAgentsModuleTests {
         let outcome = ask()
         #expect(await eventually { queue.pending.count == 1 })
         #expect(alerts.count == 0)
+        arm()
         module.decide(try head().id, .allow)
         _ = await outcome.value
     }
@@ -184,6 +205,7 @@ extension AIAgentsModuleTests {
         let outcome = ask(requestPayload("c1", tool: "apply_patch", summary: nil, source: "codex"))
         #expect(await eventually { queue.pending.count == 1 })
         #expect(try head().source == .codex)
+        arm()
         module.decide(try head().id, .allow)
         #expect(await outcome.value == .answered(.allow))
         #expect(store.sessions[key("c1", .codex)]?.state == .working(tool: "apply_patch", summary: nil))
@@ -268,11 +290,11 @@ extension AIAgentsModuleTests {
 
     // MARK: Nothing of the conversation
 
-    @Test func theCardHoldsOnlyTheToolTheSummaryAndTheFolder() async throws {
+    @Test func theCardHoldsTheToolTheWholeCommandAndTheFolderAndNothingElseOfTheConversation() async throws {
         await startListening()
         let hook = Data("""
         {"hook_event_name":"PermissionRequest","session_id":"s1","cwd":"/Users/x/Project/MyNotch","tool_name":"Bash",
-         "tool_input":{"command":"npm test\\nSECRET second line"},"prompt":"SECRET PROMPT"}
+         "tool_input":{"command":"npm test\\nsecond line stays","description":"SECRET DESCRIPTION"},"prompt":"SECRET PROMPT"}
         """.utf8)
         let payload = try #require(HookPayloadFilter.make(source: "claude", hookJSON: hook, now: Date()))
         let outcome = ask(payload)
@@ -281,7 +303,80 @@ extension AIAgentsModuleTests {
         let described = String(describing: request) + String(describing: module.publishedActivity as Any)
         #expect(!described.contains("SECRET"))
         #expect(request.summary == "npm test")
+        #expect(request.detail?.text == "npm test\nsecond line stays")
+        #expect(request.canAllow)
+        arm()
         module.decide(request.id, .ask)
         _ = await outcome.value
+    }
+
+    // MARK: A card that has just come up is not answered by a click meant for the one before
+
+    @Test func aSecondClickOnTheSameSpotDoesNotAnswerTheNextRequest() async throws {
+        await startListening()
+        let first = ask(requestPayload("a", tool: "Bash", summary: "one"))
+        #expect(await eventually { queue.pending.count == 1 })
+        let second = ask(requestPayload("b", tool: "Edit", summary: "two"))
+        #expect(await eventually { queue.pending.count == 2 })
+        let firstID = try head().id
+        arm()
+        module.decide(firstID, .allow)
+        #expect(await first.value == .answered(.allow))
+        let secondID = try head().id
+        #expect(secondID != firstID)
+        // The double click's second half, or any click that began on the first card, arrives now.
+        module.decide(secondID, .allow)
+        module.decide(secondID, .deny)
+        module.decide(secondID, .ask)
+        #expect(queue.pending.count == 1)
+        #expect(store.sessions[key("b")]?.state == .waitingForInput)
+        arm()
+        module.decide(secondID, .deny)
+        #expect(await second.value == .answered(.deny))
+    }
+
+    @Test func aCardThatJustAppearedIsNotAnsweredEither() async throws {
+        await startListening()
+        let outcome = ask()
+        #expect(await eventually { queue.pending.count == 1 })
+        let id = try head().id
+        module.decide(id, .allow)
+        #expect(queue.pending.count == 1)
+        #expect(store.sessions[key()]?.state == .waitingForInput)
+        arm()
+        module.decide(id, .allow)
+        #expect(await outcome.value == .answered(.allow))
+    }
+
+    // MARK: A request that is not shown whole cannot be allowed from the notch
+
+    @Test func aRequestThatWasCutCannotBeAllowedFromTheNotchButTheTerminalCanStillAnswerIt() async throws {
+        await startListening()
+        let outcome = ask(requestPayload(summary: "echo 1", complete: false))
+        #expect(await eventually { queue.pending.count == 1 })
+        _ = await eventually { module.publishedActivity?.ask != nil }
+        #expect(module.publishedActivity?.ask?.request.canAllow == false)
+        let id = try head().id
+        arm()
+        module.decide(id, .allow)
+        #expect(queue.pending.count == 1)
+        #expect(store.sessions[key()]?.state == .waitingForInput)
+        // The helper has heard nothing, so the agent has not been told anything it could act on.
+        module.decide(id, .ask)
+        #expect(await outcome.value == .answered(.ask))
+        #expect(store.sessions[key()]?.state == .waitingForInput)
+    }
+
+    @Test func aRequestFromAnOlderHelperThatSendsNoDetailCannotBeAllowedFromTheNotch() async throws {
+        await startListening()
+        let old = HookPayload(source: "claude", event: "PermissionRequest", sessionID: "s1", cwd: "/p", tool: "Bash", summary: "ls", timestamp: Date())
+        let outcome = ask(old)
+        #expect(await eventually { queue.pending.count == 1 })
+        let id = try head().id
+        arm()
+        module.decide(id, .allow)
+        #expect(queue.pending.count == 1)
+        module.decide(id, .deny)
+        #expect(await outcome.value == .answered(.deny))
     }
 }

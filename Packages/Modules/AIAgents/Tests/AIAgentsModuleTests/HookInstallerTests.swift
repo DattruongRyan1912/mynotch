@@ -379,6 +379,6 @@ import Testing
 
     @Test func theSettingsExplanationSaysWhatThePermissionHookDoes() {
         let text = HookInstaller.permissionExplanation
-        for part in ["PermissionRequest", "Cho phép", "Từ chối", "Hỏi trong terminal", "60 giây"] { #expect(text.contains(part), "\(part)") }
+        for part in ["PermissionRequest", "Cho phép", "Từ chối", "Hỏi trong terminal", "60 giây", "Trả lời trong terminal", "đủ yêu cầu"] { #expect(text.contains(part), "\(part)") }
     }
 }

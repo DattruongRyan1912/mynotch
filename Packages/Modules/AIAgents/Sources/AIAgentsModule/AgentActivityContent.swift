@@ -39,7 +39,7 @@ nonisolated struct AgentActivityContent: Equatable, Sendable {
     /// For VoiceOver.
     var accessibilityLabel: String {
         if let request = ask?.request {
-            return "\(source.displayName) xin quyền dùng \(request.tool)" + (request.summary.map { ": \($0)" } ?? "")
+            return "\(source.displayName) xin quyền dùng \(PermissionCardText.spoken(of: request))"
         }
         return switch kind {
         case .working: "\(source.displayName) đang chạy"

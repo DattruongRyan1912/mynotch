@@ -15,11 +15,26 @@ public enum PermissionClient {
         case unreachable
         /// The app took the request but no answer came in time, or what came was not one.
         case noAnswer
+        /// What listens is not the user's own app, or its folder is open to others: nothing was sent and nothing it says
+        /// is believed. The helper then says nothing at all, since the status datagram would go to the same folder.
+        case untrusted
         case answered(PermissionAnswer)
     }
 
-    public static func ask(_ payload: HookPayload, socketPath: String, timeout: TimeInterval) -> Outcome {
+    /// - Parameter trustedUser: the user whose app is spoken to: the one who owns the folder and the socket, and runs the
+    ///   process on the other end. The helper's own user.
+    public static func ask(_ payload: HookPayload, socketPath: String, timeout: TimeInterval, trustedUser: uid_t = geteuid()) -> Outcome {
+        ask(payload, socketPath: socketPath, timeout: timeout, trustedUser: trustedUser, peerUser: trustedUser)
+    }
+
+    /// With the user of the process on the other end apart from the owner of the files, which a test cannot otherwise tell.
+    static func ask(_ payload: HookPayload, socketPath: String, timeout: TimeInterval, trustedUser: uid_t, peerUser: uid_t) -> Outcome {
         guard let line = PermissionWire.requestLine(payload), let address = SocketAddress(path: socketPath) else { return .unreachable }
+        switch SocketTrust.inspect(socketPath: socketPath, user: trustedUser) {
+        case .absent: return .unreachable
+        case .untrusted: return .untrusted
+        case .trusted: break
+        }
         let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(timeout, 0) * 1e9)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return .unreachable }
@@ -35,6 +50,8 @@ public enum PermissionClient {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
         guard connected == 0 else { return .unreachable }
+        // Before a byte is written: the folder was right, but it is the process on the connection that answers.
+        guard SocketTrust.isPeer(fd, user: peerUser) else { return .untrusted }
         guard writeAll(line, to: fd, until: deadline) else { return .noAnswer }
         return readAnswer(from: fd, until: deadline)
     }

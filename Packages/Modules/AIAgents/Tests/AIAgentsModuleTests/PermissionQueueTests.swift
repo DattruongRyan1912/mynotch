@@ -19,10 +19,20 @@ import Testing
         PermissionQueue(scheduler: scheduler, lifetime: lifetime)
     }
 
+    /// A request whose whole text is shown, so "Cho phép" is offered, unless `complete` says otherwise.
     func payload(
-        _ session: String = "s1", tool: String = "Bash", summary: String? = "ls", source: String = "claude", cwd: String? = "/Users/x/Project/MyNotch"
+        _ session: String = "s1", tool: String = "Bash", summary: String? = "ls", source: String = "claude", cwd: String? = "/Users/x/Project/MyNotch",
+        complete: Bool = true
     ) -> HookPayload {
-        HookPayload(source: source, event: "PermissionRequest", sessionID: session, cwd: cwd, tool: tool, summary: summary, timestamp: now)
+        HookPayload(
+            source: source, event: "PermissionRequest", sessionID: session, cwd: cwd, tool: tool, summary: summary, timestamp: now,
+            detail: PermissionDetail(text: summary ?? "", hiddenLines: complete ? 0 : 3, isComplete: complete)
+        )
+    }
+
+    /// The card has been on screen long enough to be answered.
+    func arm() {
+        scheduler.advance(by: PermissionQueue.armingDelay)
     }
 
     @discardableResult
@@ -47,20 +57,27 @@ import Testing
         #expect(request.tool == "Bash")
         #expect(request.summary == "npm test")
         #expect(request.project == "MyNotch")
+        #expect(request.detail == PermissionDetail(text: "npm test", hiddenLines: 0, isComplete: true))
+        #expect(request.canAllow)
         #expect(request.key == AgentSessionKey(source: .claude, sessionID: "s1"))
         let noFolder = try #require(add(queue(), payload(cwd: nil), as: "2"))
         #expect(noFolder.project == nil)
     }
 
-    @Test func aDecisionGoesToTheExactRequestAndOnlyToIt() throws {
+    @Test func aDecisionGoesToTheRequestOnScreenAndOnlyToIt() throws {
         let queue = queue()
         let first = try #require(add(queue, payload("a"), as: "1"))
         let second = try #require(add(queue, payload("b"), as: "2"))
-        #expect(queue.decide(second.id, .deny))
-        #expect(replies.all == ["2": [.deny]])
-        #expect(queue.pending == [first])
-        #expect(queue.decide(first.id, .allow))
-        #expect(replies.all == ["1": [.allow], "2": [.deny]])
+        arm()
+        // Only the card that is shown can be answered: the one behind it is not on screen.
+        #expect(!queue.decide(second.id, .deny))
+        #expect(replies.all.isEmpty)
+        #expect(queue.decide(first.id, .deny))
+        #expect(replies.all == ["1": [.deny]])
+        #expect(queue.pending == [second])
+        arm()
+        #expect(queue.decide(second.id, .allow))
+        #expect(replies.all == ["1": [.deny], "2": [.allow]])
         #expect(queue.pending.isEmpty)
     }
 
@@ -68,6 +85,7 @@ import Testing
         let queue = queue()
         let first = try #require(add(queue, payload("a", tool: "Bash"), as: "1"))
         add(queue, payload("b", tool: "Edit"), as: "2")
+        arm()
         queue.decide(first.id, .ask)
         #expect(queue.pending.first?.tool == "Edit")
         #expect(replies.all == ["1": [.ask]])
@@ -76,6 +94,7 @@ import Testing
     @Test func aRequestIsDecidedOnceAndAnUnknownIdDoesNothing() throws {
         let queue = queue()
         let request = try #require(add(queue, payload(), as: "1"))
+        arm()
         #expect(!queue.decide("not-an-id", .allow))
         #expect(!queue.decide(request.id.lowercased() + "x", .allow))
         #expect(replies.all.isEmpty)
@@ -106,7 +125,8 @@ import Testing
         queue.withdraw(first.id)
         #expect(queue.pending.map(\.key.sessionID) == ["b"])
         #expect(replies.all.isEmpty)
-        #expect(scheduler.pendingCount == 1)
+        // What is left: the time of the request that stays and the delay of the card that came up.
+        #expect(scheduler.pendingCount == 2)
     }
 
     @Test func aRequestNobodyAnswersEndsWithAskInTheTerminalWhenItsTimeIsUp() {
@@ -122,6 +142,9 @@ import Testing
     @Test func aDecisionStopsTheTimeOfItsRequest() throws {
         let queue = queue()
         let request = try #require(add(queue, payload(), as: "1"))
+        // Its time, and the delay before its card takes answers.
+        #expect(scheduler.pendingCount == 2)
+        arm()
         #expect(scheduler.pendingCount == 1)
         queue.decide(request.id, .allow)
         #expect(scheduler.pendingCount == 0)
@@ -165,5 +188,157 @@ import Testing
         add(queue, payload("a", source: "codex"), as: "1")
         queue.settle(AgentSessionKey(source: .claude, sessionID: "a"))
         #expect(queue.pending.count == 1)
+    }
+
+    // MARK: A card that has just come up takes no answer yet
+
+    /// A click aimed at the card that was there before lands on the one that replaced it, unless the new one waits.
+    @Test func aCardThatJustAppearedTakesNoAnswerUntilItsDelayIsOver() throws {
+        let queue = queue()
+        let request = try #require(add(queue, payload(), as: "1"))
+        #expect(queue.armedID == nil)
+        for answer in [PermissionAnswer.allow, .deny, .ask] { #expect(!queue.decide(request.id, answer)) }
+        scheduler.advance(by: PermissionQueue.armingDelay - .milliseconds(1))
+        #expect(queue.armedID == nil)
+        #expect(!queue.decide(request.id, .allow))
+        #expect(replies.all.isEmpty)
+        #expect(queue.pending == [request])
+        scheduler.advance(by: .milliseconds(1))
+        #expect(queue.armedID == request.id)
+        #expect(queue.decide(request.id, .allow))
+        #expect(replies.all == ["1": [.allow]])
+    }
+
+    @Test func theNextCardInTheSlotWaitsToo() throws {
+        let queue = queue()
+        let first = try #require(add(queue, payload("a"), as: "1"))
+        let second = try #require(add(queue, payload("b"), as: "2"))
+        arm()
+        #expect(queue.decide(first.id, .allow))
+        // A second click on the same spot, as from a double click, arrives while the next card is already there.
+        #expect(queue.pending == [second])
+        #expect(queue.armedID == nil)
+        #expect(!queue.decide(second.id, .allow))
+        #expect(!queue.decide(second.id, .deny))
+        #expect(replies.all == ["1": [.allow]])
+        arm()
+        #expect(queue.armedID == second.id)
+        #expect(queue.decide(second.id, .deny))
+        #expect(replies.all == ["1": [.allow], "2": [.deny]])
+    }
+
+    @Test func theNextCardWaitsAlsoWhenTheFirstWasTakenAwayByTheAgentAndNotByTheUser() throws {
+        let queue = queue()
+        add(queue, payload("a"), as: "1")
+        let second = try #require(add(queue, payload("b"), as: "2"))
+        arm()
+        queue.settle(AgentSessionKey(source: .claude, sessionID: "a"))
+        #expect(queue.pending == [second])
+        #expect(!queue.decide(second.id, .allow))
+        arm()
+        #expect(queue.decide(second.id, .allow))
+    }
+
+    @Test func aRequestThatComesInBehindTheCardOnScreenDoesNotDisarmIt() throws {
+        let queue = queue()
+        let first = try #require(add(queue, payload("a"), as: "1"))
+        arm()
+        add(queue, payload("b"), as: "2")
+        #expect(queue.armedID == first.id)
+        #expect(queue.decide(first.id, .allow))
+    }
+
+    @Test func aRequestLeavingFromBehindTheCardOnScreenDoesNotDisarmIt() throws {
+        let queue = queue()
+        let first = try #require(add(queue, payload("a"), as: "1"))
+        let second = try #require(add(queue, payload("b"), as: "2"))
+        arm()
+        queue.withdraw(second.id)
+        #expect(queue.armedID == first.id)
+        #expect(queue.decide(first.id, .allow))
+    }
+
+    @Test func aCardThatLeavesBeforeItsDelayLeavesNoDelayRunningAndTheNextOneStartsItsOwn() throws {
+        let queue = queue()
+        let first = try #require(add(queue, payload("a"), as: "1"))
+        let second = try #require(add(queue, payload("b"), as: "2"))
+        scheduler.advance(by: .milliseconds(400))
+        queue.withdraw(first.id)
+        // The first card's delay would end 200 ms from now; the second card has a full one of its own.
+        scheduler.advance(by: .milliseconds(300))
+        #expect(queue.armedID == nil)
+        #expect(!queue.decide(second.id, .allow))
+        scheduler.advance(by: .milliseconds(300))
+        #expect(queue.armedID == second.id)
+    }
+
+    @Test func anEmptyQueueHasNothingArmedAndTheNextRequestStartsDisarmed() throws {
+        let queue = queue()
+        let first = try #require(add(queue, payload("a"), as: "1"))
+        arm()
+        queue.decide(first.id, .allow)
+        #expect(queue.armedID == nil)
+        let again = try #require(add(queue, payload("b"), as: "2"))
+        #expect(!queue.decide(again.id, .allow))
+        arm()
+        #expect(queue.decide(again.id, .allow))
+    }
+
+    @Test func whatTheAgentOrTheAppEndsIsNotHeldUpByTheDelay() throws {
+        let queue = queue()
+        add(queue, payload("a"), as: "1")
+        add(queue, payload("b"), as: "2")
+        queue.withdraw(queue.pending[0].id)
+        queue.cancelAll()
+        #expect(replies.all == ["2": [.ask]])
+        #expect(queue.pending.isEmpty)
+    }
+
+    @Test func theDelayIsLongerThanTheDoubleClickIntervalAndShortEnoughToNotBeFelt() {
+        // The system's default double-click interval is half a second; a click that began on the previous card is over by then.
+        #expect(PermissionQueue.armingDelay > .milliseconds(500))
+        #expect(PermissionQueue.armingDelay <= .seconds(1))
+    }
+
+    // MARK: A request that is not shown whole cannot be allowed
+
+    @Test func aRequestNotShownWholeCannotBeAllowedAtAllButCanBeDeniedOrLeftToTheTerminal() throws {
+        let queue = queue()
+        let request = try #require(add(queue, payload("a", complete: false), as: "1"))
+        #expect(!request.canAllow)
+        arm()
+        #expect(!queue.decide(request.id, .allow))
+        #expect(queue.pending == [request])
+        #expect(replies.all.isEmpty)
+        #expect(queue.decide(request.id, .deny))
+        #expect(replies.all == ["1": [.deny]])
+
+        let other = try #require(add(queue, payload("b", complete: false), as: "2"))
+        arm()
+        #expect(queue.decide(other.id, .ask))
+        #expect(replies.all == ["1": [.deny], "2": [.ask]])
+    }
+
+    @Test func aRequestFromAnOlderHelperWithNoDetailCannotBeAllowed() throws {
+        let queue = queue()
+        let old = HookPayload(source: "claude", event: "PermissionRequest", sessionID: "s1", tool: "Bash", summary: "ls", timestamp: now)
+        let request = try #require(queue.add(old, respond: replies.record("1")))
+        #expect(request.detail == nil)
+        #expect(!request.canAllow)
+        arm()
+        #expect(!queue.decide(request.id, .allow))
+    }
+
+    @Test func onlyAWholeDetailWithTextCanBeAllowed() throws {
+        func request(_ detail: PermissionDetail?) throws -> PermissionRequest {
+            var made = payload()
+            made.detail = detail
+            return try #require(PermissionRequest(payload: made, id: "x"))
+        }
+        #expect(try request(PermissionDetail(text: "ls", hiddenLines: 0, isComplete: true)).canAllow)
+        #expect(try !request(PermissionDetail(text: "ls", hiddenLines: 0, isComplete: false)).canAllow)
+        #expect(try !request(PermissionDetail(text: "ls", hiddenLines: 1, isComplete: true)).canAllow)
+        #expect(try !request(PermissionDetail(text: "", hiddenLines: 0, isComplete: true)).canAllow)
+        #expect(try !request(nil).canAllow)
     }
 }

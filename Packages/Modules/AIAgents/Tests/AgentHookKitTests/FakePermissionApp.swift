@@ -22,6 +22,8 @@ final class FakePermissionApp: Sendable {
     private final class Shared: Sendable {
         let requests = Mutex<[Data]>([])
         let connections = Mutex(0)
+        /// Connections whose request has been read to its end, or to the peer leaving.
+        let served = Mutex(0)
         let stopped = Mutex(false)
         var isStopped: Bool { stopped.withLock { $0 } }
     }
@@ -32,9 +34,16 @@ final class FakePermissionApp: Sendable {
 
     private let shared = Shared()
 
-    init(behavior: Behavior) throws {
+    /// - Parameter folderMode: the mode of its folder; the helper trusts only a private one (0700), as the app makes it.
+    init(behavior: Behavior, folderMode: Int = 0o700) throws {
+        // A helper that leaves before the fake answers must not end the test process: on macOS the no-SIGPIPE option
+        // cannot be set on a socket whose peer is already gone, so it is the signal that is ignored, as the real helper does.
+        signal(SIGPIPE, SIG_IGN)
         directory = "/tmp/mn-\(UUID().uuidString.prefix(8))"
-        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: folderMode]
+        )
+        chmod(directory, mode_t(folderMode))
         let path = directory + "/perm.sock"
         let listener = socket(AF_UNIX, SOCK_STREAM, 0)
         var address = sockaddr_un()
@@ -73,6 +82,8 @@ final class FakePermissionApp: Sendable {
     /// The request lines read so far, without their newline.
     var requests: [Data] { shared.requests.withLock { $0 } }
     var connectionCount: Int { shared.connections.withLock { $0 } }
+    /// How many connections the fake has read the request of: after this many, `requests` says all that was sent.
+    var servedCount: Int { shared.served.withLock { $0 } }
 
     private static func serve(_ client: Int32, _ behavior: Behavior, _ shared: Shared) {
         if case .ignore = behavior {
@@ -80,6 +91,7 @@ final class FakePermissionApp: Sendable {
             return
         }
         if let line = readLine(client, shared) { shared.requests.withLock { $0.append(line) } }
+        shared.served.withLock { $0 += 1 }
         switch behavior {
         case let .reply(text):
             put(client, text)

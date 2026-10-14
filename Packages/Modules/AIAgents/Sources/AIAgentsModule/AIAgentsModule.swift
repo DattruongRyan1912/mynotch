@@ -365,8 +365,10 @@ public final class AIAgentsModule: FeatureModule {
             ? .seconds(context.settings.value(AIAgentsSettingsKeys(context.settings).finishedSeconds)) + Self.finishedExpiryMargin : nil
         // A request shows as a card in a strip under the notch, with its buttons; its summary names it in the list of
         // activities and for VoiceOver.
-        let card = content.ask.map { ask in
-            AnyView(PermissionCard(request: ask.request, others: ask.others) { [weak self] in self?.decide($0, $1) })
+        let card = content.ask.flatMap { ask in
+            permissions.map { queue in
+                AnyView(PermissionCard(request: ask.request, others: ask.others, queue: queue) { [weak self] in self?.decide($0, $1) })
+            }
         }
         context.activities.set(LiveActivity(
             id: Self.activityID,
