@@ -20,6 +20,8 @@ struct MediaSettingsKeys {
     /// Lyrics from the captions the user turned on in a YouTube video in Chrome, which the extension hands over on this
     /// Mac. Off by default; it opens a socket for the helper that Chrome starts, and sends nothing anywhere.
     let youtubeCaptions: SettingKey<Bool>
+    /// The current and the next lyric line in a strip under the closed notch. Off by default: it makes the notch taller.
+    let lyricsUnderNotch: SettingKey<Bool>
 
     init(_ settings: ModuleSettings) {
         showActivity = settings.key("showActivity", default: true)
@@ -28,6 +30,7 @@ struct MediaSettingsKeys {
         realSpectrum = settings.key("realSpectrum", default: false)
         lyrics = settings.key("lyrics", default: false)
         youtubeCaptions = settings.key("youtubeCaptions", default: false)
+        lyricsUnderNotch = settings.key("lyricsUnderNotch", default: false)
     }
 }
 
@@ -73,6 +76,7 @@ public final class MediaModule: FeatureModule {
     private var showActivity = true
     private var realSpectrum = false
     private var lyricsEnabled = false
+    private var lyricsUnderNotch = false
     private var lyricsService: LyricsService?
     /// Track the lyrics were asked for (or are shown for); nil while lyrics are off or the track has no key.
     private var lyricsTrack: TrackKey?
@@ -104,6 +108,9 @@ public final class MediaModule: FeatureModule {
     /// Track the published activity belongs to; nil while none is published. Compared so the activity is
     /// set once per track: everything that changes while a track plays is read by its views from `store`.
     private var publishedTrack: TrackIdentity?
+    /// Whether the published activity carries the lyric strip. Unlike the track it can change while a track plays
+    /// (lyrics arrive, playback pauses), and each change republishes the activity.
+    private var publishedStrip = false
     /// Whether the lock screen view is on offer; its view reads `store`, so it is set once and cleared once.
     private var lockScreenOffered = false
     private var deadlineTimer: ScheduledAction?
@@ -181,6 +188,7 @@ public final class MediaModule: FeatureModule {
         store.reset()
         policy = ActivityPolicy()
         publishedTrack = nil
+        publishedStrip = false
         lockScreenOffered = false
         spectrumFeed = SpectrumFeed(source: spectrum, store: store, scheduler: context.scheduler, logger: context.logger)
         lyricsTrack = nil
@@ -210,7 +218,7 @@ public final class MediaModule: FeatureModule {
                 (
                     settings.value(keys.showActivity), settings.value(keys.pauseGraceSeconds),
                     settings.value(keys.hiddenApps), settings.value(keys.realSpectrum), settings.value(keys.lyrics),
-                    settings.value(keys.youtubeCaptions)
+                    settings.value(keys.youtubeCaptions), settings.value(keys.lyricsUnderNotch)
                 )
             }
             for await _ in changes { self?.settingsChanged() }
@@ -253,6 +261,7 @@ public final class MediaModule: FeatureModule {
         cancelDeadline()
         policy = ActivityPolicy()
         publishedTrack = nil
+        publishedStrip = false
         lockScreenOffered = false
         store.reset()
     }
@@ -273,6 +282,7 @@ public final class MediaModule: FeatureModule {
             realSpectrum: environment.settings.binding(keys.realSpectrum),
             lyrics: environment.settings.binding(keys.lyrics),
             youtubeCaptions: environment.settings.binding(keys.youtubeCaptions),
+            lyricsUnderNotch: environment.settings.binding(keys.lyricsUnderNotch),
             youtubeBridge: youtubeBridgeModel(for: environment),
             store: store,
             appleAccount: appleAccount,
@@ -362,6 +372,7 @@ public final class MediaModule: FeatureModule {
         policy.hiddenBundleIDs = Set(settings.value(keys.hiddenApps))
         realSpectrum = settings.value(keys.realSpectrum)
         lyricsEnabled = settings.value(keys.lyrics)
+        lyricsUnderNotch = settings.value(keys.lyricsUnderNotch)
         youtubeCaptionsEnabled = settings.value(keys.youtubeCaptions)
         updateYouTubeBridge()
     }
@@ -369,9 +380,10 @@ public final class MediaModule: FeatureModule {
     private func evaluate(at now: Date) {
         policy.update(store.state, at: now)
         scheduleDeadline(from: now)
+        // The lyrics first: the activity's strip depends on which track's lyrics are in the store.
+        refreshLyrics()
         refreshActivity()
         updateSpectrum()
-        refreshLyrics()
     }
 
     /// Connecting changes what can be found for the track playing now, so it is looked up again. Losing the sign-in does
@@ -396,7 +408,7 @@ public final class MediaModule: FeatureModule {
             // What was fetched for the track was replaced by the captions, so the lookup starts again (from the cache if it can).
             shownCaptions = nil
             lyricsTrack = nil
-            store.showLyrics(nil)
+            show(lyrics: nil)
         }
         let track = lyricsEnabled ? TrackKey(store.state) : nil
         guard track != lyricsTrack else { return }
@@ -404,9 +416,15 @@ public final class MediaModule: FeatureModule {
         lyricsTask = nil
         lyricsTrack = track
         lyricsEpoch += 1
-        store.showLyrics(nil)
+        show(lyrics: nil)
         guard let track else { return }
         fetchLyrics(for: track, mayRetry: true)
+    }
+
+    /// Hands the lyrics to the store and the activity gets its say: its strip exists only while there are synced lyrics.
+    private func show(lyrics: [LyricLine]?) {
+        store.showLyrics(lyrics)
+        refreshActivity()
     }
 
     private func fetchLyrics(for track: TrackKey, mayRetry: Bool) {
@@ -422,7 +440,7 @@ public final class MediaModule: FeatureModule {
         guard track == lyricsTrack else { return }
         switch result {
         case .synced(let lines):
-            store.showLyrics(lines)
+            show(lyrics: lines)
         case .unavailable(let reason):
             context?.logger.info("Lyrics unavailable: \(reason, privacy: .public)")
             // A rate limit is no verdict on the track: ask once more when lrclib is open again.
@@ -527,7 +545,7 @@ public final class MediaModule: FeatureModule {
         }
         guard shownCaptions?.videoID != captions.videoID || shownCaptions?.revision != captions.revision else { return }
         shownCaptions = (captions.videoID, captions.revision)
-        store.showLyrics(captions.lines)
+        show(lyrics: captions.lines)
     }
 
     /// The tap runs only while the setting is on, something plays and some bars are on screen.
@@ -574,8 +592,14 @@ public final class MediaModule: FeatureModule {
         }
     }
 
-    /// Sets the activity when it becomes visible or another track starts, clears it when it hides; nothing else,
-    /// so frequent position updates neither redraw nor reorder it.
+    /// The strip under the notch is on offer while the setting is on and the track plays with synced lyrics, from
+    /// whichever source: a paused track has no line being sung.
+    private var offersLyricStrip: Bool {
+        lyricsUnderNotch && store.state.isPlaying && store.syncedLyrics?.isEmpty == false
+    }
+
+    /// Sets the activity when it becomes visible, another track starts or its strip comes or goes; clears it when it
+    /// hides; nothing else, so frequent position updates neither redraw nor reorder it.
     private func refreshActivity() {
         guard let context else { return }
         refreshLockScreen(context)
@@ -583,19 +607,24 @@ public final class MediaModule: FeatureModule {
             if publishedTrack != nil {
                 context.activities.clear(id: Self.activityID)
                 publishedTrack = nil
+                publishedStrip = false
             }
             return
         }
         let track = store.state.trackIdentity
+        let strip = offersLyricStrip
         // While a track change is debounced the state is briefly empty: an activity already up keeps showing
         // the last track (the store's snapshot), and none is published until a track is there to show.
-        guard store.state.isActive, publishedTrack == nil || track != publishedTrack else { return }
+        guard store.state.isActive, publishedTrack == nil || track != publishedTrack || strip != publishedStrip else { return }
         context.activities.set(LiveActivity(
             id: Self.activityID,
             priority: .normal,
             leading: AnyView(NowPlayingActivityArtwork(store: store)),
-            trailing: AnyView(NowPlayingBars(store: store))
+            trailing: AnyView(NowPlayingBars(store: store)),
+            bottom: strip ? AnyView(NowPlayingLyricStrip(store: store)) : nil,
+            bottomHeight: strip ? NowPlayingLyricStrip.height : 0
         ))
         publishedTrack = track
+        publishedStrip = strip
     }
 }

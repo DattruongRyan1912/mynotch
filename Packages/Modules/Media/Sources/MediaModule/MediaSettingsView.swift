@@ -8,6 +8,8 @@ struct MediaSettingsView: View {
     static let audioCaptureSettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")!
     /// Says what leaves the Mac, because lyrics are the one feature here that talks to a server.
     static let lyricsExplanation = "Khi bật, tên bài, nghệ sĩ, album và thời lượng của mỗi bài mới (kể cả video phát trong trình duyệt) được gửi tới lrclib.net để lấy lời."
+    static let lyricsUnderNotchTitle = "Hiện lời 2 dòng dưới notch"
+    static let lyricsUnderNotchExplanation = "Khi có lời đồng bộ và nhạc đang phát, notch thu gọn hiện câu đang hát và câu sắp tới."
 
     @Binding var showActivity: Bool
     @Binding var pauseGraceSeconds: Int
@@ -15,6 +17,7 @@ struct MediaSettingsView: View {
     @Binding var realSpectrum: Bool
     @Binding var lyrics: Bool
     @Binding var youtubeCaptions: Bool
+    @Binding var lyricsUnderNotch: Bool
     let youtubeBridge: YouTubeBridgeModel
     /// Only for the permission hint; the module keeps the store for its whole life, running or not.
     let store: NowPlayingStore
@@ -52,6 +55,10 @@ struct MediaSettingsView: View {
                 AppleMusicRows(account: appleAccount, connect: connectAppleMusic, disconnect: disconnectAppleMusic)
             }
             YouTubeBridgeRows(isOn: $youtubeCaptions, model: youtubeBridge)
+            Toggle(isOn: $lyricsUnderNotch) {
+                Text(Self.lyricsUnderNotchTitle)
+                Text(Self.lyricsUnderNotchExplanation)
+            }
         }
     }
 }

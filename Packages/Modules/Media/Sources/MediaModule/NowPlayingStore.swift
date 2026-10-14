@@ -96,6 +96,12 @@ final class NowPlayingStore {
         return syncedLyrics.line(at: position)
     }
 
+    /// The two lines of the strip under the notch at `date`; nil while the track has no synced lyrics.
+    func lyricStrip(at date: Date) -> LyricStrip? {
+        guard let syncedLyrics else { return nil }
+        return LyricStrip(lines: syncedLyrics, position: position(at: date))
+    }
+
     /// Called by each bars view as it appears and disappears.
     func spectrumViewAppeared() {
         spectrumViewCount += 1

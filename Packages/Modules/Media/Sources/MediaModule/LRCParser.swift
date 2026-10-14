@@ -89,6 +89,18 @@ extension Array where Element == LyricLine {
     /// The line being sung at `seconds`: the last one that started at or before it, found by binary search.
     /// nil before the first line. Needs the order `LRCParser.parse` gives.
     func line(at seconds: Double) -> LyricLine? {
+        indexOfLine(at: seconds).map { self[$0] }
+    }
+
+    /// The line being sung at `seconds` (as `line(at:)`: nil before the first line, an empty one during a pause) and
+    /// the next line with words after it, which skips pauses. `next` is nil after the last line with words.
+    func lines(around seconds: Double) -> (current: LyricLine?, next: LyricLine?) {
+        let index = indexOfLine(at: seconds)
+        let upcoming = self[(index.map { $0 + 1 } ?? 0)...]
+        return (index.map { self[$0] }, upcoming.first { !$0.text.isEmpty })
+    }
+
+    private func indexOfLine(at seconds: Double) -> Int? {
         var low = 0
         var high = count
         // `low` ends as the first index whose line starts after `seconds`.
@@ -96,6 +108,6 @@ extension Array where Element == LyricLine {
             let middle = (low + high) / 2
             if self[middle].time <= seconds { low = middle + 1 } else { high = middle }
         }
-        return low > 0 ? self[low - 1] : nil
+        return low > 0 ? low - 1 : nil
     }
 }

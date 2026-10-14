@@ -64,3 +64,50 @@ struct NowPlayingBars: View {
         return 0.2 + 0.8 * beat * (0.45 + 0.55 * swell)
     }
 }
+
+/// Under the closed notch while the lyrics are synced: the line being sung and the one coming next, like karaoke.
+/// Two rows of one line each, so the strip keeps its height whatever the lyrics say. The notch gives it its width
+/// and its side padding.
+struct NowPlayingLyricStrip: View {
+    static let height: CGFloat = 36
+
+    let store: NowPlayingStore
+
+    var body: some View {
+        // Four times a second is fine-grained enough for lines that last seconds; the clock itself is exact.
+        TimelineView(.periodic(from: .now, by: 0.25)) { timeline in
+            let strip = store.lyricStrip(at: timeline.date)
+            ZStack {
+                // Blank in the moment between two tracks, when the old lyrics are gone and the new ones are not there yet.
+                if let strip {
+                    rows(strip)
+                        // A new pair of lines slides up into place while the old one leaves.
+                        .id(strip)
+                        .transition(.asymmetric(
+                            insertion: .offset(y: 6).combined(with: .opacity),
+                            removal: .offset(y: -6).combined(with: .opacity)
+                        ))
+                }
+            }
+            .animation(.easeOut(duration: 0.2), value: strip)
+            .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height)
+            .clipped()
+        }
+    }
+
+    private func rows(_ strip: LyricStrip) -> some View {
+        VStack(spacing: 2) {
+            Text(strip.current ?? LyricStrip.note)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(strip.current == nil ? NotchTokens.secondaryText : NotchTokens.primaryText)
+                .frame(height: 16)
+            Text(strip.next ?? "")
+                .font(.system(size: 11))
+                .foregroundStyle(NotchTokens.secondaryText)
+                .frame(height: 14)
+        }
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .frame(maxWidth: .infinity)
+    }
+}

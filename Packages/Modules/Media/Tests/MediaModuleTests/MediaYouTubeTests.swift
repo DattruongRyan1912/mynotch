@@ -120,6 +120,16 @@ import Testing
         #expect(client.requests.isEmpty, "lyrics from the web are off, and nothing goes to it")
     }
 
+    @Test func captionsGiveTheStripUnderTheNotchToo() async {
+        harness.settings.set(true, for: keys.lyricsUnderNotch)
+        await bootstrapWithCaptions()
+        playInChrome()
+        #expect(harness.activities.current?.activity.hasBottom == false)
+        receive(YouTubeTestMessages.captions(), YouTubeTestMessages.playback())
+        #expect(store.syncedLyrics == YouTubeTestMessages.lines)
+        #expect(harness.activities.current?.activity.hasBottom == true)
+    }
+
     @Test func theOrderOfTheMessagesAndTheTrackDoesNotMatter() async {
         await bootstrapWithCaptions()
         receive(YouTubeTestMessages.playback(), YouTubeTestMessages.captions())

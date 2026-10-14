@@ -3,6 +3,7 @@ import Foundation
 import SwiftUI
 import Testing
 @testable import MyNotchCore
+import MyNotchTestSupport
 
 @Suite struct CoreTypesTests {
     @Test func tabHeightIsClampedWithDefault() {
@@ -59,5 +60,50 @@ import Testing
 
     @Test func priorityOrdering() {
         #expect(ActivityPriority.low < .normal && .normal < .high && .high < .critical)
+    }
+
+    // MARK: the strip under the notch
+
+    @Test func anActivityHasNoBottomStripUnlessItAsksForOne() {
+        let plain = activity("x")
+        #expect(plain.bottom == nil)
+        #expect(plain.bottomHeight == 0)
+        #expect(!plain.hasBottom)
+
+        // The initialiser every module already calls, with all of its labels.
+        let full = LiveActivity(id: "y", priority: .high, expiresAfter: .seconds(3), leading: AnyView(EmptyView()), trailing: AnyView(EmptyView()))
+        #expect(full.priority == .high && full.expiresAfter == .seconds(3))
+        #expect(!full.hasBottom)
+    }
+
+    @Test func aBottomStripCarriesItsViewAndHeight() {
+        let strip = LiveActivity(
+            id: "x", leading: AnyView(EmptyView()), trailing: AnyView(EmptyView()),
+            bottom: AnyView(Text("under")), bottomHeight: 36
+        )
+        #expect(strip.bottom != nil)
+        #expect(strip.bottomHeight == 36)
+        #expect(strip.hasBottom)
+    }
+
+    @Test func aStripNeedsBothAViewAndAHeightToTakeSpace() {
+        let noHeight = LiveActivity(id: "x", leading: AnyView(EmptyView()), trailing: AnyView(EmptyView()), bottom: AnyView(Text("under")))
+        #expect(noHeight.bottomHeight == 0 && !noHeight.hasBottom)
+        let negative = LiveActivity(
+            id: "x", leading: AnyView(EmptyView()), trailing: AnyView(EmptyView()), bottom: AnyView(Text("under")), bottomHeight: -5
+        )
+        #expect(negative.bottomHeight == 0 && !negative.hasBottom)
+        let noView = LiveActivity(id: "x", leading: AnyView(EmptyView()), trailing: AnyView(EmptyView()), bottomHeight: 36)
+        #expect(noView.bottom == nil && noView.bottomHeight == 0 && !noView.hasBottom)
+    }
+
+    @Test func theCenterHandsOnTheCurrentActivitysStrip() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        center.set(LiveActivity(
+            id: "m", leading: AnyView(EmptyView()), trailing: AnyView(EmptyView()), bottom: AnyView(Text("under")), bottomHeight: 36
+        ), from: "one")
+        #expect(center.current?.activity.hasBottom == true)
+        center.set(activity("m"), from: "one")
+        #expect(center.current?.activity.hasBottom == false)
     }
 }
