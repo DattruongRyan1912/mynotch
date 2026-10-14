@@ -19,6 +19,8 @@ final class NotchWindowController {
     #endif
     /// Last keyboard focus decision; the panel makes itself key only when it turns true.
     private var lastFocus = false
+    /// Created on the first hand-back; see `KeyboardReturn`.
+    private var keySink: KeySinkPanel?
     /// Strip height seen by the last observation, so only a show or hide is logged.
     private var lastStripHeight: CGFloat = 0
     /// Pasteboard types of the drag in progress, empty when nothing is being dragged.
@@ -135,6 +137,9 @@ final class NotchWindowController {
         panel.allowsKeyStatus = false
         orderOut("controller closed")
         panel.close()
+        keySink?.orderOut(nil)
+        keySink?.close()
+        keySink = nil
     }
 
     private func orderFront(_ reason: String) {
@@ -162,31 +167,50 @@ final class NotchWindowController {
     }
 
     /// The panel may become key while the shown tab accepts the keyboard, and hands the keyboard back to the app in
-    /// front otherwise (once the notch collapses, never during a tab switch); it is non-activating, so MyNotch never
-    /// becomes the active app. It makes itself key only when focus starts being wanted, never on later updates, so a
-    /// pinned notch does not grab the keyboard back after the user clicked another app.
-    private func updateKeyboard(wants: Bool, focuses: Bool, isExpanded: Bool) {
+    /// front as soon as it does not (a tab switch, a close), in place and without hiding the notch; it is non-activating,
+    /// so MyNotch never becomes the active app. It makes itself key only when focus starts being wanted, never on later
+    /// updates, so a pinned notch does not grab the keyboard back after the user clicked another app.
+    private func updateKeyboard(wants: Bool, focuses: Bool) {
         let plan = NotchKeyboardPolicy.panelKeyPlan(
-            wants: wants, focuses: focuses, wasFocused: lastFocus, isKey: panel.isKeyWindow, isVisible: isVisible, isExpanded: isExpanded
+            wants: wants, focuses: focuses, wasFocused: lastFocus, isKey: panel.isKeyWindow, isVisible: isVisible
         )
+        // Before the hand-back, so the panel leaving key status is not taken for the user clicking elsewhere.
         if plan.allowsKeyStatus != panel.allowsKeyStatus {
-            NotchLog.record("keyboard allowsKey=\(plan.allowsKeyStatus) isKey=\(panel.isKeyWindow) expanded=\(isExpanded)")
+            NotchLog.record("keyboard allowsKey=\(plan.allowsKeyStatus) isKey=\(panel.isKeyWindow)")
             panel.allowsKeyStatus = plan.allowsKeyStatus
         }
-        if !plan.handBack, !wants, isExpanded, panel.isKeyWindow {
-            NotchLog.record("keyboard hand-back waits until the notch collapses")
-        }
-        if plan.handBack {
-            // Ordering out returns key status to the app in front; ordering back in leaves it there. The plan only asks for
-            // it once the notch is collapsed, because the panel blinks.
-            orderOut("hand keyboard back")
-            orderFront("hand keyboard back")
-        }
+        if plan.handBack { handBackKeyboard() }
         if plan.makeKey {
-            NotchLog.record("keyboard makeKey expanded=\(isExpanded)")
+            NotchLog.record("keyboard makeKey")
             panel.makeKey()
         }
         lastFocus = focuses
+    }
+
+    private func handBackKeyboard() {
+        let strategy = KeyboardReturn.current
+        let front = NSWorkspace.shared.frontmostApplication
+        let frontIsOtherApp = front.map { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier } ?? false
+        let steps = strategy.steps(frontIsOtherApp: frontIsOtherApp)
+        NotchLog.record("keyboard hand-back strategy=\(strategy.rawValue) steps=\(steps.map(\.rawValue)) frontIsOtherApp=\(frontIsOtherApp) \(panel.logSummary)")
+        for step in steps { perform(step, front: front) }
+        NotchLog.record("keyboard hand-back done \(panel.logSummary)")
+    }
+
+    private func perform(_ step: KeyboardReturn.Step, front: NSRunningApplication?) {
+        switch step {
+        case .showSink:
+            let sink = keySink ?? KeySinkPanel()
+            keySink = sink
+            // Inside the notch panel at the top edge, where nothing can be seen of a clear 1 pt window.
+            sink.setFrame(CGRect(x: panel.frame.midX - 0.5, y: panel.frame.maxY - 1, width: 1, height: 1), display: false)
+            sink.orderFrontRegardless()
+        case .makeSinkKey: keySink?.makeKey()
+        case .hideSink: keySink?.orderOut(nil)
+        case .activateFrontApp: _ = front?.activate()
+        case .orderNotchOut: orderOut("hand keyboard back")
+        case .orderNotchIn: orderFront("hand keyboard back")
+        }
     }
 
     /// The user moved the keyboard elsewhere (another app or another MyNotch window): treated like a click outside,
@@ -227,7 +251,7 @@ final class NotchWindowController {
                 // A finished drag (drop, or the pointer left) must not leave its types behind for later refreshes.
                 if !isDragging { self.dragTypes = [] }
                 self.refreshHitTesting()
-                self.updateKeyboard(wants: wantsKeyboard, focuses: focusesKeyboard, isExpanded: state.isExpanded)
+                self.updateKeyboard(wants: wantsKeyboard, focuses: focusesKeyboard)
             }
         }
     }

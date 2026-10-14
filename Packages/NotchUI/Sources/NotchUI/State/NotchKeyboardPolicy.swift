@@ -22,22 +22,18 @@ enum NotchKeyboardPolicy {
         var allowsKeyStatus: Bool
         /// The panel takes the keyboard now (focus just started being wanted).
         var makeKey: Bool
-        /// Order the panel out and back in so key status returns to the app in front.
+        /// Give key status back to the app in front.
         var handBack: Bool
     }
 
-    /// Returning key status means ordering the panel out and back in, which makes the notch blink, so it never
-    /// happens while the notch is open: a panel that is key when the shown tab stops wanting the keyboard (a tab
-    /// switch) keeps key status until the notch collapses or hides. Esc and clicking elsewhere still end it.
-    static func panelKeyPlan(
-        wants: Bool, focuses: Bool, wasFocused: Bool, isKey: Bool, isVisible: Bool, isExpanded: Bool
-    ) -> PanelKeyPlan {
-        let holdsKey = isKey && isVisible
-        return PanelKeyPlan(
-            allowsKeyStatus: wants || (holdsKey && isExpanded),
+    /// The panel is key and the shown tab no longer wants the keyboard (a tab switch, a close): key status goes back to the
+    /// app in front at once, in place (`KeyboardReturn`), so the notch never has to leave the screen for it.
+    static func panelKeyPlan(wants: Bool, focuses: Bool, wasFocused: Bool, isKey: Bool, isVisible: Bool) -> PanelKeyPlan {
+        PanelKeyPlan(
+            allowsKeyStatus: wants,
             // An ordered-out panel must not take the keyboard where nobody can see it.
             makeKey: focuses && !wasFocused && isVisible,
-            handBack: !wants && holdsKey && !isExpanded
+            handBack: !wants && isKey && isVisible
         )
     }
 }

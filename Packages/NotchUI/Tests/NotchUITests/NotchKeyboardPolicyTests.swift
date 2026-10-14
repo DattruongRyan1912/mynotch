@@ -45,39 +45,37 @@ import Testing
     }
 
     func plan(
-        wants: Bool, focuses: Bool = false, wasFocused: Bool = false, isKey: Bool = false, isVisible: Bool = true, isExpanded: Bool = true
+        wants: Bool, focuses: Bool = false, wasFocused: Bool = false, isKey: Bool = false, isVisible: Bool = true
     ) -> NotchKeyboardPolicy.PanelKeyPlan {
-        NotchKeyboardPolicy.panelKeyPlan(
-            wants: wants, focuses: focuses, wasFocused: wasFocused, isKey: isKey, isVisible: isVisible, isExpanded: isExpanded
-        )
+        NotchKeyboardPolicy.panelKeyPlan(wants: wants, focuses: focuses, wasFocused: wasFocused, isKey: isKey, isVisible: isVisible)
     }
 
-    @Test func leavingAKeyboardTabNeverOrdersThePanelOutWhileTheNotchIsOpen() {
-        let leaving = plan(wants: false, isKey: true, isExpanded: true)
-        #expect(!leaving.handBack)
-        // Still allowed, so losing key status later (a click elsewhere) is treated like leaving a keyboard tab.
-        #expect(leaving.allowsKeyStatus)
+    @Test func leavingAKeyboardTabHandsTheKeyboardBackAtOnce() {
+        let leaving = plan(wants: false, isKey: true)
+        #expect(leaving.handBack)
+        // Not allowed any more, so giving key status up is never mistaken for the user clicking elsewhere.
+        #expect(!leaving.allowsKeyStatus)
     }
 
-    @Test func theKeyboardGoesBackOnceTheNotchCollapsesOrHides() {
-        let collapsed = plan(wants: false, isKey: true, isExpanded: false)
-        #expect(collapsed.handBack)
-        #expect(!collapsed.allowsKeyStatus)
-        #expect(!plan(wants: false, isKey: true, isVisible: false, isExpanded: false).handBack)
+    @Test func aHiddenPanelHasNothingToHandBack() {
+        #expect(!plan(wants: false, isKey: true, isVisible: false).handBack)
     }
 
     @Test func aPanelThatIsNotKeyHasNothingToHandBack() {
-        let plain = plan(wants: false, isKey: false, isExpanded: false)
+        let plain = plan(wants: false, isKey: false)
         #expect(!plain.handBack)
         #expect(!plain.allowsKeyStatus)
-        #expect(!plan(wants: false, isKey: false, isExpanded: true).allowsKeyStatus)
     }
 
     @Test func aKeyboardTabKeepsTheKeyboardAndNeverHandsBack() {
         let typing = plan(wants: true, isKey: true)
         #expect(typing.allowsKeyStatus)
         #expect(!typing.handBack)
-        #expect(!plan(wants: true, isKey: true, isExpanded: false).handBack)
+    }
+
+    @Test func aToastOverTheKeyboardTabKeepsTheKeyboard() {
+        #expect(!plan(wants: wantsKeyboard(.toast, under: "clipboard"), isKey: true).handBack)
+        #expect(plan(wants: wantsKeyboard(.toast, under: "battery"), isKey: true).handBack)
     }
 
     @Test func thePanelBecomesKeyOnlyWhenFocusStartsAndItIsOnScreen() {
@@ -92,10 +90,9 @@ import Testing
         var isKey = false
         var wasFocused = false
         return states.map { state in
-            let wants = wantsKeyboard(state)
             let focuses = focusesKeyboard(state, onPurpose: onPurpose)
             let result = NotchKeyboardPolicy.panelKeyPlan(
-                wants: wants, focuses: focuses, wasFocused: wasFocused, isKey: isKey, isVisible: true, isExpanded: state.isExpanded
+                wants: wantsKeyboard(state), focuses: focuses, wasFocused: wasFocused, isKey: isKey, isVisible: true
             )
             if result.makeKey { isKey = true }
             if result.handBack { isKey = false }
@@ -104,20 +101,20 @@ import Testing
         }
     }
 
-    @Test func switchingTabsNeverHandsTheKeyboardBackWhileTheNotchStaysOpen() {
-        let steps = replay([
-            .open("battery"), .open("clipboard"), .open("battery"), .open("clipboard"), .open("clipboard"), .open("battery"), .open("battery"),
-        ])
-        #expect(steps.allSatisfy { !$0.plan.handBack })
-        #expect(steps.filter(\.plan.makeKey).count == 2)
+    @Test func theKeyboardGoesBackExactlyOnceRightAfterLeavingAKeyboardTab() {
+        let steps = replay([.open("battery"), .open("clipboard"), .open("clipboard"), .open("battery"), .open("battery")])
+        #expect(steps.map(\.plan.makeKey) == [false, true, false, false, false])
+        #expect(steps.map(\.plan.handBack) == [false, false, false, true, false])
     }
 
-    @Test func theKeyboardReturnsExactlyOnceAfterTheNotchCloses() {
-        let steps = replay([.open("clipboard"), .open("battery"), .closed, .closed])
-        #expect(steps.map(\.plan.handBack) == [false, false, true, false])
+    @Test func everyVisitToAKeyboardTabIsHandedBackOnce() {
+        let steps = replay([.open("clipboard"), .open("battery"), .open("clipboard"), .open("battery"), .open("clipboard"), .closed])
+        #expect(steps.filter(\.plan.makeKey).count == 3)
+        #expect(steps.filter(\.plan.handBack).count == 3)
     }
 
-    @Test func aToastCountsAsAnOpenNotchForTheHandBack() {
-        #expect(!plan(wants: false, isKey: true, isExpanded: NotchState.toast.isExpanded).handBack)
+    @Test func closingFromAKeyboardTabHandsBackWithoutAnyNotchSizeInTheDecision() {
+        let steps = replay([.open("clipboard"), .closed, .closed])
+        #expect(steps.map(\.plan.handBack) == [false, true, false])
     }
 }
