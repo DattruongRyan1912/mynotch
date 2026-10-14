@@ -74,12 +74,22 @@ import Testing
 
     // MARK: Lifecycle
 
+    @Test func declaresThePermissionsItUsesAndWhy() {
+        let descriptor = module.descriptor
+        #expect(descriptor.permissions == [.screenRecording])
+        #expect(descriptor.optionalPermissions == [.desktopFolder, .downloadsFolder])
+        #expect(descriptor.permissionReasons == [
+            .screenRecording: "Chụp màn hình.",
+            .desktopFolder: "Lưu ảnh vào Desktop (nơi lưu mặc định của “Lưu vào”).",
+            .downloadsFolder: "Lưu ảnh vào Downloads khi chọn nơi lưu là Downloads.",
+        ])
+    }
+
     @Test func descriptorAndTabMatchTheSpec() throws {
         #expect(module.descriptor.id == "screenshot")
         #expect(module.descriptor.displayName == "Ảnh chụp")
         #expect(module.descriptor.systemImage == "camera.viewfinder")
         #expect(module.descriptor.order == 300)
-        #expect(module.descriptor.permissions == [.screenRecording])
         let tab = try #require(module.makeTab())
         #expect(tab.id == "screenshot")
         #expect(tab.title == "Ảnh chụp")

@@ -26,6 +26,10 @@ public final class CalendarModule: FeatureModule {
         defaultEnabled: true,
         permissions: [.calendars],
         optionalPermissions: [.reminders],
+        permissionReasons: [
+            .calendars: "Hiện sự kiện sắp tới và thông báo họp.",
+            .reminders: "Hiện lời nhắc khi bật “Hiện lời nhắc đến hạn hôm nay”.",
+        ],
         order: 600
     )
 

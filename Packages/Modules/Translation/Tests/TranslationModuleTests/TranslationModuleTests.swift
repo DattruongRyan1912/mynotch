@@ -63,8 +63,13 @@ struct ModuleFixture {
         #expect(descriptor.displayName == "Dịch")
         #expect(descriptor.systemImage == "translate")
         #expect(descriptor.order == 400)
+    }
+
+    @Test func declaresThePermissionsItUsesAndWhy() {
+        let descriptor = fixture.module.descriptor
         #expect(descriptor.permissions.isEmpty)
         #expect(descriptor.optionalPermissions == [.accessibility])
+        #expect(descriptor.permissionReasons == [.accessibility: "Đọc văn bản bạn đang chọn ở app khác để dịch."])
     }
 
     @Test func registersTheHotkeyAndTheService() async {

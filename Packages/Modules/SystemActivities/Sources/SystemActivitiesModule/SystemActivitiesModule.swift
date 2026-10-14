@@ -28,7 +28,11 @@ public final class SystemActivitiesModule: FeatureModule {
         displayName: "Hệ thống",
         systemImage: "gauge.with.dots.needle.33percent",
         defaultEnabled: true,
-        optionalPermissions: [.bluetooth],
+        optionalPermissions: [.bluetooth, .downloadsFolder],
+        permissionReasons: [
+            .bluetooth: "Hiện thiết bị Bluetooth vừa kết nối hoặc ngắt, kèm pin.",
+            .downloadsFolder: "Báo khi file tải xong trong Downloads.",
+        ],
         order: 700
     )
 

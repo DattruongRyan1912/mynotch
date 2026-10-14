@@ -47,6 +47,9 @@ public final class MediaModule: FeatureModule {
         displayName: "Media",
         systemImage: "music.note",
         defaultEnabled: true,
+        // Only the real-spectrum switch (off by default) taps system audio; now-playing needs nothing.
+        optionalPermissions: [.systemAudio],
+        permissionReasons: [.systemAudio: "Vẽ phổ nhạc thật; chỉ cần khi bật “Cột sóng theo phổ âm thanh thật”."],
         order: 200
     )
 

@@ -13,6 +13,7 @@ public final class TranslationModule: FeatureModule {
         defaultEnabled: true,
         // Only the shortcut needs it, to read the selection; Services and typing work without.
         optionalPermissions: [.accessibility],
+        permissionReasons: [.accessibility: "Đọc văn bản bạn đang chọn ở app khác để dịch."],
         order: 400
     )
 

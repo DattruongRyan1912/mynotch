@@ -97,10 +97,18 @@ final class FakeSystem {
 
     // MARK: Lifecycle
 
+    @Test func declaresThePermissionsItUsesAndWhy() {
+        let descriptor = module.descriptor
+        #expect(descriptor.permissions.isEmpty)
+        #expect(descriptor.optionalPermissions == [.accessibility, .pasteboard])
+        #expect(descriptor.permissionReasons == [
+            .accessibility: "Dán mục bạn chọn vào app đang dùng (giả lập ⌘V).",
+            .pasteboard: "Ghi lại mọi lần chép mà macOS không hỏi lại.",
+        ])
+    }
+
     @Test func descriptorAndTabMatchTheSpec() throws {
         #expect(module.descriptor.id == "clipboard")
-        #expect(module.descriptor.permissions.isEmpty)
-        #expect(module.descriptor.optionalPermissions == [.accessibility])
         #expect(module.descriptor.order == 100)
         let tab = try #require(module.makeTab())
         #expect(tab.id == "clipboard")

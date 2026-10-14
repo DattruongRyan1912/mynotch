@@ -66,8 +66,16 @@ import Testing
         #expect(descriptor.displayName == "Lịch")
         #expect(descriptor.systemImage == "calendar")
         #expect(descriptor.order == 600)
+    }
+
+    @Test func declaresThePermissionsItUsesAndWhy() {
+        let descriptor = module.descriptor
         #expect(descriptor.permissions == [.calendars])
         #expect(descriptor.optionalPermissions == [.reminders])
+        #expect(descriptor.permissionReasons == [
+            .calendars: "Hiện sự kiện sắp tới và thông báo họp.",
+            .reminders: "Hiện lời nhắc khi bật “Hiện lời nhắc đến hạn hôm nay”.",
+        ])
     }
 
     @Test func waitsForCalendarsAccess() async {

@@ -29,8 +29,15 @@ import Testing
         #expect(descriptor.systemImage == "music.note")
         #expect(descriptor.defaultEnabled)
         #expect(descriptor.order == 200)
+    }
+
+    @Test func declaresThePermissionsItUsesAndWhy() {
+        let descriptor = module.descriptor
         #expect(descriptor.permissions.isEmpty)
-        #expect(descriptor.optionalPermissions.isEmpty)
+        #expect(descriptor.optionalPermissions == [.systemAudio])
+        #expect(descriptor.permissionReasons == [
+            .systemAudio: "Vẽ phổ nhạc thật; chỉ cần khi bật “Cột sóng theo phổ âm thanh thật”.",
+        ])
     }
 
     @Test func missingAdapterReportsUnavailable() async {

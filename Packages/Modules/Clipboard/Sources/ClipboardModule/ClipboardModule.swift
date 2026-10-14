@@ -11,7 +11,11 @@ public final class ClipboardModule: FeatureModule {
         systemImage: "doc.on.clipboard",
         defaultEnabled: true,
         permissions: [],
-        optionalPermissions: [.accessibility],
+        optionalPermissions: [.accessibility, .pasteboard],
+        permissionReasons: [
+            .accessibility: "Dán mục bạn chọn vào app đang dùng (giả lập ⌘V).",
+            .pasteboard: "Ghi lại mọi lần chép mà macOS không hỏi lại.",
+        ],
         order: 100
     )
 

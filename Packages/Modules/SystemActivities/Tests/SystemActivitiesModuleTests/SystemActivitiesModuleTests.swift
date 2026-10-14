@@ -50,9 +50,17 @@ import Testing
         #expect(descriptor.displayName == "Hệ thống")
         #expect(descriptor.systemImage == "gauge.with.dots.needle.33percent")
         #expect(descriptor.order == 700)
-        #expect(descriptor.permissions.isEmpty)
-        #expect(descriptor.optionalPermissions == [.bluetooth])
         #expect(descriptor.defaultEnabled)
+    }
+
+    @Test func declaresThePermissionsItUsesAndWhy() {
+        let descriptor = SystemActivitiesModule().descriptor
+        #expect(descriptor.permissions.isEmpty)
+        #expect(descriptor.optionalPermissions == [.bluetooth, .downloadsFolder])
+        #expect(descriptor.permissionReasons == [
+            .bluetooth: "Hiện thiết bị Bluetooth vừa kết nối hoặc ngắt, kèm pin.",
+            .downloadsFolder: "Báo khi file tải xong trong Downloads.",
+        ])
     }
 
     @Test func startsEveryMonitorAndStopsThemAll() async {

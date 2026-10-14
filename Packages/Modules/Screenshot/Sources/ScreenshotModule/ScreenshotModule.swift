@@ -12,6 +12,13 @@ public final class ScreenshotModule: FeatureModule {
         systemImage: "camera.viewfinder",
         defaultEnabled: true,
         permissions: [.screenRecording],
+        // Only the folder the "Lưu vào" setting points at is written; Pictures needs no permission.
+        optionalPermissions: [.desktopFolder, .downloadsFolder],
+        permissionReasons: [
+            .screenRecording: "Chụp màn hình.",
+            .desktopFolder: "Lưu ảnh vào Desktop (nơi lưu mặc định của “Lưu vào”).",
+            .downloadsFolder: "Lưu ảnh vào Downloads khi chọn nơi lưu là Downloads.",
+        ],
         order: 300
     )
 
