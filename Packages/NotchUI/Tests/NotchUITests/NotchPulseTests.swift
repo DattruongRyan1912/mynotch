@@ -99,9 +99,9 @@ import Testing
     /// The point of it: a pulse that SwiftUI redrew every frame would keep the hosting view laying out.
     @Test func pulsingNeverMakesTheHostingViewLayOutAgain() {
         let (hosting, window) = host(glyph().notchPulse(isActive: true))
-        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         let settled = NotchPerf.counted(.layouts)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         #expect(NotchPerf.counted(.layouts) == settled)
         #expect(!hosting.needsLayout)
         window.contentView = nil

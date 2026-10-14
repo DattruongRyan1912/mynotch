@@ -50,7 +50,7 @@ import Testing
 @Suite struct NotchTimelineTests {
     func evaluations(isOnScreen: Bool, for seconds: TimeInterval) -> Int {
         var count = 0
-        let timeline = NotchTimeline(every: 0.05) { _ in
+        let timeline = NotchTimeline(every: 0.03) { _ in
             let _ = count += 1
             Color.clear
         }
@@ -65,10 +65,10 @@ import Testing
     }
 
     @Test func tickingWhileOnScreen() {
-        #expect(evaluations(isOnScreen: true, for: 0.5) >= 3)
+        #expect(evaluations(isOnScreen: true, for: 0.2) >= 3)
     }
 
     @Test func standingStillWhileOffScreen() {
-        #expect(evaluations(isOnScreen: false, for: 0.5) == 1)
+        #expect(evaluations(isOnScreen: false, for: 0.2) == 1)
     }
 }

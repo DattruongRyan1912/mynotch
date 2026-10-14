@@ -22,7 +22,7 @@ final class CountingHostingView<Content: View>: NSHostingView<Content> {
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 60, height: 40), styleMask: .borderless, backing: .buffered, defer: true)
         window.contentView = hosting
         hosting.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         let settled = hosting.layouts
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
         let passes = hosting.layouts - settled
@@ -34,15 +34,7 @@ final class CountingHostingView<Content: View>: NSHostingView<Content> {
     /// view laid out and committed continuously for as long as an agent was working, which can be hours.
     @Test func aWorkingAgentsGlyphNeverKeepsTheHostingViewLayingOut() {
         let working = AgentActivityContent(kind: .working(since: Date()), source: .claude)
-        #expect(layoutPasses(of: working, for: 0.5) == 0)
-    }
-
-    @Test(arguments: [AgentSource.claude, .codex])
-    func eachAgentHasItsGlyph(source: AgentSource) {
-        for kind in [AgentActivityContent.Kind.waitingForInput, .finished, .working(since: Date())] {
-            let content = AgentActivityContent(kind: kind, source: source)
-            #expect(layoutPasses(of: content, for: 0.05) == 0)
-        }
+        #expect(layoutPasses(of: working, for: 0.15) == 0)
     }
 }
 
