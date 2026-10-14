@@ -9,6 +9,9 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     public static let hitPadding: CGFloat = 8
     /// Padding of the hit area while a drag with data is in progress, so the panel accepts the drop.
     public static let dragHitPadding: CGFloat = 40
+    /// Tallest strip under the collapsed notch. The panel never resizes and holds `NotchTab.heightRange.upperBound`
+    /// below the notch, so a strip this tall always fits inside it.
+    public static let maxBottomHeight: CGFloat = 80
 
     public let kind: NotchKind
     /// Size of the physical (or virtual) notch body.
@@ -38,14 +41,25 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
         state.isExpanded ? (8, 24) : (6, 10)
     }
 
-    /// Full shape size, including the top "ears" that blend into the menu bar.
-    public func shapeSize(for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight) -> CGSize {
+    /// How far the shape grows downward for an activity's strip: only the collapsed notch with an activity shows one
+    /// (an expanded notch already shows its tab), and never more than `maxBottomHeight`.
+    public func bottomHeight(for state: NotchState, requested: CGFloat) -> CGFloat {
+        guard state == .compact, requested > 0 else { return 0 }
+        return min(requested, Self.maxBottomHeight)
+    }
+
+    /// Full shape size, including the top "ears" that blend into the menu bar. `bottomHeight` is the strip the
+    /// current activity asks for; the collapsed notch grows by it, other states ignore it.
+    public func shapeSize(for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, bottomHeight: CGFloat = 0) -> CGSize {
         let ears = 2 * cornerRadii(for: state).top
         switch state {
         case .closed:
             return CGSize(width: notchSize.width + ears, height: notchSize.height)
         case .compact:
-            return CGSize(width: notchSize.width + ears + 2 * config.compactSideWidth, height: notchSize.height)
+            return CGSize(
+                width: notchSize.width + ears + 2 * config.compactSideWidth,
+                height: notchSize.height + self.bottomHeight(for: state, requested: bottomHeight)
+            )
         case .open, .toast:
             let width = min(max(config.openWidth, 480), Self.maxOpenWidth)
             let content = min(max(contentHeight, NotchTab.heightRange.lowerBound), NotchTab.heightRange.upperBound)
@@ -69,17 +83,23 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     }
 
     /// Area (screen coordinates) where the pointer counts as "inside" the notch.
-    public func hitRect(for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, in screenFrame: CGRect) -> CGRect {
-        paddedRect(for: state, contentHeight: contentHeight, padding: Self.hitPadding, in: screenFrame)
+    public func hitRect(
+        for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, bottomHeight: CGFloat = 0, in screenFrame: CGRect
+    ) -> CGRect {
+        paddedRect(for: state, contentHeight: contentHeight, bottomHeight: bottomHeight, padding: Self.hitPadding, in: screenFrame)
     }
 
     /// The enlarged hit area used while something is being dragged.
-    public func dragHitRect(for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, in screenFrame: CGRect) -> CGRect {
-        paddedRect(for: state, contentHeight: contentHeight, padding: Self.dragHitPadding, in: screenFrame)
+    public func dragHitRect(
+        for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, bottomHeight: CGFloat = 0, in screenFrame: CGRect
+    ) -> CGRect {
+        paddedRect(for: state, contentHeight: contentHeight, bottomHeight: bottomHeight, padding: Self.dragHitPadding, in: screenFrame)
     }
 
-    private func paddedRect(for state: NotchState, contentHeight: CGFloat, padding: CGFloat, in screenFrame: CGRect) -> CGRect {
-        let size = shapeSize(for: state, contentHeight: contentHeight)
+    private func paddedRect(
+        for state: NotchState, contentHeight: CGFloat, bottomHeight: CGFloat, padding: CGFloat, in screenFrame: CGRect
+    ) -> CGRect {
+        let size = shapeSize(for: state, contentHeight: contentHeight, bottomHeight: bottomHeight)
         let padded = CGRect(
             x: screenFrame.midX + centerOffset - size.width / 2,
             y: screenFrame.maxY - size.height,

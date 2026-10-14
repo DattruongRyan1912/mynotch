@@ -7,6 +7,8 @@ public enum NotchTokens {
     public static let primaryText = Color.white
     public static let secondaryText = Color.white.opacity(0.6)
     public static let padding: CGFloat = 14
+    /// Space left and right of an activity's strip under the collapsed notch, inside the notch's body.
+    public static let stripPadding: CGFloat = 12
     /// The one animation of the notch's size and shape; every state change moves it with this spring.
     public static let spring = Animation.spring(response: 0.38, dampingFraction: 0.8)
 

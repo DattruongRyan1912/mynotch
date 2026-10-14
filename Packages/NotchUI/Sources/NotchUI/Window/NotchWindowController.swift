@@ -19,6 +19,8 @@ final class NotchWindowController {
     #endif
     /// Last keyboard focus decision; the panel makes itself key only when it turns true.
     private var lastFocus = false
+    /// Strip height seen by the last observation, so only a show or hide is logged.
+    private var lastStripHeight: CGFloat = 0
     /// Pasteboard types of the drag in progress, empty when nothing is being dragged.
     private var dragTypes: [String] = []
     /// Whether the mouse button went down inside the notch, so a drag in progress started there (an item dragged out).
@@ -153,9 +155,10 @@ final class NotchWindowController {
     private func currentHitRect(dragging: Bool = false) -> CGRect {
         let state = model.displayState
         let contentHeight = registry.contentHeight(for: state, tabUnderToast: model.tabUnderToast)
+        let strip = activities.stripHeight
         return dragging
-            ? geometry.dragHitRect(for: state, contentHeight: contentHeight, in: screenFrame)
-            : geometry.hitRect(for: state, contentHeight: contentHeight, in: screenFrame)
+            ? geometry.dragHitRect(for: state, contentHeight: contentHeight, bottomHeight: strip, in: screenFrame)
+            : geometry.hitRect(for: state, contentHeight: contentHeight, bottomHeight: strip, in: screenFrame)
     }
 
     /// The panel may become key while the shown tab accepts the keyboard, and hands the keyboard back to the app in
@@ -195,11 +198,12 @@ final class NotchWindowController {
 
     private func observe() {
         observation = Task { [weak self, activities, registry, model] in
-            for await (hasActivity, state, contentHeight, wantsKeyboard, focusesKeyboard, isDragging) in Observations({
+            for await (hasActivity, stripHeight, state, contentHeight, wantsKeyboard, focusesKeyboard, isDragging) in Observations({
                 let state = model.displayState
                 let covered = model.tabUnderToast
                 return (
                     activities.current != nil,
+                    activities.stripHeight,
                     state,
                     registry.contentHeight(for: state, tabUnderToast: covered),
                     NotchKeyboardPolicy.wantsKeyboard(state: state, tabUnderToast: covered, tabs: registry.tabs),
@@ -211,10 +215,15 @@ final class NotchWindowController {
             }) {
                 guard let self else { return }
                 NotchLog.record(
-                    "observed display=\(state.logDescription) activity=\(hasActivity) contentHeight=\(contentHeight) "
+                    "observed display=\(state.logDescription) activity=\(hasActivity) strip=\(stripHeight) contentHeight=\(contentHeight) "
                         + "wantsKeyboard=\(wantsKeyboard) focusesKeyboard=\(focusesKeyboard) dragging=\(isDragging)"
                 )
                 self.model.hasActivity = hasActivity
+                if stripHeight != self.lastStripHeight {
+                    // The panel is not touched for a strip: only the hit area below changes, in `refreshHitTesting`.
+                    NotchLog.record("strip \(self.lastStripHeight) -> \(stripHeight) display=\(state.logDescription) \(self.panel.logSummary)")
+                    self.lastStripHeight = stripHeight
+                }
                 // A finished drag (drop, or the pointer left) must not leave its types behind for later refreshes.
                 if !isDragging { self.dragTypes = [] }
                 self.refreshHitTesting()

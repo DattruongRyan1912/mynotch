@@ -19,6 +19,16 @@ struct NotchRootView: View {
 
     private var contentHeight: CGFloat { registry.contentHeight(for: state, tabUnderToast: model.tabUnderToast) }
 
+    /// How far the collapsed notch grows for the current activity's strip; 0 in every other state.
+    private var stripHeight: CGFloat { geometry.bottomHeight(for: state, requested: activities.stripHeight) }
+
+    /// Everything that moves the shape. The notch animates all of it with the one spring, so a strip showing or
+    /// hiding is a single height change, not a second animation next to the state's.
+    private struct Layout: Equatable {
+        let state: NotchState
+        let strip: CGFloat
+    }
+
     private var isOpen: Bool {
         if case .open = state { true } else { false }
     }
@@ -35,9 +45,10 @@ struct NotchRootView: View {
     }
 
     var body: some View {
-        let size = geometry.shapeSize(for: state, contentHeight: contentHeight)
+        let strip = stripHeight
+        let size = geometry.shapeSize(for: state, contentHeight: contentHeight, bottomHeight: strip)
         let radii = geometry.cornerRadii(for: state)
-        let _ = NotchLog.record("body display=\(state.logDescription) size=\(size.width)x\(size.height) shownTab=\(shownTab?.id.rawValue ?? "-")")
+        let _ = NotchLog.record("body display=\(state.logDescription) size=\(size.width)x\(size.height) strip=\(strip) shownTab=\(shownTab?.id.rawValue ?? "-")")
         let shape = NotchShape(topRadius: radii.top, bottomRadius: radii.bottom)
         shape
             .fill(NotchTokens.background)
@@ -51,7 +62,7 @@ struct NotchRootView: View {
             .contentShape(shape)
             // Once open, taps belong to the tab content; the root tap only opens the notch.
             .gesture(TapGesture().onEnded { model.click() }, including: isOpen ? .subviews : .all)
-            .animation(NotchTokens.spring, value: state)
+            .animation(NotchTokens.spring, value: Layout(state: state, strip: strip))
             // SwiftUI only reports targeting here. The window controller starts drag mode from the pointer, so
             // only the end of a drag is forwarded, and the getter just reflects the model.
             .onDrop(of: allDropTypes, isTargeted: Binding(get: { model.isDragging }, set: { if !$0 { model.setDragging(false) } })) { providers in
@@ -66,12 +77,23 @@ struct NotchRootView: View {
             EmptyView()
         case .compact:
             if let entry = activities.current {
-                HStack(spacing: 0) {
-                    entry.activity.leading.frame(width: geometry.config.compactSideWidth)
-                    Spacer(minLength: geometry.notchSize.width)
-                    entry.activity.trailing.frame(width: geometry.config.compactSideWidth)
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
+                        entry.activity.leading.frame(width: geometry.config.compactSideWidth)
+                        Spacer(minLength: geometry.notchSize.width)
+                        entry.activity.trailing.frame(width: geometry.config.compactSideWidth)
+                    }
+                    .frame(height: geometry.notchSize.height)
+                    if stripHeight > 0, let bottom = entry.activity.bottom {
+                        // Laid out at its final height at once and revealed by the growing shape's clip, so the strip's
+                        // text never re-flows while the spring runs; it fades like the rest of the pill's content.
+                        bottom
+                            .frame(height: stripHeight)
+                            .padding(.horizontal, NotchTokens.stripPadding)
+                            .transition(.asymmetric(insertion: .opacity.animation(NotchTokens.enter), removal: .opacity.animation(NotchTokens.leave)))
+                            .notchLogLifecycle("strip")
+                    }
                 }
-                .frame(height: geometry.notchSize.height)
                 .transition(.asymmetric(insertion: .opacity.animation(NotchTokens.enter), removal: .opacity.animation(NotchTokens.leave)))
                 .notchLogLifecycle("compact")
             }
