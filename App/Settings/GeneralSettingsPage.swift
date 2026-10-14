@@ -46,7 +46,7 @@ struct GeneralSettingsPage: View {
                     Text("Chỉ khi notch đóng").tag(CaptureHiding.whenCollapsed)
                     Text("Luôn ẩn").tag(CaptureHiding.always)
                 }
-                Text("Áp dụng cho notch, bảng và thư viện Clipboard, màn hình khoá và khung xếp cửa sổ. Cửa sổ Cài đặt vẫn hiện.")
+                Text("Áp dụng cho notch, bảng và thư viện Clipboard, màn hình khoá và khung xếp cửa sổ. Các cửa sổ khác của MyNotch, như Cài đặt hay trình chú thích ảnh chụp, vẫn hiện.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Phím tắt") {
