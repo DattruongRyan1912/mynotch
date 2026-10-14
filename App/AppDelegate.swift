@@ -24,6 +24,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings: settings, registry: registry, permissions: permissions, hotkeys: hotkeys
     )
     private var statusItem: StatusItemController?
+    #if DEBUG
+    private var debugActivities: DebugActivityTrigger?
+    #endif
     private var permissionPolling: Task<Void, Never>?
     private var repliedToTerminate = false
 
@@ -42,6 +45,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openSettings: { [weak self] in self?.settingsWindow.show() }
         )
         screens.start()
+        #if DEBUG
+        debugActivities = DebugActivityTrigger(activities: activities)
+        debugActivities?.start()
+        #endif
         Task { await registry.bootstrap(); services.finishStartup() }
         observePermissionPolling()
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
