@@ -107,4 +107,50 @@ import YouTubeBridgeKit
         cleared.apply(YouTubeTestMessages.clear(), at: now)
         #expect(match(chrome(), cleared, keeping: videoID) == nil)
     }
+
+    // MARK: the decision and its reason
+
+    func decision(_ state: NowPlayingState, _ store: YouTubeCaptionStore, keeping: String? = nil) -> YouTubeCaptionMatcher.Decision {
+        YouTubeCaptionMatcher.decision(for: state, in: store, now: now, keeping: keeping)
+    }
+
+    /// nil unless matched.
+    func isKept(_ decision: YouTubeCaptionMatcher.Decision) -> Bool? {
+        if case .matched(_, let isKept) = decision { isKept } else { nil }
+    }
+
+    @Test func aMatchSaysWhetherItIsNewOrKept() {
+        #expect(isKept(decision(chrome(), store())) == false)
+        #expect(isKept(decision(chrome(), store(playing: false), keeping: videoID)) == true)
+        #expect(isKept(decision(chrome(), store(playing: false))) == nil)
+    }
+
+    @Test func everyFailureNamesTheRuleThatFailed() {
+        let spotify = NowPlayingState(bundleIdentifier: "com.spotify.client", title: YouTubeTestMessages.title)
+        #expect(decision(spotify, store()) == .notMatched(.notBrowser))
+        #expect(decision(chrome(title: "Another video"), store()) == .notMatched(.titleMismatch))
+        #expect(decision(chrome(), store(playing: false)) == .notMatched(.paused))
+        #expect(decision(chrome(), store(age: 30)) == .notMatched(.stalePlayback))
+        // Paused and silent for long is a pause first.
+        #expect(decision(chrome(), store(playing: false, age: 30)) == .notMatched(.paused))
+    }
+
+    @Test func whatHasNotArrivedYetIsNamedToo() {
+        #expect(decision(chrome(title: nil), store()) == .notMatched(.noTitle))
+        #expect(decision(chrome(), YouTubeCaptionStore()) == .notMatched(.noPlayback))
+        var withoutCaptions = YouTubeCaptionStore()
+        withoutCaptions.apply(YouTubeTestMessages.playback(), at: now)
+        #expect(decision(chrome(), withoutCaptions) == .notMatched(.noCaptions))
+    }
+
+    @Test func theReasonsAreFixedWords() {
+        typealias Reason = YouTubeCaptionMatcher.Reason
+        let reasons: [Reason] = [.notBrowser, .noTitle, .noPlayback, .titleMismatch, .noCaptions, .paused, .stalePlayback]
+        #expect(reasons.map(\.rawValue) == ["not-browser", "no-title", "no-playback", "title-mismatch", "no-captions", "paused", "stale-playback"])
+    }
+
+    @Test func theTrackOfADecisionIsNilUnlessMatched() {
+        #expect(decision(chrome(), store()).track?.videoID == videoID)
+        #expect(decision(chrome(), store(playing: false)).track == nil)
+    }
 }

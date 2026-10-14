@@ -44,6 +44,9 @@ nonisolated struct YouTubeCaptionStore {
             self.playback = ReceivedPlayback(message: playback, arrivedAt: now)
         case .clear(let videoID):
             tracks.removeAll { $0.videoID == videoID }
+        case .diag:
+            // Only proves the extension is there.
+            break
         }
     }
 

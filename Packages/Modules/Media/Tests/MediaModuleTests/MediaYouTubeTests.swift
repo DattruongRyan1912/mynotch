@@ -14,6 +14,7 @@ import Testing
     let socketDirectory = URL(filePath: "/tmp/mn-\(UUID().uuidString.prefix(8))", directoryHint: .isDirectory)
     let storageBase: URL
     let now = Date()
+    let recorder = LogRecorder()
 
     var socketPath: String { socketDirectory.appending(path: "youtube.sock").path }
     var keys: MediaSettingsKeys { MediaSettingsKeys(harness.settingsEnvironment(for: "media")!.settings) }
@@ -23,7 +24,8 @@ import Testing
         let path = socketDirectory.appending(path: "youtube.sock").path
         module = MediaModule(
             source: source, spectrum: FakeSpectrumSource(), lyricsClient: client, tokens: FakeTokenStore(),
-            signIn: FakeAppleMusicSignIn(), lookUpApp: { _ in nil }, youtubeSocketPath: path
+            signIn: FakeAppleMusicSignIn(), lookUpApp: { _ in nil }, youtubeSocketPath: path,
+            youtubeLog: recorder.log
         )
         harness = RegistryHarness([module])
         storageBase = harness.storageRoot.caches.deletingLastPathComponent()
@@ -380,5 +382,157 @@ import Testing
         let environment = try #require(harness.settingsEnvironment(for: "media"))
         let view = try #require(module.makeSettingsView(environment))
         #expect(String(describing: view).hasPrefix("AnyView(MediaSettingsView("))
+    }
+
+    // MARK: the log
+
+    /// The matching decisions logged so far, in order.
+    var decisions: [String] { recorder.lines.filter { $0.hasPrefix("match ") } }
+
+    @Test func aMatchingDecisionIsLoggedWhenItChangesWithTheRuleThatFailed() async {
+        await bootstrapWithCaptions()
+        playInChrome(bundle: "com.spotify.client")
+        #expect(decisions == ["match not-matched reason=not-browser"])
+        playInChrome()
+        #expect(decisions.last == "match not-matched reason=no-playback")
+        receive(YouTubeTestMessages.playback(title: "A different video"))
+        #expect(decisions.last == "match not-matched reason=title-mismatch")
+        receive(YouTubeTestMessages.playback(playing: false))
+        #expect(decisions.last == "match not-matched reason=no-captions")
+        receive(YouTubeTestMessages.captions())
+        #expect(decisions.last == "match not-matched reason=paused")
+        receive(YouTubeTestMessages.playback(playing: true), at: Date().addingTimeInterval(-30))
+        #expect(decisions.last == "match not-matched reason=stale-playback")
+        receive(YouTubeTestMessages.playback(playing: true))
+        #expect(decisions.last == "match matched")
+        let count = decisions.count
+        // Updates that change nothing say nothing: a position, a pause that keeps the captions, the same playback again.
+        source.emit(AdapterLines.position(31))
+        receive(YouTubeTestMessages.playback(playing: false))
+        receive(YouTubeTestMessages.playback(playing: true))
+        #expect(decisions.count == count)
+        #expect(decisions == [
+            "match not-matched reason=not-browser", "match not-matched reason=no-playback", "match not-matched reason=title-mismatch",
+            "match not-matched reason=no-captions", "match not-matched reason=paused", "match not-matched reason=stale-playback", "match matched",
+        ])
+        receive(YouTubeTestMessages.clear())
+        #expect(decisions.last == "match not-matched reason=no-captions")
+    }
+
+    @Test func nothingIsDecidedOrLoggedWhileTheSettingIsOff() async {
+        await harness.registry.bootstrap()
+        playInChrome()
+        receive(YouTubeTestMessages.captions(), YouTubeTestMessages.playback())
+        #expect(decisions.isEmpty)
+        #expect(recorder.lines.isEmpty)
+    }
+
+    @Test func turningTheSettingOffAndOnLogsTheDecisionAgain() async {
+        await bootstrapWithCaptions()
+        playInChrome()
+        receive(YouTubeTestMessages.captions(), YouTubeTestMessages.playback())
+        #expect(decisions.last == "match matched")
+        harness.settings.set(false, for: keys.youtubeCaptions)
+        await settle { !FileManager.default.fileExists(atPath: socketPath) }
+        enableCaptions()
+        await settle { FileManager.default.fileExists(atPath: socketPath) }
+        playInChrome()
+        #expect(decisions.last == "match not-matched reason=no-playback")
+        #expect(decisions.filter { $0 == "match matched" }.count == 1)
+    }
+
+    @Test func theReceiverReportsItselfThroughTheSameLog() async {
+        await bootstrapWithCaptions()
+        #expect(recorder.lines.contains("app listening"))
+        harness.settings.set(false, for: keys.youtubeCaptions)
+        await settle { recorder.lines.contains("app stopped") }
+        #expect(recorder.lines.contains("app stopped"))
+    }
+
+    @Test func theDriftBetweenTheVideosClockAndTheNotchsIsLoggedAtMostEveryTenSeconds() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        receive(YouTubeTestMessages.captions(), YouTubeTestMessages.playback())
+        func drifts() -> [String] { recorder.lines.filter { $0.hasPrefix("playback drift=") } }
+        #expect(drifts().count == 1, "the playback that started the match")
+
+        /// A playback for the shown video at `date`, whose time is `offset` seconds from where the notch's clock is then.
+        func playback(at date: Date, offset: Double) throws {
+            let position = try #require(store.position(at: date))
+            receive(YouTubeTestMessages.playback(time: position + offset), at: date)
+        }
+        let first = Date().addingTimeInterval(11)
+        try playback(at: first, offset: 0.42)
+        #expect(drifts().last == "playback drift=+0.42s")
+        #expect(drifts().count == 2)
+
+        try playback(at: first.addingTimeInterval(1), offset: 9)
+        try playback(at: first.addingTimeInterval(9.9), offset: 9)
+        #expect(drifts().count == 2, "one line per ten seconds")
+
+        try playback(at: first.addingTimeInterval(10), offset: -0.3)
+        #expect(drifts().last == "playback drift=-0.30s")
+        try playback(at: first.addingTimeInterval(20), offset: 0)
+        #expect(drifts().last == "playback drift=+0.00s")
+        #expect(drifts().count == 4)
+    }
+
+    @Test func noDriftIsLoggedForAVideoWhoseCaptionsAreNotShown() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        receive(YouTubeTestMessages.playback())
+        receive(YouTubeTestMessages.playback(time: 99))
+        #expect(recorder.lines.filter { $0.contains("drift=") }.isEmpty)
+        // Another video than the one whose captions are shown.
+        receive(YouTubeTestMessages.captions(), YouTubeTestMessages.playback())
+        let shown = recorder.lines.filter { $0.contains("drift=") }.count
+        receive(YouTubeTestMessages.playback("bbbbbbbbbbb", title: "Other video", time: 5), at: Date().addingTimeInterval(30))
+        #expect(recorder.lines.filter { $0.contains("drift=") }.count == shown)
+    }
+
+    @Test func aDiagnosticOnlyShowsThatTheExtensionIsThere() async {
+        await bootstrapWithCaptions()
+        playInChrome()
+        let decided = decisions
+        let arrival = Date(timeIntervalSince1970: 1_800_000_000)
+        receive(YouTubeTestMessages.diag("sw-start v=0.1.1"), at: arrival)
+        #expect(module.youtubeBridge.lastMessageAt == arrival)
+        #expect(module.youtubeBridge.status(at: arrival + 5) == .connected)
+        #expect(store.syncedLyrics == nil)
+        #expect(decisions == decided, "a diagnostic is no reason to decide again")
+        // And it changes nothing about captions that are shown.
+        receive(YouTubeTestMessages.captions(), YouTubeTestMessages.playback())
+        receive(YouTubeTestMessages.diag("content-cc off", from: .content))
+        #expect(store.syncedLyrics == YouTubeTestMessages.lines)
+    }
+
+    @Test func noLineHoldsATitleAVideoIdCaptionTextOrAUrl() async throws {
+        await bootstrapWithCaptions()
+        let secretID = "abcdefghijk"
+        let secretTitle = "Zebra Quartz Secret Title"
+        let secretWords = "hidden caption words"
+        let events = [CaptionEvent(time: 1, duration: 2, text: secretWords)]
+        // Every decision, a drift and a diagnostic, with a title, an id and caption text that must not show.
+        playInChrome(title: secretTitle, bundle: "com.spotify.client")
+        playInChrome(title: secretTitle)
+        receive(YouTubeTestMessages.playback(secretID, title: "Another " + secretTitle))
+        receive(YouTubeTestMessages.playback(secretID, title: secretTitle, playing: false))
+        receive(YouTubeTestMessages.captions(secretID, events))
+        receive(YouTubeTestMessages.playback(secretID, title: secretTitle, playing: true), at: Date().addingTimeInterval(-30))
+        receive(YouTubeTestMessages.playback(secretID, title: secretTitle, playing: true, time: 40))
+        receive(YouTubeTestMessages.diag("page-timedtext json3 events=1", from: .page))
+        receive(YouTubeTestMessages.clear(secretID))
+        // And through the socket, with frames that are refused.
+        let host = try #require(YouTubeTestClient(path: socketPath))
+        host.sendFrame(Data(#"{"v":1,"type":"playback","videoId":"abcdefghijk","title":"Zebra Quartz Secret Title","time":-1,"playing":true,"rate":1}"#.utf8))
+        host.sendFrame(Data(#"{"v":1,"type":"diag","where":"content","event":"content-tick-error https://www.youtube.com/watch?v=abcdefghijk"}"#.utf8))
+        host.sendFrame(YouTubeTestMessages.json(YouTubeTestMessages.playback(secretID, title: secretTitle)))
+        await waitUntil { !recorder.lines(containing: "app rejected frame: invalid-diag").isEmpty }
+        await harness.registry.setEnabled(false, for: "media")
+
+        #expect(decisions.count >= 5, "\(decisions)")
+        #expect(recorder.lines.contains { $0.hasPrefix("playback drift=") })
+        #expect(recorder.lines.count >= 12, "\(recorder.lines)")
+        recorder.expectNothingPrivate([secretID, secretTitle, "Zebra", "Quartz", "Secret", secretWords, "hidden", "youtube", "/tmp", socketPath])
     }
 }

@@ -34,6 +34,10 @@ enum YouTubeTestMessages {
         .clear(videoID: videoID)
     }
 
+    static func diag(_ event: String = "sw-start v=0.1.1", from origin: YouTubeDiag.Origin = .sw) -> YouTubeMessage {
+        .diag(YouTubeDiag(origin: origin, event: event))
+    }
+
     /// The JSON the extension sends, for the tests that go through a socket.
     static func json(_ message: YouTubeMessage) -> Data {
         let object: [String: Any]
@@ -50,6 +54,8 @@ enum YouTubeTestMessages {
             ]
         case .clear(let videoID):
             object = ["v": 1, "type": "clear", "videoId": videoID]
+        case .diag(let diag):
+            object = ["v": 1, "type": "diag", "where": diag.origin.rawValue, "event": diag.event]
         }
         return try! JSONSerialization.data(withJSONObject: object)
     }

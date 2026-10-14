@@ -6,6 +6,20 @@ public enum YouTubeMessage: Equatable, Sendable {
     case captions(YouTubeCaptions)
     case playback(YouTubePlayback)
     case clear(videoID: String)
+    /// The extension reporting on itself, for the logs; not part of the captions flow.
+    case diag(YouTubeDiag)
+
+    /// Why a message was refused. Fixed words, so a log line holds nothing of the message.
+    public enum Rejection: String, Error, Equatable, Sendable {
+        /// Not a JSON object with an integer `v` and a string `type`.
+        case malformed
+        case unsupportedVersion = "unsupported-version"
+        case unknownType = "unknown-type"
+        case invalidCaptions = "invalid-captions"
+        case invalidPlayback = "invalid-playback"
+        case invalidClear = "invalid-clear"
+        case invalidDiag = "invalid-diag"
+    }
 
     public static let version = 1
     /// Caption events past this many make the whole message invalid; the extension never sends more.
@@ -16,28 +30,55 @@ public enum YouTubeMessage: Equatable, Sendable {
     public static let maxRate = 16.0
     static let maxLanguageLength = 35
 
-    public var videoID: String {
+    /// The video the message is about; a diagnostic is about none.
+    public var videoID: String? {
         switch self {
         case .captions(let captions): captions.videoID
         case .playback(let playback): playback.videoID
         case .clear(let videoID): videoID
+        case .diag: nil
+        }
+    }
+
+    /// The protocol's word for the type, which is also what the logs count by.
+    public var typeName: String {
+        switch self {
+        case .captions: "captions"
+        case .playback: "playback"
+        case .clear: "clear"
+        case .diag: "diag"
         }
     }
 
     /// nil unless `data` is one JSON object of a known type with every field of the right type and in range.
     public static func decode(_ data: Data) -> YouTubeMessage? {
+        try? check(data).get()
+    }
+
+    /// `decode` with the reason when there is none.
+    public static func check(_ data: Data) -> Result<YouTubeMessage, Rejection> {
         let decoder = JSONDecoder()
-        guard let envelope = try? decoder.decode(Envelope.self, from: data), envelope.v == version else { return nil }
+        guard let envelope = try? decoder.decode(Envelope.self, from: data) else { return .failure(.malformed) }
+        guard envelope.v == version else { return .failure(.unsupportedVersion) }
+        let message: YouTubeMessage?
+        let rejection: Rejection
         switch envelope.type {
         case "captions":
-            return (try? decoder.decode(CaptionsFields.self, from: data)).flatMap(captions)
+            message = (try? decoder.decode(CaptionsFields.self, from: data)).flatMap(captions)
+            rejection = .invalidCaptions
         case "playback":
-            return (try? decoder.decode(PlaybackFields.self, from: data)).flatMap(playback)
+            message = (try? decoder.decode(PlaybackFields.self, from: data)).flatMap(playback)
+            rejection = .invalidPlayback
         case "clear":
-            return (try? decoder.decode(ClearFields.self, from: data)).flatMap { isVideoID($0.videoId) ? .clear(videoID: $0.videoId) : nil }
+            message = (try? decoder.decode(ClearFields.self, from: data)).flatMap { isVideoID($0.videoId) ? .clear(videoID: $0.videoId) : nil }
+            rejection = .invalidClear
+        case "diag":
+            message = (try? decoder.decode(DiagFields.self, from: data)).flatMap(diag)
+            rejection = .invalidDiag
         default:
-            return nil
+            return .failure(.unknownType)
         }
+        return message.map { .success($0) } ?? .failure(rejection)
     }
 
     // MARK: fields
@@ -72,6 +113,16 @@ public enum YouTubeMessage: Equatable, Sendable {
         var videoId: String
     }
 
+    private struct DiagFields: Decodable {
+        var origin: String
+        var event: String
+
+        enum CodingKeys: String, CodingKey {
+            case origin = "where"
+            case event
+        }
+    }
+
     // MARK: checking
 
     private static func captions(_ fields: CaptionsFields) -> YouTubeMessage? {
@@ -96,6 +147,11 @@ public enum YouTubeMessage: Equatable, Sendable {
         let title = normalised(fields.title, limit: maxTitleLength)
         guard isVideoID(fields.videoId), !title.isEmpty, fields.time >= 0, fields.rate > 0, fields.rate <= maxRate else { return nil }
         return .playback(YouTubePlayback(videoID: fields.videoId, title: title, time: fields.time, isPlaying: fields.playing, rate: fields.rate))
+    }
+
+    private static func diag(_ fields: DiagFields) -> YouTubeMessage? {
+        guard let origin = YouTubeDiag.Origin(rawValue: fields.origin), YouTubeDiag.isAllowed(fields.event, from: origin) else { return nil }
+        return .diag(YouTubeDiag(origin: origin, event: fields.event))
     }
 
     /// Eleven letters, digits, dashes or underscores: what a YouTube video id is made of.

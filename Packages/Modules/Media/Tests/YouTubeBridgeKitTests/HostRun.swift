@@ -17,7 +17,9 @@ final class HostRun: Sendable {
 
     init(
         socketPath: String, reconnectInterval: TimeInterval = 0.05,
-        clock: TestClock = TestClock(), expectedOwner: uid_t = geteuid()
+        clock: TestClock = TestClock(), expectedOwner: uid_t = geteuid(),
+        log: YouTubeBridgeLog = .silent,
+        launch: YouTubeHostLaunch = YouTubeHostLaunch(argumentCount: 2, parentName: "Parent")
     ) {
         var fds: [Int32] = [0, 0]
         precondition(pipe(&fds) == 0)
@@ -27,7 +29,7 @@ final class HostRun: Sendable {
         Thread.detachNewThread {
             let code = YouTubeHostCLI.run(
                 stdin: FileDescriptorReader(fileDescriptor: readEnd), socketPath: socketPath,
-                reconnectInterval: reconnectInterval, now: { clock.now }, expectedOwner: expectedOwner
+                reconnectInterval: reconnectInterval, now: { clock.now }, expectedOwner: expectedOwner, log: log, launch: launch
             )
             close(readEnd)
             result.code.withLock { $0 = code }

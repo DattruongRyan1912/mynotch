@@ -86,6 +86,12 @@ public final class MediaModule: FeatureModule {
     /// nil is the real installer, which needs the module's storage and so is made with the Settings rows.
     private let youtubeSetup: YouTubeBridgeSetup?
     private var youtubeCaptionsEnabled = false
+    /// Where the bridge's diagnostics go (category `youtube-bridge`): the receiver's, the matching decisions, the drift.
+    private let youtubeLog: YouTubeBridgeLog
+    /// What the last logged matching decision was, so that a decision is logged when it changes and not at every update.
+    private var loggedMatchDecision: String?
+    /// When the drift of the extension's clock against the notch's was last logged.
+    private var lastDriftLoggedAt: Date?
     /// What the extension has sent; memory only.
     private var captionStore = YouTubeCaptionStore()
     /// Set while the setting is on and the socket could be opened.
@@ -134,11 +140,13 @@ public final class MediaModule: FeatureModule {
         signIn: any AppleMusicSignIn,
         lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed,
         youtubeSocketPath: String? = nil,
-        youtubeSetup: YouTubeBridgeSetup? = nil
+        youtubeSetup: YouTubeBridgeSetup? = nil,
+        youtubeLog: YouTubeBridgeLog = .silent
     ) {
         self.init(
             makeSource: { _ in source }, spectrum: spectrum, lyricsClient: lyricsClient,
-            tokens: tokens, signIn: signIn, lookUpApp: lookUpApp, youtubeSocketPath: youtubeSocketPath, youtubeSetup: youtubeSetup
+            tokens: tokens, signIn: signIn, lookUpApp: lookUpApp, youtubeSocketPath: youtubeSocketPath, youtubeSetup: youtubeSetup,
+            youtubeLog: youtubeLog
         )
     }
 
@@ -150,10 +158,12 @@ public final class MediaModule: FeatureModule {
         signIn: any AppleMusicSignIn,
         lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed,
         youtubeSocketPath: String? = nil,
-        youtubeSetup: YouTubeBridgeSetup? = nil
+        youtubeSetup: YouTubeBridgeSetup? = nil,
+        youtubeLog: YouTubeBridgeLog = .system
     ) {
         self.youtubeSocketPath = youtubeSocketPath
         self.youtubeSetup = youtubeSetup
+        self.youtubeLog = youtubeLog
         self.makeSource = makeSource
         self.spectrum = spectrum
         self.lyricsClient = lyricsClient
@@ -431,6 +441,8 @@ public final class MediaModule: FeatureModule {
 
     // MARK: YouTube captions
 
+    private static let driftLogInterval: TimeInterval = 10
+
     /// Listens for the Chrome helper only while the setting is on.
     private func updateYouTubeBridge() {
         guard let context else { return }
@@ -440,7 +452,7 @@ public final class MediaModule: FeatureModule {
         }
         guard youtubeServer == nil, !youtubeListenFailed else { return }
         let path = youtubeSocketPath ?? YouTubeSocket.path(inStorageDirectory: context.storage.directory)
-        let server = YouTubeBridgeServer(socketPath: path) { [weak self] message in self?.receiveYouTube(message) }
+        let server = YouTubeBridgeServer(socketPath: path, log: youtubeLog) { [weak self] message in self?.receiveYouTube(message) }
         do {
             try server.start()
             youtubeServer = server
@@ -461,6 +473,8 @@ public final class MediaModule: FeatureModule {
         if youtubeBridge.listenFailed { youtubeBridge.listenFailed = false }
         if youtubeBridge.lastMessageAt != nil { youtubeBridge.lastMessageAt = nil }
         captionStore.removeAll()
+        loggedMatchDecision = nil
+        lastDriftLoggedAt = nil
     }
 
     /// What the helper passed on. Ignored while the setting is off, as a message still on its way when it was switched
@@ -469,13 +483,38 @@ public final class MediaModule: FeatureModule {
         guard youtubeCaptionsEnabled else { return }
         captionStore.apply(message, at: now)
         youtubeBridge.lastMessageAt = now
+        // A diagnostic only shows that the extension is there.
+        if case .diag = message { return }
         refreshLyrics()
+        logDrift(of: message, at: now)
     }
 
-    /// The captions for the track playing now, nil while the setting is off or nothing fits.
+    /// The captions for the track playing now, nil while the setting is off or nothing fits. A decision is logged
+    /// when it changes, with the rule that failed and never a title.
     private func matchedCaptions() -> YouTubeCaptionStore.Track? {
         guard youtubeCaptionsEnabled else { return nil }
-        return YouTubeCaptionMatcher.track(for: store.state, in: captionStore, now: Date(), keeping: shownCaptions?.videoID)
+        let decision = YouTubeCaptionMatcher.decision(for: store.state, in: captionStore, now: Date(), keeping: shownCaptions?.videoID)
+        let line: String
+        switch decision {
+        case .matched: line = "match matched"
+        case .notMatched(let reason): line = "match not-matched reason=\(reason.rawValue)"
+        }
+        if line != loggedMatchDecision {
+            loggedMatchDecision = line
+            youtubeLog(line)
+        }
+        return decision.track
+    }
+
+    /// How far the extension's clock is from the notch's, when a playback of the video whose captions are shown arrives:
+    /// the video's time minus the position the system's now-playing clock gives at that moment (positive: the video is
+    /// ahead of the notch). It tells whether the clock or the lyric source is off. At most one line every 10 s.
+    private func logDrift(of message: YouTubeMessage, at now: Date) {
+        guard case .playback(let playback) = message, playback.videoID == shownCaptions?.videoID,
+              let position = store.position(at: now) else { return }
+        if let last = lastDriftLoggedAt, now.timeIntervalSince(last) < Self.driftLogInterval { return }
+        lastDriftLoggedAt = now
+        youtubeLog("playback " + String(format: "drift=%+.2fs", playback.time - position))
     }
 
     /// The captions win over lyrics from the web: a lookup still going is stopped, and one that was shown is replaced.
