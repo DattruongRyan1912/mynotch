@@ -275,9 +275,15 @@ public final class AIAgentsModule: FeatureModule {
             context.activities.clear(id: Self.activityID)
             return
         }
+        // The finished check is a notice: with an expiry it takes the notch for its few seconds and playing media steps
+        // back in. The store's own timer stays, since it also ends the session's finished state; whichever of the two
+        // comes first clears the activity.
+        let lifetime: Duration? = content.kind == .finished
+            ? .seconds(context.settings.value(AIAgentsSettingsKeys(context.settings).finishedSeconds)) : nil
         context.activities.set(LiveActivity(
             id: Self.activityID,
             priority: content.priority,
+            expiresAfter: lifetime,
             leading: AnyView(AgentActivityLeading(content: content)),
             trailing: AnyView(AgentActivityTrailing(content: content))
         ))
