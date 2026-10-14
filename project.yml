@@ -50,6 +50,8 @@ packages:
     path: Packages/Modules/Timer
   TranslationModule:
     path: Packages/Modules/Translation
+  WindowLayoutModule:
+    path: Packages/Modules/WindowLayout
   KeyboardShortcuts:
     url: https://github.com/sindresorhus/KeyboardShortcuts
     exactVersion: 3.1.0
@@ -86,6 +88,7 @@ targets:
       - package: SystemActivitiesModule
       - package: TimerModule
       - package: TranslationModule
+      - package: WindowLayoutModule
       - package: KeyboardShortcuts
       # Copied into Contents/Frameworks for perl to load; the app binary never links it.
       - target: MediaRemoteAdapter

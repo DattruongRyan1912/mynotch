@@ -90,6 +90,20 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
         )
     }
 
+    /// Where the content of the expanded notch (`.open` or `.toast`) starts, in screen coordinates (AppKit): under the
+    /// notch's body, inside the shape's rounded top corners and its padding, as wide as that leaves. `height` is the
+    /// part the caller fills from the top; how much more room the notch has below depends on the content it shows, so
+    /// nothing here relies on it. Mirrors how `NotchRootView` lays the expanded notch out; a test draws the view to keep
+    /// the two together.
+    public func contentFrame(height: CGFloat, in screenFrame: CGRect) -> CGRect {
+        let width = shapeSize(for: .open(nil)).width
+        let inset = cornerRadii(for: .open(nil)).top + NotchTokens.padding
+        let top = screenFrame.maxY - notchSize.height
+        return CGRect(
+            x: screenFrame.midX + centerOffset - width / 2 + inset, y: top - height, width: width - 2 * inset, height: height
+        )
+    }
+
     /// Area (screen coordinates) where the pointer counts as "inside" the notch.
     public func hitRect(
         for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, bottomHeight: CGFloat = 0, in screenFrame: CGRect

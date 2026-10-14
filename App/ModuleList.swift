@@ -11,6 +11,7 @@ import ShortcutsModule
 import SystemActivitiesModule
 import TimerModule
 import TranslationModule
+import WindowLayoutModule
 
 /// The ONLY place modules are wired into the app. Add one line per new module.
 enum ModuleList {
@@ -28,6 +29,7 @@ enum ModuleList {
             ShelfModule(),
             SystemActivitiesModule(),
             LockScreenModule(),
+            WindowLayoutModule(),
         ]
     }
 }

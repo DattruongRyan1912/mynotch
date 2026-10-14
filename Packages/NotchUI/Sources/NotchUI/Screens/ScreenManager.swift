@@ -7,6 +7,7 @@ public final class ScreenManager {
     private let activities: ActivityCenter
     private let settings: SettingsStore
     private let scheduler: any Scheduler
+    private let interface: NotchInterface
     private var controllers: [String: NotchWindowController] = [:]
     private var fullscreenDisplays: Set<CGDirectDisplayID> = []
     private var cursorDisplay: CGDirectDisplayID?
@@ -28,11 +29,16 @@ public final class ScreenManager {
         didSet { applyVisibility() }
     }
 
-    public init(registry: ModuleRegistry, activities: ActivityCenter, settings: SettingsStore, scheduler: any Scheduler) {
+    /// `interface` is where modules learn about the notches and the capture setting; the app uses the shared one.
+    public init(
+        registry: ModuleRegistry, activities: ActivityCenter, settings: SettingsStore, scheduler: any Scheduler,
+        interface: NotchInterface = .shared
+    ) {
         self.registry = registry
         self.activities = activities
         self.settings = settings
         self.scheduler = scheduler
+        self.interface = interface
     }
 
     /// Starts observing displays, pointer and settings. Call once; later calls are ignored.
@@ -46,6 +52,8 @@ public final class ScreenManager {
             MainActor.assumeIsolated { self?.syncScreens() }
         })
         cursorDisplay = NSScreen.screens.first { $0.frame.containsMouseLocation(NSEvent.mouseLocation) }?.displayID
+        // Before the notches exist and before the modules start, so none of them reads a stale setting.
+        interface.follow(settings)
         syncScreens()
         hoverTracker.start()
         fullscreenDetector.start()
@@ -114,6 +122,7 @@ public final class ScreenManager {
             }
             controller.setVisible(visible)
         }
+        interface.notches = NotchInterface.visibleNotches(among: controllers.values.map { ($0.display, $0.isVisible) })
     }
 
     private func pointerMoved(to point: CGPoint, dragTypes: [String]) {

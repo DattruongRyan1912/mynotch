@@ -9,6 +9,8 @@ final class NotchWindowController {
     private(set) var geometry: NotchGeometry
     private(set) var isVisible = false
     var sharingType: NSWindow.SharingType { panel.sharingType }
+    /// This notch's display and geometry, as modules get them through `NotchInterface`.
+    var display: NotchDisplay { NotchDisplay(id: displayID, screenFrame: screenFrame, geometry: geometry) }
     private var screenFrame: CGRect
     private let panel: NotchPanel
     private let hosting: FirstMouseHostingView<NotchRootView>
