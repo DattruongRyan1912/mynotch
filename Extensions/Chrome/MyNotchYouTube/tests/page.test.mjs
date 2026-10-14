@@ -74,6 +74,13 @@ function makePage() {
 
 const respond = (body, init = { status: 200 }) => Promise.resolve(new Response(body, init));
 
+/**
+ * The page's own globals that mention mynotch, enumerable or not. The captions library defines its global with
+ * defineProperty, so it is not enumerable and Object.keys() would never list it: a check made with Object.keys()
+ * passes whether or not the global is left behind.
+ */
+const mynotchGlobals = (page) => Object.getOwnPropertyNames(page.window).filter((key) => /mynotch/i.test(key));
+
 test("fetch: the page gets the very same promise and body; captions are posted to our own origin", async () => {
   const page = makePage();
   const promise = respond(json3);
@@ -342,10 +349,11 @@ test("re-injecting into a page that already has the observer (the extension was 
   assert.equal(page.window.XMLHttpRequest.prototype.open, wrappedOpen, "nor is XMLHttpRequest.open");
   assert.equal(page.timers.length, 2, "no second set of diagnostic timers");
   assert.deepEqual(
-    Object.keys(page.window).filter((key) => /mynotch/i.test(key)),
+    mynotchGlobals(page),
     [],
     "the shared captions module is removed again, so the page still sees no new globals"
   );
+  assert.equal(vm.runInContext("typeof __mynotchCaptions", page.window), "undefined");
 
   // The first wrappers keep observing: one captions message per response, as before.
   page.nextFetch = respond(json3);
@@ -358,10 +366,7 @@ test("the page script leaves no visible globals behind", () => {
   const page = makePage();
   assert.equal(vm.runInContext("typeof __mynotchCaptions", page.window), "undefined");
   assert.equal(vm.runInContext("typeof __mynotchBridge", page.window), "undefined");
-  assert.deepEqual(
-    Object.keys(page.window).filter((key) => /mynotch/i.test(key)),
-    []
-  );
+  assert.deepEqual(mynotchGlobals(page), []);
 });
 
 test("a page without fetch or XMLHttpRequest is left alone", () => {

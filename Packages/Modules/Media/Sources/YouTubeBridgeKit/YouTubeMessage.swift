@@ -40,6 +40,14 @@ public enum YouTubeMessage: Equatable, Sendable {
         }
     }
 
+    /// Whether the message shows the extension at work in a YouTube page. Captions, playback and clear come from the
+    /// content script, and a diagnostic counts when the content script or the page script sent it. The service worker's
+    /// own diagnostics (it started, Chrome gives or withholds its access) say only that the extension is loaded.
+    public var isFromPage: Bool {
+        if case .diag(let diag) = self { return diag.origin != .sw }
+        return true
+    }
+
     /// The protocol's word for the type, which is also what the logs count by.
     public var typeName: String {
         switch self {

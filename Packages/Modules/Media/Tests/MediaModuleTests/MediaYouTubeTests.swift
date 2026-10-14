@@ -301,7 +301,7 @@ import Testing
         harness.settings.set(false, for: keys.youtubeCaptions)
         await settle { store.syncedLyrics == nil }
         #expect(store.syncedLyrics == nil)
-        #expect(module.youtubeBridge.lastMessageAt == nil)
+        #expect(module.youtubeBridge.lastPageMessageAt == nil)
         // Back on: nothing is remembered, so nothing shows until Chrome sends again.
         enableCaptions()
         await settle { FileManager.default.fileExists(atPath: socketPath) }
@@ -410,14 +410,37 @@ import Testing
 
     // MARK: status
 
-    @Test func everyMessageUpdatesWhenTheExtensionWasLastHeard() async {
+    @Test func everyMessageFromThePageUpdatesWhenTheExtensionWasLastHeard() async {
         await bootstrapWithCaptions()
-        #expect(module.youtubeBridge.lastMessageAt == nil)
+        #expect(module.youtubeBridge.lastPageMessageAt == nil)
         let arrival = Date(timeIntervalSince1970: 1_800_000_000)
         receive(YouTubeTestMessages.playback(), at: arrival)
-        #expect(module.youtubeBridge.lastMessageAt == arrival)
+        #expect(module.youtubeBridge.lastPageMessageAt == arrival)
         #expect(module.youtubeBridge.status(at: arrival + 10) == .connected)
         #expect(module.youtubeBridge.status(at: arrival + 40) == .notInstalled)
+        for (index, message) in [
+            YouTubeTestMessages.captions(), YouTubeTestMessages.clear(),
+            YouTubeTestMessages.diag("content-start", from: .content), YouTubeTestMessages.diag("page-seen fetch", from: .page),
+        ].enumerated() {
+            let later = arrival + Double(index + 1)
+            receive(message, at: later)
+            #expect(module.youtubeBridge.lastPageMessageAt == later)
+        }
+    }
+
+    @Test func theServiceWorkersDiagnosticsAloneDoNotMakeTheStatusConnected() async {
+        await bootstrapWithCaptions()
+        let arrival = Date(timeIntervalSince1970: 1_800_000_000)
+        receive(
+            YouTubeTestMessages.diag("sw-start v=0.1.2"), YouTubeTestMessages.diag("sw-access youtube=withheld"),
+            YouTubeTestMessages.diag("sw-inject tabs=0 injected=0 failed=0"), at: arrival
+        )
+        #expect(module.youtubeBridge.lastPageMessageAt == nil)
+        #expect(module.youtubeBridge.status(at: arrival + 1) != .connected)
+        #expect(module.youtubeBridge.accessWithheld, "the notice shows next to a status that is not green")
+        // The first thing the page sends turns it green.
+        receive(YouTubeTestMessages.diag("content-start", from: .content), at: arrival + 2)
+        #expect(module.youtubeBridge.status(at: arrival + 3) == .connected)
     }
 
     // MARK: through the socket
@@ -549,14 +572,12 @@ import Testing
         #expect(recorder.lines.filter { $0.contains("drift=") }.count == shown)
     }
 
-    @Test func aDiagnosticOnlyShowsThatTheExtensionIsThere() async {
+    @Test func aDiagnosticDecidesNothingAboutTheLyrics() async {
         await bootstrapWithCaptions()
         playInChrome()
         let decided = decisions
-        let arrival = Date(timeIntervalSince1970: 1_800_000_000)
-        receive(YouTubeTestMessages.diag("sw-start v=0.1.1"), at: arrival)
-        #expect(module.youtubeBridge.lastMessageAt == arrival)
-        #expect(module.youtubeBridge.status(at: arrival + 5) == .connected)
+        receive(YouTubeTestMessages.diag("sw-start v=0.1.1"))
+        receive(YouTubeTestMessages.diag("content-start", from: .content))
         #expect(store.syncedLyrics == nil)
         #expect(decisions == decided, "a diagnostic is no reason to decide again")
         // And it changes nothing about captions that are shown.
@@ -572,12 +593,43 @@ import Testing
         #expect(!module.youtubeBridge.accessWithheld)
         receive(YouTubeTestMessages.diag("sw-access youtube=withheld"))
         #expect(module.youtubeBridge.accessWithheld)
-        // Other diagnostics do not touch it.
-        receive(YouTubeTestMessages.diag("sw-start v=0.1.2"), YouTubeTestMessages.diag("content-cc off", from: .content))
+        // Other diagnostics of the service worker do not touch it.
+        receive(YouTubeTestMessages.diag("sw-start v=0.1.2"), YouTubeTestMessages.diag("sw-msg playback"))
         #expect(module.youtubeBridge.accessWithheld)
         // Chrome gave the access back.
         receive(YouTubeTestMessages.diag("sw-access youtube=granted"))
         #expect(!module.youtubeBridge.accessWithheld)
+    }
+
+    @Test func trafficFromThePageClearsTheWithheldNoticeBecauseItProvesTheAccessWorks() async {
+        await bootstrapWithCaptions()
+        // Chrome gave the access (the user reloaded the tab) without the extension's permission events firing.
+        for page in [
+            YouTubeTestMessages.playback(), YouTubeTestMessages.captions(), YouTubeTestMessages.clear(),
+            YouTubeTestMessages.diag("content-start", from: .content), YouTubeTestMessages.diag("page-wrap fetch=true xhr=true", from: .page),
+        ] {
+            receive(YouTubeTestMessages.diag("sw-access youtube=withheld"))
+            #expect(module.youtubeBridge.accessWithheld)
+            receive(page)
+            #expect(!module.youtubeBridge.accessWithheld, "\(page)")
+        }
+    }
+
+    @Test func theServiceWorkersOtherDiagnosticsDoNotClearTheWithheldNotice() async {
+        await bootstrapWithCaptions()
+        receive(YouTubeTestMessages.diag("sw-access youtube=withheld"))
+        receive(
+            YouTubeTestMessages.diag("sw-start v=0.1.2"), YouTubeTestMessages.diag("sw-inject tabs=0 injected=0 failed=0"),
+            YouTubeTestMessages.diag("sw-reconnect after=host-not-found failures=1")
+        )
+        #expect(module.youtubeBridge.accessWithheld)
+    }
+
+    @Test func aWithheldReportAfterTheTrafficShowsTheNoticeAgain() async {
+        await bootstrapWithCaptions()
+        receive(YouTubeTestMessages.playback())
+        receive(YouTubeTestMessages.diag("sw-access youtube=withheld"))
+        #expect(module.youtubeBridge.accessWithheld, "the service worker's own word on the access decides while it speaks")
     }
 
     @Test func onlyTheServiceWorkersAccessReportCounts() async {

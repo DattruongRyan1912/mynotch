@@ -57,12 +57,27 @@ import YouTubeBridgeKit
         #expect(store.playback?.arrivedAt == now + 5)
     }
 
-    @Test mutating func everyMessageCountsAsTheLastOneHeard() {
-        #expect(store.lastMessageAt == nil)
+    @Test mutating func everyMessageFromThePageCountsAsTheLastOneHeard() {
+        #expect(store.lastPageMessageAt == nil)
         store.apply(YouTubeTestMessages.captions(), at: now)
-        #expect(store.lastMessageAt == now)
+        #expect(store.lastPageMessageAt == now)
         store.apply(YouTubeTestMessages.clear(), at: now + 3)
-        #expect(store.lastMessageAt == now + 3)
+        #expect(store.lastPageMessageAt == now + 3)
+        store.apply(YouTubeTestMessages.playback(), at: now + 4)
+        #expect(store.lastPageMessageAt == now + 4)
+        store.apply(YouTubeTestMessages.diag("content-cc on", from: .content), at: now + 5)
+        #expect(store.lastPageMessageAt == now + 5)
+        store.apply(YouTubeTestMessages.diag("page-seen xhr", from: .page), at: now + 6)
+        #expect(store.lastPageMessageAt == now + 6)
+    }
+
+    @Test mutating func theServiceWorkersOwnDiagnosticsDoNotCount() {
+        store.apply(YouTubeTestMessages.diag("sw-start v=0.1.2"), at: now)
+        store.apply(YouTubeTestMessages.diag("sw-access youtube=withheld"), at: now)
+        #expect(store.lastPageMessageAt == nil)
+        store.apply(YouTubeTestMessages.playback(), at: now + 1)
+        store.apply(YouTubeTestMessages.diag("sw-inject tabs=1 injected=1 failed=0"), at: now + 9)
+        #expect(store.lastPageMessageAt == now + 1)
     }
 
     @Test mutating func removeAllForgetsEverything() {
@@ -71,6 +86,6 @@ import YouTubeBridgeKit
         store.removeAll()
         #expect(store.tracks.isEmpty)
         #expect(store.playback == nil)
-        #expect(store.lastMessageAt == nil)
+        #expect(store.lastPageMessageAt == nil)
     }
 }

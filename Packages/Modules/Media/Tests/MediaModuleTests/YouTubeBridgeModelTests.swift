@@ -47,7 +47,7 @@ import Testing
         #expect(model.status(at: now) == .waiting)
         #expect(model.status(at: now).text == "Đã cài — chờ extension")
 
-        model.lastMessageAt = now
+        model.lastPageMessageAt = now
         #expect(model.status(at: now + 29.9) == .connected)
         #expect(model.status(at: now + 29.9).text == "Extension đang kết nối")
         #expect(model.status(at: now + 30) == .connected)
@@ -56,7 +56,7 @@ import Testing
 
     @Test func aMessageProvesTheBridgeWorksEvenIfItWasInstalledByHand() {
         configure()
-        model.lastMessageAt = now
+        model.lastPageMessageAt = now
         #expect(model.status(at: now + 5) == .connected)
     }
 
@@ -138,8 +138,31 @@ import Testing
         model.install()
         model.accessWithheld = true
         #expect(model.status(at: now) == .waiting)
-        model.lastMessageAt = now
+        model.lastPageMessageAt = now
         #expect(model.status(at: now + 1) == .connected)
+    }
+
+    @Test func removingTheBridgeClearsTheWithheldNotice() throws {
+        try makeBundle()
+        configure()
+        model.install()
+        model.accessWithheld = true
+        model.remove()
+        #expect(!model.accessWithheld)
+    }
+
+    @Test func aRemoveThatFailsLeavesTheNoticeAlone() throws {
+        // The folder that holds Chrome's manifest cannot be changed, so nothing is removed and the notice still holds.
+        try makeBundle()
+        configure()
+        model.install()
+        model.accessWithheld = true
+        let folder = locations.nativeMessagingHosts
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path) }
+        model.remove()
+        #expect(model.message.hasPrefix("Không gỡ được cầu nối: "))
+        #expect(model.accessWithheld)
     }
 
     // MARK: strings

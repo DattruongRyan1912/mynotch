@@ -25,12 +25,12 @@ nonisolated struct YouTubeCaptionStore {
     /// Least recently received first.
     private(set) var tracks: [Track] = []
     private(set) var playback: ReceivedPlayback?
-    /// When the last message of any kind arrived.
-    private(set) var lastMessageAt: Date?
+    /// When the last message from the page side of the extension arrived (see `YouTubeMessage.isFromPage`); nil while there has been none.
+    private(set) var lastPageMessageAt: Date?
     private var received = 0
 
     mutating func apply(_ message: YouTubeMessage, at now: Date) {
-        lastMessageAt = now
+        if message.isFromPage { lastPageMessageAt = now }
         switch message {
         case .captions(let captions):
             received += 1
@@ -45,7 +45,7 @@ nonisolated struct YouTubeCaptionStore {
         case .clear(let videoID):
             tracks.removeAll { $0.videoID == videoID }
         case .diag:
-            // Only proves the extension is there.
+            // Only shows that the extension (or its page) is there.
             break
         }
     }

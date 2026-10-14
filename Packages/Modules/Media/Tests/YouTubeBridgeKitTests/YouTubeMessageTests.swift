@@ -34,6 +34,23 @@ import Testing
         if case .playback(let playback) = decode(object) { playback } else { nil }
     }
 
+    // MARK: where it comes from
+
+    @Test func everythingButTheServiceWorkersOwnDiagnosticsIsFromThePage() {
+        let videoID = Self.videoID
+        let events = [CaptionEvent(time: 1, duration: 1, text: "alpha")]
+        let fromPage: [YouTubeMessage] = [
+            .captions(YouTubeCaptions(videoID: videoID, language: "vi", kind: .standard, events: events)),
+            .playback(YouTubePlayback(videoID: videoID, title: "Sample", time: 1, isPlaying: true, rate: 1)),
+            .clear(videoID: videoID),
+            .diag(YouTubeDiag(origin: .content, event: "content-start")),
+            .diag(YouTubeDiag(origin: .page, event: "page-seen xhr")),
+        ]
+        #expect(fromPage.allSatisfy { $0.isFromPage })
+        #expect(!YouTubeMessage.diag(YouTubeDiag(origin: .sw, event: "sw-start v=0.1.2")).isFromPage)
+        #expect(!YouTubeMessage.diag(YouTubeDiag(origin: .sw, event: "sw-access youtube=withheld")).isFromPage)
+    }
+
     // MARK: valid messages
 
     @Test func aCaptionsMessageDecodesToItsFields() {

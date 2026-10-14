@@ -17,8 +17,8 @@ struct YouTubeBridgeSetup {
 }
 
 /// What the Settings rows for the Chrome bridge show: whether it is installed, whether the extension has been heard
-/// from, what the last button did. The module keeps one for its whole life, and fills in `lastMessageAt` and
-/// `listenFailed` as it listens.
+/// from in a YouTube page, what the last button did. The module keeps one for its whole life, and fills in
+/// `lastPageMessageAt`, `accessWithheld` and `listenFailed` as it listens.
 @Observable
 final class YouTubeBridgeModel {
     enum Status: Equatable {
@@ -38,17 +38,20 @@ final class YouTubeBridgeModel {
     /// What to do when Chrome has set the extension's site access to "On click" and so lets it read nothing on YouTube.
     static let accessWithheldMessage = "Chrome đang chặn extension đọc YouTube. Mở chrome://extensions, chọn MyNotch YouTube Bridge → Quyền truy cập trang web → Trên tất cả trang web, rồi tải lại tab YouTube."
     static let listenFailureMessage = "Không mở được socket nhận phụ đề từ Chrome nên phụ đề YouTube chưa hoạt động. Tắt rồi bật lại để thử lại."
-    /// The extension counts as connected while its last message is no older than this; the page sends one every 5 s while a video plays.
+    /// The extension counts as connected while its last page message is no older than this; the page sends one every 5 s while a video plays.
     static let connectedWindow: TimeInterval = 30
 
     private(set) var message = ""
     private(set) var isInstalled = false
-    /// When the module last got a message from the extension; nil while there has been none.
-    var lastMessageAt: Date?
+    /// When the module last got a message that shows the extension at work in a YouTube page (captions, playback, clear, or
+    /// a diagnostic of the content or page script); nil while there has been none. The service worker's own diagnostics do
+    /// not count: with Chrome withholding the site access they arrive while nothing reads YouTube.
+    var lastPageMessageAt: Date?
     /// The socket for the host could not be opened.
     var listenFailed = false
-    /// The extension said that Chrome withholds its access to YouTube; nil until it says anything, and false again
-    /// once the access is granted.
+    /// The extension said that Chrome withholds its access to YouTube. False until it says so, and again once it says the
+    /// access is granted, once the page sends anything (which proves the access works, whatever was reported before), and
+    /// when the bridge is removed.
     var accessWithheld = false
 
     @ObservationIgnored private var setup: YouTubeBridgeSetup?
@@ -64,7 +67,7 @@ final class YouTubeBridgeModel {
     }
 
     func status(at now: Date) -> Status {
-        if let lastMessageAt, now.timeIntervalSince(lastMessageAt) <= Self.connectedWindow { return .connected }
+        if let lastPageMessageAt, now.timeIntervalSince(lastPageMessageAt) <= Self.connectedWindow { return .connected }
         return isInstalled ? .waiting : .notInstalled
     }
 
@@ -97,6 +100,8 @@ final class YouTubeBridgeModel {
         }
         do {
             try setup.installer.remove()
+            // The notice is about an extension this bridge no longer serves.
+            if accessWithheld { accessWithheld = false }
             message = "Đã gỡ cầu nối. Nhớ xoá extension trong chrome://extensions."
         } catch {
             message = "Không gỡ được cầu nối: \(error.localizedDescription)"

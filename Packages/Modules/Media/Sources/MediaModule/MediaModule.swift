@@ -504,7 +504,7 @@ public final class MediaModule: FeatureModule {
         youtubeServer = nil
         youtubeListenFailed = false
         if youtubeBridge.listenFailed { youtubeBridge.listenFailed = false }
-        if youtubeBridge.lastMessageAt != nil { youtubeBridge.lastMessageAt = nil }
+        if youtubeBridge.lastPageMessageAt != nil { youtubeBridge.lastPageMessageAt = nil }
         if youtubeBridge.accessWithheld { youtubeBridge.accessWithheld = false }
         captionStore.removeAll()
         loggedMatchDecision = nil
@@ -516,8 +516,13 @@ public final class MediaModule: FeatureModule {
     func receiveYouTube(_ message: YouTubeMessage, at now: Date = Date()) {
         guard youtubeCaptionsEnabled else { return }
         captionStore.apply(message, at: now)
-        youtubeBridge.lastMessageAt = now
-        // A diagnostic shows that the extension is there, and one of them says whether Chrome lets it read YouTube.
+        if message.isFromPage {
+            youtubeBridge.lastPageMessageAt = now
+            // The page is sending, so Chrome lets the extension read YouTube, whatever was reported before: the notice
+            // would otherwise stay when Chrome gives the access without telling the extension.
+            if youtubeBridge.accessWithheld { youtubeBridge.accessWithheld = false }
+        }
+        // A diagnostic decides nothing about lyrics; the service worker's says whether Chrome lets the extension read YouTube.
         if case .diag(let diag) = message {
             if let access = diag.siteAccess, youtubeBridge.accessWithheld != (access == .withheld) {
                 youtubeBridge.accessWithheld = access == .withheld
