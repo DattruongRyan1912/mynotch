@@ -4,42 +4,52 @@ import Observation
 import SwiftUI
 
 /// "Dịch" tab: on-device translation of typed text, of the selection (⌃⌥T, through Accessibility) and of text sent
-/// through the "Dịch bằng MyNotch" service.
+/// through the "Dịch bằng MyNotch" service. Either text can be read aloud, and a translation of a selection can replace
+/// it in the app it was selected in.
 public final class TranslationModule: FeatureModule {
     public let descriptor = ModuleDescriptor(
         id: "translation",
         displayName: "Dịch",
         systemImage: "translate",
         defaultEnabled: true,
-        // Only the shortcut needs it, to read the selection; Services and typing work without.
+        // Only the shortcut and the replacement need it, to read the selection and write over it; Services, typing and
+        // speaking work without.
         optionalPermissions: [.accessibility],
-        permissionReasons: [.accessibility: "Đọc văn bản bạn đang chọn ở app khác để dịch."],
+        permissionReasons: [.accessibility: "Đọc văn bản bạn đang chọn ở app khác để dịch, và thay nó bằng bản dịch."],
         order: 400
     )
 
     static let defaultShortcut = KeyboardShortcuts.Shortcut(.t, modifiers: [.control, .option])
 
     let state = TranslationState()
+    let speech: SpeechPlayer
     private(set) var translator: Translator?
     private let engine: any TranslationEngine
     private let selection: SelectionReader
     private let languages: SupportedLanguages
     private let installer: any LanguageInstalling
+    private let replacer: SelectionReplacer
     private let pasteboard: NSPasteboard
     private let shortcut: KeyboardShortcuts.Shortcut?
     private var context: ModuleContext?
     /// The shortcut's selection read; tests await it. A new press, Services text or stopping supersedes it.
     private(set) var selectionRead: Task<Void, Never>?
+    /// The replacement in progress; tests await it. Stopping cancels it, and waits for it to put the clipboard back.
+    private(set) var replacement: Task<Void, Never>?
 
-    /// The module the app runs: Apple's on-device engine, the system Accessibility API and the general pasteboard.
+    /// The module the app runs: Apple's on-device engine, the system Accessibility API, the system voices and the
+    /// general pasteboard.
     public convenience init() {
         let engine = AppleTranslationEngine()
+        let accessibility = SystemAccessibilityClient()
         self.init(
             engine: engine,
-            selection: SelectionReader(),
+            selection: SelectionReader(accessibility: accessibility),
             languages: SupportedLanguages(),
             installer: LanguageInstallerWindow { await engine.status(from: $0.source, to: $0.target) },
             pasteboard: .general,
+            speech: SpeechPlayer(synthesizer: SystemSpeechSynthesizer()),
+            replacer: SelectionReplacer(accessibility: accessibility, pasteboard: .general),
             shortcut: Self.defaultShortcut
         )
     }
@@ -52,6 +62,8 @@ public final class TranslationModule: FeatureModule {
         languages: SupportedLanguages,
         installer: any LanguageInstalling,
         pasteboard: NSPasteboard,
+        speech: SpeechPlayer,
+        replacer: SelectionReplacer,
         shortcut: KeyboardShortcuts.Shortcut?
     ) {
         self.engine = engine
@@ -59,6 +71,8 @@ public final class TranslationModule: FeatureModule {
         self.languages = languages
         self.installer = installer
         self.pasteboard = pasteboard
+        self.speech = speech
+        self.replacer = replacer
         self.shortcut = shortcut
     }
 
@@ -79,9 +93,15 @@ public final class TranslationModule: FeatureModule {
         }
         let settings = context.settings
         let keys = TranslationKeys(settings)
+        state.offersReplace = settings.value(keys.showReplaceButton)
         context.run { [weak self] in
             for await target in Observations({ settings.value(keys.targetLanguage) }) {
                 self?.translator?.targetSettingChanged(target)
+            }
+        }
+        context.run { [weak self] in
+            for await offers in Observations({ settings.value(keys.showReplaceButton) }) {
+                self?.state.offersReplace = offers
             }
         }
     }
@@ -89,9 +109,15 @@ public final class TranslationModule: FeatureModule {
     public func stop() async {
         selectionRead?.cancel()
         selectionRead = nil
+        speech.stop()
         translator?.stop()
         translator = nil
         engine.invalidate()
+        // A paste waiting to put the user's clipboard back must finish: cancelling only keeps one from starting.
+        let replacement = replacement
+        replacement?.cancel()
+        await replacement?.value
+        self.replacement = nil
         context = nil
         state.input = ""
         state.output = ""
@@ -101,17 +127,27 @@ public final class TranslationModule: FeatureModule {
         state.isTranslating = false
         state.error = nil
         state.isReadingSelection = false
+        state.selectionSource = nil
+        state.isReplacing = false
+        state.needsAccessibility = false
+        state.replaceFailure = nil
     }
 
     public func makeTab() -> NotchTab? {
         guard let translator else { return nil }
+        let actions = TranslationTabActions(
+            install: { [weak self] in self?.installLanguagePack() },
+            replace: { [weak self] in self?.replaceSelection() },
+            requestAccessibility: { [weak self] in self?.requestAccessibility() },
+            refreshAccessibility: { [weak self] in self?.refreshAccessibility() }
+        )
         return NotchTab(
             id: descriptor.id,
             title: "Dịch",
             systemImage: "translate",
             preferredHeight: 220,
             acceptsKeyboard: true,
-            content: AnyView(TranslationTabView(state: state, translator: translator) { [weak self] in self?.installLanguagePack() })
+            content: AnyView(TranslationTabView(state: state, translator: translator, speech: speech, actions: actions))
         )
     }
 
@@ -123,6 +159,7 @@ public final class TranslationModule: FeatureModule {
             targetLanguage: settings.binding(keys.targetLanguage),
             autoTranslateOnOpen: settings.binding(keys.autoTranslateOnOpen),
             useChromiumAccessibility: settings.binding(keys.useChromiumAccessibility),
+            showReplaceButton: settings.binding(keys.showReplaceButton),
             languages: languages,
             status: { [engine] pair in await engine.status(from: pair.source, to: pair.target) },
             install: { [weak self, installer] pair in
@@ -137,18 +174,20 @@ public final class TranslationModule: FeatureModule {
         guard let context, let translator else { return }
         selectionRead?.cancel()
         translator.receive(nil, translate: false)
+        forgetSelection()
         state.isReadingSelection = true
         showTab(context)
         selection.useChromiumAccessibility = context.settings.value(TranslationKeys(context.settings).useChromiumAccessibility)
         selectionRead = Task { [weak self, selection] in
-            let text = await selection.selectedText()
+            let source = await selection.selection()
             // A newer press, Services text or stopping took over while the app was being read.
             guard let self, !Task.isCancelled else { return }
             selectionRead = nil
             state.isReadingSelection = false
             // Text typed meanwhile is what the user wants translated.
             guard state.input.isEmpty else { return }
-            receive(text)
+            state.selectionSource = source
+            receive(source?.text)
         }
     }
 
@@ -158,6 +197,7 @@ public final class TranslationModule: FeatureModule {
         selectionRead?.cancel()
         selectionRead = nil
         state.isReadingSelection = false
+        forgetSelection()
         receive(text)
         showTab(context)
     }
@@ -166,6 +206,70 @@ public final class TranslationModule: FeatureModule {
     func installLanguagePack() {
         guard let pair = state.currentPair else { return }
         installer.install(pair) { [weak self] in self?.translator?.languagePackChanged() }
+    }
+
+    /// The button under a result that came from a selection: puts the translation in place of that selection, in the
+    /// app it was selected in. nil when there is nothing to replace or it cannot be done now.
+    @discardableResult
+    func replaceSelection() -> Task<Void, Never>? {
+        guard context != nil, state.canReplace, let source = state.selectionSource else { return nil }
+        let text = state.output
+        state.isReplacing = true
+        state.replaceFailure = nil
+        let task = Task { [weak self, replacer] in
+            let outcome = await replacer.replace(text, expecting: source.text, in: source.application)
+            // Stopping cancelled it and resets the state itself.
+            guard let self, !Task.isCancelled else { return }
+            finishReplacing(outcome)
+        }
+        replacement = task
+        return task
+    }
+
+    /// Whether the hint "Cần quyền Accessibility" should show: a result could be replaced, but MyNotch may not write
+    /// to other apps. Reading trust never prompts. The tab checks when it appears and every 2 s while shown, so the
+    /// hint goes by itself once the permission is granted.
+    func refreshAccessibility() {
+        let needs = state.showsReplace && !replacer.isTrusted
+        if state.needsAccessibility != needs { state.needsAccessibility = needs }
+    }
+
+    /// The hint's button: the system's prompt (which lists MyNotch in the Accessibility pane), then that pane when the
+    /// prompt alone did not allow it. nil while stopped; await the task for completion.
+    @discardableResult
+    func requestAccessibility() -> Task<Void, Never>? {
+        guard let context else { return nil }
+        return Task { [weak self] in
+            if await context.permissions.request(.accessibility) != .granted {
+                context.permissions.openSystemSettings(for: .accessibility)
+            }
+            self?.refreshAccessibility()
+        }
+    }
+
+    /// The tab no longer shows a translation of a selection, so there is nothing to replace and nothing to explain.
+    private func forgetSelection() {
+        state.selectionSource = nil
+        state.replaceFailure = nil
+        refreshAccessibility()
+    }
+
+    private func finishReplacing(_ outcome: ReplaceOutcome) {
+        replacement = nil
+        state.isReplacing = false
+        switch outcome {
+        case .replaced, .pasted:
+            // The selection now holds the translation: there is nothing left for the button to replace.
+            state.selectionSource = nil
+            state.needsAccessibility = false
+            context?.presenter.close()
+        case .needsAccessibility:
+            state.needsAccessibility = true
+        case .selectionChanged:
+            state.replaceFailure = "Vùng chọn đã đổi, nên chưa thay được"
+        case .failed:
+            state.replaceFailure = "Không thay được chữ ở app kia"
+        }
     }
 
     private func receive(_ text: String?) {

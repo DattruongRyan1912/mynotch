@@ -1,5 +1,11 @@
 import Foundation
 
+/// Text selected in another app, and the app it was selected in, which a translation can later replace it in.
+nonisolated struct SelectionSource: Equatable, Sendable {
+    var text: String
+    var application: FocusedApplication
+}
+
 /// Reads the text selected in the frontmost app through Accessibility. Returns nil whenever it can't,
 /// so the caller opens the tab empty.
 final class SelectionReader {
@@ -43,12 +49,12 @@ final class SelectionReader {
         self.pause = pause
     }
 
-    func selectedText() async -> String? {
+    func selection() async -> SelectionSource? {
         // MyNotch's own text fields don't count: the selection belongs to another app.
         guard accessibility.isTrusted, let application = accessibility.focusedApplication(),
               application.processID != getpid() else { return nil }
         switch read(application) {
-        case .text(let text): return text
+        case .text(let text): return SelectionSource(text: text, application: application)
         case .unresponsive: return nil
         case .empty: break
         }
@@ -67,7 +73,7 @@ final class SelectionReader {
                 return nil   // cancelled
             }
             switch read(application) {
-            case .text(let text): return text
+            case .text(let text): return SelectionSource(text: text, application: application)
             case .unresponsive: return nil
             case .empty: continue
             }

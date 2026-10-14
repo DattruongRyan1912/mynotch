@@ -78,6 +78,7 @@ final class Translator {
         let pair = direction(for: text)
         state.detectedSource = state.source == nil ? pair.source : nil
         state.target = pair.target
+        state.replaceFailure = nil
         // Same direction: keep the banner up while retranslating, so it doesn't flicker with every pause in typing.
         if pair != statusPair { state.pairStatus = nil }
         state.isTranslating = true

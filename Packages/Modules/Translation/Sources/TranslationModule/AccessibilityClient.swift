@@ -16,7 +16,18 @@ nonisolated enum SelectionRead: Equatable, Sendable {
     case unresponsive
 }
 
-/// The Accessibility calls `SelectionReader` makes, so its retry logic is testable without AX.
+/// Whether an app really took text written to its selection through Accessibility.
+nonisolated enum SelectionReplacement {
+    /// Judged by reading the selection back: apps that ignore the write still answer "success", and their selection is
+    /// then unchanged. When either read failed, nothing says the write was ignored, so it counts.
+    static func took(_ text: String, before: String?, after: String?) -> Bool {
+        guard let before, let after else { return true }
+        // Replacing a text with itself leaves the selection as it was.
+        return after != before || before == text
+    }
+}
+
+/// The Accessibility calls `SelectionReader` and `SelectionReplacer` make, so their logic is testable without AX.
 protocol AccessibilityClient: AnyObject {
     /// Whether MyNotch has the Accessibility permission. Checking never prompts.
     var isTrusted: Bool { get }
@@ -26,6 +37,8 @@ protocol AccessibilityClient: AnyObject {
     func isEnabled(_ attribute: String, in application: FocusedApplication) -> Bool
     /// Sets a boolean attribute of the application element to true.
     func enable(_ attribute: String, in application: FocusedApplication)
+    /// Replaces the selection of the application's focused element with `text`. False when the app refused or ignored it.
+    func replaceSelection(with text: String, in application: FocusedApplication) -> Bool
 }
 
 /// Reads through the system Accessibility API.
@@ -61,6 +74,19 @@ final class SystemAccessibilityClient: AccessibilityClient {
 
     func enable(_ attribute: String, in application: FocusedApplication) {
         AXUIElementSetAttributeValue(Self.element(for: application), attribute as CFString, kCFBooleanTrue)
+    }
+
+    func replaceSelection(with text: String, in application: FocusedApplication) -> Bool {
+        guard let element = Self.element(Self.copyValue(kAXFocusedUIElementAttribute, of: Self.element(for: application)).value) else {
+            return false
+        }
+        AXUIElementSetMessagingTimeout(element, Self.timeout)
+        let before = Self.copyValue(kAXSelectedTextAttribute, of: element).value as? String
+        guard AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString) == .success else {
+            return false
+        }
+        let after = Self.copyValue(kAXSelectedTextAttribute, of: element).value as? String
+        return SelectionReplacement.took(text, before: before, after: after)
     }
 
     private static func element(for application: FocusedApplication) -> AXUIElement {

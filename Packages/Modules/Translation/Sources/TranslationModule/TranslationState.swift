@@ -28,6 +28,16 @@ final class TranslationState {
     var focusRequest = 0
     /// The shortcut opened the tab and the selection is still being read.
     var isReadingSelection = false
+    /// The selection in another app that `input` came from, which the result can replace; nil for typed text and
+    /// text from Services.
+    var selectionSource: SelectionSource?
+    /// The "Hiện nút thay vào chỗ đang chọn" setting.
+    var offersReplace = true
+    var isReplacing = false
+    /// A replacement needs Accessibility and MyNotch has not been granted it.
+    var needsAccessibility = false
+    /// Why the last replacement did not happen; the next translation or replacement clears it.
+    var replaceFailure: String?
 
     /// The direction shown in the menus, once the source is known.
     var currentPair: LanguagePair? {
@@ -44,4 +54,10 @@ final class TranslationState {
 
     /// Swapping needs a source, so it waits for the first detection when the source is automatic.
     var canSwap: Bool { currentPair != nil }
+
+    /// A result that came from a selection is shown with the button that puts it back there.
+    var showsReplace: Bool { offersReplace && selectionSource != nil && !output.isEmpty }
+
+    /// Whether the button works now: the result is the one on show, and nothing it needs is missing.
+    var canReplace: Bool { showsReplace && !isTranslating && !isReplacing && !needsAccessibility }
 }

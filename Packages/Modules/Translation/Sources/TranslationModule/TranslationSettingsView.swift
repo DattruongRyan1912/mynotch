@@ -6,6 +6,7 @@ struct TranslationSettingsView: View {
     @Binding var targetLanguage: String
     @Binding var autoTranslateOnOpen: Bool
     @Binding var useChromiumAccessibility: Bool
+    @Binding var showReplaceButton: Bool
     let languages: SupportedLanguages
     let status: (LanguagePair) async -> PairStatus
     let install: (LanguagePair) -> Void
@@ -26,6 +27,10 @@ struct TranslationSettingsView: View {
             Toggle(isOn: $useChromiumAccessibility) {
                 Text("Đọc vùng chọn trong Chrome và app Electron")
                 Text("Chrome có thể chuyển sang chế độ hỗ trợ trình đọc màn hình.")
+            }
+            Toggle(isOn: $showReplaceButton) {
+                Text("Hiện nút thay vào chỗ đang chọn")
+                Text("Dưới bản dịch của đoạn chữ đọc bằng phím tắt. Cần quyền Accessibility.")
             }
             ForEach(pairs, id: \.self) { pair in
                 LabeledContent("\(SupportedLanguages.name(of: pair.source)) → \(SupportedLanguages.name(of: pair.target))") {

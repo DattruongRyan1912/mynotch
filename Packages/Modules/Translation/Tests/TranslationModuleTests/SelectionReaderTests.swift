@@ -29,6 +29,16 @@ final class FakeAccessibility: AccessibilityClient {
         enabled.append(attribute)
         attributes.insert(attribute)
     }
+
+    /// Whether the app takes a replacement.
+    var replaces = true
+    /// Texts written over the selection, in order.
+    private(set) var replacements: [String] = []
+
+    func replaceSelection(with text: String, in application: FocusedApplication) -> Bool {
+        replacements.append(text)
+        return replaces
+    }
 }
 
 final class FakePauses {
@@ -54,42 +64,56 @@ final class FakePauses {
 
     @Test func readsTheSelection() async {
         accessibility.selections = ["Xin chào"]
-        #expect(await makeReader().selectedText() == "Xin chào")
+        #expect(await makeReader().selection()?.text == "Xin chào")
         #expect(accessibility.reads == 1)
+    }
+
+    @Test func reportsTheAppTheSelectionIsIn() async {
+        focus("com.apple.Safari")
+        accessibility.selections = ["Xin chào"]
+        let safari = FocusedApplication(processID: 42, bundleID: "com.apple.Safari")
+        #expect(await makeReader().selection() == SelectionSource(text: "Xin chào", application: safari))
+    }
+
+    @Test func reportsTheAppAfterWaitingForItsTree() async {
+        focus("com.google.Chrome")
+        accessibility.selections = [nil, "Hello"]
+        let chrome = FocusedApplication(processID: 42, bundleID: "com.google.Chrome")
+        #expect(await makeReader().selection() == SelectionSource(text: "Hello", application: chrome))
     }
 
     @Test func untrustedReadsNothing() async {
         accessibility.isTrusted = false
         accessibility.selections = ["Xin chào"]
-        #expect(await makeReader().selectedText() == nil)
+        #expect(await makeReader().selection() == nil)
         #expect(accessibility.reads == 0)
     }
 
     @Test func noFocusedApplicationReadsNothing() async {
         accessibility.application = nil
-        #expect(await makeReader().selectedText() == nil)
+        #expect(await makeReader().selection() == nil)
         #expect(accessibility.reads == 0)
     }
 
     @Test func myNotchItselfIsNotRead() async {
         accessibility.application = FocusedApplication(processID: getpid(), bundleID: "com.google.Chrome")
         accessibility.selections = ["Xin chào"]
-        #expect(await makeReader().selectedText() == nil)
+        #expect(await makeReader().selection() == nil)
         #expect(accessibility.reads == 0)
     }
 
     @Test func emptySelectionIsNil() async {
         accessibility.selections = [""]
-        #expect(await makeReader().selectedText() == nil)
+        #expect(await makeReader().selection() == nil)
         let blank = FakeAccessibility()
         blank.selections = [" \n\t"]
-        #expect(await SelectionReader(accessibility: blank) { _ in }.selectedText() == nil)
+        #expect(await SelectionReader(accessibility: blank) { _ in }.selection() == nil)
     }
 
     @Test func chromiumRetrySucceedsOnTheThirdPoll() async {
         focus("com.google.Chrome")
         accessibility.selections = [nil, nil, "", "Hello"]
-        #expect(await makeReader().selectedText() == "Hello")
+        #expect(await makeReader().selection()?.text == "Hello")
         #expect(accessibility.enabled == ["AXEnhancedUserInterface"])
         #expect(pauses.durations == [.milliseconds(100), .milliseconds(100), .milliseconds(100)])
         #expect(accessibility.reads == 4)
@@ -98,13 +122,13 @@ final class FakePauses {
     @Test func electronAppsGetManualAccessibility() async {
         focus("com.tinyspeck.slackmacgap")
         accessibility.selections = [nil, "Hello"]
-        #expect(await makeReader().selectedText() == "Hello")
+        #expect(await makeReader().selection()?.text == "Hello")
         #expect(accessibility.enabled == ["AXManualAccessibility"])
     }
 
     @Test func retriesStopAfter600Milliseconds() async {
         focus("com.microsoft.VSCode")
-        #expect(await makeReader().selectedText() == nil)
+        #expect(await makeReader().selection() == nil)
         #expect(pauses.durations.reduce(.zero, +) == .milliseconds(600))
         #expect(accessibility.reads == 7)
     }
@@ -113,17 +137,17 @@ final class FakePauses {
         focus("com.google.Chrome")
         accessibility.attributes = ["AXEnhancedUserInterface"]
         accessibility.selections = [nil, "Hello"]
-        #expect(await makeReader().selectedText() == "Hello")
+        #expect(await makeReader().selection()?.text == "Hello")
         #expect(accessibility.enabled.isEmpty)
     }
 
     @Test func anAppEnabledEarlierIsNotWaitedForAgain() async {
         focus("com.google.Chrome")
         let reader = makeReader()
-        #expect(await reader.selectedText() == nil)
+        #expect(await reader.selection() == nil)
         #expect(accessibility.reads == 7)
 
-        #expect(await reader.selectedText() == nil)
+        #expect(await reader.selection() == nil)
         #expect(accessibility.reads == 8)
         #expect(pauses.durations.count == 6)
         #expect(accessibility.enabled == ["AXEnhancedUserInterface"])
@@ -133,7 +157,7 @@ final class FakePauses {
         focus("com.google.Chrome")
         accessibility.unresponsiveReads = [0]
         accessibility.selections = [nil, "Hello"]
-        #expect(await makeReader().selectedText() == nil)
+        #expect(await makeReader().selection() == nil)
         #expect(accessibility.reads == 1)
         #expect(accessibility.enabled.isEmpty)
         #expect(pauses.durations.isEmpty)
@@ -143,7 +167,7 @@ final class FakePauses {
         focus("com.google.Chrome")
         accessibility.unresponsiveReads = [1]
         accessibility.selections = [nil, nil, "Hello"]
-        #expect(await makeReader().selectedText() == nil)
+        #expect(await makeReader().selection() == nil)
         #expect(accessibility.reads == 2)
         #expect(pauses.durations.count == 1)
     }
@@ -152,7 +176,7 @@ final class FakePauses {
     func otherAppsAreNotRetried(bundleID: String?) async {
         focus(bundleID)
         accessibility.selections = [nil, "Hello"]
-        #expect(await makeReader().selectedText() == nil)
+        #expect(await makeReader().selection() == nil)
         #expect(accessibility.reads == 1)
         #expect(accessibility.enabled.isEmpty)
         #expect(pauses.durations.isEmpty)
@@ -163,7 +187,7 @@ final class FakePauses {
         accessibility.selections = [nil, "Hello"]
         let reader = makeReader()
         reader.useChromiumAccessibility = false
-        #expect(await reader.selectedText() == nil)
+        #expect(await reader.selection() == nil)
         #expect(accessibility.enabled.isEmpty)
         #expect(pauses.durations.isEmpty)
     }
@@ -172,7 +196,7 @@ final class FakePauses {
         focus("com.google.Chrome")
         accessibility.selections = [nil, "Hello"]
         pauses.error = CancellationError()
-        #expect(await makeReader().selectedText() == nil)
+        #expect(await makeReader().selection() == nil)
         #expect(accessibility.reads == 1)
         #expect(pauses.durations.count == 1)
     }

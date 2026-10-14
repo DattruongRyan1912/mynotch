@@ -20,11 +20,14 @@ struct TranslationKeys {
     /// Translate text from the shortcut or Services as soon as the tab opens.
     let autoTranslateOnOpen: SettingKey<Bool>
     let useChromiumAccessibility: SettingKey<Bool>
+    /// Offer "Thay vào chỗ đang chọn" on a result that came from a selection in another app.
+    let showReplaceButton: SettingKey<Bool>
 
     init(_ settings: ModuleSettings) {
         preferredPair = settings.key("preferredPair", default: PreferredPair(first: "vi", second: "en"))
         targetLanguage = settings.key("targetLanguage", default: "vi")
         autoTranslateOnOpen = settings.key("autoTranslateOnOpen", default: true)
         useChromiumAccessibility = settings.key("useChromiumAccessibility", default: true)
+        showReplaceButton = settings.key("showReplaceButton", default: true)
     }
 }

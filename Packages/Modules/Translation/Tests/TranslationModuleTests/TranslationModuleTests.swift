@@ -10,6 +10,11 @@ struct ModuleFixture {
     let engine = FakeEngine()
     let accessibility = FakeAccessibility()
     let pauses = PauseGate()
+    /// The waits of the replacement: for the app to come to the front, and before the clipboard goes back.
+    let replacePauses = PauseGate()
+    let applications = FakeApplications()
+    let keystroke = FakeKeystroke()
+    let synthesizer = FakeSynthesizer()
     let installer = FakeInstaller()
     let pasteboard = NSPasteboard(name: NSPasteboard.Name("MyNotchTests.\(UUID().uuidString)"))
     let module: TranslationModule
@@ -22,6 +27,10 @@ struct ModuleFixture {
             languages: SupportedLanguages { [.vi, .en, .ja] },
             installer: installer,
             pasteboard: pasteboard,
+            speech: SpeechPlayer(synthesizer: synthesizer),
+            replacer: SelectionReplacer(
+                accessibility: accessibility, applications: applications, keystroke: keystroke, pasteboard: pasteboard
+            ) { [replacePauses] _ in try await replacePauses.pause() },
             shortcut: nil
         )
         harness = RegistryHarness([module])
@@ -69,7 +78,9 @@ struct ModuleFixture {
         let descriptor = fixture.module.descriptor
         #expect(descriptor.permissions.isEmpty)
         #expect(descriptor.optionalPermissions == [.accessibility])
-        #expect(descriptor.permissionReasons == [.accessibility: "Đọc văn bản bạn đang chọn ở app khác để dịch."])
+        #expect(descriptor.permissionReasons == [
+            .accessibility: "Đọc văn bản bạn đang chọn ở app khác để dịch, và thay nó bằng bản dịch.",
+        ])
     }
 
     @Test func registersTheHotkeyAndTheService() async {
