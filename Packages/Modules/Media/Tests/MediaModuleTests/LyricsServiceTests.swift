@@ -624,6 +624,31 @@ import Testing
         #expect(client.requests.count == asked + 1)
     }
 
+    @Test func aPipeSeparatedVideoTitleIsAskedBySongAndArtistAtEveryStep() async throws {
+        route(search: LrclibReplies.results([]), query: LrclibReplies.results([]))
+        let track = try #require(TrackKey(
+            artist: "Sơn Tùng M-TP Official", title: "CHẠY NGAY ĐI | RUN NOW | SƠN TÙNG M-TP | Official Music Video", album: nil,
+            duration: 273.5, isFromBrowser: true
+        ))
+        #expect(await lookup(makeService(), track) == .notFound)
+        #expect(calls == [
+            "/api/get track_name=CHẠY NGAY ĐI artist_name=Sơn Tùng M-TP duration=274",
+            "/api/search track_name=CHẠY NGAY ĐI artist_name=Sơn Tùng M-TP",
+            "/api/search q=Sơn Tùng M-TP CHẠY NGAY ĐI",
+        ])
+    }
+
+    @Test func aPipeSeparatedVideoTitleFindsTheRecordClosestInLength() async throws {
+        let near = LrclibReplies.entry(duration: 273, synced: LrclibReplies.lrcText(5, tag: "Near"))
+        let exact = LrclibReplies.entry(duration: 274, synced: LrclibReplies.lrcText(6, tag: "Exact"))
+        route(search: LrclibReplies.results([near, exact]))
+        let track = try #require(TrackKey(
+            artist: "Sơn Tùng M-TP Official", title: "CHẠY NGAY ĐI | RUN NOW | SƠN TÙNG M-TP | Official Music Video", album: nil,
+            duration: 273.5, isFromBrowser: true
+        ))
+        #expect(await lookup(makeService(), track) == .synced(LrclibReplies.lyricLines(6, tag: "Exact")))
+    }
+
     @Test func aBrowserTrackIsAskedByItsCleanedTitleAtEveryStep() async throws {
         route(search: LrclibReplies.results([]), query: LrclibReplies.results([]))
         let track = try #require(TrackKey(

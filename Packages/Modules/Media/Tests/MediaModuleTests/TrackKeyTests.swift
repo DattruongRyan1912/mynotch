@@ -81,10 +81,13 @@ import Testing
 }
 
 @Suite struct TrackKeyLookupTests {
-    func state(bundle: String? = "com.google.Chrome", parent: String? = nil, title: String, artist: String, album: String? = nil) -> NowPlayingState {
+    func state(
+        bundle: String? = "com.google.Chrome", parent: String? = nil, title: String, artist: String, album: String? = nil,
+        duration: Double = 200
+    ) -> NowPlayingState {
         NowPlayingState(
             bundleIdentifier: bundle, parentApplicationBundleIdentifier: parent, title: title, artist: artist, album: album,
-            durationSeconds: 200
+            durationSeconds: duration
         )
     }
 
@@ -123,6 +126,25 @@ import Testing
         let noisy = try #require(TrackKey(state(title: "Hello - Radio Edit (Official Video)", artist: "AdeleVEVO", album: "25")))
         #expect(noisy.lookupArtist == "AdeleVEVO")
         #expect(noisy.lookupTitle == "Hello - Radio Edit")
+    }
+
+    @Test func aPipeSeparatedVideoTitleIsAskedBySongAndArtist() throws {
+        let key = try #require(TrackKey(state(
+            title: "CHẠY NGAY ĐI | RUN NOW | SƠN TÙNG M-TP | Official Music Video", artist: "Sơn Tùng M-TP Official", duration: 273.5
+        )))
+        #expect(key.lookupArtist == "Sơn Tùng M-TP")
+        #expect(key.lookupTitle == "CHẠY NGAY ĐI")
+        // The cache still goes by what the player reported.
+        #expect(key.title == "CHẠY NGAY ĐI | RUN NOW | SƠN TÙNG M-TP | Official Music Video")
+        #expect(key.artist == "Sơn Tùng M-TP Official")
+        #expect(key.durationSeconds == 274)
+    }
+
+    @Test func aPipeTitleWithAnAlbumIsNotSplit() throws {
+        // The album means the player tagged the track itself: a pipe belongs to the title, as a dash does.
+        let key = try #require(TrackKey(state(title: "Chạy Ngay Đi | Run Now", artist: "Sơn Tùng M-TP", album: "Single")))
+        #expect(key.lookupArtist == "Sơn Tùng M-TP")
+        #expect(key.lookupTitle == "Chạy Ngay Đi | Run Now")
     }
 
     @Test func theKeyKeepsTheOriginalFields() throws {

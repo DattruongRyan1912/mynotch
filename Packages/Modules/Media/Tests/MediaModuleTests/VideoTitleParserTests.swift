@@ -29,6 +29,22 @@ import Testing
         ("Shape of You", "Ed Sheeran - Topic", "Ed Sheeran", "Shape of You"),
         ("Hello (Official Video)  4K", "AdeleVEVO", "Adele", "Hello"),
         ("-  - Song", "Chan", "Chan", "Song"),
+        // No dash to split on: the pipes separate the song from its artist, a translation and noise.
+        ("CHẠY NGAY ĐI | RUN NOW | SƠN TÙNG M-TP | Official Music Video", "Sơn Tùng M-TP Official", "Sơn Tùng M-TP", "CHẠY NGAY ĐI"),
+        ("NƠI NÀY CÓ ANH | HERE WITH ME | SƠN TÙNG M-TP | OFFICIAL MV", "Sơn Tùng M-TP Official", "Sơn Tùng M-TP", "NƠI NÀY CÓ ANH"),
+        ("TÌNH YÊU CHẮP VÁ ｜ LOVE PATCHWORK ｜ MONO ｜ Official MV", "MONO Official", "MONO", "TÌNH YÊU CHẮP VÁ"),
+        ("Có Chàng Trai Viết Lên Cây | PHAN MẠNH QUỲNH | OFFICIAL MV", "Phan Mạnh Quỳnh Official", "Phan Mạnh Quỳnh", "Có Chàng Trai Viết Lên Cây"),
+        ("Sơn Tùng M-TP | Muộn Rồi Mà Sao Còn (Official Video)", "Sơn Tùng M-TP Official", "Sơn Tùng M-TP", "Muộn Rồi Mà Sao Còn"),
+        ("Nơi Này Có Anh | Lyrics Video", "Sơn Tùng M-TP Official", "Sơn Tùng M-TP", "Nơi Này Có Anh"),
+        ("Chúng Ta Của Sau Này ｜ T.R.I", "T.R.I Official", "T.R.I", "Chúng Ta Của Sau Này"),
+        ("Đừng Hỏi Em | MY TAM | Lyrics", "Mỹ Tâm Official", "Mỹ Tâm", "Đừng Hỏi Em"),
+        ("Levitating | Dua Lipa | Official Music Video", "Dua Lipa", "Dua Lipa", "Levitating"),
+        ("Hello | Adele", "Adele - Topic", "Adele", "Hello"),
+        ("Hãy Trao Cho Anh | Official MV", "Sơn Tùng M-TP Official", "Sơn Tùng M-TP", "Hãy Trao Cho Anh"),
+        ("Em Của Ngày Hôm Qua // Sơn Tùng M-TP // Official MV", "Sơn Tùng M-TP Official", "Sơn Tùng M-TP", "Em Của Ngày Hôm Qua"),
+        // No segment is the channel: the first one is the song and the channel stays the artist.
+        ("Dynamite | BTS | Official MV", "HYBE LABELS", "HYBE LABELS", "Dynamite"),
+        ("Waiting For You | MONO | Prod. by Someone", "Channel", "Channel", "Waiting For You"),
     ]
 
     @Test(arguments: cases)

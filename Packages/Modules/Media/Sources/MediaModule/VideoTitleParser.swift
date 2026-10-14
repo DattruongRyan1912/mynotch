@@ -23,6 +23,8 @@ nonisolated enum VideoTitleParser {
     /// - Parameter splitsOnDash: false when the player reported an album, so `channel` is the real artist and a dash
     ///   belongs to the title ("Song - Remastered 2011"): only the noise goes, and the artist is kept as reported.
     static func parse(title: String, channel: String, splitsOnDash: Bool = true) -> (artist: String, title: String) {
+        // " // " separates the parts of a title like a pipe does.
+        let title = splitsOnDash ? title.replacingOccurrences(of: " // ", with: " | ") : title
         let cleaned = removeNoise(from: title)
         if splitsOnDash, let (left, right) = splitOnFirstSeparator(cleaned) {
             let artist = tidy(removeFeaturing(from: left))
@@ -33,7 +35,10 @@ nonisolated enum VideoTitleParser {
         let segments = cleaned.split(whereSeparator: { "|｜∣".contains($0) }).map { tidy(String($0)) }.filter { !$0.isEmpty }
         // "SONG | ARTIST": the artist's own name is not part of the song.
         let rest = segments.filter { $0.compare(artist, options: [.caseInsensitive, .diacriticInsensitive]) != .orderedSame }
-        let song = tidy(removeFeaturing(from: (rest.isEmpty ? segments : rest).joined(separator: " | ")))
+        let candidates = rest.isEmpty ? segments : rest
+        // Without an album the pipes separate the song from its artist, a translation ("SONG | RUN NOW | ARTIST") and
+        // noise, so the song is the first segment left. With one the title is the player's own: only the artist goes.
+        let song = tidy(removeFeaturing(from: splitsOnDash ? candidates.first ?? "" : candidates.joined(separator: " | ")))
         return (artist, song.isEmpty ? tidy(title) : song)
     }
 
