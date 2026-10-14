@@ -13,7 +13,7 @@ import Testing
 /// and the AI tab in the open notch's narrowest and default width. "Is the Allow button there" is read from the pixels:
 /// its capsule is the only green on the card.
 @MainActor
-@Suite struct PermissionCardLayoutTests {
+@Suite(.serialized) struct PermissionCardLayoutTests {
     let t0 = Date(timeIntervalSince1970: 1_800_000_000)
     let scheduler = ManualScheduler()
 
@@ -118,21 +118,32 @@ import Testing
         return renderer.cgImage.map { NSBitmapImageRep(cgImage: $0) }
     }
 
-    /// True when the picture has the green of the Allow button: its capsule is the only green on the card. Read straight from
-    /// the bytes of a picture drawn as 8-bit RGBA with premultiplied alpha.
-    func hasAllow(_ picture: NSBitmapImageRep?) -> Bool {
-        guard let picture, let bytes = picture.bitmapData, picture.samplesPerPixel == 4, picture.bitsPerSample == 8 else { return false }
+    /// Where the green of the Allow button is in the picture, as the columns it covers; nil when it is not there. Read straight
+    /// from the bytes of a picture drawn as 8-bit RGBA with premultiplied alpha.
+    func allowColumns(_ picture: NSBitmapImageRep?) -> ClosedRange<Int>? {
+        guard let picture, let bytes = picture.bitmapData, picture.samplesPerPixel == 4, picture.bitsPerSample == 8 else { return nil }
         var green = 0
+        var first = Int.max
+        var last = Int.min
         for y in 0..<picture.pixelsHigh {
             let row = bytes + y * picture.bytesPerRow
             for x in 0..<picture.pixelsWide {
                 let alpha = Double(row[4 * x + 3])
                 guard alpha > 12 else { continue }
                 let red = Double(row[4 * x]) / alpha, greenValue = Double(row[4 * x + 1]) / alpha, blue = Double(row[4 * x + 2]) / alpha
-                if greenValue > red + 0.3, greenValue > blue + 0.25 { green += 1 }
+                if greenValue > red + 0.3, greenValue > blue + 0.25 {
+                    green += 1
+                    first = min(first, x)
+                    last = max(last, x)
+                }
             }
         }
-        return green > 30
+        return green > 30 ? first...last : nil
+    }
+
+    /// True when the picture has the green of the Allow button: its capsule is the only green on the card.
+    func hasAllow(_ picture: NSBitmapImageRep?) -> Bool {
+        allowColumns(picture) != nil
     }
 
     /// How tall the card is with all of its text, at `width`: what the layout needs to offer Allow.
@@ -315,5 +326,59 @@ import Testing
                 #expect(drawn == expected, "\(text.prefix(24).debugDescription) at \(size.width) pt")
             }
         }
+    }
+
+    // MARK: A long tool name does not push the card out of the notch
+
+    /// Tool names of `lengths` characters, as an MCP server can choose them.
+    func toolNames() -> [String] {
+        [4, 12, 22, 23, 30, 40, 50, 64, 100].map { String(("mcp__" + String(repeating: "t", count: 100)).prefix($0)) }
+    }
+
+    /// Whatever the tool is called, the card is as wide as the room and nothing of it is cut off at the sides: when `Cho phép` is
+    /// on the card it is whole and where it is for a short tool name, and it is on the card exactly when the text fits.
+    @Test func aToolNameOfAnyLengthKeepsTheStripCardInsideTheStrip() async {
+        for virtualNotchWidth in [CGFloat(0), 185, 300] {
+            let strip = strip(Self.geometry(virtualNotchWidth: virtualNotchWidth))
+            let reference = await allowColumns(stripImage(request("ls"), in: strip))
+            #expect(reference != nil, "short tool at \(strip.width) pt")
+            for name in toolNames() {
+                let asking = request(#"{"a":"b"}"#, tool: name)
+                let columns = await allowColumns(stripImage(asking, in: strip))
+                if let columns { #expect(columns == reference, "\(name.count) characters at \(strip.width) pt: Cho phép at \(columns), not \(String(describing: reference))") }
+                let expected = shouldAllow(asking, placement: .strip, width: strip.width, room: strip.height)
+                #expect((columns != nil) == expected, "\(name.count) characters at \(strip.width) pt")
+            }
+        }
+    }
+
+    @Test func aToolNameOfAnyLengthKeepsTheTabCardInsideTheTab() async {
+        for openWidth in [CGFloat(0), 600, 720] {
+            let size = tab(Self.geometry(openWidth: openWidth))
+            let reference = await allowColumns(tabImage(request("ls"), width: size.width, height: size.height))
+            #expect(reference != nil, "short tool at \(size.width) pt")
+            for name in toolNames() {
+                let asking = request(#"{"a":"b"}"#, tool: name)
+                let columns = await allowColumns(tabImage(asking, width: size.width, height: size.height))
+                if let columns { #expect(columns == reference, "\(name.count) characters in a tab of \(size.width) pt: Cho phép at \(columns), not \(String(describing: reference))") }
+                let expected = shouldAllow(asking, placement: .tab, width: size.width - 2 * PermissionCard.tabInset, room: PermissionCard.tabBudget)
+                #expect((columns != nil) == expected, "\(name.count) characters in a tab of \(size.width) pt")
+            }
+        }
+    }
+
+    @Test func theTitleShowsTheFolderOnlyWhenItIsPlainText() {
+        func title(_ cwd: String?) -> String {
+            let payload = HookPayload(
+                source: "claude", event: "PermissionRequest", sessionID: "s1", cwd: cwd, tool: "Bash", timestamp: t0,
+                detail: PermissionDetail(text: "ls", hiddenLines: 0, isComplete: true)
+            )
+            return PermissionCardText.title(of: PermissionRequest(payload: payload, id: "id")!)
+        }
+        #expect(title("/Users/x/MyNotch") == "Claude Code • MyNotch")
+        #expect(title("/Users/x/D\u{1EF1} \u{00E1}n") == "Claude Code • …")
+        #expect(title("/Users/x/\u{05D0}bc") == "Claude Code • …")
+        #expect(title("/Users/x/pro\u{202E}ject") == "Claude Code • …")
+        #expect(title(nil) == "Claude Code")
     }
 }

@@ -47,9 +47,13 @@ nonisolated enum PermissionCardText {
         }
     }
 
-    /// The agent and, when the request knows it, the project.
+    /// The agent and, when the request knows it, the folder it works in. The folder is shown only when it is plain text, like
+    /// the rest of what the card shows: one with anything else in it (a letter of a script that runs the other way, a look-alike)
+    /// is an ellipsis, since it is context and the user is not asked about it.
     static func title(of request: PermissionRequest) -> String {
-        request.project.map { "\(request.source.displayName) • \($0)" } ?? request.source.displayName
+        guard let project = request.project else { return request.source.displayName }
+        let plain = project.unicodeScalars.allSatisfy { $0.value >= 0x20 && $0.value <= 0x7E }
+        return "\(request.source.displayName) • \(plain ? project : "…")"
     }
 
     static func toolName(of request: PermissionRequest) -> String {
@@ -132,6 +136,12 @@ nonisolated enum PermissionPlacement: Equatable, Sendable {
 /// given. Nothing about the width, the padding or the font is written down for this, so a change to the notch's padding or
 /// size cannot make it wrong. A request that is not whole or not plain text gets only the second.
 ///
+/// `ViewThatFits` judges the height only. It cannot judge the width too: with both axes it compares the ideal size of each
+/// version, which for text is one unwrapped line, and then no command of more than a few characters fits the strip. The
+/// width is kept by making nothing in the card rigid: the texts wrap or truncate and the buttons give way, so a version is
+/// never wider than the room, whatever the tool name or the folder is (`PermissionCardLayoutTests` draws tool names of 4 to
+/// 100 characters at every width and checks the card is where it is for a short one).
+///
 /// A card that has just come up, or that took the place of the one before it, takes no answer until its delay is over, and
 /// changes visibly when it is replaced, so a click that began on the previous one does not land on this one.
 struct PermissionCard: View {
@@ -194,12 +204,14 @@ struct PermissionCardLayout: View {
                 Image(systemName: request.source.systemImage)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.orange)
-                // Never cut: a name of more than `longToolName` characters is in the text, and one of fewer takes less than the row.
+                // Gives way to nothing but the title and the count, so a short name is whole, and a long one is cut with an
+                // ellipsis without making the card wider than the notch: one of more than `longToolName` characters is the first
+                // line of the text as well, where it wraps and is whole.
                 Text(PermissionCardText.toolName(of: request))
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(NotchTokens.primaryText)
                     .lineLimit(1)
-                    .fixedSize()
+                    .layoutPriority(1)
                 Text(PermissionCardText.title(of: request))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(NotchTokens.secondaryText)

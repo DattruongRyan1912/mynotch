@@ -49,7 +49,7 @@ nonisolated final class TailerSpy: @unchecked Sendable {
     let sandbox: Sandbox
     let fileSystem = FakeAgentFileSystem()
     let scheduler = ManualAgentWatcherScheduler()
-    let store = AgentSessionStore(scheduler: ManualScheduler())
+    let store = frozenStore()
     let spy = TailerSpy()
     let session = "11111111-2222-4333-8444-555555555555"
     var watcher: AgentWatcher?

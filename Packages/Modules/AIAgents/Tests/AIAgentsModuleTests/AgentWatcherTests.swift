@@ -102,6 +102,14 @@ enum Line {
     }
 }
 
+/// A store whose clock stands still at the moment it was made, with timers that never run. The transcript lines of these tests
+/// carry the real time of writing, and a turn that ended five seconds before the store's clock reads is already idle: with the
+/// clock free, a test that waited that long for its turn on a busy machine saw `.idle` where it wrote a finish.
+func frozenStore(finishedSeconds: Int = 5) -> AgentSessionStore {
+    let started = Date()
+    return AgentSessionStore(scheduler: ManualScheduler(), finishedSeconds: finishedSeconds, now: { started })
+}
+
 /// The watcher's clock moved by hand: nothing it schedules runs until the test says so. Timers run on the
 /// watcher's own queue, as the real ones do, and `settle` waits for that queue, so a test that has fired a file
 /// event and settled knows the watcher has seen it.
@@ -196,7 +204,7 @@ nonisolated final class RecordingFileSystem: AgentFileSystem, @unchecked Sendabl
 
     init() throws {
         sandbox = try Sandbox()
-        store = AgentSessionStore(scheduler: ManualScheduler())
+        store = frozenStore()
         fileSystem.setAlive(4242)
     }
 
@@ -267,6 +275,31 @@ nonisolated final class RecordingFileSystem: AgentFileSystem, @unchecked Sendabl
         #expect(claudeSession()?.state == .finished)
         // The tool record's usage was counted once although the file was scanned twice.
         #expect(claudeSession()?.usage.output == 11)
+    }
+
+    /// The failure these suites had on a busy machine: a scan that ran long after the line was written read it as a turn that
+    /// ended long ago. A store with a free clock lets it go idle; the frozen one of these suites does not, however long the
+    /// scan waited for its turn.
+    @Test func aFinishIsStillFinishedWhateverTimeThePickUpTook() async throws {
+        let late = AgentSessionStore(scheduler: ManualScheduler(), finishedSeconds: 1)
+        let still = frozenStore(finishedSeconds: 1)
+        var results: [AgentState?] = []
+        for store in [late, still] {
+            try liveClaudeSession()
+            let watcher = AgentWatcher(
+                store: store, claudeRoot: sandbox.claude, codexRoot: nil, fileSystem: fileSystem, debounce: .milliseconds(100),
+                heartbeat: .seconds(60), scheduler: ManualAgentWatcherScheduler()
+            )
+            watcher.start()
+            await watcher.rescan()
+            try sandbox.append(Line.finish(session), to: sandbox.transcript(session))
+            try await Task.sleep(for: .milliseconds(1_300))
+            await watcher.rescan()
+            results.append(store.sessions[AgentSessionKey(source: .claude, sessionID: session)]?.state)
+            watcher.stop()
+            try FileManager.default.removeItem(at: sandbox.claude)
+        }
+        #expect(results == [.idle, .finished])
     }
 
     @Test func aFileEventRescansAfterTheDebounce() async throws {
