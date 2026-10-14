@@ -18,11 +18,30 @@ public final class NotchViewModel {
     public private(set) var toastContent: AnyView?
     public private(set) var lastTab: ModuleID?
     public private(set) var isPointerInside = false
+    /// The part of the notch the pointer is over, which tells hovering the notch from hovering a bubble or the list.
+    public private(set) var hover: PointerZone = .outside
     /// Set by the owner when the activity center has something to show.
     public var hasActivity = false {
         didSet {
             guard hasActivity != oldValue else { return }
             NotchLog.record("activity \(hasActivity) display=\(displayState.logDescription)")
+        }
+    }
+    /// Set by the owner: how many bubbles of other activities are beside the notch. With none there is no list to open,
+    /// and one that is open goes.
+    public var bubbleCount = 0 {
+        didSet {
+            guard bubbleCount != oldValue else { return }
+            NotchLog.record("bubbles \(bubbleCount) display=\(displayState.logDescription)")
+            if bubbleCount == 0 { hideList() }
+        }
+    }
+    /// The list of all live activities under the collapsed notch, opened by hovering a bubble. It is only what hangs
+    /// under the notch: `state` does not change, so the notch itself neither resizes nor blinks.
+    public private(set) var isListOpen = false {
+        didSet {
+            guard isListOpen != oldValue else { return }
+            NotchLog.record("list \(isListOpen ? "open" : "closed") bubbles=\(bubbleCount) display=\(displayState.logDescription)")
         }
     }
     /// Keeps the notch open until unpinned or explicitly closed. Any window of MyNotch other than the notch
@@ -52,6 +71,7 @@ public final class NotchViewModel {
     @ObservationIgnored private let availableTabs: () -> [ModuleID]
     @ObservationIgnored private let delays: () -> (open: Duration, close: Duration)
     @ObservationIgnored private var pendingOpen: ScheduledAction?
+    @ObservationIgnored private var pendingList: ScheduledAction?
     @ObservationIgnored private var pendingClose: ScheduledAction?
     @ObservationIgnored private var toastTimer: ScheduledAction?
     /// A toast is shown for at least its duration; only after that may a pointer exit close it.
@@ -67,10 +87,12 @@ public final class NotchViewModel {
         self.delays = delays
     }
 
+    /// The pointer is over the notch itself (the collapsed pill and its strip, or the open notch).
     public func pointerEntered() {
         NotchLog.record("pointer entered state=\(state.logDescription)")
-        isPointerInside = true
+        setHover(.notch)
         pendingClose?.cancel()
+        cancelPendingList()
         guard !state.isExpanded, pendingOpen == nil else { return }
         pendingOpen = scheduler.schedule(after: delays().open) { [weak self] in
             self?.pendingOpen = nil
@@ -80,10 +102,67 @@ public final class NotchViewModel {
 
     public func pointerExited() {
         NotchLog.record("pointer exited state=\(state.logDescription)")
-        isPointerInside = false
+        setHover(.outside)
         pendingOpen?.cancel()
         pendingOpen = nil
+        cancelPendingList()
         scheduleCloseIfPointerOutside()
+    }
+
+    /// The pointer is over a bubble: after the open delay the list of all activities opens under the notch. Over the
+    /// bubbles the notch itself does not open, so a hover that began on the pill gives way to this one.
+    public func bubblesEntered() {
+        NotchLog.record("pointer entered bubbles state=\(state.logDescription)")
+        setHover(.bubbles)
+        pendingClose?.cancel()
+        pendingOpen?.cancel()
+        pendingOpen = nil
+        guard !state.isExpanded, bubbleCount > 0, !isListOpen, pendingList == nil else { return }
+        pendingList = scheduler.schedule(after: delays().open) { [weak self] in
+            self?.pendingList = nil
+            self?.showList()
+        }
+    }
+
+    /// The pointer is over the open list, which keeps it open and keeps the notch from opening.
+    public func listEntered() {
+        NotchLog.record("pointer entered list state=\(state.logDescription)")
+        setHover(.list)
+        pendingClose?.cancel()
+        pendingOpen?.cancel()
+        pendingOpen = nil
+        cancelPendingList()
+    }
+
+    /// For the window controller: the zone under the pointer changed.
+    public func pointerMoved(to zone: PointerZone) {
+        switch zone {
+        case .outside: pointerExited()
+        case .notch: pointerEntered()
+        case .bubbles: bubblesEntered()
+        case .list: listEntered()
+        }
+    }
+
+    /// Opens the list at once, for a bubble that was activated without a hover (VoiceOver, the keyboard). Only a
+    /// collapsed notch with a bubble has one.
+    public func showList() {
+        guard !state.isExpanded, bubbleCount > 0 else { return }
+        cancelPendingList()
+        isListOpen = true
+    }
+
+    public func hasTab(of module: ModuleID) -> Bool {
+        availableTabs().contains(module)
+    }
+
+    /// Opens `module`'s tab on purpose. False, and nothing happens, when the module has no tab (a module of system
+    /// notices) or is not a module at all (the debug publisher's).
+    @discardableResult
+    public func openTab(of module: ModuleID) -> Bool {
+        guard hasTab(of: module) else { return false }
+        open(tab: module)
+        return true
     }
 
     /// Opens the tabs from the closed, compact or toast state.
@@ -105,6 +184,7 @@ public final class NotchViewModel {
         NotchLog.record("show tab=\(tab?.rawValue ?? "-") onPurpose=\(onPurpose) from=\(state.logDescription)")
         pendingOpen?.cancel()
         pendingOpen = nil
+        hideList()
         pendingClose?.cancel()
         toastTimer?.cancel()
         toastExpired = true
@@ -123,6 +203,7 @@ public final class NotchViewModel {
         NotchLog.record("toast duration=\(duration) from=\(state.logDescription)")
         pendingOpen?.cancel()
         pendingOpen = nil
+        hideList()
         pendingClose?.cancel()
         toastTimer?.cancel()
         // A toast replacing another toast keeps the tab the first one covered.
@@ -139,7 +220,7 @@ public final class NotchViewModel {
     /// (Settings, alerts, sheets, popovers, menus). Pinned notches stay open, so a module pins the notch for any
     /// auxiliary UI it shows; so do notches with a drag in progress.
     public func clickedOutside() {
-        guard state.isExpanded, !isPinned, !isDragging else { return }
+        guard state.isExpanded || isListOpen, !isPinned, !isDragging else { return }
         NotchLog.record("close: click outside")
         close()
     }
@@ -150,6 +231,7 @@ public final class NotchViewModel {
         NotchLog.record("close from=\(state.logDescription)")
         pendingOpen?.cancel()
         pendingOpen = nil
+        hideList()
         pendingClose?.cancel()
         toastTimer?.cancel()
         toastExpired = true
@@ -170,7 +252,7 @@ public final class NotchViewModel {
 
     /// A drag carrying data entered the notch: opens `tab` on purpose and keeps the notch open until the drag ends.
     public func dragEntered(tab: ModuleID?) {
-        isPointerInside = true
+        setHover(.notch)
         open(tab: tab)
         setDragging(true)
     }
@@ -190,8 +272,24 @@ public final class NotchViewModel {
         }
     }
 
+    private func setHover(_ zone: PointerZone) {
+        hover = zone
+        isPointerInside = zone != .outside
+    }
+
+    private func cancelPendingList() {
+        pendingList?.cancel()
+        pendingList = nil
+    }
+
+    private func hideList() {
+        cancelPendingList()
+        isListOpen = false
+    }
+
+    /// Closes what the pointer left: the open notch, or the list under the collapsed one, after the close delay.
     private func scheduleCloseIfPointerOutside() {
-        guard state.isExpanded, !isPointerInside, !isPinned, !isDragging, state != .toast || toastExpired else { return }
+        guard state.isExpanded || isListOpen, !isPointerInside, !isPinned, !isDragging, state != .toast || toastExpired else { return }
         pendingClose?.cancel()
         NotchLog.record("close scheduled")
         pendingClose = scheduler.schedule(after: delays().close) { [weak self] in

@@ -11,6 +11,12 @@ public enum NotchTokens {
     public static let stripPadding: CGFloat = 12
     /// The one animation of the notch's size and shape; every state change moves it with this spring.
     public static let spring = Animation.spring(response: 0.38, dampingFraction: 0.8)
+    /// A bubble beside the collapsed notch comes and goes at this fraction of its size, never from nothing.
+    static let bubbleAppearScale = 0.4
+    /// An activity's `minimal` view inside its bubble.
+    static let bubbleIconSize: CGFloat = 18
+    /// Icon of a row of the list of all activities.
+    static let listIconSize: CGFloat = 16
 
     /// Content entering the notch follows the shape a moment later on the same spring.
     static let enter = spring.delay(0.08)

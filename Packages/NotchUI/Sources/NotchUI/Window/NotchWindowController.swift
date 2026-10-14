@@ -23,6 +23,8 @@ final class NotchWindowController {
     private var keySink: KeySinkPanel?
     /// Strip height seen by the last observation, so only a show or hide is logged.
     private var lastStripHeight: CGFloat = 0
+    /// Which activities were primary and in bubbles at the last observation, so only a change is logged.
+    private var lastActivityIDs = ""
     /// Pasteboard types of the drag in progress, empty when nothing is being dragged.
     private var dragTypes: [String] = []
     /// Whether the mouse button went down inside the notch, so a drag in progress started there (an item dragged out).
@@ -64,6 +66,8 @@ final class NotchWindowController {
         NotchLog.record("update display=\(displayID) panel \(panel.frame.logDescription) -> \(newGeometry.panelFrame(in: screen.frame).logDescription)")
         screenFrame = screen.frame
         geometry = newGeometry
+        // The panel may hold fewer or more bubbles with the new geometry.
+        model.bubbleCount = CompactAccessories.bubbleCount(activities: activities, geometry: newGeometry)
         // The new shape first, then the frame: `setFrame(display: true)` draws at once, and it must not draw the old shape
         // in the new frame.
         hosting.rootView = NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry)
@@ -101,7 +105,8 @@ final class NotchWindowController {
         guard isVisible else { return }
         let dropTab = dragTypes.isEmpty
             ? nil : DropRouting.tab(for: dragTypes, tabs: registry.tabs, preferring: model.displayState.shownTab(tabUnderToast: model.tabUnderToast))
-        let inside = currentHitRect(dragging: dropTab != nil).contains(point)
+        let zone = zone(at: point, dragging: dropTab != nil)
+        let inside = zone != .outside
         if panel.ignoresMouseEvents == inside {
             panel.ignoresMouseEvents = !inside
             NotchLog.record("passthrough ignoresMouse=\(!inside) state=\(model.displayState.logDescription)")
@@ -111,10 +116,8 @@ final class NotchWindowController {
         )
         if case .enter(let tab) = action {
             model.dragEntered(tab: tab)
-        } else if inside, !model.isPointerInside {
-            model.pointerEntered()
-        } else if !inside, model.isPointerInside {
-            model.pointerExited()
+        } else if zone != model.hover {
+            model.pointerMoved(to: zone)
         }
         if action == .exit { model.dragExited() }
     }
@@ -126,7 +129,7 @@ final class NotchWindowController {
         dragTypes = []
         dragStartedInside = false
         guard isVisible else { return }
-        let inside = currentHitRect().contains(point)
+        let inside = zone(at: point, dragging: false) != .outside
         dragStartedInside = inside
         if !inside { model.clickedOutside() }
     }
@@ -157,13 +160,15 @@ final class NotchWindowController {
         updatePointer(NSEvent.mouseLocation, isRefresh: true)
     }
 
-    private func currentHitRect(dragging: Bool = false) -> CGRect {
+    /// What the pointer is over: the notch (pill, strip, open notch), a bubble beside it, or the list under it. The
+    /// bubbles and the list come from the same `CompactAccessories` the view draws, so the two cannot disagree.
+    private func zone(at point: CGPoint, dragging: Bool) -> PointerZone {
         let state = model.displayState
-        let contentHeight = registry.contentHeight(for: state, tabUnderToast: model.tabUnderToast)
-        let strip = activities.stripHeight
-        return dragging
-            ? geometry.dragHitRect(for: state, contentHeight: contentHeight, bottomHeight: strip, in: screenFrame)
-            : geometry.hitRect(for: state, contentHeight: contentHeight, bottomHeight: strip, in: screenFrame)
+        let accessories = CompactAccessories(activities: activities, geometry: geometry, isListOpen: model.isListOpen, state: state)
+        return geometry.pointerZone(
+            at: point, state: state, contentHeight: registry.contentHeight(for: state, tabUnderToast: model.tabUnderToast),
+            strip: activities.stripHeight, bubbles: accessories.bubbles, listRows: accessories.listRows, dragging: dragging, in: screenFrame
+        )
     }
 
     /// The panel may become key while the shown tab accepts the keyboard, and hands the keyboard back to the app in
@@ -220,38 +225,69 @@ final class NotchWindowController {
         model.clickedOutside()
     }
 
+    /// What the controller reacts to; any change of it runs `observe`'s loop body once.
+    private struct Observed: Equatable {
+        var hasActivity: Bool
+        /// Ids and the count of what is hidden behind the bubbles, for the log; module ids and fixed activity ids only.
+        var activityIDs: String
+        var stripHeight: CGFloat
+        /// Bubbles beside the notch, and rows of the list while it is open: both move the hit area.
+        var bubbles: Int
+        var listRows: Int
+        var state: NotchState
+        var contentHeight: CGFloat
+        var wantsKeyboard: Bool
+        var focusesKeyboard: Bool
+        var isDragging: Bool
+    }
+
     private func observe() {
         observation = Task { [weak self, activities, registry, model] in
-            for await (hasActivity, stripHeight, state, contentHeight, wantsKeyboard, focusesKeyboard, isDragging) in Observations({
+            for await observed in Observations({ [weak self] () -> Observed in
                 let state = model.displayState
                 let covered = model.tabUnderToast
-                return (
-                    activities.current != nil,
-                    activities.stripHeight,
-                    state,
-                    registry.contentHeight(for: state, tabUnderToast: covered),
-                    NotchKeyboardPolicy.wantsKeyboard(state: state, tabUnderToast: covered, tabs: registry.tabs),
-                    NotchKeyboardPolicy.focusesKeyboard(
+                // The geometry is the controller's own; it only changes through `update`, which sets the bubble count itself.
+                let geometry = self?.geometry
+                let bubbles = geometry.map { CompactAccessories.bubbleCount(activities: activities, geometry: $0) } ?? 0
+                return Observed(
+                    hasActivity: activities.current != nil,
+                    activityIDs: "primary=\(activities.current?.id ?? "-") others=\(activities.others.map(\.id)) hidden=\(activities.hiddenCount)",
+                    stripHeight: activities.stripHeight,
+                    bubbles: bubbles,
+                    listRows: geometry.map {
+                        CompactAccessories(activities: activities, geometry: $0, isListOpen: model.isListOpen, state: state).listRows
+                    } ?? 0,
+                    state: state,
+                    contentHeight: registry.contentHeight(for: state, tabUnderToast: covered),
+                    wantsKeyboard: NotchKeyboardPolicy.wantsKeyboard(state: state, tabUnderToast: covered, tabs: registry.tabs),
+                    focusesKeyboard: NotchKeyboardPolicy.focusesKeyboard(
                         state: state, tabUnderToast: covered, tabs: registry.tabs, onPurpose: model.isOpenedOnPurpose
                     ),
-                    model.isDragging
+                    isDragging: model.isDragging
                 )
             }) {
                 guard let self else { return }
+                let (hasActivity, stripHeight, state) = (observed.hasActivity, observed.stripHeight, observed.state)
                 NotchLog.record(
-                    "observed display=\(state.logDescription) activity=\(hasActivity) strip=\(stripHeight) contentHeight=\(contentHeight) "
-                        + "wantsKeyboard=\(wantsKeyboard) focusesKeyboard=\(focusesKeyboard) dragging=\(isDragging)"
+                    "observed display=\(state.logDescription) activity=\(hasActivity) strip=\(stripHeight) bubbles=\(observed.bubbles) "
+                        + "list=\(observed.listRows) contentHeight=\(observed.contentHeight) wantsKeyboard=\(observed.wantsKeyboard) "
+                        + "focusesKeyboard=\(observed.focusesKeyboard) dragging=\(observed.isDragging)"
                 )
                 self.model.hasActivity = hasActivity
+                self.model.bubbleCount = observed.bubbles
+                if observed.activityIDs != self.lastActivityIDs {
+                    NotchLog.record("activities \(observed.activityIDs) bubbles=\(observed.bubbles)")
+                    self.lastActivityIDs = observed.activityIDs
+                }
                 if stripHeight != self.lastStripHeight {
                     // The panel is not touched for a strip: only the hit area below changes, in `refreshHitTesting`.
                     NotchLog.record("strip \(self.lastStripHeight) -> \(stripHeight) display=\(state.logDescription) \(self.panel.logSummary)")
                     self.lastStripHeight = stripHeight
                 }
                 // A finished drag (drop, or the pointer left) must not leave its types behind for later refreshes.
-                if !isDragging { self.dragTypes = [] }
+                if !observed.isDragging { self.dragTypes = [] }
                 self.refreshHitTesting()
-                self.updateKeyboard(wants: wantsKeyboard, focuses: focusesKeyboard)
+                self.updateKeyboard(wants: observed.wantsKeyboard, focuses: observed.focusesKeyboard)
             }
         }
     }

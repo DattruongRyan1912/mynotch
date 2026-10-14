@@ -12,6 +12,8 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     /// Tallest strip under the collapsed notch. The panel never resizes and holds `NotchTab.heightRange.upperBound`
     /// below the notch, so a strip this tall always fits inside it.
     public static let maxBottomHeight: CGFloat = 80
+    /// Most the collapsed notch can grow downward for anything (a strip or the list): what the panel holds below it.
+    static let maxExtraHeight: CGFloat = NotchTab.heightRange.upperBound
 
     public let kind: NotchKind
     /// Size of the physical (or virtual) notch body.
@@ -48,8 +50,8 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
         return min(requested, Self.maxBottomHeight)
     }
 
-    /// Full shape size, including the top "ears" that blend into the menu bar. `bottomHeight` is the strip the
-    /// current activity asks for; the collapsed notch grows by it, other states ignore it.
+    /// Full shape size, including the top "ears" that blend into the menu bar. `bottomHeight` is how far the collapsed
+    /// notch grows downward, for the strip or the open list (see `bottomHeight(for:strip:listRows:)`); other states ignore it.
     public func shapeSize(for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, bottomHeight: CGFloat = 0) -> CGSize {
         let ears = 2 * cornerRadii(for: state).top
         switch state {
@@ -58,13 +60,19 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
         case .compact:
             return CGSize(
                 width: notchSize.width + ears + 2 * config.compactSideWidth,
-                height: notchSize.height + self.bottomHeight(for: state, requested: bottomHeight)
+                height: notchSize.height + self.extraHeight(for: state, requested: bottomHeight)
             )
         case .open, .toast:
             let width = min(max(config.openWidth, 480), Self.maxOpenWidth)
             let content = min(max(contentHeight, NotchTab.heightRange.lowerBound), NotchTab.heightRange.upperBound)
             return CGSize(width: width, height: notchSize.height + content)
         }
+    }
+
+    /// A height already resolved by `bottomHeight(for:strip:listRows:)`, held to what the fixed panel has below the notch.
+    private func extraHeight(for state: NotchState, requested: CGFloat) -> CGFloat {
+        guard state == .compact, requested > 0 else { return 0 }
+        return min(requested, Self.maxExtraHeight)
     }
 
     /// Fixed panel size: the largest the notch can ever get.

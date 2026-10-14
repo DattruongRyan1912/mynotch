@@ -19,14 +19,39 @@ struct NotchRootView: View {
 
     private var contentHeight: CGFloat { registry.contentHeight(for: state, tabUnderToast: model.tabUnderToast) }
 
-    /// How far the collapsed notch grows for the current activity's strip; 0 in every other state.
-    private var stripHeight: CGFloat { geometry.bottomHeight(for: state, requested: activities.stripHeight) }
+    /// The bubbles and the open list that hang off the collapsed notch; nothing in every other state.
+    private var accessories: CompactAccessories {
+        CompactAccessories(activities: activities, geometry: geometry, isListOpen: model.isListOpen, state: state)
+    }
 
-    /// Everything that moves the shape. The notch animates all of it with the one spring, so a strip showing or
-    /// hiding is a single height change, not a second animation next to the state's.
+    /// How far the collapsed notch grows: for the open list, which takes the strip's place, else for the current
+    /// activity's strip; 0 in every other state.
+    private func bottomHeight(_ accessories: CompactAccessories) -> CGFloat {
+        geometry.bottomHeight(for: state, strip: activities.stripHeight, listRows: accessories.listRows)
+    }
+
+    /// Everything that moves the shape. The notch animates all of it with the one spring, so a strip or the list
+    /// showing or hiding is a single height change, not a second animation next to the state's. The bubbles are not
+    /// part of it: they come and go beside the notch without touching its shape.
     private struct Layout: Equatable {
         let state: NotchState
-        let strip: CGFloat
+        let bottom: CGFloat
+    }
+
+    /// What names an activity to a person and to VoiceOver: its summary, else its module's name.
+    private func label(for entry: ActivityCenter.Entry) -> String {
+        ActivityLabel.text(
+            summary: entry.activity.summary,
+            displayName: registry.modules.first { $0.descriptor.id == entry.module }?.descriptor.displayName,
+            module: entry.module
+        )
+    }
+
+    /// A bubble opens its module's tab; one that has none (or "+N") opens the list, which VoiceOver and the keyboard
+    /// have no hover to open.
+    private func activate(_ slot: ActivitySlot) {
+        if case .activity(let entry) = slot, model.openTab(of: entry.module) { return }
+        model.showList()
     }
 
     private var isOpen: Bool {
@@ -45,33 +70,53 @@ struct NotchRootView: View {
     }
 
     var body: some View {
-        let strip = stripHeight
-        let size = geometry.shapeSize(for: state, contentHeight: contentHeight, bottomHeight: strip)
+        let accessories = accessories
+        let bottom = bottomHeight(accessories)
+        let size = geometry.shapeSize(for: state, contentHeight: contentHeight, bottomHeight: bottom)
         let radii = geometry.cornerRadii(for: state)
-        let _ = NotchLog.record("body display=\(state.logDescription) size=\(size.width)x\(size.height) strip=\(strip) shownTab=\(shownTab?.id.rawValue ?? "-")")
+        let _ = NotchLog.record(
+            "body display=\(state.logDescription) size=\(size.width)x\(size.height) strip=\(activities.stripHeight) "
+                + "bottom=\(bottom) bubbles=\(accessories.bubbles) list=\(accessories.listRows) shownTab=\(shownTab?.id.rawValue ?? "-")"
+        )
         let shape = NotchShape(topRadius: radii.top, bottomRadius: radii.bottom)
-        shape
-            .fill(NotchTokens.background)
-            .overlay(alignment: .top) {
-                content
-                    .padding(.horizontal, radii.top)
-                    .environment(\.notch, NotchHandle(model: model))
-            }
-            .clipShape(shape)
-            .frame(width: size.width, height: size.height)
-            .contentShape(shape)
-            // Once open, taps belong to the tab content; the root tap only opens the notch.
-            .gesture(TapGesture().onEnded { model.click() }, including: isOpen ? .subviews : .all)
-            .animation(NotchTokens.spring, value: Layout(state: state, strip: strip))
-            // SwiftUI only reports targeting here. The window controller starts drag mode from the pointer, so
-            // only the end of a drag is forwarded, and the getter just reflects the model.
-            .onDrop(of: allDropTypes, isTargeted: Binding(get: { model.isDragging }, set: { if !$0 { model.setDragging(false) } })) { providers in
-                drop(providers)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        ZStack(alignment: .top) {
+            shape
+                .fill(NotchTokens.background)
+                .overlay(alignment: .top) {
+                    content(accessories)
+                        .padding(.horizontal, radii.top)
+                        .environment(\.notch, NotchHandle(model: model))
+                }
+                .clipShape(shape)
+                .frame(width: size.width, height: size.height)
+                .contentShape(shape)
+                // Once open, taps belong to the tab content; the root tap only opens the notch.
+                .gesture(TapGesture().onEnded { model.click() }, including: isOpen ? .subviews : .all)
+                .animation(NotchTokens.spring, value: Layout(state: state, bottom: bottom))
+                // SwiftUI only reports targeting here. The window controller starts drag mode from the pointer, so
+                // only the end of a drag is forwarded, and the getter just reflects the model.
+                .onDrop(of: allDropTypes, isTargeted: Binding(get: { model.isDragging }, set: { if !$0 { model.setDragging(false) } })) { providers in
+                    drop(providers)
+                }
+            bubbles
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    @ViewBuilder private var content: some View {
+    /// The bubbles of the other live activities, beside the collapsed notch only. They appear and go with the pill's
+    /// own content, and individually (and when they reorder) with the notch's spring; none of it touches the shape.
+    @ViewBuilder private var bubbles: some View {
+        if state == .compact {
+            ActivityBubbles(
+                slots: ActivitySlot.bubbles(of: activities, capacity: geometry.bubbleCapacity),
+                geometry: geometry, label: label(for:), activate: activate
+            )
+            .transition(.asymmetric(insertion: .opacity.animation(NotchTokens.enter), removal: .opacity.animation(NotchTokens.leave)))
+            .notchLogLifecycle("bubbles")
+        }
+    }
+
+    @ViewBuilder private func content(_ accessories: CompactAccessories) -> some View {
         switch state {
         case .closed:
             EmptyView()
@@ -84,11 +129,21 @@ struct NotchRootView: View {
                         entry.activity.trailing.frame(width: geometry.config.compactSideWidth)
                     }
                     .frame(height: geometry.notchSize.height)
-                    if stripHeight > 0, let bottom = entry.activity.bottom {
-                        // Laid out at its final height at once and revealed by the growing shape's clip, so the strip's
-                        // text never re-flows while the spring runs; it fades like the rest of the pill's content.
+                    // Both are laid out at their final height at once and revealed by the growing shape's clip, so the text
+                    // never re-flows while the spring runs; they fade like the rest of the pill's content. The list takes
+                    // the strip's place while it is open.
+                    if accessories.listRows > 0 {
+                        ActivityList(
+                            rows: ActivitySlot.listRows(of: activities, capacity: NotchGeometry.maxListRows),
+                            label: label(for:), hasTab: model.hasTab(of:), open: { model.openTab(of: $0) }
+                        )
+                        .frame(height: bottomHeight(accessories))
+                        .padding(.horizontal, NotchTokens.stripPadding)
+                        .transition(.asymmetric(insertion: .opacity.animation(NotchTokens.enter), removal: .opacity.animation(NotchTokens.leave)))
+                        .notchLogLifecycle("list")
+                    } else if bottomHeight(accessories) > 0, let bottom = entry.activity.bottom {
                         bottom
-                            .frame(height: stripHeight)
+                            .frame(height: bottomHeight(accessories))
                             .padding(.horizontal, NotchTokens.stripPadding)
                             .transition(.asymmetric(insertion: .opacity.animation(NotchTokens.enter), removal: .opacity.animation(NotchTokens.leave)))
                             .notchLogLifecycle("strip")
