@@ -25,7 +25,26 @@ import Testing
 
         #expect(try item(secret, in: history).isSensitive)
         #expect(try !item(plain, in: history).isSensitive)
-        #expect(try item(plain, in: history).sensitive == nil)
+        #expect(try item(plain, in: history).sensitive == false)
+    }
+
+    @Test func aCopyIsNeverLeftUnknown() throws {
+        var history = ClipboardHistory()
+        let id = add("xin chào", sensitive: false, to: &history)
+        // Unknown is for what was saved before MyNotch tracked it, not for anything it captures.
+        #expect(try item(id, in: history).sensitive != nil)
+    }
+
+    @Test func aCopyThatIsNotMarkedDoesNotClearWhatAnEarlierOneWas() throws {
+        var legacy = ClipboardHistory(items: [
+            ClipboardItem(
+                id: UUID(), content: .text("cũ"), contentHash: ClipboardContent.hash(of: .text("cũ")), copiedAt: Self.start,
+                sourceBundleID: nil, sourceAppName: nil
+            ),
+        ])
+        legacy.add(.text("cũ"), hash: ClipboardContent.hash(of: .text("cũ")), source: (nil, nil), at: Self.start + 1)
+        // The earlier copy may have been a secret; one that is not marked says nothing about it.
+        #expect(legacy.items[0].sensitive == nil)
     }
 
     @Test func aTextThatWasASecretOnceStaysOneWhenCopiedAgainWithoutTheMark() throws {
@@ -43,16 +62,20 @@ import Testing
         #expect(try item(id, in: history).isSensitive)
     }
 
-    @Test func theFlagIsStoredOnlyWhenItIsTrue() throws {
+    @Test func theFlagIsStoredWhenKnownAndLeftOutWhenNot() throws {
         var history = ClipboardHistory()
         _ = add("mật khẩu", sensitive: true, to: &history)
         _ = add("xin chào", sensitive: false, to: &history, at: 1)
+        let unknown = ClipboardItem(
+            id: UUID(), content: .text("cũ"), contentHash: "h-old", copiedAt: Self.start, sourceBundleID: nil, sourceAppName: nil
+        )
+        history.items.append(unknown)
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let text = String(decoding: try encoder.encode(history.items), as: UTF8.self)
 
-        #expect(text.components(separatedBy: "\"sensitive\"").count == 2)
-        #expect(text.contains("\"sensitive\":true"))
+        #expect(text.components(separatedBy: "\"sensitive\"").count == 3)
+        #expect(text.contains("\"sensitive\":true") && text.contains("\"sensitive\":false"))
         #expect(try JSONDecoder().decode([ClipboardItem].self, from: Data(text.utf8)) == history.items)
     }
 

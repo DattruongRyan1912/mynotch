@@ -114,17 +114,24 @@ final class BackupWorld {
         _ url: URL, known: Set<String> = [], limits: ZipLimits = ClipboardBackupFormat.limits,
         now: Date = BackupWorld.base.addingTimeInterval(20_000), progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> ClipboardRestorePlan {
-        try await ClipboardBackupReader.plan(
-            archiveAt: url, knownHashes: known, imagesDirectory: restoredImages, now: now, limits: limits, progress: progress
-        )
+        try await ClipboardBackupReader.plan(archiveAt: url, knownHashes: known, now: now, limits: limits, progress: progress)
     }
 
-    /// Exports and imports into `existing`, returning the history after the merge.
+    /// Stores the images of a plan, as the second step of a restore does.
+    @discardableResult
+    func writeImages(
+        _ plan: ClipboardRestorePlan, from url: URL, progress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws -> ClipboardImageWrite {
+        try await ClipboardBackupReader.writeImages(of: plan, from: url, to: restoredImages, progress: progress)
+    }
+
+    /// Exports and imports into `existing`, returning the history after the merge. The images are stored too.
     func roundTrip(
         _ options: ClipboardBackupOptions = ClipboardBackupOptions(skipSensitive: false), into existing: ClipboardHistory = ClipboardHistory()
     ) async throws -> (history: ClipboardHistory, plan: ClipboardRestorePlan, result: ClipboardHistory.RestoreResult) {
         let (url, _) = try await export(options)
         let plan = try await plan(url, known: Set(existing.items.map(\.contentHash)))
+        try await writeImages(plan, from: url)
         var merged = existing
         let result = merged.restore(plan)
         return (merged, plan, result)

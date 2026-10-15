@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -50,6 +51,11 @@ nonisolated struct ClipboardBoardIcon: Identifiable, Hashable, Sendable {
     /// `Image(systemName:)`, but a long or odd one is better replaced than kept.
     static func isValidName(_ name: String) -> Bool {
         name.wholeMatch(of: /[a-z0-9.]{1,64}/) != nil
+    }
+
+    /// Whether this macOS has a symbol of that name, which a name that merely looks right may not: it would show a blank icon.
+    @MainActor static func exists(_ name: String) -> Bool {
+        isValidName(name) && NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil
     }
 }
 

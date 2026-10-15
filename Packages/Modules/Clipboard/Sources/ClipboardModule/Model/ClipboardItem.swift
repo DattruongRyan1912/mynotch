@@ -11,14 +11,19 @@ nonisolated struct ClipboardItem: Identifiable, Codable, Sendable, Hashable {
     /// Whether a text is code, and in which language, decided when it was copied. nil for other kinds, and for a text
     /// saved before this existed until the module has looked at it, a batch at a time, after it starts.
     var codeDetection: CodeDetection?
-    /// true when the app that copied it marked it as a secret (a password manager's password or code), which only matters
-    /// when the user chose to keep such copies. nil otherwise, and for items saved before this existed.
+    /// Whether the app that copied it marked it as a secret (a password manager's password or code): true or false for a
+    /// copy made while MyNotch tracked that, nil for one it did not, which is not known to be either. Only matters when the
+    /// user keeps such copies, and for a backup.
     var sensitive: Bool?
+    /// true for an item a restore was told to keep whatever the limits say: `prune` neither removes it nor counts it. Ends
+    /// when the item is copied or used again, which makes it an ordinary item with a date of now. nil otherwise.
+    var exemptFromLimits: Bool?
 
     /// The language of a text that is code.
     var codeLanguage: CodeLanguage? { codeDetection?.language }
     var isCode: Bool { codeLanguage != nil }
     var isSensitive: Bool { sensitive == true }
+    var isExemptFromLimits: Bool { exemptFromLimits == true }
 }
 
 /// A named collection of pinned items; items in any board are never pruned. Boards are listed in the order of

@@ -237,16 +237,12 @@ import Testing
         #expect(plan.items.isEmpty && plan.unreadable == 1)
     }
 
-    @Test func linksAndColoursAreCheckedForShape() async throws {
+    @Test func coloursAreCheckedForShape() async throws {
         let good = [
-            BackupWorld.manifestItem(UUID(), kind: "link", extra: ["link": "https://example.com/x"]),
             BackupWorld.manifestItem(UUID(), kind: "color", extra: ["color": "#abcdef"]),
             BackupWorld.manifestItem(UUID(), kind: "color", extra: ["color": "#112233CC", "colorOriginal": "rgba(17, 34, 51, 0.8)"]),
         ]
         let bad = [
-            BackupWorld.manifestItem(UUID(), kind: "link", extra: ["link": "not a url"]),
-            BackupWorld.manifestItem(UUID(), kind: "link", extra: ["link": "example.com"]),
-            BackupWorld.manifestItem(UUID(), kind: "link"),
             BackupWorld.manifestItem(UUID(), kind: "color", extra: ["color": "red"]),
             BackupWorld.manifestItem(UUID(), kind: "color", extra: ["color": "#12345"]),
             BackupWorld.manifestItem(UUID(), kind: "color", extra: ["color": "#GGGGGG"]),
@@ -254,10 +250,36 @@ import Testing
         ]
         let plan = try await world.plan(try world.craft(manifest: BackupWorld.manifest(items: good + bad)))
 
+        #expect(plan.items.map(\.content) == [.color(hex: "#ABCDEF"), .color(hex: "#112233CC", original: "rgba(17, 34, 51, 0.8)")])
+        #expect(plan.unreadable == 4)
+    }
+
+    @Test func aLinkIsRestoredAsOneOnlyWhenACaptureWouldTakeItAsOne() async throws {
+        let links = [
+            "https://example.com/x", "http://localhost:8080/a?b=1", "mailto:a@example.com",
+            "ftp://example.com/file", "file:///etc/passwd", "javascript:alert(1)", "slack://open?x=1", "https:///nohost",
+            "example.com", "not a url", "https://example.com/with space",
+        ]
+        let items = links.map { BackupWorld.manifestItem(UUID(), kind: "link", extra: ["link": $0]) }
+        let plan = try await world.plan(try world.craft(manifest: BackupWorld.manifest(items: items)))
+
         #expect(plan.items.map(\.content) == [
-            .link(URL(string: "https://example.com/x")!), .color(hex: "#ABCDEF"), .color(hex: "#112233CC", original: "rgba(17, 34, 51, 0.8)"),
+            .link(URL(string: "https://example.com/x")!), .link(URL(string: "http://localhost:8080/a?b=1")!),
+            .link(URL(string: "mailto:a@example.com")!),
+            // What is not a web or mail link is kept, as the text it is.
+            .text("ftp://example.com/file"), .text("file:///etc/passwd"), .text("javascript:alert(1)"), .text("slack://open?x=1"),
+            .text("https:///nohost"), .text("example.com"), .text("not a url"), .text("https://example.com/with space"),
         ])
-        #expect(plan.unreadable == 7)
+        #expect(plan.unreadable == 0)
+    }
+
+    @Test func aLinkWithNothingInItIsLeftOut() async throws {
+        let items = [
+            BackupWorld.manifestItem(UUID(), kind: "link"), BackupWorld.manifestItem(UUID(), kind: "link", extra: ["link": "   "]),
+            BackupWorld.manifestItem(UUID(), kind: "link", extra: ["link": ""]),
+        ]
+        let plan = try await world.plan(try world.craft(manifest: BackupWorld.manifest(items: items)))
+        #expect(plan.items.isEmpty && plan.unreadable == 3)
     }
 
     @Test func fileItemsNeedAbsolutePathsAndAtLeastOneFile() async throws {
@@ -293,8 +315,11 @@ import Testing
         #expect(plan.items.map(\.content) == [.image(ClipboardImage(fileName: name, pixelWidth: 2, pixelHeight: 3, byteCount: world.firstPNG.count))])
         #expect(plan.items.first?.contentHash == ClipboardContent.hash(of: plan.items[0].content))
         #expect(plan.unreadable == 3)
-        // Only the readable image was written, under its own hash.
-        #expect(try restoredFiles() == [name])
+        // Planning writes nothing; the plan says where the one readable image is, and the second step stores it under its hash.
+        #expect(try restoredFiles().isEmpty)
+        #expect(plan.imageEntries == [name: BackupWorld.payload(png, "png")])
+        let written = try await world.writeImages(plan, from: url)
+        #expect(try restoredFiles() == [name] && written.created.count == 1 && written.failed.isEmpty)
         #expect(try Data(contentsOf: world.restoredImages.appending(path: name)) == world.firstPNG)
     }
 
@@ -336,7 +361,8 @@ import Testing
             manifest: BackupWorld.manifest(items: [secret.item, plain.item, unmarked.item]),
             entries: secret.payloads + plain.payloads + unmarked.payloads
         )
-        #expect(try await world.plan(url).items.map(\.sensitive) == [true, nil, nil])
+        // As the file says: known to be a secret, known not to be, or not said.
+        #expect(try await world.plan(url).items.map(\.sensitive) == [true, false, nil])
     }
 
     // MARK: Boards of the file
@@ -371,7 +397,9 @@ import Testing
         let plan = try await world.plan(url, known: known)
 
         #expect(plan.items.count == 7 && plan.duplicates == 3 && plan.unreadable == 0)
-        #expect(try restoredFiles() == [world.secondPNG.sha256Hex + ".png"])
+        // Only the image that is new is to be stored, and nothing is yet.
+        #expect(plan.imageEntries.keys.sorted() == [world.secondPNG.sha256Hex + ".png"])
+        #expect(try restoredFiles().isEmpty)
     }
 
     @Test func theSameItemTwiceInOneFileIsAddedOnce() async throws {
@@ -419,6 +447,129 @@ import Testing
         #expect(try #require(plan.items.first { $0.content.kind == .file }).content == .files([world.presentFile, world.missingFile]))
     }
 
+    // MARK: Caps on what a manifest may hold
+
+    func reject(_ manifest: Data, as name: String = "caps.mynotchclip") async throws -> ClipboardBackupError? {
+        await failure(of: try world.craft(manifest: manifest, as: name))
+    }
+
+    @Test func aManifestWithMoreThanFiftyThousandItemsIsRefused() async throws {
+        let unknown = { (_: Int) -> [String: Any] in ["id": UUID().uuidString, "kind": "hologram", "copiedAt": 1.0] }
+        #expect(try await reject(BackupWorld.manifest(items: (0...ClipboardBackupFormat.maxItems).map(unknown))) == .tooManyItems)
+        // Exactly the limit is read (every one of these is of a kind that is not known).
+        let plan = try await world.plan(try world.craft(manifest: BackupWorld.manifest(items: (0..<ClipboardBackupFormat.maxItems).map(unknown))))
+        #expect(plan.unreadable == ClipboardBackupFormat.maxItems)
+    }
+
+    @Test func aManifestWithMoreThanTwoHundredBoardsIsRefused() async throws {
+        let board = { (index: Int) -> [String: Any] in ["name": "B\(index)", "icon": "star", "items": []] }
+        #expect(try await reject(BackupWorld.manifest(boards: (0...ClipboardBackupFormat.maxBoards).map(board))) == .tooManyBoards)
+        let plan = try await world.plan(try world.craft(manifest: BackupWorld.manifest(boards: (0..<ClipboardBackupFormat.maxBoards).map(board))))
+        #expect(plan.boards.count == ClipboardBackupFormat.maxBoards)
+    }
+
+    @Test func aNameLongerThanTwoHundredCharactersIsRefused() async throws {
+        let long = String(repeating: "ạ", count: ClipboardBackupFormat.maxNameLength + 1)
+        let fine = String(repeating: "ạ", count: ClipboardBackupFormat.maxNameLength)
+        let id = UUID()
+        #expect(try await reject(BackupWorld.manifest(boards: [["name": long, "items": []]]), as: "board.mynotchclip") == .tooLongText)
+        #expect(try await reject(
+            BackupWorld.manifest(items: [BackupWorld.manifestItem(id, extra: ["sourceAppName": long])]), as: "app.mynotchclip"
+        ) == .tooLongText)
+        #expect(try await reject(
+            BackupWorld.manifest(items: [BackupWorld.manifestItem(id, extra: ["sourceBundleID": long])]), as: "bundle.mynotchclip"
+        ) == .tooLongText)
+        let entry = textEntry("giữ", id: id, extra: ["sourceAppName": fine, "sourceBundleID": fine])
+        let plan = try await world.plan(try world.craft(
+            manifest: BackupWorld.manifest(items: [entry.item], boards: [["name": fine, "items": []]]), entries: entry.payloads, as: "fine.mynotchclip"
+        ))
+        #expect(plan.items.count == 1 && plan.boards.map(\.name) == [fine])
+    }
+
+    @Test func aBoardThatPinsMoreThanTheItemLimitIsRefused() async throws {
+        let pins = (0...ClipboardBackupFormat.maxItems).map { _ in UUID().uuidString }
+        #expect(try await reject(BackupWorld.manifest(boards: [["name": "A", "items": pins]])) == .tooManyPins)
+    }
+
+    @Test func boardsThatTogetherPinMoreThanTheTotalAreRefused() async throws {
+        let pins = (0..<40_000).map { _ in UUID().uuidString }
+        let boards: [[String: Any]] = (0..<3).map { ["name": "B\($0)", "items": pins] }
+        #expect(try await reject(BackupWorld.manifest(boards: boards)) == .tooManyPins)
+    }
+
+    // MARK: The second step
+
+    func twoImageRestore() async throws -> (url: URL, plan: ClipboardRestorePlan, names: [String]) {
+        let a = UUID(), b = UUID()
+        let url = try world.craft(
+            manifest: BackupWorld.manifest(items: [a, b].map { BackupWorld.manifestItem($0, kind: "image") }),
+            entries: [
+                (BackupWorld.payload(a, "png"), world.firstPNG, 0o100644), (BackupWorld.payload(b, "png"), world.secondPNG, 0o100644),
+            ],
+            as: "two.mynotchclip"
+        )
+        return (url, try await world.plan(url), [world.firstPNG, world.secondPNG].map { $0.sha256Hex + ".png" })
+    }
+
+    @Test func theImagesOfAPlanAreStoredUnderTheirHashAndTheFilesAreReported() async throws {
+        let (url, plan, names) = try await twoImageRestore()
+        let written = try await world.writeImages(plan, from: url)
+
+        #expect(Set(written.created.map(\.lastPathComponent)) == Set(names) && written.failed.isEmpty)
+        #expect(try restoredFiles() == names.sorted())
+        #expect(try Data(contentsOf: world.restoredImages.appending(path: names[0])) == world.firstPNG)
+    }
+
+    @Test func anImageThatIsThereAlreadyIsNotWrittenAgainOrReportedAsCreated() async throws {
+        let (url, plan, names) = try await twoImageRestore()
+        try world.firstPNG.write(to: world.restoredImages.appending(path: names[0]))
+
+        let written = try await world.writeImages(plan, from: url)
+
+        #expect(written.created.map(\.lastPathComponent) == [names[1]])
+    }
+
+    @Test func anImageThatIsNotWhatThePlanSawIsReportedAndNotWritten() async throws {
+        let (_, plan, names) = try await twoImageRestore()
+        // The file was swapped between the two steps: the first entry now holds another image.
+        let swapped = world.file("swapped.mynotchclip")
+        let a = try #require(plan.imageEntries[names[0]]), b = try #require(plan.imageEntries[names[1]])
+        let writer = try ZipWriter(url: swapped)
+        try writer.add(name: a, data: world.secondPNG, compress: false)
+        try writer.add(name: b, data: world.secondPNG, compress: false)
+        try writer.add(name: ClipboardBackupFormat.manifestName, data: BackupWorld.manifest())
+        try writer.finish()
+
+        let written = try await world.writeImages(plan, from: swapped)
+
+        #expect(written.failed == [names[0]])
+        #expect(written.created.map(\.lastPathComponent) == [names[1]])
+    }
+
+    @Test func aCancelledStepLeavesNoImageItWrote() async throws {
+        let (url, plan, _) = try await twoImageRestore()
+        let calls = ClipboardBackupWriterTests.Progress()
+        let world = world
+        let task = Task {
+            try await world.writeImages(plan, from: url, progress: { value in
+                calls.record(value)
+                // Let the first image be written, then cancel.
+                if calls.all.count == 2 { withUnsafeCurrentTask { $0?.cancel() } }
+            })
+        }
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(try restoredFiles().isEmpty)
+    }
+
+    @Test func aStepThatCannotWriteIsAnErrorAndLeavesNothing() async throws {
+        let (url, plan, _) = try await twoImageRestore()
+        let missing = world.root.appending(path: "no-such-folder", directoryHint: .isDirectory)
+        await #expect(throws: ClipboardBackupError.self) {
+            try await ClipboardBackupReader.writeImages(of: plan, from: url, to: missing)
+        }
+        #expect(!FileManager.default.fileExists(atPath: missing.path(percentEncoded: false)))
+    }
+
     // MARK: Progress
 
     @Test func progressGoesUpToOne() async throws {
@@ -438,6 +589,6 @@ import Testing
             try await world.plan(url, progress: { _ in withUnsafeCurrentTask { $0?.cancel() } })
         }
         await #expect(throws: CancellationError.self) { try await task.value }
-        #expect(try restoredFiles().count <= 1)
+        #expect(try restoredFiles().isEmpty)
     }
 }

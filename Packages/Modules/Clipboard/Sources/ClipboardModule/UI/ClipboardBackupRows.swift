@@ -20,10 +20,11 @@ struct ClipboardBackupRows: View {
                 Button("Sao lưu…") { showsOptions = true }
                 Button("Khôi phục…", action: chooseFileToRestore)
             }
-            .disabled(backup.isWorking || !isAvailable)
+            .disabled(backup.isBusy || !isAvailable)
         }
         .sheet(isPresented: $showsOptions) {
             ClipboardBackupOptionsSheet(
+                legacyTextCount: { backup.legacyTextCount(for: $0) },
                 onChoose: { options in
                     showsOptions = false
                     // The save panel waits until the sheet is gone.
@@ -38,11 +39,22 @@ struct ClipboardBackupRows: View {
             : "Bật module Clipboard để sao lưu hoặc khôi phục.")
             .font(.caption)
             .foregroundStyle(.secondary)
+            // A restore that has been read waits here, with nothing written, for the user to say how to do it. On another row
+            // than the backup sheet, which a view can only show one of at a time.
+            .sheet(isPresented: Binding(get: { backup.choosingSummary != nil }, set: { _ in })) {
+                if let summary = backup.choosingSummary {
+                    ClipboardRestorePlanSheet(
+                        summary: summary,
+                        onChoose: { backup.confirmRestore($0) },
+                        onCancel: { backup.declineRestore() }
+                    )
+                }
+            }
     }
 
     @ViewBuilder private var status: some View {
         switch backup.status {
-        case .idle:
+        case .idle, .choosing:
             EmptyView()
         case .working(let title, let fraction):
             VStack(alignment: .leading, spacing: 6) {
@@ -111,14 +123,26 @@ struct ClipboardBackupRows: View {
     }
 }
 
-/// What goes in a backup: how much of the history, and whether secrets may. Secrets stay out unless this is unticked.
+/// What goes in a backup: how much of the history, and whether secrets may. Secrets stay out only as far as they are known to be
+/// secrets, which the sheet says, so ticking the box is never taken for a promise.
 struct ClipboardBackupOptionsSheet: View {
+    /// How many texts of a scope were saved before MyNotch tracked secrets (see `ClipboardBackupWriter.legacyTextCount`).
+    let legacyTextCount: (ClipboardBackupOptions.Scope) -> Int
     let onChoose: (ClipboardBackupOptions) -> Void
     let onCancel: () -> Void
+
+    /// Under the box, which is ticked: what it does and does not cover. Never a promise that nothing private is left.
+    static let skipCaption = "Chỉ những mục mà app đánh dấu là bí mật lúc chép (mật khẩu, mã tạm thời) mới được bỏ qua. Mục không được đánh dấu vẫn nằm trong tệp."
+
+    /// For texts saved before MyNotch tracked which copies are secrets, which are in the file whatever the box says.
+    static func legacyWarning(_ count: Int) -> String {
+        "\(count) mục văn bản được lưu trước khi MyNotch biết đánh dấu mục nhạy cảm, nên không nhận ra được và vẫn nằm trong tệp, kể cả khi đã bỏ qua mục nhạy cảm. Mật khẩu có thể nằm trong số đó."
+    }
 
     @State private var options = ClipboardBackupOptions()
 
     var body: some View {
+        let legacy = legacyTextCount(options.scope)
         VStack(alignment: .leading, spacing: 14) {
             Text("Sao lưu clipboard")
                 .font(.headline)
@@ -130,7 +154,7 @@ struct ClipboardBackupOptionsSheet: View {
             VStack(alignment: .leading, spacing: 6) {
                 Toggle("Bỏ qua mục nhạy cảm", isOn: $options.skipSensitive)
                 if options.skipSensitive {
-                    Text("Mật khẩu và mã tạm thời mà app đánh dấu là bí mật sẽ không được ghi vào tệp.")
+                    Text(Self.skipCaption)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -139,7 +163,18 @@ struct ClipboardBackupOptionsSheet: View {
                         .foregroundStyle(.orange)
                 }
             }
-            Text("Mục file chỉ lưu đường dẫn nên có thể không khôi phục được trên máy khác.")
+            if legacy > 0 {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(Self.legacyWarning(legacy), systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    if options.scope == .allHistory {
+                        Button("Chỉ xuất mục đã ghim và board") { options.scope = .pinnedOnly }
+                            .controlSize(.small)
+                    }
+                }
+            }
+            Text("Mục file chỉ lưu đường dẫn nên có thể không khôi phục được trên máy khác. Tệp được lưu chỉ cho riêng bạn đọc, nhưng không được mã hoá.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
@@ -152,6 +187,91 @@ struct ClipboardBackupOptionsSheet: View {
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(20)
-        .frame(width: 420)
+        .frame(width: 440)
+    }
+}
+
+/// What a restore would do to the history under the limits, shown before it does anything, with the ways to go on: keep
+/// everything it brings (and everything that is there), follow the limits as they are, or not restore.
+struct ClipboardRestorePlanSheet: View {
+    let summary: ClipboardRestorePlanSummary
+    let onChoose: (ClipboardRestorePolicy) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Khôi phục từ tệp sao lưu")
+                .font(.headline)
+            Text(Self.overview(summary))
+            if summary.affectsHistory {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Với giới hạn lịch sử trong Cài đặt (số mục, thời gian giữ, dung lượng ảnh):")
+                    ForEach(Self.consequences(summary), id: \.self) { line in
+                        Label(line, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+            Text("Chưa có gì được ghi cho đến khi bạn chọn.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            choices
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(20)
+        .frame(width: 460)
+    }
+
+    @ViewBuilder private var choices: some View {
+        if summary.affectsHistory {
+            VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Button("Giữ tất cả") { onChoose(.keepAll) }
+                        .keyboardShortcut(.defaultAction)
+                    Text("Mục khôi phục không bị giới hạn dọn đi, mục đang có được giữ nguyên.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Button("Theo giới hạn hiện tại") { onChoose(.applyLimits) }
+                    Text("Áp dụng đúng các con số ở trên.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Button("Huỷ", role: .cancel, action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+            }
+        } else {
+            HStack {
+                Spacer()
+                Button("Huỷ", role: .cancel, action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Khôi phục") { onChoose(.applyLimits) }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+
+    /// "Tệp có 312 mục mới, 18 mục trùng lặp sẽ bị bỏ qua, tạo 2 board mới."
+    static func overview(_ summary: ClipboardRestorePlanSummary) -> String {
+        var parts = ["Tệp có \(summary.added) mục mới"]
+        if summary.duplicates > 0 { parts.append("\(summary.duplicates) mục trùng lặp sẽ bị bỏ qua") }
+        if summary.unreadable > 0 { parts.append("\(summary.unreadable) mục không đọc được") }
+        if summary.boardsToCreate > 0 { parts.append("\(summary.boardsToCreate) board mới sẽ được tạo") }
+        return parts.joined(separator: ", ") + "."
+    }
+
+    /// What the limits would take, one line each.
+    static func consequences(_ summary: ClipboardRestorePlanSummary) -> [String] {
+        var lines: [String] = []
+        if summary.outsideLimits > 0 {
+            lines.append("\(summary.outsideLimits) mục vừa khôi phục sẽ bị dọn ngay, vì quá cũ hoặc vượt giới hạn.")
+        }
+        if summary.evictedExisting > 0 {
+            var line = "\(summary.evictedExisting) mục đang có sẽ bị xoá để lấy chỗ"
+            if summary.evictedExistingImages > 0 { line += ", trong đó \(summary.evictedExistingImages) ảnh (tệp ảnh cũng bị xoá)" }
+            lines.append(line + ".")
+        }
+        return lines
     }
 }

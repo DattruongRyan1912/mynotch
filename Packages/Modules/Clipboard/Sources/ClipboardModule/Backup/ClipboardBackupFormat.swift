@@ -13,7 +13,15 @@ nonisolated enum ClipboardBackupFormat {
     /// what would not fit, and an import refuses a file that goes over, before reading any of it.
     static let maxItemBytes = 50 * 1024 * 1024
     static let maxTotalBytes = 2 * 1024 * 1024 * 1024
-    static let limits = ZipLimits(perEntry: maxItemBytes, total: maxTotalBytes)
+    static let limits = ZipLimits(perEntry: maxItemBytes, total: maxTotalBytes, directory: 16 * 1024 * 1024)
+    /// What a manifest may list, whatever the size of the file: a hostile one could otherwise make thousands of boards, or pin
+    /// everything it brings past the limits of the history for good. A file over any of these is refused before anything is
+    /// written. Names are counted in characters.
+    static let maxItems = 50_000
+    static let maxBoards = 200
+    static let maxPinsPerBoard = maxItems
+    static let maxPinsTotal = 100_000
+    static let maxNameLength = 200
 
     /// The entry holding one part of an item. Built from the item's id and a fixed extension, never from text in the file.
     static func payloadName(for id: UUID, extension fileExtension: String) -> String {
@@ -56,6 +64,11 @@ nonisolated enum ClipboardBackupError: Error, Equatable, LocalizedError {
     /// An entry named to leave its folder, a link, a device or a repeated name. Carries the name, which is not shown.
     case unsafeEntry(String)
     case tooLarge
+    case tooManyItems
+    case tooManyBoards
+    case tooManyPins
+    /// A board name, or the name or identifier of the app an item came from, over `maxNameLength`.
+    case tooLongText
     case itemTooLarge(String)
     case unsupported
     case damaged
@@ -70,6 +83,10 @@ nonisolated enum ClipboardBackupError: Error, Equatable, LocalizedError {
         case .malformed: "Tệp sao lưu bị hỏng: không đọc được danh sách mục."
         case .unsafeEntry: "Tệp có mục không an toàn nên không được dùng."
         case .tooLarge: "Tệp quá lớn: tối đa 2 GB."
+        case .tooManyItems: "Tệp có quá nhiều mục (tối đa 50.000)."
+        case .tooManyBoards: "Tệp có quá nhiều board (tối đa 200)."
+        case .tooManyPins: "Tệp ghim quá nhiều mục vào board."
+        case .tooLongText: "Tệp có tên dài bất thường nên không được dùng."
         case .itemTooLarge: "Tệp có mục lớn hơn 50 MB nên không được dùng."
         case .unsupported: "Tệp dùng tính năng của định dạng zip mà MyNotch không hỗ trợ."
         case .damaged: "Tệp sao lưu bị hỏng."
@@ -128,6 +145,8 @@ nonisolated struct ClipboardBackupRestoreSummary: Sendable, Equatable {
     var boardsCreated = 0
     /// Added, then removed at once by the history limits in Settings.
     var prunedByLimits = 0
+    /// Items that were in the history, removed to make room under the limits.
+    var evictedExisting = 0
 
     var text: String {
         var parts = ["Đã thêm \(added) mục"]
@@ -137,6 +156,9 @@ nonisolated struct ClipboardBackupRestoreSummary: Sendable, Equatable {
         var text = parts.joined(separator: ", ")
         if prunedByLimits > 0 {
             text += ". \(prunedByLimits) mục vượt giới hạn hoặc thời gian giữ trong Cài đặt nên đã bị dọn"
+        }
+        if evictedExisting > 0 {
+            text += ". \(evictedExisting) mục đã có bị xoá để vừa giới hạn lịch sử"
         }
         return text
     }
@@ -160,6 +182,7 @@ nonisolated struct ClipboardBackupManifest: Codable, Sendable {
         var sourceAppName: String?
         /// The language of a text that is code, or "text" when it is not; left out for other kinds.
         var code: CodeDetection?
+        /// true for a secret, false for what is known not to be, left out when it was not known.
         var sensitive: Bool?
         var link: String?
         var color: String?

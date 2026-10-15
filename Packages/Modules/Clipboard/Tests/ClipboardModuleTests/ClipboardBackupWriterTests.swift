@@ -157,6 +157,95 @@ import Testing
         #expect(summary.itemCount == 10 && summary.skippedSensitive == 1)
     }
 
+    // MARK: Items the secret check cannot see
+
+    func legacy(_ text: String) -> ClipboardItem {
+        let content = ClipboardContent.text(text)
+        return ClipboardItem(
+            id: UUID(), content: content, contentHash: ClipboardContent.hash(of: content), copiedAt: BackupWorld.base,
+            sourceBundleID: nil, sourceAppName: nil
+        )
+    }
+
+    @Test func itemsCopiedWhileSecretsWereTrackedAreNotCountedAsUnknown() {
+        #expect(ClipboardBackupWriter.legacyTextCount(in: world.history, scope: .allHistory) == 0)
+        #expect(ClipboardBackupWriter.legacyTextCount(in: world.history, scope: .pinnedOnly) == 0)
+    }
+
+    @Test func textsSavedBeforeThatAreCountedByScope() {
+        var history = world.history
+        let kept = legacy("cũ đã ghim"), loose = legacy("cũ chưa ghim")
+        history.items += [kept, loose]
+        // Not text, so not what a password is: an old image and an old link are not counted.
+        let link = ClipboardContent.link(URL(string: "https://example.com")!)
+        history.items.append(ClipboardItem(
+            id: UUID(), content: link, contentHash: ClipboardContent.hash(of: link), copiedAt: BackupWorld.base, sourceBundleID: nil, sourceAppName: nil
+        ))
+        history.pin(itemID: kept.id, to: history.boards[0].id)
+
+        #expect(ClipboardBackupWriter.legacyTextCount(in: history, scope: .allHistory) == 2)
+        #expect(ClipboardBackupWriter.legacyTextCount(in: history, scope: .pinnedOnly) == 1)
+    }
+
+    @Test func anOldTextAnAppMarkedAsASecretIsNotUnknown() {
+        var history = ClipboardHistory()
+        var item = legacy("bí mật")
+        item.sensitive = true
+        history.items = [item]
+        #expect(ClipboardBackupWriter.legacyTextCount(in: history, scope: .allHistory) == 0)
+    }
+
+    @Test func richTextCountsAsText() {
+        var history = ClipboardHistory()
+        let content = ClipboardContent.richText(plain: "cũ", rtf: Data("{\\rtf1 x}".utf8))
+        history.items = [ClipboardItem(
+            id: UUID(), content: content, contentHash: ClipboardContent.hash(of: content), copiedAt: BackupWorld.base, sourceBundleID: nil, sourceAppName: nil
+        )]
+        #expect(ClipboardBackupWriter.legacyTextCount(in: history, scope: .allHistory) == 1)
+    }
+
+    @Test func theCountIsOfWhatIsNotYetKnownWhateverTheSecretsOptionSays() async throws {
+        var history = world.history
+        history.items.append(legacy("cũ"))
+        // With the secrets left out, an old text is still in the file: it is not known to be one.
+        let (url, summary) = try await world.export(history: history)
+        let ids = Set(world.manifestItems(try world.contents(of: url).manifest).compactMap { $0["id"] as? String })
+        #expect(ids.contains(history.items.last!.id.uuidString))
+        #expect(summary.itemCount == 10)
+        #expect(ClipboardBackupWriter.legacyTextCount(in: history, scope: .allHistory) == 1)
+    }
+
+    @Test func theFlagOfAnItemIsWrittenAsItIsKnownTrueFalseOrNotSaid() async throws {
+        var history = world.history
+        let old = legacy("cũ")
+        history.items.append(old)
+        let (url, _) = try await world.export(ClipboardBackupOptions(skipSensitive: false), history: history)
+        let byID = Dictionary(uniqueKeysWithValues: world.manifestItems(try world.contents(of: url).manifest).map { ($0["id"] as! String, $0) })
+
+        #expect(byID[world.id("secret").uuidString]?["sensitive"] as? Bool == true)
+        #expect(byID[world.id("text").uuidString]?["sensitive"] as? Bool == false)
+        #expect(byID[old.id.uuidString]?["sensitive"] == nil)
+    }
+
+    @Test func aNameOverTheLimitIsCutSoTheFileCanBeReadBack() async throws {
+        var history = world.history
+        let long = String(repeating: "ạ", count: 300)
+        history.boards[0].name = long
+        // The newest item that is exported (the newest of all is the secret, which is left out).
+        history.items[1].sourceAppName = long
+        history.items[1].sourceBundleID = long
+
+        let (url, _) = try await world.export(history: history)
+        let manifest = try world.contents(of: url).manifest
+        let boards = try #require(manifest["boards"] as? [[String: Any]])
+        let first = try #require(world.manifestItems(manifest).first)
+
+        #expect((boards[0]["name"] as? String)?.count == ClipboardBackupFormat.maxNameLength)
+        #expect((first["sourceAppName"] as? String)?.count == ClipboardBackupFormat.maxNameLength)
+        #expect((first["sourceBundleID"] as? String)?.count == ClipboardBackupFormat.maxNameLength)
+        #expect(try await world.plan(url).items.isEmpty == false)
+    }
+
     // MARK: Scope
 
     @Test func pinnedOnlyTakesTheItemsOfBoardsAndEveryBoard() async throws {
@@ -285,6 +374,41 @@ import Testing
         await #expect(throws: CancellationError.self) { try await task.value }
 
         #expect(try Data(contentsOf: destination) == Data("older backup".utf8))
+    }
+
+    func mode(of url: URL) throws -> Int {
+        try #require(FileManager.default.attributesOfItem(atPath: url.path(percentEncoded: false))[.posixPermissions] as? Int)
+    }
+
+    @Test func theBackupIsReadableByItsOwnerOnly() async throws {
+        let (url, _) = try await world.export()
+        #expect(try mode(of: url) == 0o600)
+    }
+
+    @Test func aBackupThatReplacesAWorldReadableFileIsPrivateToo() async throws {
+        let destination = world.file("replace-mode.mynotchclip")
+        try Data("older backup".utf8).write(to: destination)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: destination.path(percentEncoded: false))
+
+        _ = try await world.export(as: "replace-mode.mynotchclip")
+
+        #expect(try mode(of: destination) == 0o600)
+    }
+
+    @Test func thePartialFileIsPrivateFromTheMomentItExists() async throws {
+        // Looked at while the export is under way, between two items: the file that becomes the backup is already private.
+        let observed = Progress()
+        let root = world.root
+        _ = try await world.export(as: "partial-mode.mynotchclip", progress: { _ in
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: root.path(percentEncoded: false))) ?? []
+            for name in names where name.contains(".partial-") {
+                let attributes = try? FileManager.default.attributesOfItem(atPath: root.appending(path: name).path(percentEncoded: false))
+                observed.record(Double((attributes?[.posixPermissions] as? Int) ?? 0))
+            }
+        })
+        let modes = observed.all
+        #expect(!modes.isEmpty)
+        #expect(modes.allSatisfy { Int($0) == 0o600 })
     }
 
     @Test func aFinishedExportReplacesAnOlderFile() async throws {

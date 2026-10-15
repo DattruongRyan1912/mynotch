@@ -304,16 +304,26 @@ import Testing
     }
 
     @Test func aDeflatedEntryThatSaysItIsSmallerThanItIsIsRefusedWithoutBeingExpanded() throws {
-        // 10 MB of zeros deflate to a few kilobytes: the headers claim 100 bytes, so reading must stop at the claim.
+        // 1 MB of zeros deflate to about a kilobyte. The headers claim the size of that kilobyte, which the cap on the
+        // compressed size allows, so reading must stop at the claim and not expand a megabyte.
+        let url = try write([Self.entry("bomb", Data(count: 1_000_000))])
+        let compressed = try #require(read(url).entries.first).compressedSize
+        let data = try Data(contentsOf: url)
+        let (central, local) = try firstRecords(data)
+        let patched = try patched(url, [(central + 24, le32(UInt32(compressed))), (local + 22, le32(UInt32(compressed)))])
+
+        let reader = try read(patched)
+
+        #expect(reader.entries.first?.size == compressed)
+        #expect(throws: ZipError.corrupt("bomb")) { try reader.data(named: "bomb") }
+    }
+
+    @Test func aDeflatedEntryThatClaimsAFractionOfItsCompressedSizeIsRefusedAtOnce() throws {
         let url = try write([Self.entry("bomb", Data(count: 10_000_000))])
         let data = try Data(contentsOf: url)
         let (central, local) = try firstRecords(data)
         let patched = try patched(url, [(central + 24, le32(100)), (local + 22, le32(100))])
-
-        let reader = try read(patched)
-
-        #expect(reader.entries.first?.size == 100)
-        #expect(throws: ZipError.corrupt("bomb")) { try reader.data(named: "bomb") }
+        #expect(throws: ZipError.corrupt("bomb")) { try read(patched) }
     }
 
     @Test func aDeflatedEntryThatSaysItIsBiggerThanItIsIsRefused() throws {
@@ -353,6 +363,41 @@ import Testing
         let central = try firstRecords(Data(contentsOf: url)).central
         let patched = try patched(url, [(central + 24, le32(0xFFFF_FF00))])
         #expect(throws: ZipError.self) { try read(patched, limits: ZipLimits(perEntry: 50_000_000, total: 2_147_483_648)) }
+    }
+
+    // MARK: Memory
+
+    @Test func aDeflatedEntryWhoseCompressedSizeIsFarMoreThanItsSizeIsRefusedBeforeItIsRead() throws {
+        // A deflated entry takes about its size at the most. The noise after it makes the file big enough for the header's
+        // claim to lie inside it.
+        let url = try write([Self.entry("a", Data(String(repeating: "abc ", count: 1_000).utf8)), Self.entry("noise", Self.pattern(100_000))])
+        let central = try firstRecords(Data(contentsOf: url)).central
+        let patched = try patched(url, [(central + 20, le32(60_000))])
+        #expect(throws: ZipError.corrupt("a")) { try read(patched) }
+    }
+
+    @Test func aDeflatedEntryWithTheSizeANormalWriterGivesIsAccepted() throws {
+        // Noise that deflate cannot shrink is stored; text that it can is deflated. Neither is refused by the cap.
+        let url = try write([Self.entry("a", Data(String(repeating: "abc ", count: 1_000).utf8)), Self.entry("b", Self.pattern(10_000))])
+        #expect(try read(url).entries.count == 2)
+    }
+
+    @Test func aDirectoryBiggerThanTheLimitIsRefusedBeforeItIsRead() throws {
+        let url = try write((0..<20).map { Self.entry("items/entry-\($0).txt") })
+        #expect(throws: ZipError.tooManyEntries) { try read(url, limits: ZipLimits(perEntry: .max, total: .max, directory: 500)) }
+        #expect(try read(url, limits: ZipLimits(perEntry: .max, total: .max, directory: 4_000)).entries.count == 20)
+    }
+
+    @Test func theRealLimitsHoldTheDirectoryOfAnyBackupToAFewMegabytes() {
+        #expect(ClipboardBackupFormat.limits.directory == 16 * 1024 * 1024)
+    }
+
+    // MARK: Who may read the file
+
+    @Test func theWriterCreatesTheFileForItsOwnerOnly() throws {
+        let url = try write([Self.entry("a")])
+        let mode = try #require(FileManager.default.attributesOfItem(atPath: url.path(percentEncoded: false))[.posixPermissions] as? Int)
+        #expect(mode == 0o600)
     }
 
     @Test func theWriterRefusesWhatAZip64WouldBeNeededFor() throws {

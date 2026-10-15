@@ -77,7 +77,7 @@ nonisolated struct ClipboardClassifier: Sendable {
     }
 
     /// One http/https URL with a host, or a mailto: with an address; anything else stays text.
-    private static func link(_ trimmed: String) -> URL? {
+    static func link(_ trimmed: String) -> URL? {
         guard !trimmed.contains(where: \.isWhitespace), let url = URL(string: trimmed) else { return nil }
         let isComplete = switch url.scheme?.lowercased() {
         case "http", "https": url.host()?.isEmpty == false

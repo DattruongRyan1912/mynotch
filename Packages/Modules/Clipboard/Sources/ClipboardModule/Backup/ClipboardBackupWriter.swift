@@ -7,6 +7,16 @@ nonisolated enum ClipboardBackupWriter {
     /// Rough size of an item with no payload in the manifest, so progress moves for links and colours too.
     private static let itemWeight = 1024
 
+    /// How many text items a backup of `scope` would hold that were saved before MyNotch tracked which copies apps mark as
+    /// secrets (`sensitive` is neither true nor false), so there is no telling whether one is a password. Text only, since that
+    /// is what a password is. Whatever the options say, these are in the file.
+    static func legacyTextCount(in history: ClipboardHistory, scope: ClipboardBackupOptions.Scope) -> Int {
+        let pinned = scope == .pinnedOnly ? Set(history.boards.flatMap(\.itemIDs)) : []
+        return history.items.count { item in
+            item.sensitive == nil && item.content.kind == .text && (scope == .allHistory || pinned.contains(item.id))
+        }
+    }
+
     /// `imageURLs` maps an image's file name to where its PNG is. `limits` are what the file must satisfy to be read back
     /// (the format's own, unless a test says otherwise); what would not fit is left out and counted. `progress` is called
     /// with 0 to 1, in order, from the background.
@@ -41,7 +51,8 @@ nonisolated enum ClipboardBackupWriter {
     private static func publish(_ temporary: URL, as destination: URL) throws {
         let fileManager = FileManager.default
         if fileManager.fileExists(atPath: destination.path(percentEncoded: false)) {
-            _ = try fileManager.replaceItemAt(destination, withItemAt: temporary)
+            // The new file's mode, not the old file's: an older backup somebody else could read must not make this one readable.
+            _ = try fileManager.replaceItemAt(destination, withItemAt: temporary, options: .usingNewMetadataOnly)
         } else {
             try fileManager.moveItem(at: temporary, to: destination)
         }
@@ -65,7 +76,7 @@ nonisolated enum ClipboardBackupWriter {
         let candidateIDs = Set(candidates.map(\.id))
         let boards = history.boards.map { board in
             (board, ClipboardBackupManifest.Board(
-                name: board.name, icon: board.systemImage, color: board.color == .accent ? nil : board.color.rawValue,
+                name: Self.clamped(board.name), icon: board.systemImage, color: board.color == .accent ? nil : board.color.rawValue,
                 items: board.itemIDs.filter(candidateIDs.contains)
             ))
         }
@@ -133,8 +144,9 @@ nonisolated enum ClipboardBackupWriter {
     /// their own.
     private static func manifestEntry(for item: ClipboardItem) -> ClipboardBackupManifest.Item {
         var entry = ClipboardBackupManifest.Item(
-            id: item.id, kind: "", copiedAt: item.copiedAt, sourceBundleID: item.sourceBundleID, sourceAppName: item.sourceAppName,
-            code: item.codeDetection, sensitive: item.isSensitive ? true : nil
+            id: item.id, kind: "", copiedAt: item.copiedAt, sourceBundleID: item.sourceBundleID.map(Self.clamped),
+            sourceAppName: item.sourceAppName.map(Self.clamped),
+            code: item.codeDetection, sensitive: item.sensitive
         )
         switch item.content {
         case .text: entry.kind = "text"
@@ -190,6 +202,11 @@ nonisolated enum ClipboardBackupWriter {
             try archive.add(name: payload.name, data: payload.data, compress: payload.compress)
         }
         return .written(bytes: total)
+    }
+
+    /// A name longer than a reader accepts (nothing in MyNotch stops one) is cut, so the file it is in can be read back.
+    private static func clamped(_ name: String) -> String {
+        String(name.prefix(ClipboardBackupFormat.maxNameLength))
     }
 
     private static func estimatedBytes(of item: ClipboardItem) -> Int {

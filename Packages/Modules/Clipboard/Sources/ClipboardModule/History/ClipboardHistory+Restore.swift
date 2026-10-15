@@ -13,14 +13,16 @@ nonisolated extension ClipboardHistory {
     /// source; a new one keeps the date and source it had and goes where that date puts it, after an item of the same date that
     /// is already here. Boards are matched by name, ignoring case: a board that exists keeps its look and takes the file's pins
     /// after its own, and one that does not is made, last in the row, in the file's order. A pin is made for an item that was
-    /// not added too, since it is the same item.
+    /// not added too, since it is the same item. With `exempt` the items added are marked to be kept whatever the limits say
+    /// (see `prune`); items that were already here are left as they are.
     @discardableResult
-    mutating func restore(_ plan: ClipboardRestorePlan) -> RestoreResult {
+    mutating func restore(_ plan: ClipboardRestorePlan, exempt: Bool = false) -> RestoreResult {
         var result = RestoreResult()
         var known = Set(items.map(\.contentHash))
         var fresh: [ClipboardItem] = []
-        for item in plan.items {
+        for var item in plan.items {
             if known.insert(item.contentHash).inserted {
+                if exempt { item.exemptFromLimits = true }
                 fresh.append(item)
             } else {
                 result.duplicates += 1
@@ -39,8 +41,10 @@ nonisolated extension ClipboardHistory {
                 index = boards.count - 1
                 result.boardsCreated += 1
             }
+            // A set, so a board of thousands of pins costs a pass and not a pass per pin.
+            var members = Set(boards[index].itemIDs)
             for hash in spec.itemHashes {
-                guard let id = idByHash[hash], !boards[index].itemIDs.contains(id) else { continue }
+                guard let id = idByHash[hash], members.insert(id).inserted else { continue }
                 boards[index].itemIDs.append(id)
                 result.pinned += 1
             }

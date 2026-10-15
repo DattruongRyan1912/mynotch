@@ -19,41 +19,100 @@ nonisolated struct ClipboardRestorePlan: Sendable {
     /// Readable items the history already had, or an earlier item of the file had.
     var duplicates: Int
     var unreadable: Int
+    /// For each new image item, the entry of the archive that holds its PNG, by the file name it will be stored under. The
+    /// images are not stored while the plan is made (see `ClipboardBackupReader.writeImages`).
+    var imageEntries: [String: String] = [:]
 }
 
-/// Reads a `.mynotchclip` file. Runs off the main actor. The archive is checked whole before any of it is used (see `ZipReader`),
-/// everything is rebuilt from the bytes in the file (a hash, a size and an image's file name come from the data, never from
-/// what the manifest says), and one item that cannot be read is left out and counted without costing the others.
+/// What storing the images of a plan did.
+nonisolated struct ClipboardImageWrite: Sendable {
+    /// The files this step made, which are the ones to remove again if the restore is not completed.
+    var created: [URL] = []
+    /// File names of images that could not be stored: the archive no longer holds what the plan saw.
+    var failed: Set<String> = []
+}
+
+/// Reads a `.mynotchclip` file in two steps, both off the main actor. `plan` reads it whole and writes nothing, so the user can
+/// be told what a restore would do before it does anything; `writeImages` stores the images of what the user chose to add.
+/// The archive is checked whole before any of it is used (see `ZipReader`), everything is rebuilt from the bytes in the file (a
+/// hash, a size and an image's file name come from the data, never from what the manifest says), and one item that cannot be
+/// read is left out and counted without costing the others.
 nonisolated enum ClipboardBackupReader {
     private static let pngSignature = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
 
-    /// `knownHashes` are the hashes of the history now, so an item it has is not added (nor is its image written).
-    /// `imagesDirectory` is where the store keeps images. `now` holds back a date from the future.
+    /// `knownHashes` are the hashes of the history now, so an item it has is not added. `now` holds back a date from the future.
+    /// Throws before anything is read of the items when the manifest lists more than the format allows.
     @concurrent static func plan(
-        archiveAt url: URL, knownHashes: Set<String>, imagesDirectory: URL, now: Date = .now,
-        limits: ZipLimits = ClipboardBackupFormat.limits, progress: @escaping @Sendable (Double) -> Void = { _ in }
+        archiveAt url: URL, knownHashes: Set<String>, now: Date = .now, limits: ZipLimits = ClipboardBackupFormat.limits,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> ClipboardRestorePlan {
         do {
-            return try read(url, knownHashes: knownHashes, imagesDirectory: imagesDirectory, now: now, limits: limits, progress: progress)
-        } catch let error as ZipError {
-            throw ClipboardBackupError(error)
-        } catch let error as CancellationError {
-            throw error
-        } catch let error as ClipboardBackupError {
-            throw error
+            return try read(url, knownHashes: knownHashes, now: now, limits: limits, progress: progress)
         } catch {
-            throw ClipboardBackupError.cannotRead(error.localizedDescription)
+            throw backupError(error, reading: true)
+        }
+    }
+
+    /// Stores the PNG of each new image item of `plan` in `imagesDirectory`, read again from the archive and checked against the
+    /// hash it was planned under (an image the archive no longer holds as it was is reported in `failed`, not written). An
+    /// image that is stored already is left as it is. When the step ends in an error or is cancelled, the files it made are
+    /// removed again, so a restore that does not happen leaves no image behind.
+    @concurrent static func writeImages(
+        of plan: ClipboardRestorePlan, from url: URL, to imagesDirectory: URL, limits: ZipLimits = ClipboardBackupFormat.limits,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws -> ClipboardImageWrite {
+        var written = ClipboardImageWrite()
+        do {
+            let archive = try ZipReader(url: url, limits: limits)
+            let entries = plan.imageEntries.sorted { $0.key < $1.key }
+            let totalBytes = max(entries.reduce(0) { $0 + (archive.entry(named: $1.value)?.size ?? 0) }, 1)
+            var doneBytes = 0
+            progress(0)
+            for (fileName, entryName) in entries {
+                try Task.checkCancellation()
+                defer {
+                    doneBytes += archive.entry(named: entryName)?.size ?? 0
+                    progress(min(Double(doneBytes) / Double(totalBytes), 1))
+                }
+                let data: Data?
+                do {
+                    data = try archive.data(named: entryName)
+                } catch is ZipError {
+                    data = nil
+                }
+                guard let data, data.sha256Hex + ".png" == fileName else {
+                    written.failed.insert(fileName)
+                    continue
+                }
+                let target = imagesDirectory.appending(path: fileName, directoryHint: .notDirectory)
+                let existed = FileManager.default.fileExists(atPath: target.path(percentEncoded: false))
+                try ClipboardStore.writeImage(data, named: fileName, in: imagesDirectory)
+                if !existed { written.created.append(target) }
+            }
+            return written
+        } catch {
+            for file in written.created { try? FileManager.default.removeItem(at: file) }
+            throw backupError(error, reading: false)
+        }
+    }
+
+    private static func backupError(_ error: any Error, reading: Bool) -> any Error {
+        switch error {
+        case is CancellationError, is ClipboardBackupError: error
+        case let zip as ZipError: ClipboardBackupError(zip)
+        default: reading ? ClipboardBackupError.cannotRead(error.localizedDescription) : ClipboardBackupError.cannotWrite(error.localizedDescription)
         }
     }
 
     private static func read(
-        _ url: URL, knownHashes: Set<String>, imagesDirectory: URL, now: Date, limits: ZipLimits, progress: @Sendable (Double) -> Void
+        _ url: URL, knownHashes: Set<String>, now: Date, limits: ZipLimits, progress: @Sendable (Double) -> Void
     ) throws -> ClipboardRestorePlan {
         let archive = try ZipReader(url: url, limits: limits)
         guard let manifestEntry = archive.entry(named: ClipboardBackupFormat.manifestName) else { throw ClipboardBackupError.notABackup }
         let manifestData = try archive.data(of: manifestEntry)
         let decoder = ClipboardBackupFormat.makeDecoder()
         let manifest = try manifest(from: manifestData, decoder: decoder)
+        try checkCaps(of: manifest)
 
         let totalBytes = max(archive.entries.reduce(0) { $0 + $1.size }, 1)
         var doneBytes = manifestEntry.size
@@ -86,13 +145,14 @@ nonisolated enum ClipboardBackupReader {
                 plan.duplicates += 1
                 continue
             }
-            if let image = built.image {
-                try ClipboardStore.writeImage(image.data, named: image.fileName, in: imagesDirectory)
+            if let fileName = built.imageFileName {
+                plan.imageEntries[fileName] = ClipboardBackupFormat.payloadName(for: entry.id, extension: "png")
             }
             plan.items.append(ClipboardItem(
                 id: UUID(), content: built.content, contentHash: hash, copiedAt: min(entry.copiedAt, now),
                 sourceBundleID: entry.sourceBundleID, sourceAppName: entry.sourceAppName, codeDetection: built.code,
-                sensitive: entry.sensitive == true ? true : nil
+                // As the file says: a secret, not one, or not known.
+                sensitive: entry.sensitive
             ))
         }
         plan.boards = manifest.boards.compactMap { board in
@@ -125,8 +185,24 @@ nonisolated enum ClipboardBackupReader {
     private struct BuiltItem {
         var content: ClipboardContent
         var code: CodeDetection?
-        /// The PNG to store under its name, for an image.
-        var image: (data: Data, fileName: String)?
+        /// The name the PNG will be stored under, for an image.
+        var imageFileName: String?
+    }
+
+    /// Refuses a manifest that lists more than the format allows, before any of it is used.
+    private static func checkCaps(of manifest: ClipboardBackupManifest) throws {
+        guard manifest.items.count <= ClipboardBackupFormat.maxItems else { throw ClipboardBackupError.tooManyItems }
+        guard manifest.boards.count <= ClipboardBackupFormat.maxBoards else { throw ClipboardBackupError.tooManyBoards }
+        var pins = 0
+        for board in manifest.boards {
+            guard board.items.count <= ClipboardBackupFormat.maxPinsPerBoard else { throw ClipboardBackupError.tooManyPins }
+            pins += board.items.count
+        }
+        guard pins <= ClipboardBackupFormat.maxPinsTotal else { throw ClipboardBackupError.tooManyPins }
+        let limit = ClipboardBackupFormat.maxNameLength
+        guard manifest.boards.allSatisfy({ $0.name.count <= limit }),
+              manifest.items.allSatisfy({ ($0.sourceAppName?.count ?? 0) <= limit && ($0.sourceBundleID?.count ?? 0) <= limit })
+        else { throw ClipboardBackupError.tooLongText }
     }
 
     /// nil when the item cannot be read: no payload, a payload that is damaged or not what its kind needs, or a kind this
@@ -150,8 +226,14 @@ nonisolated enum ClipboardBackupReader {
             let content = ClipboardContent.richText(plain: plain, rtf: rtf)
             return BuiltItem(content: content, code: entry.code ?? ClipboardCodeDetector.detect(content))
         case "link":
-            guard let text = entry.link, let url = URL(string: text), url.scheme?.isEmpty == false else { return nil }
-            return BuiltItem(content: .link(url))
+            guard let text = entry.link, !text.allSatisfy(\.isWhitespace) else { return nil }
+            // A link is only what a capture would take as one (web or mail); anything else the file calls a link is the text it is.
+            if let url = ClipboardClassifier.link(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return BuiltItem(content: .link(url))
+            }
+            guard let plain = Self.text(from: Data(text.utf8)) else { return nil }
+            let content = ClipboardContent.text(plain)
+            return BuiltItem(content: content, code: ClipboardCodeDetector.detect(content))
         case "color":
             guard let hex = entry.color.flatMap(Self.hex(from:)) else { return nil }
             let original = entry.colorOriginal.flatMap { $0.count <= 200 ? $0 : nil }
@@ -160,7 +242,7 @@ nonisolated enum ClipboardBackupReader {
             guard let data = try payload("png"), let size = Self.pngSize(of: data) else { return nil }
             let fileName = data.sha256Hex + ".png"
             let image = ClipboardImage(fileName: fileName, pixelWidth: size.width, pixelHeight: size.height, byteCount: data.count)
-            return BuiltItem(content: .image(image), image: (data, fileName))
+            return BuiltItem(content: .image(image), imageFileName: fileName)
         case "files":
             guard let references = entry.files, !references.isEmpty else { return nil }
             var urls: [URL] = []

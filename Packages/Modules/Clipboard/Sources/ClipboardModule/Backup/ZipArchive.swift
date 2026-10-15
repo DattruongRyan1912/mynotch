@@ -24,8 +24,10 @@ nonisolated enum ZipError: Error, Equatable {
 nonisolated struct ZipLimits: Sendable {
     var perEntry: Int
     var total: Int
+    /// The size of the directory of entries, which is read whole before anything is checked.
+    var directory: Int = 16 * 1024 * 1024
 
-    static let unlimited = ZipLimits(perEntry: .max, total: .max)
+    static let unlimited = ZipLimits(perEntry: .max, total: .max, directory: .max)
 }
 
 /// One file of an archive. Folders are never listed.
@@ -95,9 +97,11 @@ nonisolated final class ZipWriter {
     private var records: [Record] = []
     private var offset = 0
 
-    /// Creates (or replaces) the file.
+    /// Creates (or replaces) the file, readable by its owner only from the moment it exists: what goes in may be private.
     init(url: URL) throws {
-        guard FileManager.default.createFile(atPath: url.path(percentEncoded: false), contents: nil) else {
+        guard FileManager.default.createFile(
+            atPath: url.path(percentEncoded: false), contents: nil, attributes: [.posixPermissions: 0o600]
+        ) else {
             throw CocoaError(.fileWriteUnknown)
         }
         handle = try FileHandle(forWritingTo: url)
@@ -253,6 +257,7 @@ nonisolated final class ZipReader {
 
     private static func readDirectory(handle: FileHandle, fileSize: Int, limits: ZipLimits) throws -> [ZipEntry] {
         let end = try endRecord(handle: handle, fileSize: fileSize)
+        guard end.directorySize <= limits.directory else { throw ZipError.tooManyEntries }
         let bytes = ZipBytes(try read(handle, fileSize: fileSize, at: end.directoryOffset, count: end.directorySize, name: ""))
         var entries: [ZipEntry] = []
         var names = Set<String>()
@@ -300,6 +305,9 @@ nonisolated final class ZipReader {
             if overflow || claimed > limits.total { throw ZipError.archiveTooLarge(total: overflow ? .max : claimed) }
             total = claimed
             if method == 0, compressedSize != size { throw ZipError.corrupt(name) }
+            // Deflate gives about the size back at the worst (a few bytes per 64 KB when nothing shrinks), and what is read
+            // into memory is this many bytes, so a header that claims far more is lying.
+            if method == 8, Int(compressedSize) > Int(size) + Int(size) / 1000 + 64 { throw ZipError.corrupt(name) }
             guard Int(localOffset) + localHeaderSize + Int(compressedSize) <= fileSize else { throw ZipError.corrupt(name) }
             entries.append(ZipEntry(
                 name: name, method: method, compressedSize: Int(compressedSize), size: Int(size), crc32: crc,

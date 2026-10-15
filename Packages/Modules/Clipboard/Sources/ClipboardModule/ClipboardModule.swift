@@ -239,9 +239,12 @@ public final class ClipboardModule: FeatureModule {
                     guard let self else { throw ClipboardBackupError.moduleStopped }
                     return try await self.exportBackup(options, to: url, progress: progress)
                 },
-                restore: { [weak self] url, progress in
+                planRestore: { [weak self] url, progress in
                     guard let self else { throw ClipboardBackupError.moduleStopped }
-                    return try await self.restoreBackup(from: url, progress: progress)
+                    return try await self.planRestore(from: url, progress: progress)
+                },
+                legacyTextCount: { [weak self] scope in
+                    self.map { ClipboardBackupWriter.legacyTextCount(in: $0.state.history, scope: scope) } ?? 0
                 }
             )
         ))
@@ -915,16 +918,20 @@ public final class ClipboardModule: FeatureModule {
         store.scheduleSave(history)
     }
 
+    /// The limits in Settings as they are now; nil while stopped.
+    var pruneLimits: ClipboardRestoreImpact.Limits? {
+        guard let context, let keys else { return nil }
+        let settings = context.settings
+        return ClipboardRestoreImpact.Limits(
+            limit: settings.value(keys.historyLimit), retention: settings.value(keys.retention),
+            imageByteLimit: settings.value(keys.imageStorageLimitMB) * ClipboardStorageUsage.bytesPerMB
+        )
+    }
+
     /// Removes items beyond the limits in Settings; returns them so their images can be deleted.
     func prune(_ history: inout ClipboardHistory) -> [ClipboardItem] {
-        guard let context, let keys else { return [] }
-        let settings = context.settings
-        return history.prune(
-            limit: settings.value(keys.historyLimit),
-            retention: settings.value(keys.retention),
-            imageByteLimit: settings.value(keys.imageStorageLimitMB) * ClipboardStorageUsage.bytesPerMB,
-            now: now()
-        )
+        guard let limits = pruneLimits else { return [] }
+        return history.prune(limit: limits.limit, retention: limits.retention, imageByteLimit: limits.imageByteLimit, now: now())
     }
 }
 

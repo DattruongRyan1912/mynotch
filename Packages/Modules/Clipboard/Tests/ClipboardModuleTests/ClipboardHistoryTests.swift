@@ -39,7 +39,7 @@ import Testing
         #expect(history.items.map(\.id) == [secondID, firstID])
         #expect(history.items[1] == ClipboardItem(
             id: firstID, content: .text("a"), contentHash: "hash-a", copiedAt: Self.start,
-            sourceBundleID: "com.apple.Safari", sourceAppName: "Safari", codeDetection: .notCode
+            sourceBundleID: "com.apple.Safari", sourceAppName: "Safari", codeDetection: .notCode, sensitive: false
         ))
         #expect(history.items[0].sourceBundleID == nil && history.items[0].sourceAppName == nil)
     }
@@ -58,7 +58,8 @@ import Testing
         #expect(history.items.map(\.id) == [original, other])
         #expect(history.items[0] == ClipboardItem(
             id: original, content: .richText(plain: "Bold", rtf: rtf), contentHash: ClipboardContent.hash(of: .text("Bold")),
-            copiedAt: Self.start + 5, sourceBundleID: "com.apple.iWork.Pages", sourceAppName: "Pages", codeDetection: .notCode
+            copiedAt: Self.start + 5, sourceBundleID: "com.apple.iWork.Pages", sourceAppName: "Pages", codeDetection: .notCode,
+            sensitive: false
         ))
     }
 

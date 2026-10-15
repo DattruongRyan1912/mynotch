@@ -34,14 +34,17 @@ nonisolated struct ClipboardHistory: Codable, Equatable, Sendable {
             item.sourceAppName = source.name
             // The same hash is the same text, so the answer stays; only an item from before detection has none yet.
             item.codeDetection = item.codeDetection ?? ClipboardCodeDetector.detect(content)
+            // A copy that is not marked does not clear what an earlier one was: the same words may have been a secret then.
             if isSensitive { item.sensitive = true }
+            // Copied now, it is an ordinary item with a date of now.
+            item.exemptFromLimits = nil
             items.insert(item, at: 0)
             return .moved(item.id)
         }
         let item = ClipboardItem(
             id: UUID(), content: content, contentHash: hash, copiedAt: date,
             sourceBundleID: source.bundleID, sourceAppName: source.name, codeDetection: ClipboardCodeDetector.detect(content),
-            sensitive: isSensitive ? true : nil
+            sensitive: isSensitive
         )
         items.insert(item, at: 0)
         return .inserted(item.id)
@@ -76,6 +79,7 @@ nonisolated struct ClipboardHistory: Codable, Equatable, Sendable {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         var item = items.remove(at: index)
         item.copiedAt = date
+        item.exemptFromLimits = nil
         items.insert(item, at: 0)
     }
 
@@ -92,10 +96,12 @@ nonisolated struct ClipboardHistory: Codable, Equatable, Sendable {
     }
 
     /// Enforces the limits in order: item count, age, then image bytes, each removing the oldest unpinned items first.
-    /// The limits apply only to unpinned items: pinned ones are exempt and never removed, so pinning many items
-    /// never pushes new copies out of history. Returns the removed items in removal order.
+    /// The limits apply only to items that are neither pinned nor exempt (a restore can exempt what it brings): those are
+    /// never removed and not counted, so pinning many items, or restoring a backup, never pushes new copies out of history.
+    /// Returns the removed items in removal order.
     mutating func prune(limit: Int, retention: Retention, imageByteLimit: Int, now: Date) -> [ClipboardItem] {
-        let pinned = pinnedIDs
+        var pinned = pinnedIDs
+        for item in items where item.isExemptFromLimits { pinned.insert(item.id) }
         var removed: [ClipboardItem] = []
         /// Walks from the oldest item and removes every unpinned one that `shouldRemove` accepts at that moment.
         func removeOldestUnpinned(where shouldRemove: (ClipboardItem) -> Bool) {
