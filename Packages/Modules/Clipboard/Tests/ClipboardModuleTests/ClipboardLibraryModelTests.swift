@@ -10,6 +10,10 @@ final class FakeLibraryActions: ClipboardLibraryActions {
     private(set) var copied: [UUID] = []
     private(set) var deleted: [Set<UUID>] = []
     private(set) var pinned: [(ids: [UUID], board: UUID)] = []
+    private(set) var pasted: [(id: UUID, plainText: Bool)] = []
+    private(set) var edited: [UUID] = []
+    /// What opening the editor answers; false is an item that cannot be edited.
+    var editOpens = true
     /// Runs when an item is used, before the answer, so a test can see what had happened by then.
     var onActivate: (() -> Void)?
 
@@ -26,6 +30,17 @@ final class FakeLibraryActions: ClipboardLibraryActions {
     func copy(_ item: ClipboardItem, plainText: Bool) -> ClipboardPaster.Outcome? {
         copied.append(item.id)
         return outcome
+    }
+
+    func paste(_ item: ClipboardItem, plainText: Bool) -> ClipboardPaster.Outcome? {
+        pasted.append((item.id, plainText))
+        onActivate?()
+        return outcome
+    }
+
+    func edit(_ item: ClipboardItem) -> Bool {
+        edited.append(item.id)
+        return editOpens
     }
 
     func delete(ids: Set<UUID>) {

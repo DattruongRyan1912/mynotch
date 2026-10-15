@@ -59,7 +59,7 @@ import Testing
         #expect(history.items[0] == ClipboardItem(
             id: original, content: .richText(plain: "Bold", rtf: rtf), contentHash: ClipboardContent.hash(of: .text("Bold")),
             copiedAt: Self.start + 5, sourceBundleID: "com.apple.iWork.Pages", sourceAppName: "Pages", codeDetection: .notCode,
-            sensitive: false
+            sensitive: false, copyCount: 2
         ))
     }
 

@@ -18,14 +18,26 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
     // MARK: What the user chose
 
     var selection = ClipboardLibrarySelection.all {
-        didSet { if selection != oldValue { refreshItems() } }
+        didSet {
+            guard selection != oldValue else { return }
+            refreshItems()
+            visitCurrentPlace()
+        }
     }
     /// Narrows the selection to one kind.
     var kindFilter: ClipboardKind? {
-        didSet { if kindFilter != oldValue { refreshItems() } }
+        didSet {
+            guard kindFilter != oldValue else { return }
+            refreshItems()
+            visitCurrentPlace()
+        }
     }
     var searchText = "" {
-        didSet { if searchText != oldValue { refreshItems() } }
+        didSet {
+            guard searchText != oldValue else { return }
+            refreshItems()
+            searchTextChanged()
+        }
     }
     var sort: ClipboardLibrarySort {
         didSet {
@@ -39,6 +51,10 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
     }
     var cardSize: ClipboardLibraryCardSize {
         didSet { if cardSize != oldValue { onPreferencesChange?(preferences) } }
+    }
+    /// The inspector pane beside the cards; remembered between openings.
+    var isInspectorVisible: Bool {
+        didSet { if isInspectorVisible != oldValue { onPreferencesChange?(preferences) } }
     }
     /// Cards per row now; set by the view, which knows the width. Arrow keys move by this many in the grid.
     var columns = 1
@@ -61,6 +77,10 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
     private(set) var pendingDeletion: Set<UUID>?
     private(set) var notice: ClipboardLibraryNotice?
     private(set) var draggingIDs: [UUID] = []
+    /// Where the user has been, for ⌘[ and ⌘] like Finder. Not kept anywhere: a new window starts with nowhere to go back to.
+    private(set) var navigation = ClipboardLibraryNavigation(
+        start: ClipboardLibraryNavigation.Place(selection: .all, kindFilter: nil, searchText: "", selectedID: nil)
+    )
 
     @ObservationIgnored var onPreferencesChange: ((ClipboardLibraryPreferences) -> Void)?
     /// Owned by the library, so its thumbnails go with the window.
@@ -75,6 +95,11 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
     /// Where a ⇧-click or ⇧-arrow range starts.
     @ObservationIgnored private var anchorID: UUID?
     @ObservationIgnored private var noticeCount = 0
+    /// True while a place from the list is being put back, or the model itself moves off a place that is gone: neither is a step
+    /// the user took, so neither adds a place.
+    @ObservationIgnored private var isMovingByItself = false
+    /// True while the search text is being typed, so the letters of one word make one place.
+    @ObservationIgnored private var isTypingSearch = false
 
     init(
         state: ClipboardState, actions: any ClipboardLibraryActions, preferences: ClipboardLibraryPreferences = ClipboardLibraryPreferences(),
@@ -89,6 +114,7 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
         sort = preferences.sort
         layout = preferences.layout
         cardSize = preferences.cardSize
+        isInspectorVisible = preferences.inspectorVisible
         refreshAll()
         state.observeHistory(self) { [weak self] in self?.refreshAll() }
     }
@@ -100,7 +126,7 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
     }
 
     var preferences: ClipboardLibraryPreferences {
-        ClipboardLibraryPreferences(layout: layout, sort: sort, cardSize: cardSize)
+        ClipboardLibraryPreferences(layout: layout, sort: sort, cardSize: cardSize, inspectorVisible: isInspectorVisible)
     }
 
     // MARK: Words
@@ -161,6 +187,8 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
     func handleSearchKey(_ command: ClipboardKeyCommand) -> Bool {
         var text = searchText
         guard suggestions.handle(command, text: &text) else { return false }
+        // Completing a word is a choice of its own, not one more letter.
+        isTypingSearch = false
         searchText = text
         return true
     }
@@ -169,10 +197,12 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
     func acceptSuggestion(at index: Int) {
         var text = searchText
         suggestions.accept(index, into: &text)
+        isTypingSearch = false
         searchText = text
     }
 
     func removeChip(_ token: ClipboardSearchToken) {
+        isTypingSearch = false
         searchText = ClipboardSearchTerms.removing(token, from: searchText)
     }
 
@@ -186,6 +216,7 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
             selectedIDs = [id]
             anchorID = id
             focusID = id
+            reviseCurrentPlace()
         case .toggle:
             if selectedIDs.remove(id) == nil {
                 selectedIDs.insert(id)
@@ -194,6 +225,7 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
                 focusID = items.last { selectedIDs.contains($0.id) }?.id
             }
             anchorID = id
+            reviseCurrentPlace()
         case .range:
             guard let anchor = anchorID.flatMap({ ids.firstIndex(of: $0) }) else {
                 select(id, mode: .replace)
@@ -201,6 +233,7 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
             }
             selectedIDs = Set(ids[min(anchor, index)...max(anchor, index)])
             focusID = id
+            reviseCurrentPlace()
         }
     }
 
@@ -208,12 +241,14 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
         selectedIDs = Set(items.map(\.id))
         anchorID = items.first?.id
         focusID = items.last?.id
+        reviseCurrentPlace()
     }
 
     func clearSelection() {
         selectedIDs = []
         anchorID = nil
         focusID = nil
+        reviseCurrentPlace()
     }
 
     /// An arrow key. Nothing focused yet starts at the first card. In the grid up and down move a row, and a
@@ -274,6 +309,47 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
         if notice?.id == id { notice = nil }
     }
 
+    // MARK: The inspector
+
+    /// What the inspector shows: the focused card's facts, or only that the board on show is locked.
+    var inspector: ClipboardInspectorContent {
+        ClipboardInspectorContent.make(for: focusedItem, in: history, boardIsLocked: lockedSelectedBoard != nil)
+    }
+
+    /// The card Return and ⌘C act on, as the item itself.
+    var focusedItem: ClipboardItem? {
+        focusID.flatMap { id in items.first { $0.id == id } }
+    }
+
+    /// ⌘I.
+    func toggleInspector() {
+        isInspectorVisible.toggle()
+    }
+
+    /// The inspector's "Dán": the focused card is copied and pasted whatever the click action says. False with no card focused.
+    @discardableResult
+    func pasteFocused() -> Bool {
+        guard let item = focusedItem else { return false }
+        // Before anything is written or pasted, so the preview is never in the way of the keyboard or of ⌘V.
+        preview.close()
+        show(actions.paste(item, plainText: false))
+        return true
+    }
+
+    /// The inspector's "Sửa…".
+    @discardableResult
+    func editFocused() -> Bool {
+        guard let item = focusedItem else { return false }
+        return edit(item)
+    }
+
+    /// Opens the editor on `item` if it can be edited (a text, a code or a link, not in a closed board).
+    @discardableResult
+    func edit(_ item: ClipboardItem) -> Bool {
+        guard history.canEdit(item.id) else { return false }
+        return actions.edit(item)
+    }
+
     // MARK: The large preview
 
     var isPreviewOpen: Bool { preview.isOpen }
@@ -315,6 +391,72 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
         case .activate: activateSelection()
         }
         return true
+    }
+
+    // MARK: Back and forward
+
+    var canGoBack: Bool { navigation.canGoBack }
+    var canGoForward: Bool { navigation.canGoForward }
+
+    /// ⌘[ and the toolbar's arrow: the place before this one. False when there is none.
+    @discardableResult
+    func goBack() -> Bool {
+        guard let place = navigation.back() else { return false }
+        show(place)
+        return true
+    }
+
+    /// ⌘] and the toolbar's arrow.
+    @discardableResult
+    func goForward() -> Bool {
+        guard let place = navigation.forward() else { return false }
+        show(place)
+        return true
+    }
+
+    private var currentPlace: ClipboardLibraryNavigation.Place {
+        ClipboardLibraryNavigation.Place(selection: selection, kindFilter: kindFilter, searchText: searchText, selectedID: focusID)
+    }
+
+    /// The sidebar or the kind filter changed: a new place.
+    private func visitCurrentPlace() {
+        guard !isMovingByItself else { return }
+        isTypingSearch = false
+        navigation.visit(currentPlace)
+    }
+
+    /// The search text changed: one place for a whole run of typing, which goes on until something else is chosen.
+    private func searchTextChanged() {
+        guard !isMovingByItself else { return }
+        if isTypingSearch {
+            // Typing back to where it started joins the places, so the next letter starts a place of its own.
+            if navigation.revise(currentPlace) { isTypingSearch = false }
+        } else {
+            navigation.visit(currentPlace)
+            isTypingSearch = true
+        }
+    }
+
+    /// A card was picked: that is part of where the user is, not a new place.
+    private func reviseCurrentPlace() {
+        guard !isMovingByItself else { return }
+        isTypingSearch = false
+        navigation.revise(currentPlace)
+    }
+
+    /// Puts a place of the list back: its sidebar choice, filter and search, and its pick if that card is still there.
+    private func show(_ place: ClipboardLibraryNavigation.Place) {
+        isMovingByItself = true
+        defer { isMovingByItself = false }
+        selection = place.selection
+        kindFilter = place.kindFilter
+        searchText = place.searchText
+        if let id = place.selectedID, items.contains(where: { $0.id == id }) {
+            select(id, mode: .replace)
+        } else {
+            clearSelection()
+        }
+        isTypingSearch = false
     }
 
     // MARK: Deleting
@@ -431,10 +573,24 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
             let remaining = pending.intersection(existing)
             pendingDeletion = remaining.isEmpty ? nil : remaining
         }
+        if navigation.places.contains(where: { !canShow($0.selection) }) { navigation.removePlaces { !canShow($0.selection) } }
+        if canShow(selection) {
+            refreshItems()
+        } else {
+            // The place on show is gone. "Tất cả" takes its place in the list: the model moved, not the user.
+            isMovingByItself = true
+            selection = .all
+            isMovingByItself = false
+            navigation.revise(currentPlace)
+        }
+    }
+
+    /// Whether a sidebar choice still exists: a board that was deleted, or an app none of whose items is left, does not.
+    private func canShow(_ selection: ClipboardLibrarySelection) -> Bool {
         switch selection {
-        case .board(let id) where !history.boards.contains(where: { $0.id == id }): selection = .all
-        case .app(let key) where !counts.apps.contains(where: { $0.id == key }): selection = .all
-        default: refreshItems()
+        case .all, .kind: true
+        case .board(let id): history.boards.contains { $0.id == id }
+        case .app(let key): counts.apps.contains { $0.id == key }
         }
     }
 

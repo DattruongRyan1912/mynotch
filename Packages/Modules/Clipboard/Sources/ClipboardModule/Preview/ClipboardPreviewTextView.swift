@@ -8,9 +8,13 @@ struct ClipboardPreviewTextView: NSViewRepresentable {
     /// Monospaced when it is code.
     let isCode: Bool
     let runs: [ClipboardPreviewHighlight.Run]
+    /// For the inspector's pane: smaller type and margins.
+    var isCompact = false
 
     static let codeSize: CGFloat = 14
     static let textSize: CGFloat = 17
+    static let compactCodeSize: CGFloat = 11
+    static let compactTextSize: CGFloat = 13
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -25,10 +29,10 @@ struct ClipboardPreviewTextView: NSViewRepresentable {
             textView.isEditable = false
             textView.isSelectable = true
             textView.drawsBackground = false
-            textView.textContainerInset = NSSize(width: 24, height: 20)
+            textView.textContainerInset = isCompact ? NSSize(width: 10, height: 8) : NSSize(width: 24, height: 20)
             textView.isAutomaticLinkDetectionEnabled = false
             textView.isRichText = true
-            textView.textStorage?.setAttributedString(Self.attributed(text, isCode: isCode))
+            textView.textStorage?.setAttributedString(Self.attributed(text, isCode: isCode, isCompact: isCompact))
             context.coordinator.runs = []
         }
         return scroll
@@ -54,10 +58,11 @@ struct ClipboardPreviewTextView: NSViewRepresentable {
     }
 
     /// Large and readable: a preview is for reading, not for fitting a card.
-    static func attributed(_ text: String, isCode: Bool) -> NSAttributedString {
+    static func attributed(_ text: String, isCode: Bool, isCompact: Bool = false) -> NSAttributedString {
+        let codeSize = isCompact ? compactCodeSize : codeSize, textSize = isCompact ? compactTextSize : textSize
         let font = isCode ? NSFont.monospacedSystemFont(ofSize: codeSize, weight: .regular) : NSFont.systemFont(ofSize: textSize)
         let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = isCode ? 2 : 4
+        paragraph.lineSpacing = isCode ? 2 : (isCompact ? 2 : 4)
         // A tab is four characters wide, as in an editor.
         paragraph.defaultTabInterval = font.maximumAdvancement.width * 4
         paragraph.tabStops = []

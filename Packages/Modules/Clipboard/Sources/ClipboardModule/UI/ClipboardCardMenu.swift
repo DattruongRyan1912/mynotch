@@ -21,6 +21,8 @@ struct ClipboardCardMenu: View {
     var onResult: (ClipboardPaster.Outcome?) -> Void = { _ in }
     /// Replaces deleting at once, for a window that asks before deleting a pinned item.
     var onDelete: ((ClipboardItem) -> Void)?
+    /// Opens the editor on the item ("Sửa…"), for a window that has one; nil leaves it out.
+    var onEdit: ((ClipboardItem) -> Void)?
     /// Shows the inline name field; the new board gets this item pinned.
     let onNewBoard: () -> Void
 
@@ -35,6 +37,9 @@ struct ClipboardCardMenu: View {
         }
         if item.content.kind == .text, let text = item.content.plainText {
             transforms(of: text)
+        }
+        if let onEdit, ClipboardEditing.text(of: item) != nil {
+            Button("Sửa…", systemImage: "pencil") { onEdit(item) }
         }
         boards
         if ClipboardModule.openableLink(of: item) != nil {

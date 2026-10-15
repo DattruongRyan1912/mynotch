@@ -18,17 +18,23 @@ struct ClipboardLibraryView: View {
             ClipboardLibrarySidebar(module: module, model: model, requestName: startNaming, requestVault: { vaultPrompt = $0 })
                 .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 320)
         } detail: {
-            ClipboardLibraryContentView(module: module, model: model, requestName: startNaming, requestVault: { vaultPrompt = $0 })
-                .safeAreaInset(edge: .top, spacing: 0) { topStrips }
-                // Under the toolbar, where the search field is.
-                .overlay(alignment: .topTrailing) { suggestionList }
-                .navigationSubtitle("\(model.title) · \(model.items.count) mục")
+            HStack(spacing: 0) {
+                ClipboardLibraryContentView(module: module, model: model, requestName: startNaming, requestVault: { vaultPrompt = $0 })
+                    .safeAreaInset(edge: .top, spacing: 0) { topStrips }
+                if model.isInspectorVisible {
+                    Divider()
+                    ClipboardInspectorView(module: module, model: model, requestName: startNaming)
+                }
+            }
+            // Under the toolbar, where the search field is: at the window's edge, beside the inspector when it is shown.
+            .overlay(alignment: .topTrailing) { suggestionList }
+            .navigationSubtitle("\(model.title) · \(model.items.count) mục")
         }
         // The toolbar of a window hosted like this showed no sidebar toggle when inspected off screen, so it gets its
         // own, and the split view's is removed in case it does appear, so there are never two.
         .toolbar(removing: .sidebarToggle)
         .toolbar { toolbarContent }
-        .background { findShortcut }
+        .background { shortcuts }
         .frame(minWidth: 760, minHeight: 480)
         // While the window is open: when it appears, then every 2 s, so the hint goes by itself once it is allowed.
         .task {
@@ -105,12 +111,23 @@ struct ClipboardLibraryView: View {
         }
     }
 
-    /// ⌘F, which `.searchable` used to provide.
-    private var findShortcut: some View {
-        Button("Tìm kiếm") { searchFocusRequest += 1 }
-            .keyboardShortcut("f", modifiers: .command)
-            .opacity(0)
-            .accessibilityHidden(true)
+    /// ⌘F, which `.searchable` used to provide, and ⌘[, ⌘] and ⌘I. Buttons nobody sees, so they work whatever has the keyboard; the
+    /// toolbar's own buttons carry the same shortcuts in their help text.
+    private var shortcuts: some View {
+        Group {
+            Button("Tìm kiếm") { searchFocusRequest += 1 }
+                .keyboardShortcut("f", modifiers: .command)
+            Button("Quay lại") { model.goBack() }
+                .keyboardShortcut("[", modifiers: .command)
+                .disabled(!model.canGoBack)
+            Button("Tiến tới") { model.goForward() }
+                .keyboardShortcut("]", modifiers: .command)
+                .disabled(!model.canGoForward)
+            Button("Hiện hoặc ẩn chi tiết") { model.toggleInspector() }
+                .keyboardShortcut("i", modifiers: .command)
+        }
+        .opacity(0)
+        .accessibilityHidden(true)
     }
 
     // MARK: Toolbar
@@ -123,6 +140,18 @@ struct ClipboardLibraryView: View {
                 Label("Thanh bên", systemImage: "sidebar.left")
             }
             .help("Ẩn hoặc hiện thanh bên")
+        }
+        ToolbarItemGroup(placement: .navigation) {
+            Button { model.goBack() } label: {
+                Label("Quay lại", systemImage: "chevron.left")
+            }
+            .disabled(!model.canGoBack)
+            .help("Quay lại (⌘[)")
+            Button { model.goForward() } label: {
+                Label("Tiến tới", systemImage: "chevron.right")
+            }
+            .disabled(!model.canGoForward)
+            .help("Tiến tới (⌘])")
         }
         ToolbarItemGroup {
             Menu {
@@ -186,6 +215,12 @@ struct ClipboardLibraryView: View {
                 Label("Board mới", systemImage: "folder.badge.plus")
             }
             .help("Board mới")
+        }
+        ToolbarItem {
+            Button { model.toggleInspector() } label: {
+                Label("Chi tiết", systemImage: "sidebar.right")
+            }
+            .help("Hiện hoặc ẩn chi tiết (⌘I)")
         }
         ToolbarItem {
             ClipboardSearchField(

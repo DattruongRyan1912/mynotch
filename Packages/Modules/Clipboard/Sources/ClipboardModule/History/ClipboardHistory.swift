@@ -38,6 +38,7 @@ nonisolated struct ClipboardHistory: Codable, Equatable, Sendable {
             if isSensitive { item.sensitive = true }
             // Copied now, it is an ordinary item with a date of now.
             item.exemptFromLimits = nil
+            item.copyCount = item.timesCopied + 1
             items.insert(item, at: 0)
             return .moved(item.id)
         }

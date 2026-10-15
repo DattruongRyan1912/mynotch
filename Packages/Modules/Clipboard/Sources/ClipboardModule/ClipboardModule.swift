@@ -29,6 +29,8 @@ public final class ClipboardModule: FeatureModule {
     let thumbnails = ClipboardThumbnailCache()
     /// The pictures of the open locked boards, which are in memory and in no file; see `ClipboardModule+Vault`.
     let openImages = ClipboardOpenImages()
+    /// The editor windows that are open; see `ClipboardModule+Edit`.
+    let editors = ClipboardEditors()
     /// Whether Touch ID can be offered, looked at once per run; nil until it is asked.
     var touchIDProbe: Bool?
     /// How long a drag's file stays after the drag is over, for the drop target to read it.
@@ -349,7 +351,7 @@ public final class ClipboardModule: FeatureModule {
             state: state, actions: self,
             preferences: ClipboardLibraryPreferences(
                 layout: settings.value(keys.libraryLayout), sort: settings.value(keys.librarySort),
-                cardSize: settings.value(keys.libraryCardSize)
+                cardSize: settings.value(keys.libraryCardSize), inspectorVisible: settings.value(keys.libraryInspectorVisible)
             ),
             now: now
         )
@@ -357,6 +359,7 @@ public final class ClipboardModule: FeatureModule {
             settings.set(preferences.layout, for: keys.libraryLayout)
             settings.set(preferences.sort, for: keys.librarySort)
             settings.set(preferences.cardSize, for: keys.libraryCardSize)
+            settings.set(preferences.inspectorVisible, for: keys.libraryInspectorVisible)
         }
         model.thumbnails.openImages = openImages
         library = model

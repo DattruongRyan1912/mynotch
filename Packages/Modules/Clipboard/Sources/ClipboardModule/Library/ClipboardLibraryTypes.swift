@@ -80,6 +80,8 @@ nonisolated struct ClipboardLibraryPreferences: Equatable, Sendable {
     var layout: ClipboardLibraryLayout = .grid
     var sort: ClipboardLibrarySort = .newest
     var cardSize: ClipboardLibraryCardSize = .medium
+    /// Whether the inspector pane beside the cards is shown (⌘I).
+    var inspectorVisible = false
 }
 
 /// A source app of the history, as one sidebar row.

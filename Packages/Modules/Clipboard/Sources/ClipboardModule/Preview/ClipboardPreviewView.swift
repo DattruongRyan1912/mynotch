@@ -10,9 +10,10 @@ struct ClipboardPreviewView: View {
     var body: some View {
         Group {
             if let item = host.previewedItem {
-                // A fresh view per item, so nothing loaded for the one before can show for the next.
+                // A fresh view per item and per version of its words, so nothing loaded for the one before can show for the next, and
+                // an item the editor replaced is drawn again.
                 ClipboardPreviewItemView(item: item, imageSource: module.previewImageSource(of: item))
-                    .id(item.id)
+                    .id(ClipboardPreviewIdentity(id: item.id, contentHash: item.contentHash))
             } else {
                 Color.clear
             }
@@ -21,6 +22,12 @@ struct ClipboardPreviewView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Xem trước")
     }
+}
+
+/// What makes a preview view the same view: the item and its words.
+struct ClipboardPreviewIdentity: Hashable {
+    let id: UUID
+    let contentHash: String
 }
 
 struct ClipboardPreviewItemView: View {
@@ -53,14 +60,8 @@ struct ClipboardPreviewItemView: View {
         }
     }
 
-    @ViewBuilder private var pane: some View {
-        switch content {
-        case .text(let text): ClipboardPreviewTextPane(text: text)
-        case .image(let info): ClipboardPreviewImagePane(info: info, source: imageSource)
-        case .color(let values): ClipboardPreviewColorPane(values: values)
-        case .link(let link): ClipboardPreviewLinkPane(link: link)
-        case .files: ClipboardPreviewFilesPane(urls: filesOf(item))
-        }
+    private var pane: some View {
+        ClipboardPreviewPane(content: content, item: item, imageSource: imageSource)
     }
 
     private func filesOf(_ item: ClipboardItem) -> [URL] {
@@ -100,19 +101,43 @@ struct ClipboardPreviewItemView: View {
     }
 }
 
+/// What the large preview and the library's inspector draw for an item, by kind: the large one fills a window and the compact one a
+/// pane beside the cards, with smaller type, tighter margins and no Quick Look.
+struct ClipboardPreviewPane: View {
+    let content: ClipboardPreviewContent
+    let item: ClipboardItem
+    let imageSource: ClipboardPreviewImageSource?
+    var isCompact = false
+
+    var body: some View {
+        switch content {
+        case .text(let text): ClipboardPreviewTextPane(text: text, isCompact: isCompact)
+        case .image(let info): ClipboardPreviewImagePane(info: info, source: imageSource, isCompact: isCompact)
+        case .color(let values): ClipboardPreviewColorPane(values: values, isCompact: isCompact)
+        case .link(let link): ClipboardPreviewLinkPane(link: link, isCompact: isCompact)
+        case .files: ClipboardPreviewFilesPane(urls: files, isCompact: isCompact)
+        }
+    }
+
+    private var files: [URL] {
+        if case .files(let urls) = item.content { urls } else { [] }
+    }
+}
+
 // MARK: Text and code
 
 struct ClipboardPreviewTextPane: View {
     let text: ClipboardPreviewText
+    var isCompact = false
     @State private var runs: [ClipboardPreviewHighlight.Run] = []
 
     var body: some View {
         VStack(spacing: 0) {
-            ClipboardPreviewTextView(text: text.text, isCode: text.language != nil, runs: runs)
+            ClipboardPreviewTextView(text: text.text, isCode: text.language != nil, runs: runs, isCompact: isCompact)
             if text.isTruncated {
                 Divider()
                 Text("Văn bản dài: chỉ hiện \(ClipboardPreviewText.characterLimit.formatted()) ký tự đầu")
-                    .font(.system(size: 12))
+                    .font(.system(size: isCompact ? 11 : 12))
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 6)
             }
@@ -132,6 +157,7 @@ struct ClipboardPreviewTextPane: View {
 struct ClipboardPreviewImagePane: View {
     let info: ClipboardPreviewImageInfo
     let source: ClipboardPreviewImageSource?
+    var isCompact = false
 
     @Environment(\.displayScale) private var scale
     @State private var image: CGImage?
@@ -176,7 +202,7 @@ struct ClipboardPreviewImagePane: View {
                 failed = decoded == nil
             }
         }
-        .padding(20)
+        .padding(isCompact ? 8 : 20)
         .accessibilityLabel("Ảnh \(info.dimensionsText)")
     }
 }
@@ -185,12 +211,13 @@ struct ClipboardPreviewImagePane: View {
 
 struct ClipboardPreviewColorPane: View {
     let values: ClipboardColorValues
+    var isCompact = false
 
     var body: some View {
-        VStack(spacing: 22) {
-            ClipboardColorSwatch(hex: values.hex, border: .primary.opacity(0.2), cornerRadius: 18)
+        VStack(spacing: isCompact ? 8 : 22) {
+            ClipboardColorSwatch(hex: values.hex, border: .primary.opacity(0.2), cornerRadius: isCompact ? 10 : 18)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
+            Grid(alignment: .leading, horizontalSpacing: isCompact ? 10 : 18, verticalSpacing: isCompact ? 2 : 8) {
                 if let original = values.original {
                     row("Đã chép", original)
                 }
@@ -199,7 +226,7 @@ struct ClipboardPreviewColorPane: View {
                 row("HSL", values.hsl)
             }
         }
-        .padding(28)
+        .padding(isCompact ? 10 : 28)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Màu \(values.original ?? values.hex), \(values.rgb), \(values.hsl)")
     }
@@ -207,10 +234,12 @@ struct ClipboardPreviewColorPane: View {
     private func row(_ name: String, _ value: String) -> some View {
         GridRow {
             Text(name)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: isCompact ? 11 : 13, weight: .semibold))
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.system(size: 22, weight: .medium, design: .monospaced))
+                .font(.system(size: isCompact ? 12 : 22, weight: .medium, design: .monospaced))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
     }
 }
@@ -219,29 +248,33 @@ struct ClipboardPreviewColorPane: View {
 
 struct ClipboardPreviewLinkPane: View {
     let link: ClipboardPreviewLink
+    var isCompact = false
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: isCompact ? 6 : 14) {
                 Image(systemName: "link")
-                    .font(.system(size: 34))
+                    .font(.system(size: isCompact ? 18 : 34))
                     .foregroundStyle(.secondary)
                 Text(link.host)
-                    .font(.system(size: 30, weight: .semibold))
+                    .font(.system(size: isCompact ? 16 : 30, weight: .semibold))
                 if let detail = link.detail {
                     Text(detail)
-                        .font(.system(size: 18, design: .monospaced))
+                        .font(.system(size: isCompact ? 11 : 18, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
                 Divider()
                 Text(link.address)
-                    .font(.system(size: 15, design: .monospaced))
-                Text("Chỉ hiện địa chỉ: MyNotch không mở trang này.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: isCompact ? 11 : 15, design: .monospaced))
+                    .textSelection(.enabled)
+                if !isCompact {
+                    Text("Chỉ hiện địa chỉ: MyNotch không mở trang này.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(32)
+            .padding(isCompact ? 12 : 32)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Link \(link.address)")
@@ -252,6 +285,7 @@ struct ClipboardPreviewLinkPane: View {
 
 struct ClipboardPreviewFilesPane: View {
     let urls: [URL]
+    var isCompact = false
     @State private var files: ClipboardPreviewFiles?
 
     var body: some View {
@@ -270,7 +304,8 @@ struct ClipboardPreviewFilesPane: View {
     }
 
     @ViewBuilder private func loaded(_ files: ClipboardPreviewFiles) -> some View {
-        if let url = files.quickLookURL, let entry = files.entries.first {
+        // The compact pane lists the files only: Quick Look's own drawing belongs to the large preview.
+        if !isCompact, let url = files.quickLookURL, let entry = files.entries.first {
             VStack(spacing: 0) {
                 row(entry, iconSize: 40)
                     .padding(14)
@@ -282,7 +317,7 @@ struct ClipboardPreviewFilesPane: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(Array(files.entries.enumerated()), id: \.offset) { _, entry in
-                        row(entry, iconSize: 36)
+                        row(entry, iconSize: isCompact ? 28 : 36)
                     }
                     if files.omittedCount > 0 {
                         Text("và \(files.omittedCount) file khác")
@@ -291,7 +326,7 @@ struct ClipboardPreviewFilesPane: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(24)
+                .padding(isCompact ? 12 : 24)
             }
         }
     }

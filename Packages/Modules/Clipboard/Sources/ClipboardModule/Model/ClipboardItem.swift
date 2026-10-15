@@ -18,12 +18,19 @@ nonisolated struct ClipboardItem: Identifiable, Codable, Sendable, Hashable {
     /// true for an item a restore was told to keep whatever the limits say: `prune` neither removes it nor counts it. Ends
     /// when the item is copied or used again, which makes it an ordinary item with a date of now. nil otherwise.
     var exemptFromLimits: Bool?
+    /// How many times it was copied, counting the first; nil for one copy. A copy that only moved it to the top is one more, MyNotch
+    /// using it again is not.
+    var copyCount: Int?
+    /// true once the user replaced its words in the editor, which keeps its date and its source; nil otherwise.
+    var edited: Bool?
 
     /// The language of a text that is code.
     var codeLanguage: CodeLanguage? { codeDetection?.language }
     var isCode: Bool { codeLanguage != nil }
     var isSensitive: Bool { sensitive == true }
     var isExemptFromLimits: Bool { exemptFromLimits == true }
+    var timesCopied: Int { max(copyCount ?? 1, 1) }
+    var isEdited: Bool { edited == true }
 }
 
 /// A named collection of pinned items; items in any board are never pruned. Boards are listed in the order of

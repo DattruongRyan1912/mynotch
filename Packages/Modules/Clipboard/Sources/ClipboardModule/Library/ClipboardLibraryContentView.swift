@@ -207,7 +207,8 @@ struct ClipboardLibraryContentView: View {
         } else {
             ClipboardCardMenu(
                 module: module, item: item, shownBoardID: model.selection.boardID, onResult: { model.show($0) },
-                onDelete: { model.requestDelete([$0.id]) }, onNewBoard: { requestName(.create(pinning: [item.id])) }
+                onDelete: { model.requestDelete([$0.id]) }, onEdit: { model.edit($0) },
+                onNewBoard: { requestName(.create(pinning: [item.id])) }
             )
         }
     }
