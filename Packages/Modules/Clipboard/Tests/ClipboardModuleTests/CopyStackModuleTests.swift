@@ -34,7 +34,7 @@ extension ClipboardModuleTests {
 
     // MARK: Hotkeys
 
-    @Test func theStackHasTwoHotkeysThatDoNotCollideWithAnyOther() async throws {
+    @Test func theStackHasTwoHotkeysThatDoNotCollideWithTheModulesOthers() async throws {
         await start()
 
         let toggle = try #require(harness.hotkeys.registrations.first { $0.id == Self.toggleStackID })
@@ -44,7 +44,9 @@ extension ClipboardModuleTests {
         #expect(harness.hotkeyBackend.getShortcut(for: toggle.name) == KeyboardShortcuts.Shortcut(.c, modifiers: [.control, .option]))
         #expect(harness.hotkeyBackend.getShortcut(for: paste.name) == KeyboardShortcuts.Shortcut(.v, modifiers: [.control, .option, .command]))
         #expect(harness.hotkeys.registrations.count == 5)
-        // ⌃⌥V already opens the history; two modules' worth of handlers on one key would both fire.
+        // Only this module's five: ⌃⌥V already opens the history, and two handlers on one key would both fire. Across modules
+        // the guarantee is the registry's (it reports a second registration with the same default, and stops a debug
+        // build), so a collision with another module fails wherever both are running, not in this test.
         #expect(harness.hotkeys.conflicts().isEmpty)
     }
 
@@ -331,6 +333,104 @@ extension ClipboardModuleTests {
         #expect(state.stack.entries.isEmpty)
     }
 
+    // MARK: Waiting for the hotkey's keys
+
+    /// The shortcut fires when V goes up, while ⌃⌥⌘ are normally still down: ⌘V must not be posted until they are up, and the
+    /// item must leave the stack only when ⌘V really went out.
+    @Test func theItemLeavesTheStackOnlyWhenCommandVIsSent() async {
+        await start()
+        startStack()
+        copy("một")
+
+        #expect(harness.hotkeyBackend.trigger(Self.pasteStackID))
+        #expect(keystrokes.pasteCount == 0)
+        #expect(stackTexts == ["một"])
+
+        harness.scheduler.advance(by: .milliseconds(80))
+        #expect(keystrokes.pasteCount == 1)
+        #expect(stackTexts.isEmpty)
+    }
+
+    @Test func commandVWaitsForTheKeysToBeLetGoAndGoesOutOnceAfterwards() async {
+        await start()
+        startStack()
+        copy("một")
+        copy("hai")
+        modifiers.held = true
+
+        #expect(harness.hotkeyBackend.trigger(Self.pasteStackID))
+        harness.scheduler.schedule(after: .milliseconds(200)) { [modifiers] in modifiers.held = false }
+
+        harness.scheduler.advance(by: .milliseconds(199))
+        #expect(keystrokes.pasteCount == 0)
+        #expect(stackTexts == ["một", "hai"])
+        #expect(activity("pasteHint") == nil)
+
+        harness.scheduler.advance(by: .milliseconds(16))
+        #expect(keystrokes.pasteCount == 1)
+        #expect(stackTexts == ["hai"])
+        harness.scheduler.advance(by: .seconds(2))
+        #expect(keystrokes.pasteCount == 1)
+        #expect(pasteboard.writes.map(\.content) == [.text("một")])
+    }
+
+    @Test func keysThatStayDownForASecondMeanCopyOnlyAndTheItemStaysOnTheStack() async {
+        await start()
+        startStack()
+        copy("một")
+        modifiers.held = true
+
+        #expect(harness.hotkeyBackend.trigger(Self.pasteStackID))
+        harness.scheduler.advance(by: .milliseconds(80) + .milliseconds(990))
+        #expect(activity("pasteHint") == nil)
+        harness.scheduler.advance(by: .milliseconds(30))
+
+        #expect(keystrokes.pasteCount == 0)
+        #expect(stackTexts == ["một"])
+        #expect(pasteboard.writes.map(\.content) == [.text("một")])
+        // The usual message: the item is on the pasteboard for the user's own ⌘V.
+        #expect(activity("pasteHint") != nil)
+
+        modifiers.held = false
+        pasteNext()
+        #expect(keystrokes.pasteCount == 1)
+        #expect(stackTexts.isEmpty)
+    }
+
+    @Test func stoppingTheModuleWhileWaitingSendsNothing() async {
+        await start()
+        startStack()
+        copy("một")
+        modifiers.held = true
+        #expect(harness.hotkeyBackend.trigger(Self.pasteStackID))
+        harness.scheduler.advance(by: .milliseconds(100))
+
+        await harness.registry.setEnabled(false, for: "clipboard")
+        modifiers.held = false
+        harness.scheduler.advance(by: .seconds(3))
+
+        #expect(keystrokes.pasteCount == 0)
+    }
+
+    /// The second press takes over from the first, which never sent anything: nothing lost, nothing doubled.
+    @Test func aSecondPressWhileWaitingNeitherLosesNorDoublesAnItem() async {
+        await start()
+        startStack()
+        copy("một")
+        copy("hai")
+        modifiers.held = true
+
+        #expect(harness.hotkeyBackend.trigger(Self.pasteStackID))
+        harness.scheduler.advance(by: .milliseconds(100))
+        #expect(harness.hotkeyBackend.trigger(Self.pasteStackID))
+        modifiers.held = false
+        harness.scheduler.advance(by: .seconds(1))
+
+        #expect(keystrokes.pasteCount == 1)
+        #expect(pasteboard.writes.map(\.content) == [.text("một"), .text("một")])
+        #expect(stackTexts == ["hai"])
+    }
+
     // MARK: When the paste cannot be done
 
     /// A window of MyNotch has the keyboard, so ⌘V would land in it: copy only, and the same item is next again.
@@ -442,6 +542,55 @@ extension ClipboardModuleTests {
         #expect(pasteboard.writes.isEmpty)
         #expect(keystrokes.pasteCount == 0)
         #expect(activity("stackNotice")?.summary == "Ngăn xếp đang tắt")
+    }
+
+    // MARK: An image that is gone
+
+    /// Deleting the history item deletes the image file while the stack still lists it.
+    func deleteImageFile(of entry: CopyStackEntry) throws {
+        guard case .image(let image) = entry.item.content else { return }
+        try FileManager.default.removeItem(at: imageFile(image.fileName))
+    }
+
+    @Test func anImageWhoseFileIsGoneIsDroppedWithANoteAndTheNextItemIsPasted() async throws {
+        await start()
+        startStack()
+        copy(PasteboardSnapshot(types: ["public.png"], png: ClipboardClassifierTests.png))
+        copy("còn")
+        try deleteImageFile(of: try #require(state.stack.entries.first))
+
+        pasteNext()
+
+        #expect(pasteboard.writes.map(\.content) == [.text("còn")])
+        #expect(keystrokes.pasteCount == 1)
+        #expect(stackTexts.isEmpty)
+        #expect(activity("stackNotice")?.summary == "Đã bỏ 1 mục không còn trên đĩa")
+        #expect(harness.presenter.toastCount == 0)
+    }
+
+    @Test func aStackLeftWithOnlyGoneImagesEndsInsteadOfGettingStuck() async throws {
+        let (settings, keys) = try settings()
+        settings.set(.lastIn, for: keys.stackOrder)
+        await start()
+        startStack()
+        copy(PasteboardSnapshot(types: ["public.png"], png: ClipboardClassifierTests.png))
+        try deleteImageFile(of: try #require(state.stack.entries.first))
+
+        pasteNext()
+
+        #expect(pasteboard.writes.isEmpty)
+        #expect(keystrokes.pasteCount == 0)
+        #expect(!state.stack.isOn)
+        #expect(activity("stackNotice")?.summary == "Ngăn xếp đã hết")
+    }
+
+    // MARK: In the bubble beside the notch
+
+    @Test func theCountAlsoHasAPlaceInTheBubbleThatShowsWhenAnotherActivityTakesTheNotch() async {
+        await start()
+        startStack()
+        #expect(activity("stack")?.minimal != nil)
+        #expect(activity("stack")?.summary == "Ngăn xếp: 0 mục")
     }
 
     // MARK: Editing

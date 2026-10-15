@@ -21,6 +21,7 @@ final class FakeSystem {
     let libraryWindow = FakeLibraryWindow()
     let panelWindow = FakePanelWindow()
     let system = FakeSystem()
+    let modifiers = FakeModifierState()
     let module: ClipboardModule
     let harness: RegistryHarness
     /// The harness's temporary storage root, removed when the test ends.
@@ -31,8 +32,8 @@ final class FakeSystem {
         module = ClipboardModule(
             pasteboard: pasteboard, keystrokes: keystrokes,
             frontmostApp: { system.frontmost }, isTrusted: { system.trusted },
-            pasteboardAccessBehavior: { system.accessBehavior }, now: { system.now }, libraryWindow: libraryWindow,
-            panelWindow: panelWindow
+            pasteboardAccessBehavior: { system.accessBehavior }, modifiers: modifiers, now: { system.now },
+            libraryWindow: libraryWindow, panelWindow: panelWindow
         )
         harness = RegistryHarness([module])
         temporaryRoot = harness.storageRoot.applicationSupport.deletingLastPathComponent()
@@ -353,7 +354,7 @@ final class FakeSystem {
         let module = ClipboardModule(
             pasteboard: SystemPasteboard(pasteboard: named), keystrokes: keystrokes,
             frontmostApp: { system.frontmost }, isTrusted: { true },
-            pasteboardAccessBehavior: { .alwaysAllow }, now: { system.now }
+            pasteboardAccessBehavior: { .alwaysAllow }, modifiers: FakeModifierState(), now: { system.now }
         )
         let harness = RegistryHarness([module])
         let root = harness.storageRoot.applicationSupport.deletingLastPathComponent()

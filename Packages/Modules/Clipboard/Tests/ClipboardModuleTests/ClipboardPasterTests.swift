@@ -16,8 +16,11 @@ import Testing
     let scheduler = ManualScheduler()
     var trusted = true
 
+    let modifiers = FakeModifierState()
+
     lazy var paster = ClipboardPaster(
-        pasteboard: pasteboard, keystrokes: keystrokes, scheduler: scheduler, isTrusted: { [unowned self] in trusted }
+        pasteboard: pasteboard, keystrokes: keystrokes, scheduler: scheduler, isTrusted: { [unowned self] in trusted },
+        modifiers: modifiers
     )
 
     @Test func copyWritesTheItemWithoutPasting() {
@@ -147,7 +150,8 @@ import Testing
             copiedAt: .now, sourceBundleID: nil, sourceAppName: nil
         )
         let paster = ClipboardPaster(
-            pasteboard: SystemPasteboard(pasteboard: named), keystrokes: keystrokes, scheduler: scheduler, isTrusted: { true }
+            pasteboard: SystemPasteboard(pasteboard: named), keystrokes: keystrokes, scheduler: scheduler, isTrusted: { true },
+            modifiers: modifiers
         )
 
         let outcome = paster.perform(item, imageURL: URL(fileURLWithPath: "/tmp/MyNotchTests/missing.png"), paste: true)
@@ -156,6 +160,108 @@ import Testing
         #expect(outcome == .failed)
         #expect(named.changeCount == changeCount)
         #expect(named.string(forType: .string) == "keep me")
+        #expect(keystrokes.pasteCount == 0)
+        #expect(scheduler.pendingCount == 0)
+    }
+
+    // MARK: Waiting for the keys that asked for the paste
+
+    /// What a paste that waits tells its caller, in the order it happened.
+    final class Waiting {
+        var events: [String] = []
+
+        func release(_ keystrokes: FakeKeystrokeSender) -> ClipboardPaster.KeyRelease {
+            ClipboardPaster.KeyRelease(
+                onSent: { [self] in events.append("sent after \(keystrokes.pasteCount) command-V") },
+                onTimeout: { [self] in events.append("timeout") }
+            )
+        }
+    }
+
+    @Test func keysThatAreAlreadyUpDelayNothingBeyondThePasteDelay() {
+        let waiting = Waiting()
+        let outcome = paster.perform(Self.item, imageURL: nil, paste: true, afterKeysUp: waiting.release(keystrokes))
+
+        #expect(outcome == .pasted)
+        scheduler.advance(by: .milliseconds(79))
+        #expect(keystrokes.pasteCount == 0)
+        #expect(waiting.events.isEmpty)
+        scheduler.advance(by: .milliseconds(1))
+        // Told after the key went out, once.
+        #expect(waiting.events == ["sent after 1 command-V"])
+        scheduler.advance(by: .seconds(2))
+        #expect(waiting.events.count == 1)
+    }
+
+    @Test func keysHeldThenLetGoSendCommandVOnceAfterTheyAreUp() {
+        modifiers.held = true
+        let waiting = Waiting()
+        paster.perform(Self.item, imageURL: nil, paste: true, afterKeysUp: waiting.release(keystrokes))
+        scheduler.schedule(after: .milliseconds(200)) { [modifiers] in modifiers.held = false }
+
+        scheduler.advance(by: .milliseconds(199))
+        #expect(keystrokes.pasteCount == 0)
+        #expect(waiting.events.isEmpty)
+        #expect(modifiers.readCount > 1)
+
+        // The next look at the keys is at most 15 ms later.
+        scheduler.advance(by: .milliseconds(16))
+        #expect(keystrokes.pasteCount == 1)
+        #expect(waiting.events == ["sent after 1 command-V"])
+        scheduler.advance(by: .seconds(2))
+        #expect(keystrokes.pasteCount == 1)
+        #expect(scheduler.pendingCount == 0)
+    }
+
+    @Test func keysHeldForASecondGiveUpWithoutSendingAnything() {
+        modifiers.held = true
+        let waiting = Waiting()
+        paster.perform(Self.item, imageURL: nil, paste: true, afterKeysUp: waiting.release(keystrokes))
+
+        // 80 ms of paste delay, then a second of looking at the keys.
+        scheduler.advance(by: .milliseconds(80) + .milliseconds(990))
+        #expect(waiting.events.isEmpty)
+        scheduler.advance(by: .milliseconds(30))
+        #expect(waiting.events == ["timeout"])
+        #expect(keystrokes.pasteCount == 0)
+        scheduler.advance(by: .seconds(5))
+        #expect(waiting.events == ["timeout"])
+        #expect(scheduler.pendingCount == 0)
+    }
+
+    @Test func aNewerPasteTakesOverFromOneThatIsStillWaiting() {
+        modifiers.held = true
+        let first = Waiting(), second = Waiting()
+        paster.perform(Self.item, imageURL: nil, paste: true, afterKeysUp: first.release(keystrokes))
+        scheduler.advance(by: .milliseconds(100))
+        paster.perform(Self.item, imageURL: nil, paste: true, afterKeysUp: second.release(keystrokes))
+        modifiers.held = false
+        scheduler.advance(by: .seconds(2))
+
+        #expect(first.events.isEmpty)
+        #expect(second.events == ["sent after 1 command-V"])
+        #expect(keystrokes.pasteCount == 1)
+    }
+
+    @Test func aPasteThatDoesNotAskToWaitNeverLooksAtTheKeys() {
+        modifiers.held = true
+        paster.perform(Self.item, imageURL: nil, paste: true)
+        scheduler.advance(by: .seconds(2))
+
+        #expect(keystrokes.pasteCount == 1)
+        #expect(modifiers.readCount == 0)
+    }
+
+    @Test func aRefusedPasteNeverWaitsForTheKeys() {
+        modifiers.held = true
+        let waiting = Waiting()
+        let outcome = paster.perform(
+            Self.item, imageURL: nil, paste: true, beforePaste: { false }, afterKeysUp: waiting.release(keystrokes)
+        )
+        scheduler.advance(by: .seconds(2))
+
+        #expect(outcome == .copied)
+        #expect(waiting.events.isEmpty)
         #expect(keystrokes.pasteCount == 0)
         #expect(scheduler.pendingCount == 0)
     }

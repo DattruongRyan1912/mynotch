@@ -38,6 +38,7 @@ public final class ClipboardModule: FeatureModule {
     private let frontmostApp: () -> ClipboardMonitor.SourceApp
     private let isTrusted: () -> Bool
     private let pasteboardAccessBehavior: () -> NSPasteboard.AccessBehavior
+    private let modifiers: any ModifierState
     private let now: () -> Date
     /// nil in tests that never show it; the app passes the real window.
     private let libraryWindow: (any ClipboardLibraryWindowing)?
@@ -64,6 +65,7 @@ public final class ClipboardModule: FeatureModule {
             isTrusted: { AXIsProcessTrusted() },
             // Reading the behavior does not read the pasteboard, so it never prompts.
             pasteboardAccessBehavior: { NSPasteboard.general.accessBehavior },
+            modifiers: SystemModifierState(),
             libraryWindow: ClipboardLibraryWindowController(),
             panelWindow: ClipboardPanelController()
         )
@@ -76,6 +78,7 @@ public final class ClipboardModule: FeatureModule {
         frontmostApp: @escaping () -> ClipboardMonitor.SourceApp,
         isTrusted: @escaping () -> Bool,
         pasteboardAccessBehavior: @escaping () -> NSPasteboard.AccessBehavior,
+        modifiers: any ModifierState,
         now: @escaping () -> Date = { .now },
         libraryWindow: (any ClipboardLibraryWindowing)? = nil,
         panelWindow: (any ClipboardPanelWindowing)? = nil
@@ -85,6 +88,7 @@ public final class ClipboardModule: FeatureModule {
         self.frontmostApp = frontmostApp
         self.isTrusted = isTrusted
         self.pasteboardAccessBehavior = pasteboardAccessBehavior
+        self.modifiers = modifiers
         self.now = now
         self.libraryWindow = libraryWindow
         self.panelWindow = panelWindow
@@ -118,7 +122,9 @@ public final class ClipboardModule: FeatureModule {
 
         let keystrokeGate = KeystrokeGate(keystrokes)
         self.keystrokeGate = keystrokeGate
-        paster = ClipboardPaster(pasteboard: pasteboard, keystrokes: keystrokeGate, scheduler: context.scheduler, isTrusted: isTrusted)
+        paster = ClipboardPaster(
+            pasteboard: pasteboard, keystrokes: keystrokeGate, scheduler: context.scheduler, isTrusted: isTrusted, modifiers: modifiers
+        )
         let settings = context.settings
         let monitor = ClipboardMonitor(
             pasteboard: pasteboard, scheduler: context.scheduler, frontmostApp: frontmostApp,
@@ -521,25 +527,37 @@ public final class ClipboardModule: FeatureModule {
         return context.settings.value(keys.stackOrder)
     }
 
-    /// The ⌃⌥⌘V shortcut: pastes the next item into the app in front and moves on, through the same checked path as the
-    /// floating panel (the keyboard must be with that app, or the item is only copied and the stack stays where it was).
-    /// An empty stack turns itself off, and a stack that is off says so instead of pasting.
+    /// The ⌃⌥⌘V shortcut: pastes the next item into the app in front, through the same checked path as the floating panel
+    /// (the keyboard must be with that app, or the item is only copied and the stack stays where it was). ⌘V also waits
+    /// until the shortcut's own keys are up, and the item leaves the stack only when ⌘V went out: when the keys stay down
+    /// for a second the item is only copied, like any paste that cannot be done. An image whose file is gone is dropped
+    /// first, with a note. An empty stack turns itself off, and a stack that is off says so instead of pasting.
     func pasteNextInStack() {
-        guard let context, let keys, store != nil else { return }
+        guard let context, let keys, let store else { return }
         guard state.stack.isOn else {
             announceStack("Ngăn xếp đang tắt", short: "Tắt")
             return
         }
-        guard let entry = state.stack.next(context.settings.value(keys.stackOrder)) else {
+        let order = context.settings.value(keys.stackOrder)
+        var dropped = 0
+        var next = state.stack.next(order)
+        while let entry = next, !hasImageFile(entry.item, in: store) {
+            updateStack { $0.remove(id: entry.id) }
+            dropped += 1
+            next = state.stack.next(order)
+        }
+        guard let entry = next else {
             updateStack { $0.stop() }
             announceStack("Ngăn xếp đã hết", short: "Hết")
             return
         }
+        if dropped > 0 { announceStack("Đã bỏ \(dropped) mục không còn trên đĩa", short: "−\(dropped)") }
         // The history keeps its order: pasting a run of copies must not turn it upside down.
-        let outcome = put(entry.item, paste: true, touchesHistory: false) { [weak self] in
-            self?.keyboardIsReadyForStackPaste() ?? false
-        }
-        if outcome == .pasted { updateStack { $0.remove(id: entry.id) } }
+        put(
+            entry.item, paste: true, touchesHistory: false,
+            beforePaste: { [weak self] in self?.keyboardIsReadyForStackPaste() ?? false },
+            afterKeysUp: { [weak self] in self?.updateStack { $0.remove(id: entry.id) } }
+        )
     }
 
     // MARK: Private
@@ -609,11 +627,12 @@ public final class ClipboardModule: FeatureModule {
     /// A failed write changes nothing and keeps the notch open. A paste from the library window hands the keyboard
     /// back to the app behind it and waits longer for that before sending ⌘V. `beforePaste` is the floating panel's way to
     /// get the keyboard out of its own window between the write and ⌘V; a refusal pastes nothing and asks the user to
-    /// press ⌘V. `touchesHistory` is off for the stack, whose pastes must not reorder the history.
+    /// press ⌘V. `touchesHistory` is off for the stack, whose pastes must not reorder the history. `afterKeysUp` is the
+    /// shortcut's: ⌘V waits for the user's keys, and it runs when ⌘V went out.
     @discardableResult
     private func put(
         _ item: ClipboardItem, paste: Bool, plainTextOnly: Bool = false, touchesHistory: Bool = true,
-        beforePaste: (() -> Bool)? = nil
+        beforePaste: (() -> Bool)? = nil, afterKeysUp: (() -> Void)? = nil
     ) -> ClipboardPaster.Outcome? {
         guard let context, let keys, let paster else { return nil }
         let fromLibrary = paste && libraryWindow?.isFrontmost == true
@@ -628,6 +647,10 @@ public final class ClipboardModule: FeatureModule {
                     if !isBack { keyboardRefused = true }
                     return isBack
                 }
+            },
+            // A shortcut's paste waits for its keys to be up, and tells when ⌘V is really out or given up.
+            afterKeysUp: afterKeysUp.map { sent in
+                ClipboardPaster.KeyRelease(onSent: sent, onTimeout: { [weak self] in self?.pasteTimedOut() })
             }
         )
         let closeAfterAction = context.settings.value(keys.closeAfterAction)
@@ -675,6 +698,12 @@ public final class ClipboardModule: FeatureModule {
         context.activities.raise(id: "pasteHint")
     }
 
+    /// The keys that asked for a paste stayed down, so nothing was sent: the item is on the pasteboard for the user's ⌘V.
+    private func pasteTimedOut() {
+        guard let context else { return }
+        askToPressPaste(context)
+    }
+
     /// Whether a ⌘V now would reach the app in front. A floating panel that is open hands the keyboard back first (a
     /// pinned one stays on screen); with none open it is only a check. Without a panel window, nothing is known: no.
     private func keyboardIsReadyForStackPaste() -> Bool {
@@ -707,6 +736,8 @@ public final class ClipboardModule: FeatureModule {
             id: "stack",
             leading: AnyView(ClipboardActivityIcon(systemImage: "square.stack.3d.up.fill")),
             trailing: AnyView(ClipboardStackActivityText(text: "\(count)")),
+            // With music or another activity in front, the stack is a bubble the size of the notch: the count still fits.
+            minimal: AnyView(ClipboardStackBubbleCount(count: count)),
             summary: "Ngăn xếp: \(count) mục"
         ))
     }

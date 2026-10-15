@@ -39,6 +39,21 @@ struct ClipboardStackActivityText: View {
     }
 }
 
+/// The stack's count in the small round bubble that an activity gets when another one has the notch: no room for more than
+/// two digits, so a long stack reads "99+".
+struct ClipboardStackBubbleCount: View {
+    let count: Int
+
+    var body: some View {
+        Text(count > 99 ? "99+" : "\(count)")
+            .font(.system(size: 12, weight: .bold).monospacedDigit())
+            .foregroundStyle(NotchTokens.primaryText)
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            .padding(.horizontal, 2)
+    }
+}
+
 /// A short message over the open tab; activities would stay hidden until the notch closes.
 struct ClipboardToast: View {
     let text: String

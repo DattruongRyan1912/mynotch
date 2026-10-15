@@ -1,3 +1,4 @@
+import AppKit
 import NotchUI
 import SwiftUI
 
@@ -28,6 +29,9 @@ struct ClipboardStackStartButton: View {
 /// order they were copied, to reorder by dragging, remove one by one or clear.
 struct ClipboardStackView: View {
     let module: ClipboardModule
+
+    @Environment(\.notch) private var notch
+    @State private var dragWatch = ClipboardMouseDragWatch()
 
     private var stack: CopyStack { module.state.stack }
 
@@ -66,7 +70,7 @@ struct ClipboardStackView: View {
         .frame(height: 22)
     }
 
-    /// A list, for the drag that reorders rows. Dragging a row asks nothing of the notch: the pointer stays inside it.
+    /// A list, for the drag that reorders rows.
     private var list: some View {
         let next = stack.next(module.stackOrder)?.id
         let entries = stack.entries
@@ -87,6 +91,9 @@ struct ClipboardStackView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .environment(\.defaultMinListRowHeight, 26)
+        // A list's own drag does not say when it starts, so the notch is told while the button is down over the list.
+        .onHover { dragWatch.pointerMoved(inside: $0, notch: notch) }
+        .onDisappear { dragWatch.stop() }
     }
 }
 
@@ -149,6 +156,7 @@ private struct ClipboardStackRow: View {
         // A drag is not the only way to reorder.
         .accessibilityAction(named: "Chuyển lên") { if canMoveUp { move(.up) } }
         .accessibilityAction(named: "Chuyển xuống") { if canMoveDown { move(.down) } }
+        .accessibilityAction(named: "Bỏ khỏi ngăn xếp", remove)
     }
 
     private var accessibilityLabel: String {
@@ -190,5 +198,39 @@ extension CopyStackOrder {
         case .firstIn: "Dán từ mục chép trước"
         case .lastIn: "Dán từ mục chép sau"
         }
+    }
+}
+
+/// Tells the notch a drag is going on while the left button is down after the pointer was over a list, the way the history
+/// cards do from their drag. A list's own reordering drag has no start to hook into, so the button is looked at every
+/// 50 ms from the moment the pointer enters until it has left and the button is up. A plain click is a drag for a moment,
+/// which only keeps the notch from closing for that moment.
+@MainActor final class ClipboardMouseDragWatch {
+    private var isPointerInside = false
+    private var task: Task<Void, Never>?
+
+    func pointerMoved(inside: Bool, notch: NotchHandle) {
+        isPointerInside = inside
+        guard inside, task == nil else { return }
+        task = Task { [self] in
+            var wasDown = false
+            while !Task.isCancelled {
+                let isDown = NSEvent.pressedMouseButtons & 1 != 0
+                if isDown != wasDown {
+                    notch.setDragging(isDown)
+                    wasDown = isDown
+                }
+                if !isDown, !isPointerInside { break }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            // A cancelled watch (the list went away) must not leave the notch in drag mode.
+            if wasDown { notch.setDragging(false) }
+            if !Task.isCancelled { task = nil }
+        }
+    }
+
+    func stop() {
+        task?.cancel()
+        task = nil
     }
 }

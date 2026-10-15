@@ -50,7 +50,22 @@ import MyNotchTestSupport
         #expect(backend.getShortcut(for: name) == nil)
     }
 
+    /// A registry that records the default collisions it is told about instead of failing on them.
+    func recordingRegistry(_ collisions: Collisions) -> HotkeyRegistry {
+        HotkeyRegistry(backend: backend) { collisions.reports.append(Collisions.Report(new: $0.id, existing: $1.id)) }
+    }
+
+    final class Collisions {
+        struct Report: Equatable {
+            let new: String
+            let existing: String
+        }
+
+        var reports: [Report] = []
+    }
+
     @Test func conflictsGroupRegistrationsSharingAKeyCombination() throws {
+        let registry = recordingRegistry(Collisions())
         registry.register("b", title: "B", owner: "two", initial: Self.controlOptionV) {}
         registry.register("a", title: "A", owner: "one", initial: Self.controlOptionV) {}
         registry.register("c", title: "C", owner: "three", initial: Self.controlOptionT) {}
@@ -62,6 +77,81 @@ import MyNotchTestSupport
         #expect(registry.conflicts().map { $0.map(\.id) } == [["three_c", "two_b"]])
         backend.setShortcut(nil, for: b.name)
         #expect(registry.conflicts().isEmpty)
+    }
+
+    // MARK: Two defaults on one key
+
+    @Test func aSecondRegistrationWithTheSameDefaultIsReportedWithBothNames() {
+        let collisions = Collisions()
+        let registry = recordingRegistry(collisions)
+        registry.register("openTab", title: "Open", owner: "battery", initial: Self.controlOptionV) {}
+        #expect(collisions.reports.isEmpty)
+
+        registry.register("paste", title: "Paste", owner: "clipboard", initial: Self.controlOptionV) {}
+        #expect(collisions.reports == [Collisions.Report(new: "clipboard_paste", existing: "battery_openTab")])
+        // Still registered: the report is a warning, the user can sort it out in Settings.
+        #expect(registry.registrations.map(\.id) == ["battery_openTab", "clipboard_paste"])
+    }
+
+    @Test func differentDefaultsAndRegistrationsWithoutOneAreNotReported() {
+        let collisions = Collisions()
+        let registry = recordingRegistry(collisions)
+        registry.register("a", title: "A", owner: "one", initial: Self.controlOptionV) {}
+        registry.register("b", title: "B", owner: "two", initial: Self.controlOptionT) {}
+        registry.register("c", title: "C", owner: "three") {}
+        registry.register("d", title: "D", owner: "four") {}
+        #expect(collisions.reports.isEmpty)
+    }
+
+    @Test func registeringTheSameNameAgainIsNotACollisionWithItself() {
+        let collisions = Collisions()
+        let registry = recordingRegistry(collisions)
+        registry.register("openTab", title: "Open", owner: "battery", initial: Self.controlOptionV) {}
+        registry.register("openTab", title: "Open again", owner: "battery", initial: Self.controlOptionV) {}
+        #expect(collisions.reports.isEmpty)
+    }
+
+    @Test func theDefaultOfAModuleThatStoppedIsFreeAgain() {
+        let collisions = Collisions()
+        let registry = recordingRegistry(collisions)
+        let first = ModuleHotkeys(registry: registry, module: "battery")
+        first.register("openTab", title: "Open", initial: Self.controlOptionV) {}
+        first.invalidate()
+
+        ModuleHotkeys(registry: registry, module: "clipboard").register("paste", title: "Paste", initial: Self.controlOptionV) {}
+        #expect(collisions.reports.isEmpty)
+    }
+
+    @Test func modulesRegisteringThroughTheirFacadeAreChecked() {
+        let collisions = Collisions()
+        let registry = recordingRegistry(collisions)
+        ModuleHotkeys(registry: registry, module: "battery").register("openTab", title: "Open", initial: Self.controlOptionV) {}
+        ModuleHotkeys(registry: registry, module: "clipboard").register("paste", title: "Paste", initial: Self.controlOptionV) {}
+        registry.register("toggle", title: "Toggle", owner: nil, initial: Self.controlOptionV) {}
+
+        #expect(collisions.reports == [
+            Collisions.Report(new: "clipboard_paste", existing: "battery_openTab"),
+            Collisions.Report(new: "app_toggle", existing: "battery_openTab"),
+        ])
+    }
+
+    /// Defaults are compared, not what the user chose later: a combination the user moved away from still collides in the
+    /// code that registers it, and one the user moved to is `conflicts()`'s business.
+    @Test func onlyTheDefaultsCountNotWhatTheUserChoseLater() throws {
+        let collisions = Collisions()
+        let registry = recordingRegistry(collisions)
+        registry.register("a", title: "A", owner: "one", initial: Self.controlOptionV) {}
+        backend.setShortcut(Self.controlOptionT, for: try #require(registry.registrations.first).name)
+
+        registry.register("b", title: "B", owner: "two", initial: Self.controlOptionT) {}
+        #expect(collisions.reports.isEmpty)
+        #expect(registry.conflicts().map { $0.map(\.id) } == [["one_a", "two_b"]])
+    }
+
+    @Test func aRegistrationRemembersItsDefault() throws {
+        registry.register("a", title: "A", owner: "one", initial: Self.controlOptionV) {}
+        registry.register("b", title: "B", owner: "two") {}
+        #expect(registry.registrations.map(\.defaultShortcut) == [Self.controlOptionV, nil])
     }
 
     @Test func invalidatedModuleHotkeysUnregisterAndIgnoreLateRegistrations() {

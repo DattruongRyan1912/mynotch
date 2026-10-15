@@ -44,3 +44,15 @@ final class FakeKeystrokeSender: KeystrokeSending {
         pasteCount += 1
     }
 }
+
+/// The modifier keys as a test sets them, so no test reads the real keyboard.
+final class FakeModifierState: ModifierState {
+    /// Whether the user is holding ⌃, ⌥, ⌘ or ⇧.
+    var held = false
+    private(set) var readCount = 0
+
+    var isAnyHeld: Bool {
+        readCount += 1
+        return held
+    }
+}
