@@ -19,6 +19,8 @@ struct TranslationKeys {
     let targetLanguage: SettingKey<String>
     /// Translate text from the shortcut or Services as soon as the tab opens.
     let autoTranslateOnOpen: SettingKey<Bool>
+    /// Let the shortcut, and "Bôi đen là hiểu", switch a Chrome or Electron app into accessibility mode, which those apps need to
+    /// say what is selected. On by default.
     let useChromiumAccessibility: SettingKey<Bool>
     /// Offer "Thay vào chỗ đang chọn" on a result that came from a selection in another app.
     let showReplaceButton: SettingKey<Bool>

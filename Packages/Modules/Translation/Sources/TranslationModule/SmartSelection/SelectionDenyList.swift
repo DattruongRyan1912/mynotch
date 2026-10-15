@@ -19,6 +19,8 @@ struct RunningApplications {
     var name: (String) -> String
     /// The ordinary apps running now, by name.
     var running: () -> [(id: String, name: String)]
+    /// An app's icon for its bundle ID; nil when no app is installed under it.
+    var icon: (String) -> NSImage? = { _ in nil }
 
     func candidates(excluding denied: [String]) -> [(id: String, name: String)] {
         running().filter { !denied.contains($0.id) }
@@ -34,6 +36,9 @@ struct RunningApplications {
                 .filter { $0.activationPolicy == .regular && $0.processIdentifier != getpid() }
                 .compactMap { app in app.bundleIdentifier.map { (id: $0, name: app.localizedName ?? $0) } }
                 .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        },
+        icon: { id in
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: id).map { NSWorkspace.shared.icon(forFile: $0.path) }
         }
     )
 }
@@ -50,7 +55,7 @@ struct SmartSelectionSettingsView: View {
         Group {
             Toggle(isOn: $smartSelection) {
                 Text("Bôi đen là hiểu")
-                Text("Bôi đen chữ ở app nào cũng được: MyNotch tự nhận ra tiền, đơn vị, giờ có múi giờ hay chữ nước ngoài, và cho xem kết quả cạnh vùng chọn. Cần quyền Accessibility. Chữ bạn chọn chỉ xử lý trên máy; bản dịch xem trước chỉ dùng Apple, trên máy, và bộ máy khác chỉ chạy khi bạn bấm “Mở”. Số tiền cần tỷ giá hằng ngày từ internet khi bạn bật “Quy đổi tiền tệ”, không gửi chữ nào. Không đọc ô mật khẩu, app quản lý mật khẩu, đường dẫn, link hay mã. Trong Chrome và app Electron, chỉ đọc được sau khi bạn dùng phím tắt dịch một lần ở app đó.")
+                Text("Bôi đen chữ ở app nào cũng được: MyNotch tự nhận ra tiền, đơn vị, giờ có múi giờ hay chữ nước ngoài, và cho xem kết quả cạnh vùng chọn. Cần quyền Accessibility. Chữ bạn chọn chỉ xử lý trên máy; bản dịch xem trước chỉ dùng Apple, trên máy, và bộ máy khác chỉ chạy khi bạn bấm “Mở”. Số tiền cần tỷ giá hằng ngày từ internet khi bạn bật “Quy đổi tiền tệ”, không gửi chữ nào. Không đọc ô mật khẩu, app quản lý mật khẩu, đường dẫn, link hay mã. Chrome và app Electron cần mục “Đọc vùng chọn trong Chrome và app Electron” ở dưới đang bật.")
             }
             Toggle(isOn: $showChip) {
                 Text("Hiện nút cạnh vùng chọn")
@@ -76,8 +81,17 @@ struct SmartSelectionSettingsView: View {
             }
             .disabled(!Self.optionsEnabled(smartSelection: smartSelection))
             ForEach(denyList, id: \.self) { id in
-                LabeledContent(applications.name(id)) {
+                LabeledContent {
                     Button("Bỏ") { denyList = SelectionDenyList.removing(id, from: denyList) }
+                } label: {
+                    Label {
+                        Text(applications.name(id))
+                    } icon: {
+                        // The app's own icon, small; a plain one when the app is not installed (any more).
+                        Image(nsImage: applications.icon(id) ?? NSImage(named: NSImage.applicationIconName) ?? NSImage())
+                            .resizable()
+                            .frame(width: 18, height: 18)
+                    }
                 }
             }
         }

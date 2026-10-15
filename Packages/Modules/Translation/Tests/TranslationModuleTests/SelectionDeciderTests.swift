@@ -122,18 +122,26 @@ import Testing
         #expect(fixture.previewEngine.requests.isEmpty)
     }
 
-    @Test func aTrimmedFirstLineIsWhatTheChipShows() async throws {
+    @Test func theWholeTranslationIsWhatTheChipGets() async throws {
         let hint = await hint("\n  Good morning my friends\nand good night to everyone  \n", using: try await decider())
-        #expect(hint?.text == "Good morning my friends")
+        // Trimmed, but every line of it: the chip wraps and scrolls it, so nothing is cut here.
+        #expect(hint?.text == "Good morning my friends\nand good night to everyone [en→vi]")
     }
 
-    @Test func aLongTranslationIsCut() async throws {
+    @Test func aLongTranslationIsNeverCut() async throws {
         let long = String(repeating: english + ". ", count: 3)
         let hint = await hint(long, using: try await decider())
         let text = try #require(hint?.text)
-        #expect(text.count == SelectionHint.maxLength)
-        #expect(text.hasSuffix("…"))
-        #expect(text.hasPrefix("The quick brown fox"))
+        #expect(text == "\(long.trimmingCharacters(in: .whitespaces)) [en→vi]")
+        #expect(text.count > SelectionHint.maxLength)
+        #expect(!text.hasSuffix("…"))
+    }
+
+    @Test func aConversionKeepsItsCompactLine() async throws {
+        let long = "It was 30 °C " + String(repeating: "and sunny in the park ", count: 6)
+        let hint = await hint(long, using: try await decider())
+        #expect(hint?.kind == .conversion)
+        #expect(try #require(hint?.text).count <= SelectionHint.maxLength)
     }
 
     @Test func aShortTranslationIsNotCut() async throws {
@@ -141,13 +149,14 @@ import Testing
         #expect(hint?.text == "Please send me the report before the meeting tomorrow [en→vi]")
     }
 
-    @Test func aLongSelectionIsOnlyTranslatedAsFarAsThePreviewNeeds() async throws {
+    @Test func aLongSelectionIsTranslatedWholeUpToTheLimitOfASelection() async throws {
         let long = String(repeating: english + ". ", count: 25)
-        #expect(long.count > SelectionDecider.previewLimit)
+        #expect(long.count > 300)
+        #expect(SelectionDecider.previewLimit == SelectionIgnoreRules.maxLength)
         let hint = await hint(long, using: try await decider())
-        #expect(fixture.previewEngine.requests.first?.text.count == SelectionDecider.previewLimit)
+        #expect(fixture.previewEngine.requests.first?.text == long.trimmingCharacters(in: .whitespaces))
         #expect(hint?.kind == .translation)
-        #expect(try #require(hint?.text).count <= SelectionHint.maxLength)
+        #expect(try #require(hint?.text).count > long.count)
     }
 
     @Test func aShortSelectionIsTranslatedWhole() async throws {
@@ -168,12 +177,43 @@ import Testing
         }
     }
 
-    // MARK: failures show nothing
+    // MARK: a preview that cannot be made
 
-    @Test(arguments: [TranslationFailure.notInstalled, .unsupported, .cancelled, .failed("boom")])
-    func aPreviewThatFailsShowsNothing(failure: TranslationFailure) async throws {
+    @Test func aMissingLanguagePackStillOffersTheTranslateButton() async throws {
+        fixture.previewEngine.failure = .notInstalled
+        let hint = await hint(english, using: try await decider())
+        #expect(hint?.kind == .button)
+        #expect(hint?.text == "Cần tải gói ngôn ngữ")
+        #expect(hint?.source.text == english)
+    }
+
+    @Test(arguments: [TranslationFailure.unsupported, .failed("boom")])
+    func aPreviewThatFailsOtherwiseStillOffersTheButtonWithNoNote(failure: TranslationFailure) async throws {
         fixture.previewEngine.failure = failure
+        let hint = await hint(english, using: try await decider())
+        #expect(hint?.kind == .button)
+        #expect(hint?.text == "")
+    }
+
+    @Test func aPreviewThatWasSupersededShowsNothing() async throws {
+        fixture.previewEngine.failure = .cancelled
         #expect(await hint(english, using: try await decider()) == nil)
+    }
+
+    @Test func theButtonIsOnlyForTextThatWouldHaveBeenPreviewed() async throws {
+        fixture.previewEngine.failure = .notInstalled
+        let decider = try await decider()
+        // Not foreign, not enough of it, not prose: no button either.
+        #expect(await hint("Hôm nay trời đẹp quá, chúng ta đi dạo nhé", using: decider) == nil)
+        #expect(await hint("Hello", using: decider) == nil)
+        #expect(await hint("https://example.com/a/b", using: decider) == nil)
+        #expect(await hint("let value = compute(input)", using: decider) == nil)
+    }
+
+    @Test func aQuantityNeverNeedsTheLanguagePack() async throws {
+        fixture.previewEngine.failure = .notInstalled
+        let hint = await hint("5 ft 11 in", using: try await decider())
+        #expect(hint?.kind == .conversion)
     }
 
     // MARK: nothing leaves the Mac on its own

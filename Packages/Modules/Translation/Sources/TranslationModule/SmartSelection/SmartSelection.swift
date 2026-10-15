@@ -14,6 +14,19 @@ struct SmartSelectionSetup {
     /// The displays, the main one first.
     var screens: () -> [ScreenArea] = { SmartSelectionSetup.systemScreens() }
     var ownProcessID: pid_t = getpid()
+    /// Where it tells what it is doing: the unified log, category `smart-selection`.
+    var log: any SelectionLog = OSSelectionLog()
+    /// What was already said once in this run of the app (the module may start more than once).
+    var notices = SelectionNotices()
+    /// The wait between two looks at an app that has just been switched into accessibility mode.
+    var pause: @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    /// An app's name for the notice that says it was hidden.
+    var applicationName: (FocusedApplication) -> String = { SmartSelectionSetup.systemName(of: $0) }
+
+    static func systemName(of application: FocusedApplication) -> String {
+        NSRunningApplication(processIdentifier: application.processID)?.localizedName
+            ?? application.bundleID.map(RunningApplications.system.name) ?? "app này"
+    }
 
     static func systemScreens() -> [ScreenArea] {
         NSScreen.screens.map { ScreenArea(frame: $0.frame, visibleFrame: $0.visibleFrame) }
@@ -26,13 +39,36 @@ struct SmartSelectionSetup {
 /// Nothing the user selects is written anywhere or sent anywhere from here, and it is held in memory only until the next
 /// selection or the end of the module: the preview is on-device, and the selected text is never logged.
 ///
-/// It reads passively, so it must never disturb the app it reads from or the notch: it goes by the front app (no Accessibility
-/// call), makes one pass over one element with a short timeout, leaves an app alone for 30 s once it has not answered, and
-/// never switches another app into accessibility mode (that is for the shortcut, on the user's press).
+/// It reads passively, so it must not disturb the app it reads from or the notch: it goes by the front app (no Accessibility
+/// call), makes one pass over one element with a short timeout, and leaves an app alone for 30 s once it has not answered. The
+/// one thing it does to another app is what the shortcut does too, and only when the user allows it ("Đọc vùng chọn trong
+/// Chrome và app Electron", on by default): once per process, it switches a Chrome or Electron app that shows no selection
+/// into accessibility mode, which those apps need to say what is selected.
+///
+/// Every reading says in the log what it ended with, as a code (see `SelectionLog`), so that a selection that shows nothing can
+/// be explained.
 final class SmartSelection {
     static let activityID = "selection"
     /// How long an app that did not answer in time is left alone.
     static let coolDown = Duration.seconds(30)
+    /// A Chrome or Electron app that was just switched into accessibility mode builds its tree on its own time: it is looked at
+    /// again every tenth of a second, up to this many times.
+    static let treeLooks = 6
+    static let treeInterval = Duration.milliseconds(100)
+    /// How long the notice about the missing permission stays up.
+    static let noticeDuration = Duration.seconds(10)
+    /// How long an app that was hidden can be brought back with "Hoàn tác".
+    static let undoDuration = Duration.seconds(5)
+
+    /// What "Hoàn tác" undoes: the app that was put on the deny list, and whether this is what put it there.
+    struct Denial {
+        var bundleID: String
+        var appName: String
+        var added: Bool
+    }
+
+    /// The hiding that can still be undone; tests read it.
+    private(set) var pendingUndo: Denial?
 
     let decider: SelectionDecider
     /// The newest reading; tests await it. A newer gesture, a click, a key or another app coming forward supersedes it.
@@ -56,6 +92,9 @@ final class SmartSelection {
     private var readingProcessID: pid_t?
     /// Apps that did not answer, which are not asked again for `coolDown`.
     private var coolingDown: Set<pid_t> = []
+    /// Processes already switched into accessibility mode, or found in it: once is enough for as long as the process lives.
+    private var switchedOn: Set<pid_t> = []
+    private var undoWindow: ScheduledAction?
 
     /// - Parameter open: the chip's "Mở": opens the notch's Translation tab on the selection.
     init(
@@ -77,9 +116,10 @@ final class SmartSelection {
     /// Starts or stops watching to match the settings, and keeps doing so as they change.
     func start() {
         apply()
+        log("start watcher=\(Self.flag(isWatching)) trusted=\(Self.flag(setup.accessibility.isTrusted)) keys=\(Self.flag(watchesKeys))")
         context.run { [weak self] in
             for await _ in Observations({ [weak self] in self?.wantsToWatch ?? false }) {
-                self?.apply()
+                self?.apply(logging: true)
             }
         }
     }
@@ -96,12 +136,28 @@ final class SmartSelection {
         return settings.value(keys.smartSelection) && (settings.value(keys.selectionChip) || settings.value(keys.selectionActivity))
     }
 
-    func apply() {
+    func apply(logging: Bool = false) {
         switch (wantsToWatch, isWatching) {
-        case (true, false): startWatching()
-        case (false, true): stopWatching()
+        case (true, false):
+            startWatching()
+            if logging { log("watcher on keys=\(Self.flag(watchesKeys))") }
+        case (false, true):
+            stopWatching()
+            if logging { log("watcher off") }
         default: break
         }
+    }
+
+    private func log(_ line: String) {
+        setup.log.write(line)
+    }
+
+    private static func flag(_ value: Bool) -> Int { value ? 1 : 0 }
+
+    private func skip(_ reason: SelectionSkip) {
+        log("skip reason=\(reason.rawValue)")
+        // The same selection is still what the chip shows; any other reason means it is no longer the one worth showing.
+        if reason != .unchanged { chip.dismiss() }
     }
 
     // MARK: watching
@@ -126,6 +182,7 @@ final class SmartSelection {
         chip.dismiss()
         lastHandled = nil
         coolingDown.removeAll()
+        switchedOn.removeAll()
     }
 
     /// Key-ups need Accessibility, so they are only asked for once it is granted; the mouse needs nothing, which also lets the
@@ -161,7 +218,11 @@ final class SmartSelection {
     }
 
     private func selectionGesture(at pointer: CGPoint, byPointer: Bool) {
-        if isWatching, !watchesKeys, setup.accessibility.isTrusted { startInput() }
+        log("gesture pointer=\(Self.flag(byPointer)) keys=\(Self.flag(watchesKeys))")
+        if isWatching, !watchesKeys, setup.accessibility.isTrusted {
+            startInput()
+            log("keys on trusted=1")
+        }
         supersedeReading()
         let request = generation
         reading = Task { [weak self] in await self?.read(at: pointer, byPointer: byPointer, request: request) }
@@ -176,40 +237,102 @@ final class SmartSelection {
     private func read(at pointer: CGPoint, byPointer: Bool, request: Int) async {
         let accessibility = setup.accessibility
         let settings = context.settings
-        guard accessibility.isTrusted, let application = accessibility.frontmostApplication(),
-              SelectionIgnoreRules.application(application, ownProcessID: setup.ownProcessID, denyList: settings.value(keys.selectionDenyList)) == nil,
-              !coolingDown.contains(application.processID),
-              !accessibility.isSecureInputHeld(by: application) else { return chip.dismiss() }
+        guard accessibility.isTrusted else {
+            skip(.notTrusted)
+            return announceMissingAccessibility()
+        }
+        guard let application = accessibility.frontmostApplication() else { return skip(.noFrontApp) }
+        if let reason = SelectionIgnoreRules.application(application, ownProcessID: setup.ownProcessID, denyList: settings.value(keys.selectionDenyList)) {
+            return skip(reason == .ownApplication ? .ownApp : .denied)
+        }
+        guard !coolingDown.contains(application.processID) else { return skip(.cooldown) }
+        guard !accessibility.isSecureInputHeld(by: application) else { return skip(.secure) }
         readingProcessID = application.processID
         defer { if request == generation { readingProcessID = nil } }
-        // One look, which never turns accessibility on in the app: Chrome and Electron apps show their selection here only once
-        // the shortcut has switched them on.
+        // One look. A Chrome or Electron app that shows nothing may only be hiding it: with the user's leave it is switched into
+        // accessibility mode, once per process, and looked at again while it builds its tree.
+        var inspection = accessibility.inspectSelection(in: application)
+        if case .none = inspection, switchOnAccessibility(of: application) {
+            for _ in 0..<Self.treeLooks {
+                do {
+                    try await setup.pause(Self.treeInterval)
+                } catch {
+                    return
+                }
+                guard isCurrent(request) else { return }
+                inspection = accessibility.inspectSelection(in: application)
+                if case .none = inspection { continue }
+                break
+            }
+        }
         let source: SelectionSource
         let bounds: CGRect?
-        switch accessibility.inspectSelection(in: application) {
+        switch inspection {
         case .selected(let text, let found):
             source = SelectionSource(text: text, application: application)
             bounds = found
         case .unresponsive:
             coolDown(application.processID)
-            return chip.dismiss()
-        case .none, .tooLong:
+            return skip(.unresponsive)
+        case .none:
             lastHandled = nil
-            return chip.dismiss()
+            return skip(.none)
+        case .tooLong:
+            lastHandled = nil
+            return skip(.tooLong)
         }
         if let reason = SelectionIgnoreRules.text(source, lastHandled: lastHandled) {
-            if reason != .unchanged {
-                lastHandled = nil
-                chip.dismiss()
-            }
-            return
+            if reason != .unchanged { lastHandled = nil }
+            return skip(reason == .empty ? .blank : reason == .tooLong ? .tooLong : .unchanged)
         }
-        let hint = await decider.hint(for: source)
+        let decision = await decider.decide(for: source)
         guard isCurrent(request) else { return }
         lastHandled = source
-        guard let hint else { return chip.dismiss() }
-        let anchor = SelectionGeometry.anchor(bounds: bounds, pointer: pointer, screens: setup.screens(), pointerMatters: byPointer)
-        chip.show(hint, anchor: anchor)
+        switch decision {
+        case .skip(let reason):
+            skip(reason)
+        case .hint(let hint, let failure):
+            if let failure { log("preview failed reason=\(failure.rawValue)") }
+            log("hint kind=\(hint.kind.logCode)")
+            let anchor = SelectionGeometry.anchor(bounds: bounds, pointer: pointer, screens: setup.screens(), pointerMatters: byPointer)
+            chip.show(hint, anchor: anchor)
+        }
+    }
+
+    /// Switches a Chrome or Electron app into accessibility mode, the way the shortcut does, when the user allows it and it is
+    /// not done yet for this process. True when it was done now, so the app needs a moment to build what it shows.
+    private func switchOnAccessibility(of application: FocusedApplication) -> Bool {
+        guard context.settings.value(keys.useChromiumAccessibility),
+              let attribute = application.bundleID.flatMap({ SelectionReader.accessibilityAttributes[$0] }),
+              switchedOn.insert(application.processID).inserted else { return false }
+        guard !setup.accessibility.isEnabled(attribute, in: application) else { return false }
+        setup.accessibility.enable(attribute, in: application)
+        log("accessibility enabled attribute=\(attribute)")
+        return true
+    }
+
+    // MARK: the permission
+
+    /// Without Accessibility nothing can be read, and it used to show nothing, which looks like a broken feature: the first
+    /// selection of the run says what is missing, with the button that asks for it.
+    private func announceMissingAccessibility() {
+        guard setup.notices.claim() else { return }
+        log("notice accessibility")
+        context.presenter.showToast(
+            AnyView(SelectionAccessibilityNotice { [weak self] in self?.requestAccessibility() }), duration: Self.noticeDuration
+        )
+    }
+
+    /// The notice's button: the system's prompt (which lists MyNotch in the Accessibility pane), then that pane when the prompt
+    /// alone did not allow it, as the Translation tab does.
+    @discardableResult
+    func requestAccessibility() -> Task<Void, Never> {
+        let permissions = context.permissions
+        return Task {
+            if await permissions.request(.accessibility) != .granted {
+                permissions.openSystemSettings(for: .accessibility)
+            }
+        }
     }
 
     /// The app did not answer in time: it is not asked again for 30 s, so a hung app costs one short wait, not one per drag.
@@ -224,13 +347,18 @@ final class SmartSelection {
         let settings = context.settings
         if settings.value(keys.selectionChip) {
             setup.window.show(content(for: hint), near: anchor)
+            log("chip shown")
         }
         if settings.value(keys.selectionActivity) {
+            // Beside the notch there is room for a line: the first line of a translation, or what a button says.
+            let text = hint.kind == .translation ? SelectionHint.firstLine(of: hint.text) ?? hint.text
+                : hint.text.isEmpty ? SelectionHint.buttonTitle : hint.text
             context.activities.set(LiveActivity(
                 id: Self.activityID, expiresAfter: SelectionChip.lifetime,
-                leading: AnyView(SelectionActivityIcon(kind: hint.kind)), trailing: AnyView(SelectionActivityText(text: hint.text)),
-                summary: hint.text
+                leading: AnyView(SelectionActivityIcon(kind: hint.kind)), trailing: AnyView(SelectionActivityText(text: text)),
+                summary: text
             ))
+            log("activity shown")
         }
     }
 
@@ -244,7 +372,8 @@ final class SmartSelection {
         var deny: (@MainActor () -> Void)?
         if application.bundleID != nil { deny = { [weak self] in self?.deny(application) } }
         return SelectionChipContent(
-            kind: hint.kind, text: hint.text,
+            kind: hint.kind, text: hint.text, actionTitle: hint.kind == .button ? SelectionHint.buttonTitle : "Mở",
+            caption: hint.kind == .translation ? SelectionHint.caption(of: hint.source.text) : nil,
             open: { [weak self] in self?.openCurrent() },
             deny: deny,
             hover: { [weak self] in self?.chip.hoverChanged($0) }
@@ -258,12 +387,36 @@ final class SmartSelection {
         openResult(hint.source)
     }
 
-    /// "Không hiện trong app này": the app joins the deny list, and nothing more is read from it.
-    private func deny(_ application: FocusedApplication) {
+    /// "Không hiện trong app này": the app joins the deny list, and nothing more is read from it. It is not final: the notch says
+    /// what was done and for a few seconds offers "Hoàn tác".
+    func deny(_ application: FocusedApplication) {
         guard let bundleID = application.bundleID else { return }
         let settings = context.settings
-        settings.set(SelectionDenyList.adding(bundleID, to: settings.value(keys.selectionDenyList)), for: keys.selectionDenyList)
+        let before = settings.value(keys.selectionDenyList)
+        settings.set(SelectionDenyList.adding(bundleID, to: before), for: keys.selectionDenyList)
         supersedeReading()
         chip.dismiss()
+        let denial = Denial(bundleID: bundleID, appName: setup.applicationName(application), added: !before.contains(bundleID))
+        pendingUndo = denial
+        undoWindow?.cancel()
+        undoWindow = context.scheduler.schedule(after: Self.undoDuration) { [weak self] in self?.pendingUndo = nil }
+        log("deny added=\(Self.flag(denial.added))")
+        context.presenter.showToast(
+            AnyView(SelectionDenialNotice(appName: denial.appName) { [weak self] in self?.undoDenial() }), duration: Self.undoDuration
+        )
+    }
+
+    /// "Hoàn tác": the app comes off the deny list again, if hiding it is what put it there, and the notice goes.
+    func undoDenial() {
+        guard let denial = pendingUndo else { return }
+        pendingUndo = nil
+        undoWindow?.cancel()
+        undoWindow = nil
+        let settings = context.settings
+        if denial.added {
+            settings.set(SelectionDenyList.removing(denial.bundleID, from: settings.value(keys.selectionDenyList)), for: keys.selectionDenyList)
+        }
+        log("deny undone=1")
+        context.presenter.close()
     }
 }

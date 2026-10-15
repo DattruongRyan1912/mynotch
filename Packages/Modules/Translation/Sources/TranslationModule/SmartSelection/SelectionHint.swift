@@ -5,16 +5,44 @@ nonisolated struct SelectionHint: Equatable, Sendable {
     enum Kind: Equatable, Sendable {
         case conversion
         case translation
+        /// Foreign text whose preview could not be made: the chip is a "Dịch" button that opens the tab, and `text` is only the
+        /// reason it needs ("Cần tải gói ngôn ngữ") or nothing.
+        case button
+
+        /// What the log calls it.
+        var logCode: String {
+            switch self {
+            case .conversion: "conversion"
+            case .translation: "preview"
+            case .button: "button"
+            }
+        }
     }
 
-    /// The chip shows one line; longer is cut here.
+    /// The button's note when the language pack is not installed.
+    static let languagePackNote = "Cần tải gói ngôn ngữ"
+    /// What the button chip and its activity say.
+    static let buttonTitle = "Dịch"
+
+    /// A conversion is one line in the chip; longer is cut here. A translation is never cut: the chip wraps and scrolls it.
     static let maxLength = 80
+    /// The first line of the original, small, over a translation.
+    static let captionLength = 60
 
     var kind: Kind
-    /// Already one line and no longer than `maxLength`.
+    /// A conversion: one line, no longer than `maxLength`. A translation: all of it, trimmed, in as many lines as it has. A
+    /// button: its note, or empty.
     var text: String
     /// The selection it was made for, which "Mở" opens in the tab and the replace button writes over.
     var source: SelectionSource
+
+    /// The first line of the original text, for the small caption over its translation; nil when it has none.
+    static func caption(of original: String) -> String? {
+        original.split(whereSeparator: \.isNewline)
+            .lazy.map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty }
+            .map { $0.count > captionLength ? String($0.prefix(captionLength - 1)).trimmingCharacters(in: .whitespaces) + "…" : $0 }
+    }
 
     /// The first line that has anything on it, trimmed, with an ellipsis if it had to be cut.
     static func firstLine(of text: String) -> String? {

@@ -13,6 +13,12 @@ import Testing
         SystemSelectionChipWindow(interface: interface) { [screen] in [screen] }
     }
 
+    /// A translation as the chip shows it: all of it, with the first line of the original over it.
+    func translation(lines count: Int, caption: String? = "Good morning my friends") -> SelectionChipContent {
+        let text = (1...count).map { "Chào buổi sáng các bạn của tôi số \($0)" }.joined(separator: "\n")
+        return SelectionChipContent(kind: .translation, text: text, caption: caption, open: {}, deny: {}, hover: { _ in })
+    }
+
     func content(_ text: String = "5 ft 11 in → 180 cm", canDeny: Bool = true) -> SelectionChipContent {
         var deny: (@MainActor () -> Void)?
         if canDeny { deny = {} }
@@ -74,6 +80,121 @@ import Testing
             return NSHostingView(rootView: view).fittingSize.width
         }
         #expect(width(canDeny: true) > width(canDeny: false))
+    }
+
+    // MARK: a whole translation
+
+    @Test func aLongTranslationGrowsTheChipAndKeepsItBelowTheSelection() throws {
+        let window = makeWindow()
+        let anchor = CGRect(x: 500, y: 600, width: 100, height: 20)
+        let frame = window.place(translation(lines: 30), near: anchor)
+        #expect(frame.height > 150)
+        #expect(frame.height <= SelectionChipLayout.maxHeight)
+        #expect(frame.maxY < anchor.minY, "below the selection")
+        #expect(screen.visibleFrame.contains(frame))
+        window.hide()
+    }
+
+    @Test func aTallChipNearTheBottomGoesAboveAndNeverCoversTheSelection() throws {
+        let window = makeWindow()
+        let anchor = CGRect(x: 500, y: 60, width: 100, height: 20)
+        let frame = window.place(translation(lines: 30), near: anchor)
+        #expect(frame.minY >= anchor.maxY)
+        #expect(!frame.intersects(anchor))
+        #expect(screen.visibleFrame.contains(frame))
+        window.hide()
+    }
+
+    @Test func aTallChipNearTheTopGoesBelow() throws {
+        let window = makeWindow()
+        let anchor = CGRect(x: 500, y: 830, width: 100, height: 20)
+        let frame = window.place(translation(lines: 30), near: anchor)
+        #expect(frame.maxY <= anchor.minY)
+        #expect(!frame.intersects(anchor))
+        window.hide()
+    }
+
+    @Test func whenNeitherSideHasRoomForAllOfItTheChipShrinksInsteadOfCoveringTheSelection() throws {
+        let small = ScreenArea(frame: CGRect(x: 0, y: 0, width: 800, height: 320), visibleFrame: CGRect(x: 0, y: 0, width: 800, height: 300))
+        let window = SystemSelectionChipWindow(interface: interface) { [small] in [small] }
+        let anchor = CGRect(x: 300, y: 140, width: 100, height: 20)
+        let frame = window.place(translation(lines: 30), near: anchor)
+        #expect(!frame.intersects(anchor))
+        #expect(small.visibleFrame.contains(frame))
+        #expect(frame.height <= SelectionGeometry.room(besides: anchor, screens: [small]) + 1)
+        window.hide()
+    }
+
+    @Test func aShortTranslationStaysCompactAndAChipIsNarrowerThanTheWidest() throws {
+        let window = makeWindow()
+        let short = SelectionChipContent(kind: .translation, text: "Xin chào", caption: nil, open: {}, deny: {}, hover: { _ in })
+        let frame = window.place(short, near: CGRect(x: 500, y: 400, width: 100, height: 20))
+        #expect(frame.height < 90)
+        #expect(frame.width < SelectionChipLayout.maxWidth)
+        window.hide()
+    }
+
+    @Test func aReplacementChipMovesAndResizesThePanel() throws {
+        let window = makeWindow()
+        let first = window.place(translation(lines: 2), near: CGRect(x: 500, y: 400, width: 100, height: 20))
+        let second = window.place(translation(lines: 8), near: CGRect(x: 500, y: 400, width: 100, height: 20))
+        #expect(second.height > first.height)
+        window.hide()
+    }
+
+    // MARK: the menu
+
+    /// A chip in a window that is never shown, which is what makes it listen for menus.
+    func hostedChip(
+        center: NotificationCenter, log: HoverLog, pointerIsOver: Bool
+    ) -> (hosting: SelectionChipHostingView, window: NSWindow) {
+        let hosting = SelectionChipHostingView(rootView: AnyView(Color.clear), notifications: center, pointerIsOverChip: { pointerIsOver }) {
+            log.record($0)
+        }
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 100, height: 30), styleMask: .borderless, backing: .buffered, defer: true)
+        window.contentView = hosting
+        return (hosting, window)
+    }
+
+    @Test func aMenuOpenedFromTheChipHoldsItAndLeavesItWhenTheMenuEndsAwayFromIt() {
+        let center = NotificationCenter()
+        let log = HoverLog()
+        let (_, window) = hostedChip(center: center, log: log, pointerIsOver: false)
+        center.post(name: NSMenu.didBeginTrackingNotification, object: NSMenu())
+        #expect(log.values == [true])
+        center.post(name: NSMenu.didEndTrackingNotification, object: NSMenu())
+        #expect(log.values == [true, false])
+        window.contentView = nil
+    }
+
+    @Test func aMenuThatEndsWithThePointerBackOnTheChipKeepsHolding() {
+        let center = NotificationCenter()
+        let log = HoverLog()
+        let (_, window) = hostedChip(center: center, log: log, pointerIsOver: true)
+        center.post(name: NSMenu.didBeginTrackingNotification, object: NSMenu())
+        center.post(name: NSMenu.didEndTrackingNotification, object: NSMenu())
+        #expect(log.values == [true])
+        window.contentView = nil
+    }
+
+    @Test func aChipThatLeftItsWindowStopsListeningForMenus() {
+        let center = NotificationCenter()
+        let log = HoverLog()
+        let (_, window) = hostedChip(center: center, log: log, pointerIsOver: false)
+        window.contentView = nil
+        center.post(name: NSMenu.didBeginTrackingNotification, object: NSMenu())
+        #expect(log.values.isEmpty)
+    }
+
+    @Test func aChipThatWasNeverInAWindowDoesNotListenForMenus() {
+        let center = NotificationCenter()
+        let log = HoverLog()
+        let hosting = SelectionChipHostingView(rootView: AnyView(Color.clear), notifications: center, pointerIsOverChip: { false }) {
+            log.record($0)
+        }
+        center.post(name: NSMenu.didBeginTrackingNotification, object: NSMenu())
+        #expect(log.values.isEmpty)
+        withExtendedLifetime(hosting) {}
     }
 
     @Test func hidingDropsThePanel() {

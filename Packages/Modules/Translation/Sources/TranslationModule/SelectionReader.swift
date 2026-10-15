@@ -17,7 +17,7 @@ final class SelectionReader {
     private static let retries = 6
 
     /// Attribute that makes each known app expose its selection, by bundle ID.
-    private static let accessibilityAttributes: [String: String] = {
+    static let accessibilityAttributes: [String: String] = {
         let chromium = [
             "com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.dev", "com.google.Chrome.canary",
             "org.chromium.Chromium",

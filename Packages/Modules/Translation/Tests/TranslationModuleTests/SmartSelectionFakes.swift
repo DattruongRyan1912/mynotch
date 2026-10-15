@@ -68,6 +68,21 @@ final class FakeChipWindow: SelectionChipWindowing {
     }
 }
 
+/// What the watcher wrote to the diagnostics log, one line per entry. The real one is the unified log, which a test must not
+/// write to or read.
+final class FakeSelectionLog: SelectionLog {
+    private(set) var lines: [String] = []
+
+    func write(_ line: String) {
+        lines.append(line)
+    }
+
+    func contains(_ line: String) -> Bool { lines.contains(line) }
+
+    /// The lines that start with `prefix`, in order.
+    func lines(startingWith prefix: String) -> [String] { lines.filter { $0.hasPrefix(prefix) } }
+}
+
 /// The displays the chip is placed on; tests set them.
 final class FakeDisplays {
     /// The main display first, as `NSScreen.screens` lists them: 1440 x 900 with a 25 pt menu bar.

@@ -168,35 +168,121 @@ import Testing
         #expect(chip.shown.isEmpty)
     }
 
-    @Test func aPassiveReadNeverTurnsAccessibilityOnInAnotherApp() async {
+    // MARK: Chrome and Electron
+
+    @Test func withTheSettingOffAPassiveReadNeverTurnsAccessibilityOn() async {
         await start()
-        for setting in [true, false] {
-            fixture.set(setting, for: \.useChromiumAccessibility)
-            for bundleID in ["com.google.Chrome", "com.tinyspeck.slackmacgap", "com.microsoft.VSCode"] {
-                fixture.focus(bundleID)
-                await fixture.dragSelecting(nil)
-                await fixture.dragSelecting("5 ft 11 in")
-            }
+        fixture.set(false, for: \.useChromiumAccessibility)
+        for bundleID in ["com.google.Chrome", "com.tinyspeck.slackmacgap", "com.microsoft.VSCode"] {
+            fixture.focus(bundleID)
+            await fixture.dragSelecting(nil)
+            await fixture.dragSelecting("5 ft 11 in")
         }
-        // Setting a flag on Chrome or an Electron app is only ever done for the shortcut, on the user's press.
         #expect(fixture.accessibility.enabled.isEmpty)
         #expect(fixture.accessibility.attributes.isEmpty)
+        #expect(fixture.treePauses.durations.isEmpty)
     }
 
-    @Test func aChromeThatExposesNothingShowsNothingAndIsLeftAlone() async {
+    @Test func theSettingIsOnByDefault() async {
+        #expect(fixture.keys.useChromiumAccessibility.defaultValue == true)
+    }
+
+    @Test func aChromeThatShowsNothingIsSwitchedOnOnceForTheProcess() async {
         await start()
         fixture.focus("com.google.Chrome")
         await fixture.dragSelecting(nil)
-        #expect(chip.shown.isEmpty)
+        #expect(fixture.accessibility.enabled == ["AXEnhancedUserInterface"])
+        await fixture.dragSelecting(nil)
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(fixture.accessibility.enabled == ["AXEnhancedUserInterface"])
+    }
+
+    @Test func anAppThatIgnoresTheAttributeIsNotAskedAgainWhileTheProcessLives() async {
+        await start()
+        fixture.accessibility.enableSticks = false
+        fixture.focus("com.google.Chrome")
+        for _ in 0..<3 { await fixture.dragSelecting(nil) }
+        #expect(fixture.accessibility.enabled == ["AXEnhancedUserInterface"])
+    }
+
+    @Test func anElectronAppGetsTheManualAttribute() async {
+        await start()
+        for (index, bundleID) in ["com.tinyspeck.slackmacgap", "com.microsoft.VSCode", "notion.id"].enumerated() {
+            fixture.accessibility.application = FocusedApplication(processID: pid_t(100 + index), bundleID: bundleID)
+            // The fake keeps one set of attributes for every app; each of these is a different app that has none yet.
+            fixture.accessibility.attributes = []
+            await fixture.dragSelecting(nil)
+        }
+        #expect(fixture.accessibility.enabled == ["AXManualAccessibility", "AXManualAccessibility", "AXManualAccessibility"])
+    }
+
+    @Test func aNewProcessOfTheSameAppIsSwitchedOnAgain() async {
+        await start()
+        fixture.accessibility.application = FocusedApplication(processID: 42, bundleID: "com.google.Chrome")
+        await fixture.dragSelecting(nil)
+        // Chrome restarted: the attribute is gone with the old process.
+        fixture.accessibility.attributes = []
+        fixture.accessibility.application = FocusedApplication(processID: 43, bundleID: "com.google.Chrome")
+        await fixture.dragSelecting(nil)
+        #expect(fixture.accessibility.enabled == ["AXEnhancedUserInterface", "AXEnhancedUserInterface"])
+    }
+
+    @Test func anAppThatAlreadyHasItOnIsNotTouched() async {
+        await start()
+        fixture.accessibility.attributes = ["AXEnhancedUserInterface"]
+        fixture.focus("com.google.Chrome")
+        await fixture.dragSelecting(nil)
         #expect(fixture.accessibility.enabled.isEmpty)
     }
 
-    @Test func aChromeThatExposesItsSelectionIsReadLikeAnyOtherApp() async {
+    @Test func aChromeThatExposesItsSelectionIsReadWithoutBeingTouched() async {
         await start()
         fixture.focus("com.google.Chrome")
         await fixture.dragSelecting("5 ft 11 in")
         #expect(chip.current?.content.text == "5 ft 11 in → 180 cm")
         #expect(fixture.accessibility.enabled.isEmpty)
+    }
+
+    @Test func otherAppsAreNeverSwitchedOn() async {
+        await start()
+        for bundleID in ["com.apple.Safari", "com.apple.Notes", "com.apple.TextEdit"] {
+            fixture.focus(bundleID)
+            await fixture.dragSelecting(nil)
+        }
+        #expect(fixture.accessibility.enabled.isEmpty)
+    }
+
+    @Test func theSelectionOfAChromeSwitchedOnJustNowShowsOnceItsTreeIsBuilt() async {
+        await start()
+        fixture.focus("com.google.Chrome")
+        // Nothing the first time: the tree is not there yet; then it is.
+        fixture.accessibility.selections = [nil, nil, "5 ft 11 in"]
+        await fixture.dragSelecting(nil)
+        #expect(fixture.accessibility.enabled == ["AXEnhancedUserInterface"])
+        #expect(chip.current?.content.text == "5 ft 11 in → 180 cm")
+        // It waited a tenth of a second between looks, without holding anything.
+        #expect(fixture.treePauses.durations == [.milliseconds(100), .milliseconds(100)])
+    }
+
+    @Test func aChromeThatNeverExposesAnythingIsLookedAtSixTimesAndThenLeftAlone() async {
+        await start()
+        fixture.focus("com.google.Chrome")
+        await fixture.dragSelecting(nil)
+        #expect(fixture.accessibility.inspections == 7)
+        #expect(chip.shown.isEmpty)
+        await fixture.dragSelecting(nil)
+        #expect(fixture.accessibility.inspections == 8)
+    }
+
+    @Test func turningTheSettingOffInTheMiddleStopsSwitchingAppsOn() async {
+        await start()
+        fixture.focus("com.google.Chrome")
+        fixture.set(false, for: \.useChromiumAccessibility)
+        await fixture.dragSelecting(nil)
+        #expect(fixture.accessibility.enabled.isEmpty)
+        fixture.set(true, for: \.useChromiumAccessibility)
+        await fixture.dragSelecting(nil)
+        #expect(fixture.accessibility.enabled == ["AXEnhancedUserInterface"])
     }
 
     // MARK: what it ignores

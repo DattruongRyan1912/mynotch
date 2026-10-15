@@ -66,9 +66,12 @@ final class FakeAccessibility: AccessibilityClient {
 
     func isEnabled(_ attribute: String, in application: FocusedApplication) -> Bool { attributes.contains(attribute) }
 
+    /// Whether an app keeps the attribute that was set; some ignore it, and then it reads as off again.
+    var enableSticks = true
+
     func enable(_ attribute: String, in application: FocusedApplication) {
         enabled.append(attribute)
-        attributes.insert(attribute)
+        if enableSticks { attributes.insert(attribute) }
     }
 
     /// Whether the app takes a replacement.

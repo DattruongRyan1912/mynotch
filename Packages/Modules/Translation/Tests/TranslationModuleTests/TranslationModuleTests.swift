@@ -33,6 +33,9 @@ struct ModuleFixture {
     let displays = FakeDisplays()
     /// Apple's engine for the previews, which is not the one the tab translates with.
     let previewEngine = FakeEngine()
+    /// What the watcher logs, and the waits it makes for an app to build its accessibility tree (which return at once).
+    let selectionLog = FakeSelectionLog()
+    let treePauses = FakePauses()
     /// 15 January 2026, noon UTC: winter in the northern hemisphere and 19:00 in Hanoi.
     let clock = TestClock("2026-01-15T12:00:00Z")
     /// Reads quantities like the real one, and records when and where.
@@ -66,7 +69,9 @@ struct ModuleFixture {
             opener: opener,
             engines: EngineSetup(keys: keyStore, transport: transport, log: engineLog),
             smartSelection: SmartSelectionSetup(
-                accessibility: accessibility, input: input, window: chipWindow, preview: previewEngine, screens: { [displays] in displays.areas }
+                accessibility: accessibility, input: input, window: chipWindow, preview: previewEngine, screens: { [displays] in displays.areas },
+                log: selectionLog, pause: { [treePauses] in treePauses.durations.append($0) },
+                applicationName: { $0.bundleID == "com.apple.Safari" ? "Safari" : ($0.bundleID ?? "app") }
             ),
             shortcut: nil
         )

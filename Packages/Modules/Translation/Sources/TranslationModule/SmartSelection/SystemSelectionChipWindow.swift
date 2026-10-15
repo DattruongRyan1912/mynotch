@@ -38,14 +38,37 @@ final class SelectionChipPanel: NSPanel {
 }
 
 /// Hosts the chip's view: accepts the first click although MyNotch is not active, and reports the pointer coming and going
-/// even then (a tracking area that is `activeAlways`, which SwiftUI's own hover is not guaranteed to be).
+/// even then (a tracking area that is `activeAlways`, which SwiftUI's own hover is not guaranteed to be). A menu of the chip
+/// ("⋯") moves the pointer off the panel, so while any menu is open the chip counts as hovered, and it is let go the way the
+/// pointer's leaving is when the menu ends with the pointer elsewhere.
 final class SelectionChipHostingView: NSHostingView<AnyView> {
     var hover: @MainActor (Bool) -> Void = { _ in }
     private var pointerArea: NSTrackingArea?
+    private var notifications = NotificationCenter.default
+    private var pointerIsOverChip: () -> Bool = { false }
+    private var menuObservers: [any NSObjectProtocol] = []
 
-    convenience init(rootView: AnyView, hover: @escaping @MainActor (Bool) -> Void) {
+    convenience init(
+        rootView: AnyView, notifications: NotificationCenter = .default, pointerIsOverChip: (() -> Bool)? = nil,
+        hover: @escaping @MainActor (Bool) -> Void
+    ) {
         self.init(rootView: rootView)
         self.hover = hover
+        self.notifications = notifications
+        self.pointerIsOverChip = pointerIsOverChip ?? { [weak self] in
+            self.map { $0.window?.frame.contains(NSEvent.mouseLocation) ?? false } ?? false
+        }
+    }
+
+    isolated deinit {
+        stopObservingMenus()
+    }
+
+    /// Menus are only listened for while the chip is in a window.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        stopObservingMenus()
+        if window != nil { observeMenus() }
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -63,6 +86,25 @@ final class SelectionChipHostingView: NSHostingView<AnyView> {
 
     func pointerEntered() { hover(true) }
     func pointerExited() { hover(false) }
+
+    private func stopObservingMenus() {
+        menuObservers.forEach(notifications.removeObserver)
+        menuObservers = []
+    }
+
+    private func observeMenus() {
+        menuObservers = [
+            notifications.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.hover(true) }
+            },
+            notifications.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, !self.pointerIsOverChip() else { return }
+                    self.hover(false)
+                }
+            },
+        ]
+    }
 }
 
 /// The real chip window: one panel while a chip is up, made when it first shows and dropped when it goes, so a hidden
@@ -92,8 +134,11 @@ final class SystemSelectionChipWindow: SelectionChipWindowing {
     func place(_ content: SelectionChipContent, near anchor: CGRect) -> CGRect {
         let (panel, hosting) = panelAndHosting()
         hosting.hover = content.hover
-        hosting.rootView = AnyView(SelectionChipView(content: content, interface: interface))
-        let frame = SelectionGeometry.chipFrame(size: hosting.fittingSize, anchor: anchor, screens: screens())
+        // A translation may be tall: it takes the room beside the selection, at most, and scrolls past that.
+        let displays = screens()
+        let room = min(SelectionChipLayout.maxHeight, SelectionGeometry.room(besides: anchor, screens: displays))
+        hosting.rootView = AnyView(SelectionChipView(content: content, interface: interface, maxHeight: room))
+        let frame = SelectionGeometry.chipFrame(size: hosting.fittingSize, anchor: anchor, screens: displays)
         panel.setFrame(frame, display: true)
         return panel.frame
     }

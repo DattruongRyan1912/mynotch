@@ -36,17 +36,36 @@ nonisolated enum SelectionLanguage {
         text.split(whereSeparator: \.isWhitespace).count(where: { $0.contains(where: \.isLetter) })
     }
 
+    /// What to make of a selection: the language to translate it from, or the reason there is none.
+    nonisolated enum Assessment: Equatable, Sendable {
+        case source(Locale.Language)
+        case skip(SelectionSkip)
+    }
+
     /// The language to translate `text` from: the one it is written in, when it is not the target's, enough of it is there,
     /// it is a text somebody wrote to be read (see `SelectionShape`), and some candidate is that language. Candidates are tried
     /// in order, so the one the user prefers wins ("en" before "en-AU").
     ///
     /// For a Vietnamese user, text with no accents is held to more: Vietnamese typed that way is often taken for Italian or
     /// Romanian, so a text with several common Vietnamese words shows nothing, and any guess needs 0.9 and three words.
+    static func assess(_ text: String, target: Locale.Language, candidates: [Locale.Language]) -> Assessment {
+        guard hasEnoughToTranslate(text), SelectionShape.isProse(text) else { return .skip(.shape) }
+        guard let guess = guess(of: text) else { return .skip(.lowConfidence) }
+        guard LanguageDetector.writtenLanguage(of: target) != guess.language else { return .skip(.sameLanguage) }
+        guard passesUnaccentedRules(text: text, target: target, confidence: guess.confidence) else { return .skip(.lowConfidence) }
+        guard let source = candidates.first(where: { LanguageDetector.writtenLanguage(of: $0) == guess.language }) else {
+            return .skip(.unsupportedLanguage)
+        }
+        return .source(source)
+    }
+
     static func source(of text: String, target: Locale.Language, candidates: [Locale.Language]) -> Locale.Language? {
-        guard hasEnoughToTranslate(text), SelectionShape.isProse(text), let guess = guess(of: text) else { return nil }
-        guard LanguageDetector.writtenLanguage(of: target) != guess.language else { return nil }
-        guard passesUnaccentedRules(text: text, target: target, confidence: guess.confidence) else { return nil }
-        return candidates.first { LanguageDetector.writtenLanguage(of: $0) == guess.language }
+        if case .source(let language) = assess(text, target: target, candidates: candidates) { language } else { nil }
+    }
+
+    /// `assess`, off the main actor: recognizing a long text is not instant.
+    @concurrent static func assessInBackground(_ text: String, target: Locale.Language, candidates: [Locale.Language]) async -> Assessment {
+        assess(text, target: target, candidates: candidates)
     }
 
     /// Whether a guess about `text` of that confidence stands once the rules for a Vietnamese user's unaccented text are
@@ -65,11 +84,6 @@ nonisolated enum SelectionLanguage {
     /// Text with no accents says little about its language, so a guess about it needs 0.9 and three words.
     static func trustsGuessOnUnaccentedText(confidence: Double, wordCount: Int) -> Bool {
         confidence >= 0.9 && wordCount >= 3
-    }
-
-    /// `source`, off the main actor: recognizing a long text is not instant.
-    @concurrent static func sourceInBackground(of text: String, target: Locale.Language, candidates: [Locale.Language]) async -> Locale.Language? {
-        source(of: text, target: target, candidates: candidates)
     }
 
     private static func isCJK(_ scalar: Unicode.Scalar) -> Bool {

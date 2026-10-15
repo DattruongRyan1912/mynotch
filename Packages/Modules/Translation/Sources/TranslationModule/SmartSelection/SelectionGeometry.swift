@@ -53,6 +53,13 @@ nonisolated enum SelectionGeometry {
         return CGRect(origin: CGPoint(x: x, y: y), size: size)
     }
 
+    /// How tall a chip can be beside `anchor` without covering it: the bigger of the room below and the room above, on the
+    /// display of the anchor, never less than none. With no display to go by, as tall as a chip ever is.
+    static func room(besides anchor: CGRect, screens: [ScreenArea]) -> CGFloat {
+        guard let visible = screen(for: anchor, in: screens)?.visibleFrame else { return SelectionChipLayout.maxHeight }
+        return max(0, anchor.minY - gap - visible.minY, visible.maxY - (anchor.maxY + gap))
+    }
+
     private static func isUsable(_ rect: CGRect) -> Bool {
         [rect.origin.x, rect.origin.y, rect.size.width, rect.size.height].allSatisfy(\.isFinite)
             && rect.size.width > 0 && rect.size.height > 0

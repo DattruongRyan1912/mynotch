@@ -146,6 +146,28 @@ import Testing
         #expect(frame.origin.x == 0)
     }
 
+    // MARK: how much room there is
+
+    @Test func theRoomIsTheBiggerSideOfTheSelection() {
+        // 394 pt below and 449 above (the menu bar is not room).
+        #expect(SelectionGeometry.room(besides: CGRect(x: 500, y: 400, width: 100, height: 20), screens: [main]) == 449)
+        // Near the bottom there is more above; near the top, more below.
+        #expect(SelectionGeometry.room(besides: CGRect(x: 500, y: 20, width: 100, height: 20), screens: [main]) == 829)
+        #expect(SelectionGeometry.room(besides: CGRect(x: 500, y: 840, width: 100, height: 20), screens: [main]) == 834)
+    }
+
+    @Test func theRoomIsOfTheDisplayOfTheSelection() {
+        #expect(SelectionGeometry.room(besides: CGRect(x: 2000, y: 100, width: 100, height: 20), screens: all) == 749)
+    }
+
+    @Test func aSelectionTallerThanTheDisplayLeavesNoRoom() {
+        #expect(SelectionGeometry.room(besides: CGRect(x: 500, y: 0, width: 100, height: 875), screens: [main]) == 0)
+    }
+
+    @Test func withNoDisplaysThereIsAsMuchRoomAsAChipEverTakes() {
+        #expect(SelectionGeometry.room(besides: CGRect(x: 500, y: 400, width: 100, height: 20), screens: []) == SelectionChipLayout.maxHeight)
+    }
+
     // MARK: several displays
 
     @Test func theChipIsOnTheDisplayOfTheSelection() {
