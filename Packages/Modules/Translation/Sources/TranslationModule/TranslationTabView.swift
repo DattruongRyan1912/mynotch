@@ -19,6 +19,7 @@ struct TranslationTabView: View {
     let actions: TranslationTabActions
 
     @Environment(\.notch) private var notch
+    @Environment(\.notchAccent) private var accent
     @State private var copied = false
     /// After a language pick the notch stays pinned until the pointer is back in it or `menuHold` passes, so the
     /// new translation can be seen even with the pointer left where the menu was.
@@ -197,7 +198,7 @@ struct TranslationTabView: View {
                 if state.offersAppleFallback {
                     Button("Dịch bằng Apple", action: translator.translateWithApple)
                         .buttonStyle(.borderedProminent)
-                        .tint(NotchTokens.accent)
+                        .tint(accent)
                         .controlSize(.small)
                 }
             }
@@ -219,7 +220,7 @@ struct TranslationTabView: View {
                 .foregroundStyle(NotchTokens.secondaryText)
                 Button("Cài đặt…", action: actions.install)
                     .buttonStyle(.borderedProminent)
-                    .tint(NotchTokens.accent)
+                    .tint(accent)
                     .controlSize(.small)
             }
         case .unsupported:
@@ -239,7 +240,7 @@ struct TranslationTabView: View {
                         Text("Thay vào chỗ đang chọn")
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(NotchTokens.accent)
+                    .tint(accent)
                     .controlSize(.small)
                     .disabled(!state.canReplace)
                     if state.isReplacing {
@@ -272,10 +273,10 @@ struct TranslationTabView: View {
             } label: {
                 Text("Cấp quyền")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(NotchTokens.primaryText)
+                    .foregroundStyle(AccentLabel.colour(on: accent))
                     .padding(.horizontal, 8)
                     .frame(height: 20)
-                    .background(NotchTokens.accent.opacity(0.7), in: Capsule())
+                    .background(accent.opacity(0.7), in: Capsule())
                     .contentShape(Capsule())
             }
             .buttonStyle(.plain)

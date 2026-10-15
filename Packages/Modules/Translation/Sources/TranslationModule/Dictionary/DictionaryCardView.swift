@@ -7,6 +7,8 @@ struct DictionaryCardView: View {
     let entry: DictionaryEntry
     let open: () -> Void
 
+    @Environment(\.notchAccent) private var accent
+
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -30,7 +32,7 @@ struct DictionaryCardView: View {
             Button(action: open) {
                 Label("Mở trong Từ điển", systemImage: "book")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(NotchTokens.accent)
+                    .foregroundStyle(accent)
             }
             .buttonStyle(.plain)
             .padding(.vertical, 2)
