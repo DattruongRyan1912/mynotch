@@ -17,7 +17,7 @@ struct AddEventButton: View {
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(isHovering ? NotchTokens.primaryText : NotchTokens.secondaryText)
                 .frame(width: CalendarTabView.headerHeight, height: CalendarTabView.headerHeight)
-                .background(Color.white.opacity(isHovering ? 0.16 : 0.08), in: Circle())
+                .background(NotchTokens.fill(isHovering ? 0.16 : 0.08), in: Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -85,8 +85,8 @@ struct QuickAddView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // The notch is always black, whatever the system appearance.
-        .environment(\.colorScheme, .dark)
+        // The classic notch is black whatever the system appearance; on Liquid Glass the field follows the glass.
+        .notchColorScheme()
         .background(WindowReader { window in
             self.window = window
             panelIsKey = window?.isKeyWindow ?? false
@@ -123,7 +123,7 @@ struct QuickAddView: View {
             // A click on the padding goes to the field too. Behind the field, so it never takes a click from the text.
             .background {
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.white.opacity(0.1))
+                    .fill(NotchTokens.fill(0.1))
                     .contentShape(RoundedRectangle(cornerRadius: 8))
                     .onTapGesture { isFocused = true }
             }

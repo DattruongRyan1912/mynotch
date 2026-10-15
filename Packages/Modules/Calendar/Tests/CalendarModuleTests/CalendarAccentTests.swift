@@ -67,7 +67,7 @@ private let probeRed = Color(.sRGB, red: 1, green: 0, blue: 0)
     }
 
     @Test func theJoinLabelStaysReadableOnALightAccent() {
-        let white = NotchTokens.primaryText
+        let white = Color.white
         // The palette colours as macOS shows them on a dark surface (blue, purple, pink, red) keep the white they always had.
         for accent in [NotchAccent.Palette.blue, .purple, .pink, .red].map(\.rgb.color) {
             #expect(MeetingCardActions.labelColour(on: accent) == white)

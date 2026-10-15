@@ -34,7 +34,8 @@ struct MeetingCardActions: View {
     }
 
     /// The colour of the join button's label: white, as it always was, unless the accent is so light that white could hardly be
-    /// read on it (yellow, the oranges and the greens), where black is used.
+    /// read on it (yellow, the oranges and the greens), where black is used. Plain white, not the text token: the label is on a
+    /// solid accent, which is as dark as the accent whatever the glass behind the notch is.
     static func labelColour(on accent: Color) -> Color {
         let rgb = NSColor(accent).usingColorSpace(.sRGB) ?? .black
         func linear(_ component: CGFloat) -> Double {
@@ -43,7 +44,7 @@ struct MeetingCardActions: View {
         }
         let luminance = 0.2126 * linear(rgb.redComponent) + 0.7152 * linear(rgb.greenComponent) + 0.0722 * linear(rgb.blueComponent)
         let whiteContrast = 1.05 / (luminance + 0.05)
-        return whiteContrast < 2.5 ? Color.black.opacity(0.85) : NotchTokens.primaryText
+        return whiteContrast < 2.5 ? Color.black.opacity(0.85) : Color.white
     }
 
     /// What VoiceOver reads: the title alone would not say which meeting a button is for.
@@ -115,7 +116,7 @@ private struct QuietButton: View {
                 .foregroundStyle(isHovering ? NotchTokens.primaryText : NotchTokens.secondaryText)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 4)
-                .background(Color.white.opacity(isHovering ? 0.1 : 0), in: Capsule())
+                .background(NotchTokens.fill(isHovering ? 0.1 : 0), in: Capsule())
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)

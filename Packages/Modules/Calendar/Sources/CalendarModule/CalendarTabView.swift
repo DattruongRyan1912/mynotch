@@ -85,7 +85,7 @@ struct UpcomingCard: View {
         .padding(.vertical, 8)
         .padding(.horizontal, CalendarTabView.cardInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .background(NotchTokens.fill(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder
@@ -180,7 +180,7 @@ struct TodayContent: View {
                     .foregroundStyle(NotchTokens.primaryText)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(Color.white.opacity(0.14), in: Capsule())
+                    .background(NotchTokens.fill(0.14), in: Capsule())
             }
             .buttonStyle(.plain)
         case .items(let items):
@@ -238,7 +238,7 @@ private struct EventRow: View {
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
-            .background(Color.white.opacity(isHovering ? 0.1 : 0), in: RoundedRectangle(cornerRadius: 6))
+            .background(NotchTokens.fill(isHovering ? 0.1 : 0), in: RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
