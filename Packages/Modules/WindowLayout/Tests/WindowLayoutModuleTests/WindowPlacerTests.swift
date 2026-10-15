@@ -33,7 +33,7 @@ import Testing
     @Test func aWindowThatTakesTheSizeCostsTwoCallsAndIsNotMovedAgain() {
         let placement = placement(.rightHalf, zone: 0, area: Self.docks[0].area)
         let window = FakeWindowAttributes()
-        #expect(WindowPlacer.place(placement, on: window))
+        #expect(WindowPlacer.place(placement, on: window).moved)
         #expect(window.calls == ["size", "position"])
         #expect(window.frame == placement.frame)
     }
@@ -42,7 +42,7 @@ import Testing
         let placement = placement(.fullScreen, zone: 0, area: Self.docks[0].area)
         let window = FakeWindowAttributes(frame: CGRect(x: 100, y: 100, width: 400, height: 300))
         window.sizeLimitUntilMoved = CGSize(width: 800, height: 600)
-        #expect(WindowPlacer.place(placement, on: window))
+        #expect(WindowPlacer.place(placement, on: window).moved)
         #expect(window.calls == ["size", "position", "size"])
         #expect(window.frame == placement.frame)
     }
@@ -55,7 +55,7 @@ import Testing
         #expect(placement.frame == CGRect(x: 1008, y: 37, width: 504, height: 945))
         let window = FakeWindowAttributes(frame: CGRect(x: 100, y: 100, width: 715, height: 945))
         window.isResizable = false
-        #expect(WindowPlacer.place(placement, on: window))
+        #expect(WindowPlacer.place(placement, on: window).moved)
         #expect(window.frame == CGRect(x: 797, y: 37, width: 715, height: 945))
     }
 
@@ -63,7 +63,7 @@ import Testing
         let placement = placement(.thirds, zone: 2, area: Self.docks[0].area)
         let window = FakeWindowAttributes()
         window.minimum = CGSize(width: 715, height: 300)
-        #expect(WindowPlacer.place(placement, on: window))
+        #expect(WindowPlacer.place(placement, on: window).moved)
         #expect(window.calls == ["size", "position", "size"], "one retry for a size the display might have clamped, no more")
         #expect(window.frame.maxX == 1512)
     }
@@ -149,12 +149,87 @@ import Testing
         #expect(window.frame.maxX == edge)
     }
 
+    // MARK: apps with the enhanced user interface on
+
+    /// Chrome with it on says yes to a move and does nothing; the switch has to be off while the window is placed and
+    /// back on after, on every way out.
+    @Test func anAppWithTheEnhancedInterfaceOnIsPlacedWithItSwitchedOffAndItComesBackOn() {
+        let placement = placement(.rightHalf, zone: 0, area: Self.docks[0].area)
+        let window = FakeWindowAttributes()
+        window.enhancedUI = true
+        let outcome = WindowPlacer.place(placement, on: window)
+        #expect(outcome == SnapOutcome(moved: true, enhancedUI: true))
+        #expect(window.frame == placement.frame, "moved as asked, which the app would have ignored with the mode on")
+        #expect(window.timeline == ["enhanced=false", "size", "position", "enhanced=true"])
+        #expect(window.enhancedUI == true)
+    }
+
+    @Test func theSwitchStaysOffForTheWholePlacementIncludingTheSecondSize() {
+        let placement = placement(.thirds, zone: 2, area: Self.docks[0].area)
+        let window = FakeWindowAttributes()
+        window.enhancedUI = true
+        window.minimum = CGSize(width: 715, height: 300)
+        #expect(WindowPlacer.place(placement, on: window).moved)
+        #expect(window.timeline == ["enhanced=false", "size", "position", "size", "enhanced=true"])
+        #expect(window.frame.maxX == 1512)
+    }
+
+    @Test func theSwitchComesBackOnWhenThePlacementEndsEarlyOrFails() {
+        let placement = placement(.rightHalf, zone: 0, area: Self.docks[0].area)
+        let failures: [(String, (FakeWindowAttributes) -> Void)] = [
+            ("the app refuses to move", { $0.isMovable = false }),
+            ("a fixed-size window", { $0.isResizable = false }),
+            ("a size that cannot be read", { $0.canReadSize = false }),
+            ("a smallest size", { $0.minimum = CGSize(width: 900, height: 100) }),
+        ]
+        for (name, configure) in failures {
+            let window = FakeWindowAttributes()
+            window.enhancedUI = true
+            configure(window)
+            WindowPlacer.place(placement, on: window)
+            #expect(window.enhancedUI == true, "\(name)")
+            #expect(window.timeline.first == "enhanced=false" && window.timeline.last == "enhanced=true", "\(name): \(window.timeline)")
+            #expect(window.enhancedWrites == [false, true], "\(name)")
+        }
+    }
+
+    @Test func aFailedPlacementIsStillReportedAsFailedAfterTheSwitchComesBack() {
+        let window = FakeWindowAttributes()
+        window.enhancedUI = true
+        window.isMovable = false
+        let outcome = WindowPlacer.place(placement(.rightHalf, zone: 0, area: Self.docks[0].area), on: window)
+        #expect(outcome == SnapOutcome(moved: false, enhancedUI: true))
+    }
+
+    @Test func anAppWithTheModeOffOrWithoutItIsNeverWrittenTo() {
+        for state in [false, nil] as [Bool?] {
+            let window = FakeWindowAttributes()
+            window.enhancedUI = state
+            let outcome = WindowPlacer.place(placement(.rightHalf, zone: 0, area: Self.docks[0].area), on: window)
+            #expect(outcome == SnapOutcome(moved: true, enhancedUI: false))
+            #expect(window.enhancedWrites.isEmpty, "\(String(describing: state))")
+            #expect(window.timeline == ["size", "position"])
+            #expect(window.enhancedUI == state)
+        }
+    }
+
+    @Test func aSwitchThatCannotBeTurnedOffIsNotWrittenToAgainAndThePlacementIsStillTried() {
+        let window = FakeWindowAttributes()
+        window.enhancedUI = true
+        window.canSetEnhancedUI = false
+        let outcome = WindowPlacer.place(placement(.rightHalf, zone: 0, area: Self.docks[0].area), on: window)
+        #expect(window.enhancedWrites == [false], "it was never changed, so there is nothing to restore")
+        // Still tried (this app ignores moves while the mode is on, so the placer looks again and asks once more).
+        #expect(window.calls.first == "size" && window.calls.contains("position"))
+        #expect(outcome.enhancedUI, "it was on, which is what the log says")
+    }
+
     // MARK: apps that refuse
 
     @Test func anAppThatRefusesToMoveIsNotCalledAgain() {
         let window = FakeWindowAttributes()
         window.isMovable = false
-        #expect(!WindowPlacer.place(placement(.rightHalf, zone: 0, area: Self.docks[0].area), on: window))
+        #expect(!WindowPlacer.place(placement(.rightHalf, zone: 0, area: Self.docks[0].area), on: window).moved)
         // Neither a second size nor a correction: it would only wait for the same refusal.
         #expect(window.calls == ["size", "position"])
     }
@@ -162,7 +237,7 @@ import Testing
     @Test func aFixedSizeWindowIsStillMovedAndNotAskedForItsSizeAgain() {
         let window = FakeWindowAttributes()
         window.isResizable = false
-        #expect(WindowPlacer.place(placement(.leftHalf, zone: 0, area: Self.docks[0].area), on: window))
+        #expect(WindowPlacer.place(placement(.leftHalf, zone: 0, area: Self.docks[0].area), on: window).moved)
         #expect(window.calls == ["size", "position"])
         #expect(window.frame.origin == CGPoint(x: 0, y: 37))
     }
@@ -171,7 +246,7 @@ import Testing
         let placement = placement(.rightHalf, zone: 0, area: Self.docks[0].area)
         let window = FakeWindowAttributes()
         window.canReadSize = false
-        #expect(WindowPlacer.place(placement, on: window))
+        #expect(WindowPlacer.place(placement, on: window).moved)
         #expect(window.origin == placement.frame.origin)
         // Without a size there is nothing to correct and nothing to ask again.
         #expect(window.calls == ["size", "position"])

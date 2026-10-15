@@ -292,14 +292,15 @@ final class SnapSession {
     private func put(
         _ window: any SnapWindow, app: SnapApp, in target: SnapTarget, as ask: SnapReport.Ask, placement: SnapPlacement
     ) -> Put {
-        let moved = window.place(placement)
+        let outcome = window.place(placement)
+        let moved = outcome.moved
         var actual = window.frame()
         // A slow app may say yes before it has applied the size. One more look before judging a window that seems not to
         // have taken it: a smallest size looks the same the second time, a late one does not.
         if let seen = actual, !placement.takes(seen.size) {
             actual = window.frame() ?? actual
         }
-        environment.log(SnapReport.placed(app: app, target: target, ask: ask, placement: placement, actual: actual, moved: moved))
+        environment.log(SnapReport.placed(app: app, target: target, ask: ask, placement: placement, actual: actual, outcome: outcome))
         return Put(moved: moved, actual: actual)
     }
 }

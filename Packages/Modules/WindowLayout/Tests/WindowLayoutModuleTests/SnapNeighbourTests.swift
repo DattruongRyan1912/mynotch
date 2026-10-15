@@ -432,6 +432,15 @@ import Testing
         #expect(fixture.logged.last == "overlaps app=com.macpaw.CleanMyMac with=com.apple.Music layout=rightHalf zone=0 by=284x945 neighbour-moved=no")
     }
 
+    @Test func aPlacementThatSwitchedTheEnhancedInterfaceOffSaysSoAndOtherPlacementsDoNot() {
+        let chrome = FakeWindow(app: SnapApp(bundleID: "com.google.Chrome", name: "Google Chrome"))
+        chrome.enhancedUI = true
+        fixture.snap(chrome, tile: Self.rightTile)
+        #expect(fixture.logged.last == "placed app=com.google.Chrome layout=rightHalf zone=0 ask=zone frame=756,37,756,945 requested=756x945 actual=756x945 origin=756,37 landed=756,37 oversize=no refused=no enhancedUI=1")
+        fixture.snap(music, tile: Self.leftTile)
+        #expect(fixture.logged.last?.contains("enhancedUI") == false)
+    }
+
     @Test func aRefusedMoveIsLoggedAsRefused() {
         music.accepts = false
         fixture.snap(music, tile: Self.rightTile)

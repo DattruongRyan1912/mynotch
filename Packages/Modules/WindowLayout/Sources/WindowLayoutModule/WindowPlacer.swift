@@ -9,6 +9,11 @@ protocol WindowAttributes: AnyObject {
     /// False when the app refused.
     func setPosition(_ position: CGPoint) -> Bool
     func setSize(_ size: CGSize) -> Bool
+    /// The app's `AXEnhancedUserInterface`, which Chrome and other apps turn on when assistive technology is at work, and
+    /// then animate or ignore moves made from outside. Nil when the app has none.
+    func enhancedUserInterface() -> Bool?
+    /// False when the app refused.
+    func setEnhancedUserInterface(_ on: Bool) -> Bool
 }
 
 /// Puts a window where a placement says, whatever size the app gives it.
@@ -18,10 +23,21 @@ enum WindowPlacer {
     /// size the window actually has, so one that keeps a bigger size (a smallest or a fixed size) is put against the edge
     /// of its zone and inside the visible area instead of hanging off the display or under the Dock.
     ///
+    /// An app whose enhanced user interface is on animates or ignores a frame change made from outside, so that is switched
+    /// off for the placement and back on after it, whichever way the placement ends. An app that has it off, or has none, is
+    /// not written to at all, and `AXManualAccessibility` (which does not touch frames) is never touched.
+    ///
     /// Every call is a wait for the other app, so an app that refuses to move is not called again, and a size the app did
-    /// not take is asked for once more at most. False when the app refused to move.
+    /// not take is asked for once more at most.
     @discardableResult
-    static func place(_ placement: SnapPlacement, on window: some WindowAttributes) -> Bool {
+    static func place(_ placement: SnapPlacement, on window: some WindowAttributes) -> SnapOutcome {
+        let wasOn = window.enhancedUserInterface() == true
+        let paused = wasOn && window.setEnhancedUserInterface(false)
+        defer { if paused { _ = window.setEnhancedUserInterface(true) } }
+        return SnapOutcome(moved: move(placement, on: window), enhancedUI: wasOn)
+    }
+
+    private static func move(_ placement: SnapPlacement, on window: some WindowAttributes) -> Bool {
         let target = placement.frame
         let tookSize = window.setSize(target.size)
         let first = window.size() ?? target.size

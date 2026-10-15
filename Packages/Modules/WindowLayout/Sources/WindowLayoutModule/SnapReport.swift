@@ -41,13 +41,15 @@ nonisolated enum SnapReport {
 
     /// One placement: what was asked of the window, what it came to and where it went. `oversize` says the window kept a
     /// size bigger than what was asked (it overlaps whatever is beside the part it was given); `refused`, that the app
-    /// would not move it. A refused window's size says nothing.
-    static func placed(app: SnapApp, target: SnapTarget, ask: Ask, placement: SnapPlacement, actual: CGRect?, moved: Bool) -> String {
+    /// would not move it. A refused window's size says nothing. `enhancedUI=1` is there only when the app had its enhanced
+    /// user interface on (switched off for the move and back on after), which is why an app may have ignored a move.
+    static func placed(app: SnapApp, target: SnapTarget, ask: Ask, placement: SnapPlacement, actual: CGRect?, outcome: SnapOutcome) -> String {
+        let moved = outcome.moved
         let origin = actual.map { point(placement.origin(for: $0.size)) } ?? "?"
         let oversize = moved && (actual.map { placement.isOversize($0.size) } ?? false)
         return "placed \(subject(app, target)) ask=\(ask.rawValue) frame=\(rect(placement.frame)) requested=\(size(placement.frame.size))"
             + " actual=\(actual.map { size($0.size) } ?? "?") origin=\(origin) landed=\(actual.map { point($0.origin) } ?? "?")"
-            + " oversize=\(oversize ? "yes" : "no") refused=\(moved ? "no" : "yes")"
+            + " oversize=\(oversize ? "yes" : "no") refused=\(moved ? "no" : "yes")" + (outcome.enhancedUI ? " enhancedUI=1" : "")
     }
 
     /// The placed window ended up over another one. The other window is never moved to make room.

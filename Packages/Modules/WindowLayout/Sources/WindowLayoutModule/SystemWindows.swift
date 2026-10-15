@@ -8,7 +8,19 @@ final class AccessibilityWindow: SnapWindow, WindowAttributes {
     static let readTimeout: Float = 0.1
     static let writeTimeout: Float = 0.5
 
+    /// The attribute Chrome and other apps turn on while assistive technology is at work, and under which they animate or
+    /// ignore moves from outside. Not in the public headers, but the same string every window manager uses.
+    private static let enhancedUserInterface = "AXEnhancedUserInterface" as CFString
+
     private let element: AXUIElement
+    /// The app the window belongs to: the switch above is on it, not on the window.
+    private lazy var application: AXUIElement? = {
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(element, &pid) == .success else { return nil }
+        let application = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(application, Self.readTimeout)
+        return application
+    }()
 
     init(_ element: AXUIElement) {
         self.element = element
@@ -40,10 +52,28 @@ final class AccessibilityWindow: SnapWindow, WindowAttributes {
 
     /// The order of the calls and what is done about a size the app did not take are `WindowPlacer`'s.
     @discardableResult
-    func place(_ placement: SnapPlacement) -> Bool {
+    func place(_ placement: SnapPlacement) -> SnapOutcome {
+        let application = application
         AXUIElementSetMessagingTimeout(element, Self.writeTimeout)
-        defer { AXUIElementSetMessagingTimeout(element, Self.readTimeout) }
+        if let application { AXUIElementSetMessagingTimeout(application, Self.writeTimeout) }
+        defer {
+            AXUIElementSetMessagingTimeout(element, Self.readTimeout)
+            if let application { AXUIElementSetMessagingTimeout(application, Self.readTimeout) }
+        }
         return WindowPlacer.place(placement, on: self)
+    }
+
+    func enhancedUserInterface() -> Bool? {
+        guard let application else { return nil }
+        var raw: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(application, Self.enhancedUserInterface, &raw) == .success,
+              let raw, CFGetTypeID(raw) == CFBooleanGetTypeID() else { return nil }
+        return CFBooleanGetValue(unsafeDowncast(raw, to: CFBoolean.self))
+    }
+
+    func setEnhancedUserInterface(_ on: Bool) -> Bool {
+        guard let application else { return false }
+        return AXUIElementSetAttributeValue(application, Self.enhancedUserInterface, on ? kCFBooleanTrue : kCFBooleanFalse) == .success
     }
 
     func position() -> CGPoint? {

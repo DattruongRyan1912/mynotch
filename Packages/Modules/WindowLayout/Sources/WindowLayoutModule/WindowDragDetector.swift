@@ -8,6 +8,15 @@ nonisolated struct SnapApp: Equatable, Sendable {
     let name: String?
 }
 
+/// What a placement came to.
+nonisolated struct SnapOutcome: Equatable, Sendable {
+    /// False when the app refused to move the window.
+    let moved: Bool
+    /// The app had its enhanced user interface on (`AXEnhancedUserInterface`, which makes apps animate or ignore moves),
+    /// so it was switched off for the move and back on after.
+    let enhancedUI: Bool
+}
+
 /// A window of another app, as far as the module needs to know it. `frame` and `place` use Accessibility coordinates:
 /// the origin is the top left of the primary display and y grows down.
 protocol SnapWindow: AnyObject {
@@ -20,8 +29,8 @@ protocol SnapWindow: AnyObject {
     /// Position and size, or nil when the app does not answer.
     func frame() -> CGRect?
     /// Moves and resizes the window to the placement, and keeps it inside the placement's visible area when the app does not
-    /// take the size. False when the app refused to move.
-    @discardableResult func place(_ placement: SnapPlacement) -> Bool
+    /// take the size.
+    @discardableResult func place(_ placement: SnapPlacement) -> SnapOutcome
     func isSame(as other: any SnapWindow) -> Bool
 }
 
