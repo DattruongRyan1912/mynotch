@@ -97,6 +97,8 @@ struct NowPlayingLockScreenView: View {
             }
             LockScreenProgress(store: store)
         }
+        // The lock screen draws this on a black card of its own, whatever the notch's look is.
+        .notchOnDarkBackground()
     }
 }
 

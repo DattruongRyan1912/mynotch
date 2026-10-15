@@ -109,7 +109,7 @@ struct PlaybackProgressView: View {
             let width = geometry.size.width
             let filled = width * progress.fraction
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.18))
+                Capsule().fill(NotchTokens.fill(0.18))
                 Capsule()
                     .fill(Self.fill(tint: store.activeTint?.primary, isActive: isActive, accent: accent))
                     .animation(.easeInOut(duration: 0.4), value: store.activeTint?.primary)

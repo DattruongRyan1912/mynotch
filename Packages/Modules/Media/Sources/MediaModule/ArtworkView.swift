@@ -24,14 +24,14 @@ struct ArtworkView: View {
                     .transition(.opacity)
             } else if let icon {
                 // Icons have their own shape and margins: alone at activity size, on a tile in the tab.
-                if isLarge { shape.fill(Color.white.opacity(0.1)) }
+                if isLarge { shape.fill(NotchTokens.fill(0.1)) }
                 Image(nsImage: icon)
                     .resizable()
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
                     .padding(isLarge ? size * 0.18 : 0)
             } else {
-                shape.fill(Color.white.opacity(0.1))
+                shape.fill(NotchTokens.fill(0.1))
                 Image(systemName: "music.note")
                     .font(.system(size: size * 0.42, weight: .semibold))
                     .foregroundStyle(NotchTokens.secondaryText)

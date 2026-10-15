@@ -62,6 +62,8 @@ struct LyricsPanelView: View {
             .background(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous).fill(Color.black.opacity(0.82)))
             .environment(\.notchIsOnScreen, presence.isOnScreen)
             .followingAccent(of: interface)
+            // The panel is a window of its own on a dark surface whatever the look is, so the text tokens must be the light ones.
+            .notchOnDarkBackground()
     }
 }
 
@@ -100,9 +102,8 @@ private struct LyricsTimelineContent: View {
     /// The line being sung; the dimmed note while nothing is.
     @ViewBuilder
     private func current(_ line: LyricLine?, size: Double) -> some View {
-        let style = KaraokeStyle(
-            fontSize: size, weight: .bold, lit: NSColor(NotchTokens.primaryText), dim: NSColor(NotchTokens.primaryText).withAlphaComponent(0.4)
-        )
+        // White: the panel is dark whatever the look is, and a colour in a layer is made once.
+        let style = KaraokeStyle(fontSize: size, weight: .bold, lit: NSColor(Color.white), dim: NSColor(Color.white).withAlphaComponent(0.4))
         if store.karaokeIsActive, let line, line.words != nil {
             KaraokeLine(line: line, store: store, style: style)
                 .frame(height: style.lineHeight)

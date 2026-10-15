@@ -62,15 +62,18 @@ struct NowPlayingLyricStrip: View {
     static let height: CGFloat = 36
 
     let store: NowPlayingStore
+    @Environment(\.notchSurface) private var surface
 
     var body: some View {
         // At each line when it is filled word by word, else four times a second, which is fine-grained enough for lines that
         // last seconds; the clock itself is exact. Not at all while the notch is hidden.
+        // The style is read here, in the body: the timeline's closure runs later, where the environment is not this view's to read.
+        let karaoke: KaraokeStyle = surface.isLiquidGlass ? .stripOnGlass : .strip
         LyricTimeline(store: store) { date in
             // The note alone while the lyrics are gone and the new ones are not there yet (between two tracks).
             let strip = store.lyricStrip(at: date) ?? .waiting
             ZStack {
-                rows(strip, line: store.lyric(at: date))
+                rows(strip, line: store.lyric(at: date), karaoke: karaoke)
                     // A new pair of lines slides up into place while the old one leaves.
                     .id(strip)
                     .transition(.asymmetric(
@@ -84,10 +87,10 @@ struct NowPlayingLyricStrip: View {
         }
     }
 
-    private func rows(_ strip: LyricStrip, line: LyricLine?) -> some View {
+    private func rows(_ strip: LyricStrip, line: LyricLine?, karaoke: KaraokeStyle) -> some View {
         VStack(spacing: 2) {
             if store.karaokeIsActive, let line, strip.current != nil, line.words != nil {
-                KaraokeLine(line: line, store: store, style: .strip)
+                KaraokeLine(line: line, store: store, style: karaoke)
                     .frame(height: 16)
             } else {
                 Text(strip.current ?? LyricStrip.note)
@@ -111,6 +114,9 @@ struct NowPlayingLyricStrip: View {
 }
 
 extension KaraokeStyle {
-    /// The current line of the strip under the notch: the size and weight of its text row, the sung part lit.
-    static let strip = KaraokeStyle(fontSize: 12, weight: .semibold, lit: NSColor(NotchTokens.primaryText), dim: NSColor(NotchTokens.secondaryText))
+    /// The current line of the strip under the notch: the size and weight of its text row, the sung part lit. White, as the black
+    /// notch's text always was: a colour in a layer is made once, so it cannot be a token that follows the look.
+    static let strip = KaraokeStyle(fontSize: 12, weight: .semibold, lit: NSColor(Color.white), dim: NSColor(Color.white.opacity(0.6)))
+    /// The same strip on Liquid Glass: the system's label colours, which turn dark on light glass.
+    static let stripOnGlass = KaraokeStyle(fontSize: 12, weight: .semibold, lit: .labelColor, dim: .secondaryLabelColor)
 }

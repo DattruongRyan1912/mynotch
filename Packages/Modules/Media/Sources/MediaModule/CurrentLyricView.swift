@@ -19,10 +19,12 @@ struct CurrentLyricView: View {
     let store: NowPlayingStore
     /// Puts the floating lyrics panel up or takes it down.
     var togglePanel: () -> Void = {}
+    @Environment(\.notchSurface) private var surface
 
     var body: some View {
         let hasRow = store.lyricRow != .absent
-        content
+        // Read here, in the body, and handed down: the row's closures run later, where the environment is not this view's to read.
+        content(karaoke: surface.isLiquidGlass ? .rowOnGlass : .row)
             .padding(.horizontal, hasRow ? Self.toggleWidth : 0)
             .overlay(alignment: .trailing) {
                 if hasRow { PanelToggleButton(isShown: store.lyricsPanelShown, action: togglePanel) }
@@ -30,7 +32,7 @@ struct CurrentLyricView: View {
     }
 
     @ViewBuilder
-    private var content: some View {
+    private func content(karaoke: KaraokeStyle) -> some View {
         switch store.lyricRow {
         case .absent:
             EmptyView()
@@ -44,7 +46,7 @@ struct CurrentLyricView: View {
                 let text = line?.text ?? ""
                 Group {
                     if store.karaokeIsActive, let line, !text.isEmpty, line.words != nil {
-                        KaraokeLine(line: line, store: store, style: .row)
+                        KaraokeLine(line: line, store: store, style: karaoke)
                             .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height)
                     } else {
                         row(text)
@@ -72,10 +74,15 @@ struct CurrentLyricView: View {
 }
 
 extension KaraokeStyle {
-    /// The current line of the Media tab's row, which is a little smaller and dimmer than the strip's.
+    /// The current line of the Media tab's row, which is a little smaller and dimmer than the strip's. White, as the black notch's
+    /// text always was: a colour in a layer is made once, so it cannot be a token that follows the look.
     static let row = KaraokeStyle(
-        fontSize: 11, weight: .medium, lit: NSColor(NotchTokens.primaryText).withAlphaComponent(0.9),
-        dim: NSColor(NotchTokens.secondaryText).withAlphaComponent(0.7)
+        fontSize: 11, weight: .medium, lit: NSColor(Color.white).withAlphaComponent(0.9),
+        dim: NSColor(Color.white.opacity(0.6)).withAlphaComponent(0.7)
+    )
+    /// The same row on Liquid Glass: the system's label colours, which turn dark on light glass.
+    static let rowOnGlass = KaraokeStyle(
+        fontSize: 11, weight: .medium, lit: .dynamic(.labelColor, alpha: 0.9), dim: .dynamic(.secondaryLabelColor, alpha: 0.7)
     )
 }
 

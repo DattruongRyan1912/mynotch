@@ -22,6 +22,18 @@ struct KaraokeStyle: Equatable {
     }
 }
 
+extension NSColor {
+    /// A system colour at `alpha` that is still dynamic: `withAlphaComponent` on one gives a fixed colour, in the appearance the
+    /// app has when it is called, which would not follow glass that is light.
+    static func dynamic(_ base: NSColor, alpha: CGFloat) -> NSColor {
+        NSColor(name: nil) { appearance in
+            var resolved = base
+            appearance.performAsCurrentDrawingAppearance { resolved = base.withAlphaComponent(alpha) }
+            return resolved
+        }
+    }
+}
+
 /// A line of lyrics whose sung part fills word by word: the dim text with the same text lit on top of it, and the lit one
 /// masked up to where the line is sung. Placed in the SwiftUI views of the notch or the panel.
 ///
@@ -136,6 +148,13 @@ final class KaraokeLineView: NSView {
         refresh()
     }
 
+    /// The text is made again, so its colours are resolved again: a dynamic colour does not change by itself once it is a layer's.
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        shown = nil
+        refresh()
+    }
+
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         let scale = window?.backingScaleFactor ?? 2
@@ -195,7 +214,8 @@ final class KaraokeLineView: NSView {
             text.string = line.text
             text.font = font
             text.fontSize = size
-            text.foregroundColor = color.cgColor
+            // A system colour (the label colours on Liquid Glass) is dynamic: it becomes this colour in the appearance the view is in.
+            effectiveAppearance.performAsCurrentDrawingAppearance { text.foregroundColor = color.cgColor }
             text.frame = frame
         }
 

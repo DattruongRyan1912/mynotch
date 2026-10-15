@@ -3,8 +3,9 @@ import NotchUI
 import SwiftUI
 
 extension KaraokeStyle {
-    /// The current line on the lock screen: a little larger than the strip's, the sung part lit and the rest dimmed.
-    static let lockScreen = KaraokeStyle(fontSize: LockScreenLyricsView.currentSize, weight: .semibold, lit: NSColor(NotchTokens.primaryText), dim: NSColor(NotchTokens.secondaryText))
+    /// The current line on the lock screen: a little larger than the strip's, the sung part lit and the rest dimmed. White whatever the
+    /// notch's look is: the lock screen's card is black.
+    static let lockScreen = KaraokeStyle(fontSize: LockScreenLyricsView.currentSize, weight: .semibold, lit: NSColor(Color.white), dim: NSColor(Color.white.opacity(0.6)))
 }
 
 /// Under the track on the lock screen: the line being sung (filled word by word when its words are timed, else lit whole) and the

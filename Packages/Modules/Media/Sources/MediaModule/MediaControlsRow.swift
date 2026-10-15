@@ -121,7 +121,7 @@ struct RowButton: View {
                 .foregroundStyle(isActive ? accent : NotchTokens.primaryText)
                 .contentTransition(.symbolEffect(.replace))
                 .frame(width: MediaControlsRow.buttonSize, height: MediaControlsRow.buttonSize)
-                .background(Circle().fill(Color.white.opacity(isHovering ? 0.14 : 0)))
+                .background(Circle().fill(NotchTokens.fill(isHovering ? 0.14 : 0)))
                 .contentShape(Circle())
         }
         .buttonStyle(PressableButtonStyle())
@@ -173,7 +173,7 @@ private struct VolumeRow: View {
             let width = geometry.size.width
             let filled = width * CGFloat(volume.level ?? 0)
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.18))
+                Capsule().fill(NotchTokens.fill(0.18))
                 Capsule().fill(accent).frame(width: filled)
                 Circle()
                     .fill(NotchTokens.primaryText)
