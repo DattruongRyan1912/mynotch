@@ -129,4 +129,15 @@ import MyNotchTestSupport
         environment.lockScreenControlsEnabled = false
         #expect(!environment.lockScreenControlsEnabled)
     }
+
+    @Test func theLockScreenLetsLyricsBeShownUnlessTheUserTurnedThemOffAndThatIsNotTheControlsSwitch() {
+        #expect(EnvironmentValues().lockScreenLyricsEnabled)
+        var environment = EnvironmentValues()
+        environment.lockScreenLyricsEnabled = false
+        #expect(!environment.lockScreenLyricsEnabled)
+        #expect(environment.lockScreenControlsEnabled, "each has its own switch")
+        environment.lockScreenControlsEnabled = false
+        environment.lockScreenLyricsEnabled = true
+        #expect(environment.lockScreenLyricsEnabled)
+    }
 }

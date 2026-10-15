@@ -23,7 +23,9 @@ final class LockScreenHostingView: NSHostingView<AnyView> {
 /// It follows the user's hide-from-recording setting like the notch's own panels, as a widget under the collapsed
 /// notch: "when collapsed" and "always" keep it out of recordings and shared screens, "never" leaves it in.
 final class LockScreenPanel: NSPanel, LockScreenWindow {
-    static let size = CGSize(width: 340, height: 80)
+    /// Tall enough for the card with its lyric lines: the cover row (40), two lyric rows (about 34), the progress bar (3) and the
+    /// gaps (12) make about 89, and the card pads 8 above and below. A card without lyrics is shorter and the rest is clear.
+    static let size = CGSize(width: 340, height: 112)
     /// Space between the notch and the panel.
     static let gap: CGFloat = 8
 

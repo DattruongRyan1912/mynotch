@@ -12,12 +12,16 @@ struct LockScreenKeys {
     /// The media view draws its buttons, and the panel takes clicks for them. Off, the track and its progress are shown and
     /// nothing can be pressed.
     let showMediaControls: SettingKey<Bool>
+    /// The media view shows the line being sung and the next one under the track. Apart from the controls: a view can have
+    /// either, both or neither.
+    let showLyrics: SettingKey<Bool>
 
     init(_ settings: ModuleSettings) {
         showMedia = settings.key("showMedia", default: true)
         showTimer = settings.key("showTimer", default: true)
         showBattery = settings.key("showBattery", default: false)
         showMediaControls = settings.key("showMediaControls", default: true)
+        showLyrics = settings.key("showLyrics", default: true)
     }
 
     /// Whether the user wants `module`'s view on the lock screen. A module with no switch here is never shown.
@@ -57,6 +61,8 @@ public final class LockScreenModule: FeatureModule {
     private var observer: LockStateObserver?
     private var window: (any LockScreenWindow)?
     private var pendingHide: ScheduledAction?
+    /// Whether the lock screen can be seen right now, set before anything is shown or hidden so that the views stop at once.
+    private let presence = LockScreenPresence()
     /// Keeps the panel's click-through state in step with what is shown and the controls setting, while the panel is up.
     private var clickWatch: Task<Void, Never>?
 
@@ -102,6 +108,7 @@ public final class LockScreenModule: FeatureModule {
         pendingHide = nil
         observer?.stop()
         observer = nil
+        presence.set(false)
         hide()
         context = nil
     }
@@ -115,6 +122,8 @@ public final class LockScreenModule: FeatureModule {
     private func stateChanged(_ state: LockStateObserver.State) {
         pendingHide?.cancel()
         pendingHide = nil
+        // At once, not after the hide delay: a display that sleeps must stop the lyric lines' timeline and sweep now.
+        presence.set(state.isLockScreenVisible)
         if state.isLockScreenVisible {
             show()
         } else if window != nil {
@@ -130,7 +139,8 @@ public final class LockScreenModule: FeatureModule {
         let keys = LockScreenKeys(settings)
         let isAllowed: (ModuleID) -> Bool = { keys.allows($0, in: settings) }
         let root = LockScreenRootView(
-            lockScreen: context.lockScreen, isAllowed: isAllowed, controlsEnabled: { settings.value(keys.showMediaControls) }
+            lockScreen: context.lockScreen, isAllowed: isAllowed, presence: presence,
+            controlsEnabled: { settings.value(keys.showMediaControls) }, lyricsEnabled: { settings.value(keys.showLyrics) }
         )
         guard context.lockScreen.current(allowing: isAllowed) != nil, let window = makeWindow(AnyView(root)) else { return }
         self.window = window

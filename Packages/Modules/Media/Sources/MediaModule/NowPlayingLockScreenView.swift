@@ -46,8 +46,9 @@ struct LockScreenTransport {
     func skipForward() { actions.press(.next) }
 }
 
-/// Lock screen widget: cover, title, artist and a thin progress bar, and, while the lock screen allows controls, the previous,
-/// play/pause and next buttons. It reads the store, so it is offered once and follows the track.
+/// Lock screen widget: cover, title, artist and a thin progress bar; while the lock screen allows them, the previous, play/pause and
+/// next buttons and, under the track, the lyric line being sung and the next one. It reads the store, so it is offered once and
+/// follows the track.
 struct NowPlayingLockScreenView: View {
     static let artworkSize: CGFloat = 40
     static let progressHeight: CGFloat = 3
@@ -55,6 +56,8 @@ struct NowPlayingLockScreenView: View {
     let transport: LockScreenTransport
     /// The lock screen module's "Điều khiển nhạc trên màn hình khoá". Off, nothing here can be pressed.
     @Environment(\.lockScreenControlsEnabled) private var controlsEnabled
+    /// The lock screen module's "Hiện lời bài hát trên màn hình khoá", apart from the controls. Off, no lyric row is made at all.
+    @Environment(\.lockScreenLyricsEnabled) private var lyricsEnabled
 
     private var store: NowPlayingStore { transport.store }
 
@@ -88,6 +91,9 @@ struct NowPlayingLockScreenView: View {
                         }
                     }
                 }
+            }
+            if lyricsEnabled, store.syncedLyrics?.isEmpty == false {
+                LockScreenLyricsView(store: store)
             }
             LockScreenProgress(store: store)
         }

@@ -91,4 +91,9 @@ extension EnvironmentValues {
     /// Whether the lock screen lets a view's controls show. The lock screen module sets it from its own setting, so a module
     /// that offers a view with buttons (Media) can draw it read-only without knowing the module. True anywhere else.
     @Entry public var lockScreenControlsEnabled: Bool = true
+
+    /// Whether the lock screen lets a view show lyrics ("Hiện lời bài hát trên màn hình khoá"), a switch apart from the controls.
+    /// The lock screen module sets it from its own setting, so Media can leave the lines out without knowing the module. True
+    /// anywhere else.
+    @Entry public var lockScreenLyricsEnabled: Bool = true
 }
