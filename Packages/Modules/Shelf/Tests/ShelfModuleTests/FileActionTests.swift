@@ -37,6 +37,11 @@ import UniformTypeIdentifiers
         #expect(ShelfActionGroup.pdf.action(preferred: .pdfToImages, droppingPDFsOnly: false) == .imagesToPDF)
     }
 
+    @Test func theButtonsTakeFilesAndNotNotesOrLinks() {
+        #expect(ShelfActionChip.dropTypes == [.fileURL, .image])
+        #expect(!ShelfActionChip.dropTypes.contains(.plainText) && !ShelfActionChip.dropTypes.contains(.url))
+    }
+
     @Test func onlyZipAndPDFMergeTakeTheirSourcesTogether() {
         #expect(FileAction.zip.combinesSources && FileAction.imagesToPDF.combinesSources)
         #expect(![FileAction.cutOut, .readText, .pdfToImages, .convert(.png), .resize(.half), .compressImage(.jpeg)].contains { $0.combinesSources })
@@ -69,6 +74,7 @@ import UniformTypeIdentifiers
         #expect(Progress(action: .cutOut, done: 0, total: 1, current: "a.png").detail == "a.png")
         #expect(Progress(action: .zip, done: 0, total: nil, current: "a.txt").detail == "a.txt")
         #expect(Progress(action: .zip, done: 0, total: nil, current: nil).detail == "")
+        #expect(Progress(action: .zip, done: 0, total: nil, current: "a.txt", isCancelling: true).detail == "Đang huỷ…")
     }
 
     // MARK: The report's summary
@@ -85,5 +91,16 @@ import UniformTypeIdentifiers
         #expect(Report(action: .readText, text: "chữ", textCopied: false).summary == "Đọc được chữ, nhưng không chép được")
         #expect(Report(action: .cutOut, wasCancelled: true).summary == "Đã huỷ")
         #expect(Report(action: .cutOut, created: [url], wasCancelled: true).summary == "Đã huỷ, đã tạo 1 file")
+    }
+
+    @Test func aReportSaysWhenResultsStayedOffAFullShelfAndWhere() {
+        typealias Report = FileActionRunner.Report
+        let folder = URL(filePath: "/tmp/Ảnh", directoryHint: .isDirectory)
+        let made = (1...3).map { folder.appending(path: "a\($0).png") }
+        var report = Report(action: .resize(.half), created: made, notShelved: Array(made.dropFirst()))
+        #expect(report.summary == "Đã tạo 3 file · 2 file chưa vào khay")
+        #expect(report.shelfNote == "Khay đầy: 2 file nằm trong thư mục Ảnh")
+        report.notShelved = []
+        #expect(report.shelfNote == nil && report.summary == "Đã tạo 3 file")
     }
 }

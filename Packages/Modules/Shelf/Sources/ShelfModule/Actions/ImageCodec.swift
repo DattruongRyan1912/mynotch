@@ -78,7 +78,18 @@ nonisolated enum ImageCodec {
             kCGImagePropertyPixelWidth, kCGImagePropertyPixelHeight, kCGImagePropertyDepth, kCGImagePropertyColorModel,
             kCGImagePropertyProfileName, kCGImagePropertyHasAlpha,
         ] { result[key] = nil }
-        if stripLocation { result[kCGImagePropertyGPSDictionary] = nil }
+        if stripLocation {
+            result[kCGImagePropertyGPSDictionary] = nil
+            // Place names written as text are location too.
+            if var iptc = result[kCGImagePropertyIPTCDictionary] as? [CFString: Any] {
+                for key in [
+                    kCGImagePropertyIPTCSubLocation, kCGImagePropertyIPTCCity, kCGImagePropertyIPTCProvinceState,
+                    kCGImagePropertyIPTCCountryPrimaryLocationName, kCGImagePropertyIPTCCountryPrimaryLocationCode,
+                    kCGImagePropertyIPTCContentLocationName, kCGImagePropertyIPTCContentLocationCode,
+                ] { iptc[key] = nil }
+                result[kCGImagePropertyIPTCDictionary] = iptc
+            }
+        }
         result[kCGImagePropertyOrientation] = 1
         if var tiff = result[kCGImagePropertyTIFFDictionary] as? [CFString: Any], tiff[kCGImagePropertyTIFFOrientation] != nil {
             tiff[kCGImagePropertyTIFFOrientation] = 1

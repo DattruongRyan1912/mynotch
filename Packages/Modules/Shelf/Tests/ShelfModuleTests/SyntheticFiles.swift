@@ -96,6 +96,42 @@ enum SyntheticFiles {
         return url
     }
 
+    /// One entry of a zip file as its central directory and local header describe it.
+    struct ZipRecord {
+        let name: String
+        /// The Unix mode in the high half of the external attributes; 0 when the archive gives none.
+        let mode: Int
+        /// The stored bytes of an entry that is not compressed (a link's target is stored this way).
+        let stored: Data?
+
+        var isLink: Bool { mode & 0o170000 == 0o120000 }
+    }
+
+    static func zipRecords(_ url: URL) throws -> [ZipRecord] {
+        let data = try Data(contentsOf: url)
+        func u16(_ offset: Int) -> Int { Int(data[offset]) | Int(data[offset + 1]) << 8 }
+        func u32(_ offset: Int) -> Int { u16(offset) | u16(offset + 2) << 16 }
+        var end = data.count - 22
+        while end >= 0, u32(end) != 0x0605_4b50 { end -= 1 }
+        try #require(end >= 0, "not a zip file")
+        var offset = u32(end + 16)
+        var records: [ZipRecord] = []
+        for _ in 0..<u16(end + 10) {
+            let method = u16(offset + 10), size = u32(offset + 20)
+            let nameLength = u16(offset + 28), extraLength = u16(offset + 30), commentLength = u16(offset + 32)
+            let local = u32(offset + 42)
+            let name = String(decoding: data[(offset + 46)..<(offset + 46 + nameLength)], as: UTF8.self)
+            var stored: Data?
+            if method == 0 {
+                let start = local + 30 + u16(local + 26) + u16(local + 28)
+                stored = data[start..<(start + size)]
+            }
+            records.append(ZipRecord(name: name, mode: u32(offset + 38) >> 16, stored: stored))
+            offset += 46 + nameLength + extraLength + commentLength
+        }
+        return records
+    }
+
     /// The names of the entries of a zip file, read from its central directory.
     static func zipEntries(_ url: URL) throws -> [String] {
         let data = try Data(contentsOf: url)

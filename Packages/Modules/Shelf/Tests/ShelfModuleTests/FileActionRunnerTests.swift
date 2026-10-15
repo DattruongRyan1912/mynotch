@@ -156,7 +156,7 @@ actor Gate {
             await gate.pass()
             return "chữ"
         })
-        runner.start(.readText, sources: urls.map(source), processor: processor, pasteboard: pasteboard, deliver: { _ in })
+        runner.start(.readText, sources: urls.map(source), processor: processor, pasteboard: pasteboard, deliver: { _ in [] })
         #expect(runner.isRunning)
         await gate.waitForArrivals(1)
         #expect(runner.phase == .running(.init(action: .readText, done: 0, total: 3, current: "ảnh-1.png")))
@@ -173,7 +173,7 @@ actor Gate {
     @Test func aCombinedActionHasNoCountToShow() async throws {
         let folder = try makeTempDirectory()
         let a = try makeTempFile(named: "a.txt", in: folder)
-        runner.start(.zip, sources: [source(a)], processor: FileActionProcessor(), pasteboard: pasteboard, deliver: { _ in })
+        runner.start(.zip, sources: [source(a)], processor: FileActionProcessor(), pasteboard: pasteboard, deliver: { _ in [] })
         #expect(runner.phase == .running(.init(action: .zip, done: 0, total: nil, current: "a.txt")))
         await runner.currentRun?.value
         #expect(report?.created.count == 1)
@@ -215,7 +215,7 @@ actor Gate {
         let delivered = Delivered()
         runner.start(.readText, sources: urls.map(source), processor: FileActionProcessor(recognizer: recognizer), pasteboard: pasteboard, deliver: delivered.receive)
         // The first file is being read when the user cancels.
-        while recognizer.requests.isEmpty { await Task.yield() }
+        await eventually { !recognizer.requests.isEmpty }
         runner.cancel()
         await runner.currentRun?.value
         let report = try #require(report)
@@ -227,7 +227,7 @@ actor Gate {
     @Test func cancellingAZipWritesNoZip() async throws {
         let folder = try makeTempDirectory()
         let a = try makeTempFile(named: "a.txt", in: folder)
-        runner.start(.zip, sources: [source(a)], processor: FileActionProcessor(), pasteboard: pasteboard, deliver: { _ in })
+        runner.start(.zip, sources: [source(a)], processor: FileActionProcessor(), pasteboard: pasteboard, deliver: { _ in [] })
         runner.cancel()
         await runner.currentRun?.value
         let names = try FileManager.default.contentsOfDirectory(atPath: folder.path)
@@ -245,8 +245,8 @@ actor Gate {
             await gate.pass()
             return "chữ"
         })
-        runner.start(.readText, sources: urls.map(source), processor: processor, pasteboard: pasteboard, deliver: { _ in })
-        runner.start(.resize(.side800), sources: urls.map(source), processor: processor, pasteboard: pasteboard, deliver: { _ in })
+        runner.start(.readText, sources: urls.map(source), processor: processor, pasteboard: pasteboard, deliver: { _ in [] })
+        runner.start(.resize(.side800), sources: urls.map(source), processor: processor, pasteboard: pasteboard, deliver: { _ in [] })
         await gate.waitForArrivals(1)
         runner.dismiss()
         #expect(runner.isRunning)
@@ -256,6 +256,59 @@ actor Gate {
         #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path) == ["ảnh-1.png"])
     }
 
+    @Test func filesThatDidNotFitOnTheShelfAreReportedWithTheirFolder() async throws {
+        let folder = try makeTempDirectory()
+        let urls = try images(3, in: folder)
+        await run(.resize(.side800), urls.map(source), delivered: Delivered(room: 1))
+        let report = try #require(report)
+        #expect(report.created.count == 3)
+        #expect(report.notShelved.map(\.lastPathComponent) == ["ảnh-2-800.png", "ảnh-3-800.png"])
+    }
+
+    @Test func cancellingShowsThatTheRunIsStoppingUntilItHas() async throws {
+        let folder = try makeTempDirectory()
+        let urls = try images(2, in: folder)
+        let gate = Gate()
+        let processor = FileActionProcessor(recognizer: FakeRecognizer { _ in
+            await gate.pass()
+            return "chữ"
+        })
+        runner.start(.readText, sources: urls.map(source), processor: processor, pasteboard: pasteboard, deliver: { _ in [] })
+        await gate.waitForArrivals(1)
+        runner.cancel()
+        let running = try #require({ () -> FileActionRunner.Progress? in
+            if case .running(let progress) = runner.phase { progress } else { nil }
+        }())
+        #expect(running.isCancelling && running.detail == "Đang huỷ…")
+        await gate.release()
+        await runner.currentRun?.value
+        #expect(report?.wasCancelled == true)
+    }
+
+    @Test func progressInsideASourceCountsTowardsTheBarAndNeverGoesBack() async throws {
+        let folder = try makeTempDirectory()
+        let urls = try images(1, in: folder)
+        let gate = Gate()
+        let processor = FileActionProcessor(recognizer: FakeRecognizer { _ in
+            await gate.pass()
+            return "chữ"
+        })
+        runner.start(.readText, sources: urls.map(source), processor: processor, pasteboard: pasteboard, deliver: { _ in [] })
+        await gate.waitForArrivals(1)
+        let token = runner.generation
+        func fraction() -> Double? {
+            if case .running(let progress) = runner.phase { progress.fraction } else { nil }
+        }
+        runner.noteFraction(0.4, run: token, source: 0)
+        #expect(fraction() == 0.4)
+        runner.noteFraction(0.2, run: token, source: 0)
+        runner.noteFraction(0.9, run: token, source: 1)
+        runner.noteFraction(0.9, run: token - 1, source: 0)
+        #expect(fraction() == 0.4)
+        await gate.release()
+        await runner.currentRun?.value
+    }
+
     @Test func resetStopsTheRunAndItsLateEndLeavesNoReportBehind() async throws {
         let folder = try makeTempDirectory()
         let urls = try images(2, in: folder)
@@ -263,8 +316,8 @@ actor Gate {
             try await Task.sleep(for: .seconds(60))
             return "chữ"
         }
-        runner.start(.readText, sources: urls.map(source), processor: FileActionProcessor(recognizer: recognizer), pasteboard: pasteboard, deliver: { _ in })
-        while recognizer.requests.isEmpty { await Task.yield() }
+        runner.start(.readText, sources: urls.map(source), processor: FileActionProcessor(recognizer: recognizer), pasteboard: pasteboard, deliver: { _ in [] })
+        await eventually { !recognizer.requests.isEmpty }
         let stopped = try #require(runner.currentRun)
         runner.reset()
         #expect(runner.phase == .idle)
@@ -280,11 +333,11 @@ actor Gate {
             try await Task.sleep(for: .seconds(60))
             return "cũ"
         }
-        runner.start(.readText, sources: urls.map(source), processor: FileActionProcessor(recognizer: old), pasteboard: pasteboard, deliver: { _ in })
-        while old.requests.isEmpty { await Task.yield() }
+        runner.start(.readText, sources: urls.map(source), processor: FileActionProcessor(recognizer: old), pasteboard: pasteboard, deliver: { _ in [] })
+        await eventually { !old.requests.isEmpty }
         let stopped = try #require(runner.currentRun)
         runner.reset()
-        runner.start(.readText, sources: urls.map(source), processor: FileActionProcessor(recognizer: FakeRecognizer { _ in "mới" }), pasteboard: pasteboard, deliver: { _ in })
+        runner.start(.readText, sources: urls.map(source), processor: FileActionProcessor(recognizer: FakeRecognizer { _ in "mới" }), pasteboard: pasteboard, deliver: { _ in [] })
         await stopped.value
         await runner.currentRun?.value
         #expect(report?.text == "mới")
@@ -300,10 +353,28 @@ actor Gate {
     }
 }
 
-/// What a run delivered to the shelf, one batch per call.
+/// What a run delivered to the shelf, one batch per call. `room` is how many files the shelf still takes; the
+/// ones past it come back as not shelved.
 final class Delivered {
     private(set) var batches: [[URL]] = []
-    func receive(_ urls: [URL]) { batches.append(urls) }
+    var room: Int
+
+    init(room: Int = .max) { self.room = room }
+
+    func receive(_ urls: [URL]) async -> [URL] {
+        batches.append(urls)
+        let taken = min(room, urls.count)
+        room -= taken
+        return Array(urls.dropFirst(taken))
+    }
+
+    /// The progress values a processor reported, from any thread.
+    nonisolated final class Fractions: @unchecked Sendable {
+        private let lock = NSLock()
+        private var seen: [Double] = []
+        func add(_ value: Double) { lock.withLock { seen.append(value) } }
+        var values: [Double] { lock.withLock { seen } }
+    }
 
     /// Hands out strings in turn.
     nonisolated final class Words: @unchecked Sendable {
@@ -311,5 +382,19 @@ final class Delivered {
         private var remaining: [String]
         init(_ words: [String]) { remaining = words }
         func next() -> String { lock.withLock { remaining.isEmpty ? "" : remaining.removeFirst() } }
+    }
+}
+
+
+/// Waits until `condition` holds and records a failure after ten seconds, so a fake that is never called fails the
+/// test instead of hanging it.
+func eventually(_ condition: () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async {
+    let deadline = ContinuousClock.now + .seconds(10)
+    while !condition() {
+        guard ContinuousClock.now < deadline else {
+            Issue.record("Timed out waiting", sourceLocation: sourceLocation)
+            return
+        }
+        await Task.yield()
     }
 }

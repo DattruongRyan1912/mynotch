@@ -39,7 +39,7 @@ extension ShelfModule {
             folders: OutputFolders(promisedDirectory: store.promisedDirectory)
         )
         state.actions.start(action, sources: sources, processor: processor, pasteboard: pasteboard) { [weak self, weak store] urls in
-            self?.shelve(urls, in: store)
+            await self?.shelve(urls, in: store) ?? urls
         }
     }
 
@@ -75,16 +75,30 @@ extension ShelfModule {
         return pasteboard.write(text)
     }
 
-    /// Results go to the front of the shelf, the first of them first, as a drop does. A run that outlived its shelf
-    /// (the module stopped, or stopped and started again) adds nothing to the new one.
-    private func shelve(_ urls: [URL], in store: ShelfStore?) {
-        guard let store, state.store === store, let keys, let context else { return }
-        for url in urls.reversed() {
-            do {
-                store.add(try .file(at: url), limit: context.settings.value(keys.maxItems))
-            } catch {
-                context.logger.error("A result could not be added to the shelf: \(error.localizedDescription)")
-            }
-        }
+    /// Gives the files a card each, the first of them first as a drop does, and returns the ones it did not take.
+    ///
+    /// Results never push other cards off: the shelf drops its oldest cards past its limit, and those can be the
+    /// only copy of a text or a promised file (which is deleted with its card). So only as many results are shelved
+    /// as there are free places; the rest are on disk next to their sources, and the report says where. The
+    /// bookmarks are made off the main actor and the shelf is written once for the whole batch. A run that outlived
+    /// its shelf (the module stopped, or stopped and started again) adds nothing to the new one.
+    private func shelve(_ urls: [URL], in store: ShelfStore?) async -> [URL] {
+        guard let store, state.store === store, let keys, let context else { return urls }
+        let limit = context.settings.value(keys.maxItems)
+        let wanted = Array(urls.prefix(max(0, limit - store.items.count)))
+        let cards = await Self.cards(for: wanted)
+        // The shelf may have changed while the bookmarks were made; check the room again.
+        guard state.store === store else { return urls }
+        let room = max(0, limit - store.items.count)
+        let shelved = Array(cards.prefix(room))
+        if !shelved.isEmpty { store.add(contentsOf: shelved.map(\.kind).reversed(), limit: limit) }
+        let taken = Set(shelved.map(\.url))
+        return urls.filter { !taken.contains($0) }
+    }
+
+    /// The card each file gets; a file whose bookmark cannot be made gets none.
+    @concurrent
+    private static func cards(for urls: [URL]) async -> [(url: URL, kind: ShelfItem.Kind)] {
+        urls.compactMap { url in (try? ShelfItem.Kind.file(at: url)).map { (url, $0) } }
     }
 }

@@ -28,6 +28,7 @@ struct ShelfTabView: View {
                         .buttonStyle(.plain)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
+                        .disabled(state.actions.isRunning)
                 }
                 if isIdle {
                     ScrollView(.horizontal) {

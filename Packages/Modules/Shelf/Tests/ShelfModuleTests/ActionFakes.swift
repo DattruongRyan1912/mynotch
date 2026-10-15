@@ -46,3 +46,37 @@ nonisolated final class FakeCutter: ForegroundCutting {
         return context.makeImage()!
     }
 }
+
+/// Makes decoded images whose memory is counted, to see how many are alive at once. Each image is backed by a
+/// buffer that tells the counter when it is freed.
+nonisolated final class ImageCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current = 0
+    private var highest = 0
+    private var total = 0
+
+    var live: Int { lock.withLock { current } }
+    var peak: Int { lock.withLock { highest } }
+    var made: Int { lock.withLock { total } }
+
+    func makeImage(width: Int, height: Int) -> CGImage {
+        lock.withLock {
+            current += 1
+            total += 1
+            highest = max(highest, current)
+        }
+        let size = width * height * 4
+        let buffer = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: 16)
+        buffer.initializeMemory(as: UInt8.self, repeating: 200, count: size)
+        let provider = CGDataProvider(dataInfo: Unmanaged.passRetained(self).toOpaque(), data: buffer, size: size) { info, data, _ in
+            data.deallocate()
+            let counter = Unmanaged<ImageCounter>.fromOpaque(info!).takeRetainedValue()
+            counter.lock.withLock { counter.current -= 1 }
+        }!
+        return CGImage(
+            width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
+        )!
+    }
+}

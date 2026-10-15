@@ -220,6 +220,112 @@ import UniformTypeIdentifiers
         #expect(fixture.items.count == 1)
     }
 
+    // MARK: A full shelf
+
+    /// Text cards, then `count` image files at the back, on a shelf whose limit is 10; returns the text cards and the files.
+    func fullShelf(texts: Int, files count: Int, in fixture: ShelfFixture) async throws -> (texts: [ShelfItem], files: [ShelfItem]) {
+        fixture.settings.set(10, for: fixture.keys.maxItems)
+        let folder = try makeTempDirectory()
+        _ = await fixture.module.add(providers: (1...texts).reversed().map { NSItemProvider(object: "ghi chú \($0)" as NSString) })
+        let urls = try (1...count).map { try png("ảnh-\($0).png", in: folder) }
+        _ = await shelve(urls, in: fixture)
+        let texts = fixture.items.filter { if case .text = $0.kind { true } else { false } }
+        let files = fixture.items.filter { if case .file = $0.kind { true } else { false } }
+        return (texts, files)
+    }
+
+    @Test func resultsNeverPushOtherCardsOffAFullShelf() async throws {
+        let fixture = await started()
+        let (texts, files) = try await fullShelf(texts: 7, files: 3, in: fixture)
+        #expect(fixture.items.count == 10)
+        fixture.module.runAction(.resize(.side800), on: files)
+        await finish(fixture)
+        let report = try #require(finished(fixture))
+        // The three results are on disk next to their sources, and the shelf is as it was.
+        #expect(report.created.count == 3 && report.created.allSatisfy(exists))
+        #expect(Set(fixture.items.map(\.id)) == Set(texts.map(\.id) + files.map(\.id)))
+        #expect(report.notShelved == report.created)
+    }
+
+    @Test func resultsTakeTheFreePlacesAndTheRestStayOnDisk() async throws {
+        let fixture = await started()
+        let folder = try makeTempDirectory()
+        fixture.settings.set(10, for: fixture.keys.maxItems)
+        _ = await fixture.module.add(providers: (1...6).reversed().map { NSItemProvider(object: "ghi chú \($0)" as NSString) })
+        let pdf = try SyntheticFiles.pdf(pages: 5, size: CGSize(width: 40, height: 40), named: "d.pdf", in: folder)
+        let items = await shelve([pdf], in: fixture)
+        let others = fixture.items.filter { $0.id != items[0].id }
+        // 7 cards on a shelf of 10: room for three of the five pages.
+        fixture.module.runAction(.pdfToImages, on: [items[0]])
+        await finish(fixture)
+        let report = try #require(finished(fixture))
+        #expect(report.created.map(\.lastPathComponent) == (1...5).map { "d-trang-\($0).png" })
+        #expect(fileNames(fixture).prefix(3) == ["d-trang-1.png", "d-trang-2.png", "d-trang-3.png"])
+        #expect(fixture.items.count == 10)
+        #expect(report.notShelved.map(\.lastPathComponent) == ["d-trang-4.png", "d-trang-5.png"])
+        #expect(Set(others.map(\.id)).isSubset(of: Set(fixture.items.map(\.id))))
+        #expect(report.shelfNote == "Khay đầy: 2 file nằm trong thư mục \(folder.lastPathComponent)")
+    }
+
+    @Test func aPromisedCopyIsNeverEvictedByResults() async throws {
+        let fixture = await started()
+        fixture.settings.set(10, for: fixture.keys.maxItems)
+        let data = NSMutableData()
+        let destination = try #require(CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, SyntheticFiles.image(width: 2000, height: 1000), nil)
+        #expect(CGImageDestinationFinalize(destination))
+        let bytes = data as Data
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(forTypeIdentifier: UTType.png.identifier, visibility: .all) { completion in
+            completion(bytes, nil)
+            return nil
+        }
+        // The promised copy is the oldest card on a shelf that is then full.
+        _ = await fixture.module.add(providers: [provider])
+        _ = await fixture.module.add(providers: (1...9).map { NSItemProvider(object: "ghi chú \($0)" as NSString) })
+        let promised = try #require(fixture.items.last)
+        let copy = try #require(fixture.module.state.store?.url(of: promised))
+        #expect(fixture.items.count == 10)
+
+        fixture.module.runAction(.resize(.side800), on: [promised])
+        await finish(fixture)
+        #expect(fixture.items.contains(promised) && exists(copy))
+        #expect(finished(fixture)?.created.count == 1)
+        #expect(fixture.items.count == 10)
+    }
+
+    @Test func manyResultsAreSavedToTheShelfInOneWrite() async throws {
+        let fixture = await started()
+        let folder = try makeTempDirectory()
+        let pdf = try SyntheticFiles.pdf(pages: 12, size: CGSize(width: 20, height: 20), named: "d.pdf", in: folder)
+        let items = await shelve([pdf], in: fixture)
+        let store = try #require(fixture.module.state.store)
+        let before = store.saveCount
+        fixture.module.runAction(.pdfToImages, on: items)
+        await finish(fixture)
+        #expect(store.items.count == 13)
+        #expect(store.saveCount - before == 1)
+    }
+
+    @Test func theShelfCannotBeEmptiedWhileAnActionRuns() async throws {
+        let gate = Gate()
+        let fixture = await started(ShelfFixture(recognizer: FakeRecognizer { _ in
+            await gate.pass()
+            return "chữ"
+        }))
+        let items = await shelve([try png("a.png", 200, 100, in: try makeTempDirectory())], in: fixture)
+        fixture.module.runAction(.readText, on: items)
+        await gate.waitForArrivals(1)
+        fixture.module.removeAll()
+        fixture.module.remove(items[0])
+        #expect(fixture.items == items)
+        await gate.release()
+        await finish(fixture)
+        fixture.module.dismissActionReport()
+        fixture.module.removeAll()
+        #expect(fixture.items.isEmpty)
+    }
+
     // MARK: Dropping on the row
 
     @Test func aFileDroppedOnAGroupJoinsTheShelfAndRunsTheChoiceUsedLast() async throws {

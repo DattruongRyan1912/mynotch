@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The "Hành động" row under the cards: one button for each kind of action. The buttons work on the picked cards,
 /// and a file dropped on one runs it at once.
@@ -27,6 +28,9 @@ struct ShelfActionChip: View {
     /// Whether any card is picked. A drop works either way.
     let isEnabled: Bool
 
+    /// Only files: a note or a link dropped here would join the shelf and then run nothing.
+    static let dropTypes: [UTType] = [.fileURL, .image]
+
     @State private var isTargeted = false
 
     var body: some View {
@@ -36,7 +40,7 @@ struct ShelfActionChip: View {
             .disabled(!isEnabled)
             // Outside the disabled control: a file can be dropped on the button when nothing is picked.
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: 2).opacity(isTargeted ? 1 : 0))
-            .onDrop(of: ShelfModule.dropTypes, isTargeted: $isTargeted) { module.runAction(on: group, dropping: $0) }
+            .onDrop(of: Self.dropTypes, isTargeted: $isTargeted) { module.runAction(on: group, dropping: $0) }
             .help(isEnabled ? group.title : "Chọn file trên khay, hoặc thả file vào nút này")
     }
 
@@ -82,7 +86,7 @@ struct ShelfActionStatusView: View {
     private func running(_ progress: FileActionRunner.Progress) -> some View {
         HStack(spacing: 10) {
             if let total = progress.total {
-                ProgressView(value: Double(progress.done), total: Double(total)).frame(width: 110)
+                ProgressView(value: min(Double(progress.done) + progress.fraction, Double(total)), total: Double(total)).frame(width: 110)
             } else {
                 ProgressView().controlSize(.small)
             }
@@ -91,7 +95,7 @@ struct ShelfActionStatusView: View {
                 Text(progress.detail).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
-            Button("Huỷ", action: module.cancelAction).controlSize(.small)
+            Button("Huỷ", action: module.cancelAction).controlSize(.small).disabled(progress.isCancelling)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -116,6 +120,9 @@ struct ShelfActionReportView: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
+                    if let note = report.shelfNote {
+                        Text(note).font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
                     if let text = report.text {
                         Text(text)
                             .font(.system(size: 11))

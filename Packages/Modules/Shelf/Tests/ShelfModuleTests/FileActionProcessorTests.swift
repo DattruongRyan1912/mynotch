@@ -301,6 +301,20 @@ import UniformTypeIdentifiers
         #expect(output.files.map(\.lastPathComponent) == ["tài liệu-trang-1.png", "tài liệu-trang-2.png"])
     }
 
+    @Test func aSplitReportsItsProgressPageByPage() async throws {
+        let folder = try makeTempDirectory()
+        let pdf = try SyntheticFiles.pdf(pages: 4, size: CGSize(width: 10, height: 10), in: folder)
+        let seen = Delivered.Fractions()
+        _ = try await processor().process(.pdfToImages, source: pdf) { seen.add($0) }
+        #expect(seen.values == [0.25, 0.5, 0.75, 1])
+    }
+
+    @Test func aPDFWithTooManyPagesIsRefusedWithAMessage() async throws {
+        let folder = try makeTempDirectory()
+        let pdf = try SyntheticFiles.pdf(pages: PDFActions.maxSplitPages + 1, size: CGSize(width: 10, height: 10), in: folder)
+        await #expect(throws: FileActionError.tooManyPages(count: 201, limit: 200)) { try await processor().process(.pdfToImages, source: pdf) }
+    }
+
     @Test func mergesImagesIntoOnePDFAndReportsTheOnesItSkipped() async throws {
         let folder = try makeTempDirectory()
         let one = try png("một.png", in: folder)
@@ -320,6 +334,25 @@ import UniformTypeIdentifiers
         #expect(combined.files.map(\.lastPathComponent) == ["a.zip"])
         #expect(combined.skipped.map(\.source) == [gone] && combined.skipped.map(\.error) == [.missing])
         #expect(try SyntheticFiles.zipEntries(combined.files[0]).map(\.precomposedStringWithCanonicalMapping).filter { !$0.hasSuffix("/") } == ["a/a.txt"])
+    }
+
+    @Test func aFolderWithLinksIsZippedAndTheLinksAreKept() async throws {
+        let folder = try makeTempDirectory()
+        let project = folder.appending(path: "Dự án", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        _ = try makeTempFile(named: "a.txt", in: project)
+        try FileManager.default.createSymbolicLink(atPath: project.appending(path: "trong").path, withDestinationPath: "a.txt")
+        let combined = try await processor().combine(.zip, sources: [project])
+        #expect(combined.skipped.isEmpty)
+        let records = try SyntheticFiles.zipRecords(combined.files[0])
+        #expect(records.contains { $0.isLink && $0.name.hasSuffix("/trong") })
+    }
+
+    @Test func aDanglingLinkCountsAsThereNotAsMissing() async throws {
+        let folder = try makeTempDirectory()
+        try FileManager.default.createSymbolicLink(atPath: folder.appending(path: "treo").path, withDestinationPath: "không-có")
+        let combined = try await processor().combine(.zip, sources: [folder.appending(path: "treo")])
+        #expect(combined.files.count == 1 && combined.skipped.isEmpty)
     }
 
     @Test func zipsAnyFileNotJustImages() async throws {

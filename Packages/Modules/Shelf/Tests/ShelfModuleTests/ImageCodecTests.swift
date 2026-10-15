@@ -142,6 +142,47 @@ import UniformTypeIdentifiers
         #expect(tiff[kCGImagePropertyTIFFMake] as? String == "Máy ảnh")
     }
 
+    @Test func placeNamesAreStrippedWithTheLocationButTheRestOfTheCaptionStays() throws {
+        let folder = try makeTempDirectory()
+        let url = try SyntheticFiles.write(
+            SyntheticFiles.image(width: 40, height: 20), as: .jpeg, named: "iptc.jpg", in: folder,
+            properties: [kCGImagePropertyIPTCDictionary: [
+                kCGImagePropertyIPTCCity: "Đà Nẵng", kCGImagePropertyIPTCCountryPrimaryLocationName: "Việt Nam",
+                kCGImagePropertyIPTCCaptionAbstract: "Chuyến đi",
+            ]]
+        )
+        let loaded = try ImageCodec.load(url, longestSide: nil)
+        try #require((loaded.properties[kCGImagePropertyIPTCDictionary] as? [CFString: Any])?[kCGImagePropertyIPTCCity] != nil)
+
+        func iptc(stripping: Bool) throws -> [CFString: Any] {
+            let data = try ImageCodec.encode(loaded.image, as: .jpeg, quality: 0.9, properties: loaded.properties, stripLocation: stripping)
+            let file = folder.appending(path: "out-\(stripping).jpg")
+            try data.write(to: file)
+            return try SyntheticFiles.properties(of: file)[kCGImagePropertyIPTCDictionary] as? [CFString: Any] ?? [:]
+        }
+        let stripped = try iptc(stripping: true)
+        #expect(stripped[kCGImagePropertyIPTCCity] == nil && stripped[kCGImagePropertyIPTCCountryPrimaryLocationName] == nil)
+        #expect(stripped[kCGImagePropertyIPTCCaptionAbstract] as? String == "Chuyến đi")
+        let kept = try iptc(stripping: false)
+        #expect(kept[kCGImagePropertyIPTCCity] as? String == "Đà Nẵng")
+    }
+
+    @Test(arguments: [ImageFormat.png, .tiff, .jpeg])
+    func aWideGamutColourProfileSurvivesAConversion(format: ImageFormat) throws {
+        let p3 = try #require(CGColorSpace(name: CGColorSpace.displayP3))
+        let context = try #require(CGContext(
+            data: nil, width: 20, height: 20, bitsPerComponent: 8, bytesPerRow: 0, space: p3, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ))
+        context.setFillColor(red: 1, green: 0, blue: 0, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 20, height: 20))
+        let folder = try makeTempDirectory()
+        let source = try SyntheticFiles.write(try #require(context.makeImage()), as: .png, named: "p3.png", in: folder)
+        let loaded = try ImageCodec.load(source, longestSide: nil)
+        let data = try ImageCodec.encode(loaded.image, as: format, quality: 0.9, properties: loaded.properties, stripLocation: true)
+        let image = try SyntheticFiles.decoded(data)
+        #expect(image.colorSpace?.name == CGColorSpace.displayP3 as CFString)
+    }
+
     @Test func aTurnedImageIsWrittenUprightWithNoOrientationLeftToApplyTwice() throws {
         let folder = try makeTempDirectory()
         let url = try SyntheticFiles.write(

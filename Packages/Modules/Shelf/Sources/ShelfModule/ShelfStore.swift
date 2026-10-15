@@ -49,11 +49,21 @@ final class ShelfStore {
     /// Something that is already on the shelf (the same file, text or link) moves to the front instead of appearing
     /// twice, so a card dropped back onto the shelf cannot leave two cards sharing one stored copy.
     func add(_ kind: ShelfItem.Kind, limit: Int) {
+        add(contentsOf: [kind], limit: limit)
+    }
+
+    /// `add` for several, one after the other (so the last of them ends up first), written to `shelf.json` once.
+    func add(contentsOf kinds: [ShelfItem.Kind], limit: Int) {
+        for kind in kinds { insert(kind, limit: limit) }
+        save()
+    }
+
+    private func insert(_ kind: ShelfItem.Kind, limit: Int) {
         let location = resolvedURL(of: kind)
         if let index = items.firstIndex(where: { isSame($0, as: kind, at: location) }) {
             let existing = items.remove(at: index)
             items.insert(ShelfItem(id: existing.id, kind: existing.kind, addedAt: .now), at: 0)
-            return save()
+            return
         }
         let item = ShelfItem(kind: kind)
         items.insert(item, at: 0)
@@ -64,7 +74,6 @@ final class ShelfStore {
             locations[trimmed.id] = nil
         }
         items.removeLast(overflow.count)
-        save()
     }
 
     /// `deletingCopy: false` keeps the stored copy of a promised file whose item was dragged out, because the
@@ -160,7 +169,11 @@ final class ShelfStore {
         }
     }
 
+    /// How many times the shelf was written, for tests of batches.
+    private(set) var saveCount = 0
+
     private func save() {
+        saveCount += 1
         do {
             try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(items).write(to: fileURL, options: .atomic)

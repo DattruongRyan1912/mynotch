@@ -162,12 +162,15 @@ public final class ShelfModule: FeatureModule {
         store.remove(id: item.id, deletingCopy: false)
     }
 
+    /// Not while an action runs: it may still be reading a promised copy that removing its card would delete.
     func remove(_ item: ShelfItem) {
+        guard !state.actions.isRunning else { return }
         state.selection.removeAll { $0 == item.id }
         state.store?.remove(id: item.id)
     }
 
     func removeAll() {
+        guard !state.actions.isRunning else { return }
         state.selection = []
         state.store?.removeAll()
     }

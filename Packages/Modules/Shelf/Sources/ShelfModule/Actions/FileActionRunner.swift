@@ -18,9 +18,14 @@ final class FileActionRunner {
         /// Nil for an action that combines its sources and so has nothing to count.
         let total: Int?
         let current: String?
+        /// How far the source being worked on is (0 to 1), for one that takes long, such as a PDF of many pages.
+        var fraction = 0.0
+        /// The user asked to stop and the file in progress is still finishing.
+        var isCancelling = false
 
         /// The file being worked on, and which one of how many it is.
         var detail: String {
+            if isCancelling { return "Đang huỷ…" }
             guard let current else { return "" }
             guard let total, total > 1 else { return current }
             return "\(current) · \(min(done + 1, total))/\(total)"
@@ -40,6 +45,9 @@ final class FileActionRunner {
         var text: String?
         var textCopied = false
         var wasCancelled = false
+        /// Results that are on disk next to their sources but not on the shelf, because it had no room: results
+        /// never push other cards off.
+        var notShelved: [URL] = []
 
         /// One line for the top of the report.
         var summary: String {
@@ -47,8 +55,15 @@ final class FileActionRunner {
             var parts: [String] = []
             if let text { parts.append(textCopied ? "Đã chép \(text.count) ký tự" : "Đọc được chữ, nhưng không chép được") }
             if !created.isEmpty { parts.append("Đã tạo \(created.count) file") }
+            if !notShelved.isEmpty { parts.append("\(notShelved.count) file chưa vào khay") }
             if !failures.isEmpty { parts.append("\(failures.count) file lỗi") }
             return parts.joined(separator: " · ")
+        }
+
+        /// Says where the results are that did not fit on the shelf.
+        var shelfNote: String? {
+            guard let first = notShelved.first else { return nil }
+            return "Khay đầy: \(notShelved.count) file nằm trong thư mục \(first.deletingLastPathComponent().lastPathComponent)"
         }
     }
 
@@ -60,7 +75,7 @@ final class FileActionRunner {
 
     private(set) var phase = Phase.idle
     /// Changes with every run and every reset, so a run that was reset knows that it is no longer the current one.
-    private var generation = 0
+    private(set) var generation = 0
     /// The run in progress or the last one, for tests to wait for.
     private(set) var currentRun: Task<Void, Never>?
 
@@ -69,10 +84,11 @@ final class FileActionRunner {
     }
 
     /// Starts the run in the background and returns at once. Ignored while another run is going. `deliver` hears the
-    /// files made for each source as soon as they exist, on the main actor.
+    /// files made for each source as soon as they exist, on the main actor, and gives back the ones it did not
+    /// take (the shelf had no room); the report names them.
     func start(
         _ action: FileAction, sources: [ActionSource], processor: FileActionProcessor, pasteboard: any PasteboardWriting,
-        deliver: @escaping ([URL]) -> Void
+        deliver: @escaping ([URL]) async -> [URL]
     ) {
         guard let token = begin(action, sources: sources) else { return }
         currentRun = Task { await perform(action, sources: sources, token: token, processor: processor, pasteboard: pasteboard, deliver: deliver) }
@@ -81,14 +97,28 @@ final class FileActionRunner {
     /// `start`, waiting for the end.
     func run(
         _ action: FileAction, sources: [ActionSource], processor: FileActionProcessor, pasteboard: any PasteboardWriting,
-        deliver: @escaping ([URL]) -> Void
+        deliver: @escaping ([URL]) async -> [URL]
     ) async {
         guard let token = begin(action, sources: sources) else { return }
         await perform(action, sources: sources, token: token, processor: processor, pasteboard: pasteboard, deliver: deliver)
     }
 
-    /// Asks the run to stop: the file in progress is dropped, the ones already made stay.
-    func cancel() { currentRun?.cancel() }
+    /// Asks the run to stop: the file in progress is dropped, the ones already made stay. The file in progress may
+    /// take a moment to notice (the system's zip cannot be interrupted), so the progress says it is stopping.
+    func cancel() {
+        currentRun?.cancel()
+        if case .running(var progress) = phase {
+            progress.isCancelling = true
+            phase = .running(progress)
+        }
+    }
+
+    /// Progress inside the source being worked on. Late, repeated and stale reports are ignored.
+    func noteFraction(_ fraction: Double, run token: Int, source index: Int) {
+        guard token == generation, case .running(var progress) = phase, progress.done == index, fraction > progress.fraction else { return }
+        progress.fraction = min(1, fraction)
+        phase = .running(progress)
+    }
 
     /// Stops the run and forgets it and its report, for when the shelf stops. What the run was doing may finish its
     /// current step, but it neither reports nor copies anything any more.
@@ -114,7 +144,7 @@ final class FileActionRunner {
 
     private func perform(
         _ action: FileAction, sources: [ActionSource], token: Int, processor: FileActionProcessor, pasteboard: any PasteboardWriting,
-        deliver: ([URL]) -> Void
+        deliver: ([URL]) async -> [URL]
     ) async {
         var report = Report(action: action)
         var texts: [String] = []
@@ -124,16 +154,20 @@ final class FileActionRunner {
             } else {
                 for (index, source) in sources.enumerated() {
                     try Task.checkCancellation()
-                    if token == generation { phase = .running(Progress(action: action, done: index, total: sources.count, current: source.name)) }
+                    if token == generation, case .running(let progress) = phase {
+                        phase = .running(Progress(action: action, done: index, total: sources.count, current: source.name, isCancelling: progress.isCancelling))
+                    }
                     guard let url = source.url else {
                         report.failures.append(Failure(name: source.name, message: FileActionError.missing.localizedDescription))
                         continue
                     }
                     do {
-                        let output = try await processor.process(action, source: url)
+                        let output = try await processor.process(action, source: url) { [weak self] fraction in
+                            Task { @MainActor in self?.noteFraction(fraction, run: token, source: index) }
+                        }
                         if !output.files.isEmpty {
                             report.created += output.files
-                            deliver(output.files)
+                            report.notShelved += await deliver(output.files)
                         }
                         if let text = output.text { texts.append(text) }
                     } catch is CancellationError {
@@ -158,7 +192,8 @@ final class FileActionRunner {
 
     /// Sources that are gone are reported by name and left out; when the action fails as a whole there is one error.
     private func combine(
-        _ action: FileAction, _ sources: [ActionSource], _ processor: FileActionProcessor, into report: inout Report, deliver: ([URL]) -> Void
+        _ action: FileAction, _ sources: [ActionSource], _ processor: FileActionProcessor, into report: inout Report,
+        deliver: ([URL]) async -> [URL]
     ) async throws {
         let missing = sources.filter { $0.url == nil }
         report.failures = missing.map { Failure(name: $0.name, message: FileActionError.missing.localizedDescription) }
@@ -167,7 +202,7 @@ final class FileActionRunner {
         do {
             let combined = try await processor.combine(action, sources: present)
             report.created = combined.files
-            deliver(combined.files)
+            report.notShelved += await deliver(combined.files)
             report.failures += combined.skipped.map { skipped in
                 Failure(name: sources.first { $0.url == skipped.source }?.name ?? skipped.source.lastPathComponent, message: skipped.error.localizedDescription)
             }

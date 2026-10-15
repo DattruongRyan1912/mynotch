@@ -12,6 +12,8 @@ nonisolated struct FileActionProcessor: Sendable {
     /// Whether the GPS metadata of an image is left out of what is written.
     var stripLocation = true
     var folders = OutputFolders(promisedDirectory: nil)
+    /// Where a zip copies files to before it zips them.
+    var stagingRoot = FileManager.default.temporaryDirectory
 
     /// What an action made of one source: the files it wrote, or the text it read.
     struct Output: Sendable {
@@ -25,16 +27,17 @@ nonisolated struct FileActionProcessor: Sendable {
         let skipped: [SkippedFile]
     }
 
-    /// The actions that make something from each source on its own.
+    /// The actions that make something from each source on its own. `progress` hears how far a long one is (0 to 1).
     @concurrent
-    func process(_ action: FileAction, source: URL) async throws -> Output {
+    func process(_ action: FileAction, source: URL, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> Output {
         switch action {
         case .convert(let format): try convert(source, to: format)
         case .resize(let preset): try resize(source, preset)
         case .compressImage(let format): try compress(source, to: format)
         case .cutOut: try await cutOut(source)
         case .readText: try await readText(source)
-        case .pdfToImages: Output(files: try PDFActions.renderPages(of: source, folders: folders))
+        case .pdfToImages:
+            Output(files: try PDFActions.renderPages(of: source, folders: folders) { written, total in progress(Double(written) / Double(total)) })
         case .zip, .imagesToPDF:
             assertionFailure("\(action) takes its sources together: use combine")
             throw FileActionError.unreadable
@@ -46,10 +49,12 @@ nonisolated struct FileActionProcessor: Sendable {
     func combine(_ action: FileAction, sources: [URL]) async throws -> Combined {
         switch action {
         case .zip:
-            let present = sources.filter { FileManager.default.fileExists(atPath: $0.path) }
+            let present = sources.filter(ZipArchive.exists)
             guard !present.isEmpty else { throw FileActionError.missing }
+            let made = try ZipArchive.make(from: present, folders: folders, stagingRoot: stagingRoot)
             let skipped = sources.filter { !present.contains($0) }.map { SkippedFile(source: $0, error: .missing) }
-            return Combined(files: [try ZipArchive.make(from: present, folders: folders)], skipped: skipped)
+                + made.unstoredLinks.map { SkippedFile(source: $0, error: .linkNotStored) }
+            return Combined(files: [made.file], skipped: skipped)
         case .imagesToPDF:
             let merged = try PDFActions.makePDF(from: sources, quality: quality, folders: folders)
             return Combined(files: [merged.file], skipped: merged.skipped)
