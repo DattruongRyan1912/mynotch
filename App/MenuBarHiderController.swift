@@ -4,19 +4,34 @@ import MyNotchCore
 /// The separator status item ‹ and what drives it: the settings, a click on it and the pointer on the menu bar. The rules
 /// (lengths, timers, what is refused) are `MenuBarHider`'s; this only owns the real item and the event monitors.
 final class MenuBarHiderController {
+    /// Nothing collapses by itself for this long after the user turns the hider on: they are placing icons.
+    private static let arrangingGrace: Duration = .seconds(60)
+
     private let settings: SettingsStore
     private let hider: MenuBarHider
+    private let notice: MenuBarNotice
     /// The MyNotch icon, which toggles; the separator is created after it, so the system lays it out on its left.
     private var toggleItem: NSStatusItem?
     private var separatorItem: NSStatusItem?
     private var separator: StatusItemSeparator?
     private let hover = MenuBarHoverMonitor()
+    /// Whether the setting was on at the last look, so only a switch-on gets the arranging grace, not a launch.
+    private var wasEnabled: Bool
+    /// ⌘-dragging "‹" off the menu bar clears its `isVisible`, which is mirrored into the setting.
+    private var visibilityObservation: NSKeyValueObservation?
+    private var layoutObservers: [(center: NotificationCenter, token: NSObjectProtocol)] = []
 
-    init(settings: SettingsStore, scheduler: any Scheduler) {
+    init(settings: SettingsStore, scheduler: any Scheduler, notice: MenuBarNotice) {
         self.settings = settings
+        self.notice = notice
+        wasEnabled = settings.value(MenuBarHiderSettings.enabled)
         hider = MenuBarHider(settings: settings, scheduler: scheduler)
         hover.onChange = { [weak self] inside in self?.hider.pointerMoved(inMenuBar: inside) }
+        hider.onForcedExpand = { [weak self] in
+            self?.notice.show("Biểu tượng MyNotch bị che nên các icon đã ẩn được hiện lại.")
+        }
         observeSettings()
+        observeQuitting()
     }
 
     /// Whether the user switched the hider on. The separator exists only while the MyNotch icon does too, since that icon is
@@ -29,17 +44,21 @@ final class MenuBarHiderController {
         sync()
     }
 
-    /// A click on the MyNotch icon or the shortcut. A refused collapse (the separator was dragged to the right of the icon)
-    /// beeps instead of hiding the way back.
+    /// A click on the MyNotch icon or the shortcut. A refused collapse (the separator is not left of the icon) says what to
+    /// do, on the notch and to VoiceOver, instead of leaving a dead icon.
     func toggle() {
         guard separatorItem != nil else { return }
         if !hider.toggle() {
             Log.logger(category: "app").notice("Menu-bar hider: not collapsing, the separator is not left of the MyNotch icon")
             NSSound.beep()
+            notice.show("Kéo dấu ‹ sang trái biểu tượng MyNotch (giữ ⌘)")
         }
     }
 
     var isCollapsed: Bool { hider.isCollapsed }
+
+    /// Shows everything again, for the moments the app is going away and the icons must not stay hidden.
+    func expandNow() { hider.expand() }
 
     private func observeSettings() {
         Task { [weak self, settings] in
@@ -53,21 +72,38 @@ final class MenuBarHiderController {
         }
     }
 
+    /// Whatever the way out is (quitting, shutting down), the icons come back first: the status item's length is never
+    /// saved, but the wait for the modules to stop can last seconds.
+    private func observeQuitting() {
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hider.expand() }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willPowerOffNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hider.expand() }
+        }
+    }
+
     private func sync() {
-        let wanted = isEnabled && toggleItem != nil
+        let enabled = isEnabled
+        let justEnabled = enabled && !wasEnabled
+        wasEnabled = enabled
+        let wanted = enabled && toggleItem != nil
         if wanted, separatorItem == nil {
-            addSeparator()
+            addSeparator(quietFor: justEnabled ? Self.arrangingGrace : .zero)
         } else if !wanted, separatorItem != nil {
             removeSeparator()
         }
         hover.setRunning(wanted && settings.value(MenuBarHiderSettings.revealOnHover))
     }
 
-    private func addSeparator() {
+    private func addSeparator(quietFor grace: Duration) {
         guard let toggleItem else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         // A fixed name, so macOS keeps where the user dragged it across launches whatever order the items are made in.
         item.autosaveName = "MyNotchSeparator"
+        // The name also keeps whether the item is shown, and a ⌘-drag off the bar stored "hidden" under it. The user's settings
+        // say it should exist now, so it does.
+        item.isVisible = true
         if let button = item.button {
             button.image = NSImage(systemSymbolName: "chevron.compact.left", accessibilityDescription: "Dấu ngăn icon menu bar")
             if button.image == nil { button.title = "‹" }
@@ -78,14 +114,54 @@ final class MenuBarHiderController {
         let separator = StatusItemSeparator(item: item, toggle: toggleItem)
         separatorItem = item
         self.separator = separator
-        hider.attach(separator)
+        // After the name and visibility are settled, so only the user's own removal is heard.
+        visibilityObservation = item.observe(\.isVisible, options: [.new]) { [weak self] _, change in
+            guard change.newValue == false else { return }
+            Task { @MainActor in self?.separatorWasRemoved() }
+        }
+        observeLayout(of: item, and: toggleItem)
+        hider.attach(separator, quietFor: grace)
     }
 
     private func removeSeparator() {
+        visibilityObservation = nil
+        stopObservingLayout()
         hider.detach()
         if let separatorItem { NSStatusBar.system.removeStatusItem(separatorItem) }
         separatorItem = nil
         separator = nil
+    }
+
+    /// The user dragged "‹" off the menu bar: with nothing to hide behind, the hider is off, and the user is told.
+    private func separatorWasRemoved() {
+        guard separatorItem != nil else { return }
+        Log.logger(category: "app").notice("Menu-bar hider: the separator was removed from the menu bar, switching the hider off")
+        settings.set(false, for: MenuBarHiderSettings.enabled)
+        notice.show("Dấu ‹ đã bị gỡ khỏi menu bar nên tính năng ẩn icon được tắt. Bật lại trong Cài đặt, mục Chung.")
+    }
+
+    /// While collapsed the windows are looked at again when either moves or the displays change; the hider waits for them to
+    /// settle, since collapsing moves them too.
+    private func observeLayout(of separatorItem: NSStatusItem, and toggleItem: NSStatusItem) {
+        let center = NotificationCenter.default
+        let changed: @Sendable (Notification) -> Void = { [weak self] _ in
+            MainActor.assumeIsolated { self?.hider.layoutChanged() }
+        }
+        for window in [separatorItem.button?.window, toggleItem.button?.window].compactMap({ $0 }) {
+            for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didChangeScreenNotification] {
+                layoutObservers.append((center, center.addObserver(forName: name, object: window, queue: .main, using: changed)))
+            }
+        }
+        layoutObservers.append((center, center.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main, using: changed
+        )))
+        let workspace = NSWorkspace.shared.notificationCenter
+        layoutObservers.append((workspace, workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main, using: changed)))
+    }
+
+    private func stopObservingLayout() {
+        layoutObservers.forEach { $0.center.removeObserver($0.token) }
+        layoutObservers.removeAll()
     }
 
     @objc private func separatorClicked() { toggle() }
@@ -106,11 +182,25 @@ private final class StatusItemSeparator: MenuBarSeparator {
         set { item.length = newValue }
     }
 
-    /// Compared by the two items' windows, which the system places once the items have been laid out; without both, it
-    /// cannot be told, and hiding then could hide the way back, so the answer is no.
-    var isLeftOfToggle: Bool {
-        guard let own = item.button?.window, let other = toggle?.button?.window, own.isVisible, other.isVisible else { return false }
-        return own.frame.midX < other.frame.midX
+    var separatorFrame: CGRect? { Self.frame(of: item) }
+
+    var toggleFrame: CGRect? { toggle.flatMap(Self.frame(of:)) }
+
+    var screens: [MenuBarScreen] { MenuBarScreen.current() }
+
+    /// The item's window frame, nil when it has none or is not shown. Whether the frame is on a menu bar is `MenuBarOrder`'s call.
+    private static func frame(of item: NSStatusItem) -> CGRect? {
+        guard let window = item.button?.window, window.isVisible else { return nil }
+        return window.frame
+    }
+}
+
+extension MenuBarScreen {
+    /// The displays' menu bars as they are now. A display with a notch has a taller bar than the standard one.
+    static func current() -> [MenuBarScreen] {
+        NSScreen.screens.map {
+            MenuBarScreen(frame: $0.frame, barHeight: max($0.safeAreaInsets.top, NSStatusBar.system.thickness))
+        }
     }
 }
 
@@ -162,10 +252,7 @@ private final class MenuBarHoverMonitor {
     }
 
     private func refreshScreens() {
-        // A display with a notch has a taller menu bar than the standard one.
-        screens = NSScreen.screens.map {
-            MenuBarScreen(frame: $0.frame, barHeight: max($0.safeAreaInsets.top, NSStatusBar.system.thickness))
-        }
+        screens = MenuBarScreen.current()
     }
 
     private func moved() {

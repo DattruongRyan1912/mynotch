@@ -203,3 +203,34 @@ import MyNotchTestSupport
         #expect(PermissionOverview(registry: harness.registry, scheduler: harness.scheduler).missingOptionalCount == 0)
     }
 }
+
+@Suite struct PasteboardRestingStateTests {
+    @Test func aPasteboardLeftOnTheSystemDefaultIsNotWaitedFor() {
+        // "Not determined" is where macOS leaves it until the user opens the pane, so a loop gated on it would never stop.
+        let harness = Harness([FakeModule("m", optionalPermissions: [.pasteboard, .accessibility])])
+        harness.permissions.statuses = [.pasteboard: .notDetermined, .accessibility: .granted]
+        let overview = PermissionOverview(registry: harness.registry, scheduler: harness.scheduler)
+        #expect(overview.missingOptionalCount == 0)
+        #expect(!PermissionRefreshLoop.isWanted(missingOptional: overview.missingOptionalCount, settingsVisible: true, notchOpen: true))
+    }
+
+    @Test func aPasteboardTheUserRefusedStillCounts() {
+        let harness = Harness([FakeModule("m", optionalPermissions: [.pasteboard])])
+        harness.permissions.statuses = [.pasteboard: .denied]
+        #expect(PermissionOverview(registry: harness.registry, scheduler: harness.scheduler).missingOptionalCount == 1)
+    }
+
+    @Test func otherPermissionsNotYetAskedStillCount() {
+        let harness = Harness([FakeModule("m", optionalPermissions: [.pasteboard, .accessibility])])
+        harness.permissions.statuses = [.pasteboard: .notDetermined, .accessibility: .notDetermined]
+        #expect(PermissionOverview(registry: harness.registry, scheduler: harness.scheduler).missingOptionalCount == 1)
+    }
+
+    @Test func thePageStillListsAPasteboardThatIsNotGranted() {
+        let harness = Harness([FakeModule("m", optionalPermissions: [.pasteboard])])
+        harness.permissions.statuses = [.pasteboard: .notDetermined]
+        let overview = PermissionOverview(registry: harness.registry, scheduler: harness.scheduler)
+        #expect(overview.missingCount == 1)
+        #expect(overview.optionalRows.map(\.permission) == [.pasteboard])
+    }
+}

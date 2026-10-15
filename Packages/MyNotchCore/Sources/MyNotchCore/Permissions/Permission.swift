@@ -110,6 +110,10 @@ nonisolated public enum Permission: Hashable, Sendable {
         }
     }
 
+    /// macOS leaves it at "not determined" until the user opens its pane (the system's own default behaviour), so that state
+    /// is where most people stay and not a sign that something is waiting to be answered.
+    public var restsAsNotDetermined: Bool { self == .pasteboard }
+
     /// What the grant button does now. Promptable permissions are requested until the user has answered once
     /// (macOS shows the prompt a single time); after a refusal only System Settings can change the answer.
     public func grantAction(for status: PermissionStatus) -> PermissionGrantAction {

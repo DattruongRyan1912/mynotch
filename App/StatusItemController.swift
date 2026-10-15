@@ -9,9 +9,12 @@ final class StatusItemController: NSObject {
     private let screens: ScreenManager
     private let overview: PermissionOverview
     private let hider: MenuBarHiderController
+    private let notice: MenuBarNotice
     private let openSettings: () -> Void
     private let openPermissions: () -> Void
     private var item: NSStatusItem?
+    /// ⌘-dragging the icon off the menu bar clears its `isVisible`, which is mirrored into "Hiện icon trên menu bar".
+    private var visibilityObservation: NSKeyValueObservation?
     private var menu: NSMenu?
     private var visibilityItem: NSMenuItem?
     private var hiderItem: NSMenuItem?
@@ -24,13 +27,15 @@ final class StatusItemController: NSObject {
 
     init(
         settings: SettingsStore, registry: ModuleRegistry, screens: ScreenManager, overview: PermissionOverview,
-        hider: MenuBarHiderController, openSettings: @escaping () -> Void, openPermissions: @escaping () -> Void
+        hider: MenuBarHiderController, notice: MenuBarNotice,
+        openSettings: @escaping () -> Void, openPermissions: @escaping () -> Void
     ) {
         self.settings = settings
         self.registry = registry
         self.screens = screens
         self.overview = overview
         self.hider = hider
+        self.notice = notice
         self.openSettings = openSettings
         self.openPermissions = openPermissions
         super.init()
@@ -62,6 +67,7 @@ final class StatusItemController: NSObject {
             for await _ in Observations({ settings.value(MenuBarHiderSettings.enabled) }) {
                 self?.applyClickBehaviour()
                 self?.updateHiderEntry()
+                self?.updatePermissionNudge()
             }
         }
     }
@@ -71,21 +77,39 @@ final class StatusItemController: NSObject {
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
             // A fixed name, so macOS keeps where the user dragged the icon, and the hider's separator can be told to sit on its left.
             item.autosaveName = "MyNotchIcon"
+            // The name also keeps whether the item is shown: a ⌘-drag off the bar stored "hidden" under it, and the setting that
+            // brings the icon back must not meet that. The user's settings say the icon exists now.
+            item.isVisible = true
             item.button?.image = NSImage(systemSymbolName: "rectangle.topthird.inset.filled", accessibilityDescription: "MyNotch")
             menu = makeMenu()
             self.item = item
             applyClickBehaviour()
             addMissingDot(to: item.button)
             updatePermissionNudge()
+            // After the name and visibility are settled, so only the user's own removal is heard.
+            visibilityObservation = item.observe(\.isVisible, options: [.new]) { [weak self] _, change in
+                guard change.newValue == false else { return }
+                Task { @MainActor in self?.iconWasRemoved() }
+            }
             // After the icon exists, so the separator is made after it.
             hider.setToggleItem(item)
         } else if !visible, let item {
+            visibilityObservation = nil
             hider.setToggleItem(nil)
             NSStatusBar.system.removeStatusItem(item)
             self.item = nil
             menu = nil
             missingDot = nil
         }
+    }
+
+    /// The user dragged the icon off the menu bar (or switched it off in System Settings): the setting follows, so Settings
+    /// shows what is true and switching it on again brings the icon back.
+    private func iconWasRemoved() {
+        guard item != nil else { return }
+        Log.logger(category: "app").notice("The MyNotch icon was removed from the menu bar, switching \"Hiện icon trên menu bar\" off")
+        settings.set(false, for: AppSettings.showMenuBarIcon)
+        notice.show("Biểu tượng MyNotch đã bị gỡ khỏi menu bar. Bật lại trong Cài đặt, mục Chung.")
     }
 
     /// The menu opens on a click, or, with the hider on, on a right-click or control-click while a plain click toggles.
@@ -111,12 +135,18 @@ final class StatusItemController: NSObject {
         }
     }
 
+    /// Only a plain left click toggles; a key press, VoiceOver, a right or control click and anything else opens the menu.
     @objc private func statusButtonClicked() {
         let event = NSApp.currentEvent
-        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
-            showMenu()
-        } else {
-            hider.toggle()
+        let action = MenuBarIcon.action(
+            isLeftMouseUp: event?.type == .leftMouseUp,
+            hasControl: event?.modifierFlags.contains(.control) == true,
+            eventAge: event.map { ProcessInfo.processInfo.systemUptime - $0.timestamp } ?? .infinity,
+            isOnButton: event != nil && event?.window === item?.button?.window
+        )
+        switch action {
+        case .toggleHiddenIcons: hider.toggle()
+        case .openMenu: showMenu()
         }
     }
 
@@ -154,7 +184,7 @@ final class StatusItemController: NSObject {
     private func updatePermissionNudge() {
         let title = overview.nudgeTitle
         missingDot?.isHidden = title == nil
-        item?.button?.toolTip = title.map { "MyNotch: \($0)" }
+        item?.button?.toolTip = MenuBarIcon.toolTip(permissionNudge: title, hiderIsOn: hider.isEnabled)
         permissionItem?.title = title ?? ""
         permissionItem?.isHidden = title == nil
     }

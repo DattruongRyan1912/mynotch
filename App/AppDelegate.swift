@@ -27,7 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var settingsWindow = SettingsWindowController(
         settings: settings, registry: registry, permissions: permissions, overview: permissionOverview, hotkeys: hotkeys
     )
-    private lazy var menuBarHider = MenuBarHiderController(settings: settings, scheduler: scheduler)
+    private lazy var menuBarNotice = MenuBarNotice(presenter: coordinator)
+    private lazy var menuBarHider = MenuBarHiderController(settings: settings, scheduler: scheduler, notice: menuBarNotice)
     private var statusItem: StatusItemController?
     #if DEBUG
     private var debugActivities: DebugActivityTrigger?
@@ -57,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] in self?.menuBarHider.toggle() }
         statusItem = StatusItemController(
             settings: settings, registry: registry, screens: screens, overview: permissionOverview, hider: menuBarHider,
+            notice: menuBarNotice,
             openSettings: { [weak self] in self?.settingsWindow.show() },
             openPermissions: { [weak self] in self?.settingsWindow.show(page: .permissions) }
         )
@@ -94,6 +96,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if DEBUG
         debugActivities?.stop()
         #endif
+        // The wait for the modules can last seconds; the icons the hider holds off the screen come back first.
+        menuBarHider.expandNow()
         let deadline = Timer(timeInterval: 3, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.replyToTerminate() }
         }

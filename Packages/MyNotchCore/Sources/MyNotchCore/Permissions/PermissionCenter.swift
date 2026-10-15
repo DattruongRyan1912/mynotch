@@ -88,7 +88,14 @@ public final class PermissionOverview {
 
     /// Optional permissions of enabled modules that are denied or never asked. `PermissionRefreshLoop` keeps them current
     /// while someone is looking, since no module waits on an optional permission and nothing else polls for it.
-    public var missingOptionalCount: Int { optionalRows.count { status(of: $0.permission).isMissing } }
+    /// A permission that rests at "not determined" (`Permission.restsAsNotDetermined`) does not count in that state, or the
+    /// loop would never stop.
+    public var missingOptionalCount: Int {
+        optionalRows.count { row in
+            let status = status(of: row.permission)
+            return status.isMissing && !(status == .notDetermined && row.permission.restsAsNotDetermined)
+        }
+    }
 
     /// The status-bar menu entry, nil when nothing required is missing.
     public var nudgeTitle: String? {
