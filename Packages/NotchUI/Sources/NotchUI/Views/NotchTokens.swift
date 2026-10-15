@@ -9,6 +9,12 @@ public enum NotchTokens {
     public static var primaryText: Color { NotchLookState.current.isGlass ? .primary : .white }
     /// Secondary text, likewise: white at 0.6, or the system's secondary colour on glass.
     public static var secondaryText: Color { NotchLookState.current.isGlass ? .secondary : .white.opacity(0.6) }
+    /// A wash of the text colour at `opacity`, for what a module draws behind or around its text: a card, a hovered row, a divider,
+    /// an outline. White on the classic notch; on Liquid Glass the system's primary colour, so the wash is dark on light glass and
+    /// light on dark glass and the text over it keeps its contrast. Read it in a `body`, like the text tokens.
+    public static func fill(_ opacity: Double) -> Color {
+        NotchLookState.current.isGlass ? Color.primary.opacity(opacity) : Color.white.opacity(opacity)
+    }
     /// Inner padding of the open notch; `nonisolated` because the geometry's maths reads it.
     nonisolated public static let padding: CGFloat = 14
     /// Opacity of the accent behind the selected tab; `nonisolated` because the accent's legibility on black is worked out from it.

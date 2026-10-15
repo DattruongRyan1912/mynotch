@@ -43,6 +43,27 @@ import Testing
         }
     }
 
+    @Test func aFillIsWhiteAtItsStrengthOnTheClassicNotchAndTheSystemsPrimaryColourOnGlass() {
+        for opacity in [0.05, 0.08, 0.14, 0.35] {
+            NotchLookState.$current.withValue(state(glass: false)) {
+                #expect(NotchTokens.fill(opacity) == Color.white.opacity(opacity))
+            }
+            NotchLookState.$current.withValue(state(glass: true)) {
+                #expect(NotchTokens.fill(opacity) == Color.primary.opacity(opacity))
+            }
+        }
+    }
+
+    @Test func aViewThatReadAFillIsToldWhenTheLookChanges() {
+        let state = state(glass: false)
+        let changed = Changed()
+        NotchLookState.$current.withValue(state) {
+            withObservationTracking { _ = NotchTokens.fill(0.08) } onChange: { changed.value = true }
+        }
+        state.isGlass = true
+        #expect(changed.value)
+    }
+
     @Test func theAppsOwnStateStartsClassicAndIsWhatTheTokensReadUnlessATestSaysOtherwise() {
         #expect(NotchLookState.current === NotchLookState.shared)
         #expect(!NotchLookState.shared.isGlass)
