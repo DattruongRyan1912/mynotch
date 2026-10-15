@@ -53,6 +53,7 @@ struct ClipboardBoardBar: View {
     var onRelock: (UUID) -> Void = { _ in }
 
     @Environment(\.notch) private var notch
+    @Environment(\.notchSurface) private var surface
     @State private var widths: [UUID: CGFloat] = [:]
     @State private var drag: BoardDrag?
 
@@ -158,7 +159,7 @@ struct ClipboardBoardBar: View {
     }
 
     private var nameField: some View {
-        ClipboardBoardNameField(name: $name, onCommit: { onFinish(true) }, onCancel: { onFinish(false) })
+        ClipboardBoardNameField(name: $name, onGlass: surface.isLiquidGlass, onCommit: { onFinish(true) }, onCancel: { onFinish(false) })
             .frame(width: 120)
     }
 
@@ -168,7 +169,7 @@ struct ClipboardBoardBar: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(NotchTokens.secondaryText)
                 .frame(width: 22, height: 22)
-                .background(Color.white.opacity(0.06), in: Circle())
+                .background(NotchTokens.fill(0.06), in: Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -194,7 +195,7 @@ struct ClipboardPill: View {
             .padding(.horizontal, 8)
             .frame(height: 22)
             .foregroundStyle(isSelected ? NotchTokens.primaryText : NotchTokens.secondaryText)
-            .background(isSelected ? Color.white.opacity(0.14) : .clear, in: Capsule())
+            .background(isSelected ? NotchTokens.fill(0.14) : .clear, in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

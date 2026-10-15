@@ -13,6 +13,8 @@ struct ClipboardPasswordField: NSViewRepresentable {
     let placeholder: String
     @Binding var text: String
     var look: ClipboardLook = .library
+    /// Whether the notch is Liquid Glass, where the notch's field follows the window's appearance instead of being dark.
+    var onGlass = false
     var takesFocus = false
     let onCommit: () -> Void
     let onCancel: () -> Void
@@ -25,7 +27,7 @@ struct ClipboardPasswordField: NSViewRepresentable {
         let field = WindowReportingSecureTextField()
         field.placeholderString = placeholder
         field.stringValue = text
-        if look == .notch { field.appearance = NSAppearance(named: .darkAqua) }
+        field.appearance = look.fieldAppearance(onGlass: onGlass).flatMap(NSAppearance.init(named:))
         field.bezelStyle = .roundedBezel
         field.controlSize = .small
         field.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -46,6 +48,8 @@ struct ClipboardPasswordField: NSViewRepresentable {
 
     func updateNSView(_ field: WindowReportingSecureTextField, context: Context) {
         context.coordinator.parent = self
+        let appearance = look.fieldAppearance(onGlass: onGlass)
+        if field.appearance?.name != appearance { field.appearance = appearance.flatMap(NSAppearance.init(named:)) }
         if field.stringValue != text { field.stringValue = text }
     }
 
@@ -97,6 +101,7 @@ struct ClipboardBoardVaultView: View {
     let look: ClipboardLook
     let mode: Mode
     let board: ClipboardBoard
+    @Environment(\.notchSurface) private var surface
     @State private var model: ClipboardBoardLockModel
     let onCancel: () -> Void
 
@@ -146,11 +151,11 @@ struct ClipboardBoardVaultView: View {
             }
             HStack(spacing: 6) {
                 ClipboardPasswordField(
-                    placeholder: "Mật khẩu", text: $model.password, look: look, takesFocus: true, onCommit: {}, onCancel: onCancel
+                    placeholder: "Mật khẩu", text: $model.password, look: look, onGlass: surface.isLiquidGlass, takesFocus: true, onCommit: {}, onCancel: onCancel
                 )
                 .frame(minWidth: 110)
                 ClipboardPasswordField(
-                    placeholder: "Nhập lại mật khẩu", text: $model.confirmation, look: look,
+                    placeholder: "Nhập lại mật khẩu", text: $model.confirmation, look: look, onGlass: surface.isLiquidGlass,
                     onCommit: { Task { await model.lockWithPassword() } }, onCancel: onCancel
                 )
                 .frame(minWidth: 110)
@@ -215,7 +220,7 @@ struct ClipboardBoardVaultView: View {
                     }
                 } else {
                     ClipboardPasswordField(
-                        placeholder: "Mật khẩu", text: $model.password, look: look, takesFocus: true,
+                        placeholder: "Mật khẩu", text: $model.password, look: look, onGlass: surface.isLiquidGlass, takesFocus: true,
                         onCommit: { Task { await model.unlockWithPassword() } }, onCancel: onCancel
                     )
                     .frame(width: 180)

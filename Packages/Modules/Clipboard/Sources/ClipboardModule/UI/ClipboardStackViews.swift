@@ -16,7 +16,7 @@ struct ClipboardStackStartButton: View {
                 .foregroundStyle(NotchTokens.secondaryText)
                 .padding(.horizontal, 8)
                 .frame(height: 22)
-                .background(Color.white.opacity(0.06), in: Capsule())
+                .background(NotchTokens.fill(0.06), in: Capsule())
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -146,7 +146,7 @@ struct ClipboardStackRow: View {
         }
         .padding(.horizontal, 8)
         .frame(height: 24)
-        .background(Color.white.opacity(isHovered ? 0.12 : 0.07), in: shape)
+        .background(NotchTokens.fill(isHovered ? 0.12 : 0.07), in: shape)
         .overlay {
             if isNext { shape.strokeBorder(accent, lineWidth: 1.5) }
         }
@@ -183,7 +183,7 @@ private struct ClipboardStackPill: View {
                 .foregroundStyle(NotchTokens.secondaryText)
                 .padding(.horizontal, 8)
                 .frame(height: 22)
-                .background(Color.white.opacity(0.06), in: Capsule())
+                .background(NotchTokens.fill(0.06), in: Capsule())
                 .opacity(isEnabled ? 1 : 0.4)
                 .contentShape(Capsule())
         }

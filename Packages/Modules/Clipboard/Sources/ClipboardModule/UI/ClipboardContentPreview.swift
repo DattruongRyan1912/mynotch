@@ -18,10 +18,14 @@ struct ClipboardContentPreview: View {
         /// The colours of code, which follow the system's appearance unless the card is always dark.
         var codePalette = CodePalette.adaptive
 
-        static let notch = Style(
-            primary: NotchTokens.primaryText, secondary: NotchTokens.secondaryText, swatchBorder: .white.opacity(0.2),
-            textLines: 4, textSize: 11, detailSize: 10, fileIconSize: 32, codePalette: .dark
-        )
+        /// The notch's card. Its colours are the text tokens, which follow the look, so it is made when it is drawn, not kept; and
+        /// code is coloured for a dark card on the black notch and for the system's appearance on Liquid Glass.
+        static func notch(onGlass: Bool) -> Style {
+            Style(
+                primary: NotchTokens.primaryText, secondary: NotchTokens.secondaryText, swatchBorder: NotchTokens.fill(0.2),
+                textLines: 4, textSize: 11, detailSize: 10, fileIconSize: 32, codePalette: onGlass ? .adaptive : .dark
+            )
+        }
 
         /// The floating panel's preview pane, which has the room for a longer excerpt.
         static let panel = Style(

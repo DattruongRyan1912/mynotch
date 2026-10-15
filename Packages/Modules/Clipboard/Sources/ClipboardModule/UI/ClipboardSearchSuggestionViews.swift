@@ -10,6 +10,7 @@ struct ClipboardSuggestionListView: View {
 
     private var rowHeight: CGFloat { look == .notch ? 24 : 26 }
     private var visibleRows: Int { look == .notch ? 5 : 8 }
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -30,6 +31,8 @@ struct ClipboardSuggestionListView: View {
         }
         .frame(width: look == .notch ? 220 : 260, height: CGFloat(min(list.items.count, visibleRows)) * rowHeight + 8)
         .background(background)
+        // The notch's list is a dark card on any look, so its text tokens must be the light ones; the other looks sit on a material.
+        .environment(\.colorScheme, look == .notch ? .dark : scheme)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Gợi ý bộ lọc")
     }

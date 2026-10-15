@@ -16,6 +16,7 @@ struct ClipboardCardView: View {
     let thumbnails: ClipboardThumbnailCache
 
     @Environment(\.notchAccent) private var accent
+    @Environment(\.notchSurface) private var surface
     @State private var isHovered = false
 
     private var shape: RoundedRectangle {
@@ -30,7 +31,7 @@ struct ClipboardCardView: View {
         }
         .padding(8)
         .frame(width: Self.size.width, height: Self.size.height)
-        .background(Color.white.opacity(isHovered ? 0.12 : 0.07), in: shape)
+        .background(NotchTokens.fill(isHovered ? 0.12 : 0.07), in: shape)
         .overlay {
             if isSelected { shape.strokeBorder(accent, lineWidth: 2) }
         }
@@ -41,7 +42,7 @@ struct ClipboardCardView: View {
     }
 
     private var preview: some View {
-        ClipboardContentPreview(content: item.content, codeLanguage: item.codeLanguage, imageURL: imageURL, thumbnails: thumbnails, style: .notch)
+        ClipboardContentPreview(content: item.content, codeLanguage: item.codeLanguage, imageURL: imageURL, thumbnails: thumbnails, style: .notch(onGlass: surface.isLiquidGlass))
     }
 
     private var footer: some View {

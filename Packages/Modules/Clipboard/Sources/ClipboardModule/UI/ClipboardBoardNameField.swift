@@ -6,6 +6,8 @@ import SwiftUI
 /// the tab pins the notch while the field is shown, so it must not wait for a click that never comes.
 struct ClipboardBoardNameField: NSViewRepresentable {
     @Binding var name: String
+    /// Whether the notch is Liquid Glass, where the field follows the window's appearance instead of being dark.
+    let onGlass: Bool
     /// Return, or the field lost the keyboard. Called again when the field goes away; the tab ignores repeats.
     let onCommit: () -> Void
     /// Esc.
@@ -19,7 +21,7 @@ struct ClipboardBoardNameField: NSViewRepresentable {
         let field = WindowReportingTextField()
         field.placeholderString = "Tên board"
         field.stringValue = name
-        field.appearance = NSAppearance(named: .darkAqua)
+        field.appearance = ClipboardLook.notch.fieldAppearance(onGlass: onGlass).flatMap(NSAppearance.init(named:))
         field.bezelStyle = .roundedBezel
         field.controlSize = .small
         field.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -33,6 +35,8 @@ struct ClipboardBoardNameField: NSViewRepresentable {
 
     func updateNSView(_ field: WindowReportingTextField, context: Context) {
         context.coordinator.parent = self
+        let appearance = ClipboardLook.notch.fieldAppearance(onGlass: onGlass)
+        if field.appearance?.name != appearance { field.appearance = appearance.flatMap(NSAppearance.init(named:)) }
         if field.stringValue != name { field.stringValue = name }
     }
 

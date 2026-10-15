@@ -9,6 +9,7 @@ struct ClipboardTabView: View {
     let module: ClipboardModule
 
     @Environment(\.notch) private var notch
+    @Environment(\.notchSurface) private var surface
     /// A menu of this app is being tracked, e.g. a card's or a board's context menu.
     @State private var isMenuOpen = false
     @State private var boardEditing: ClipboardBoardEditing?
@@ -122,7 +123,8 @@ struct ClipboardTabView: View {
     @ViewBuilder private var history: some View {
         HStack(spacing: 8) {
             ClipboardSearchField(
-                text: queryBinding(\.text), takesFocus: boardEditing == nil && !showsVault, focusRequest: searchFocusRequest, onCommand: perform
+                text: queryBinding(\.text), onGlass: surface.isLiquidGlass, takesFocus: boardEditing == nil && !showsVault,
+                focusRequest: searchFocusRequest, onCommand: perform
             )
             .frame(minWidth: 140)
             ClipboardKindChips(selection: queryBinding(\.kind))
@@ -257,7 +259,7 @@ struct ClipboardTabView: View {
                 .foregroundStyle(NotchTokens.secondaryText)
                 .padding(.horizontal, 8)
                 .frame(height: 22)
-                .background(Color.white.opacity(0.06), in: Capsule())
+                .background(NotchTokens.fill(0.06), in: Capsule())
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)

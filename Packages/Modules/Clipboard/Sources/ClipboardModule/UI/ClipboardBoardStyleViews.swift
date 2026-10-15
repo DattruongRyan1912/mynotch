@@ -46,7 +46,7 @@ struct ClipboardBoardPill: View {
         .padding(.horizontal, 8)
         .frame(height: 22)
         .foregroundStyle(isSelected ? NotchTokens.primaryText : NotchTokens.secondaryText)
-        .background(isSelected ? Color.white.opacity(0.14) : .clear, in: Capsule())
+        .background(isSelected ? NotchTokens.fill(0.14) : .clear, in: Capsule())
         .contentShape(Capsule())
     }
 }
@@ -98,7 +98,7 @@ struct ClipboardBoardStyleStrip: View {
                 .font(.system(size: 11))
                 .foregroundStyle(isSelected ? NotchTokens.primaryText : NotchTokens.secondaryText)
                 .frame(width: 24, height: 22)
-                .background(isSelected ? Color.white.opacity(0.18) : .clear, in: Capsule())
+                .background(isSelected ? NotchTokens.fill(0.18) : .clear, in: Capsule())
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -113,7 +113,7 @@ struct ClipboardBoardStyleStrip: View {
             Circle()
                 .fill(color.color(accent: accent))
                 .frame(width: 13, height: 13)
-                .overlay { Circle().strokeBorder(Color.white.opacity(isSelected ? 0.95 : 0), lineWidth: 1.5).padding(-3) }
+                .overlay { Circle().strokeBorder(NotchTokens.fill(isSelected ? 0.95 : 0), lineWidth: 1.5).padding(-3) }
                 .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
         }

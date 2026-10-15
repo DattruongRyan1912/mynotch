@@ -10,6 +10,8 @@ struct ClipboardSearchField: NSViewRepresentable {
     /// is the same but follows the system's appearance; the library's follows the system and takes the keyboard only when
     /// asked, through `focusRequest`.
     var look = ClipboardLook.notch
+    /// Whether the notch is Liquid Glass, where its field follows the window's appearance instead of being dark.
+    var onGlass = false
     /// False while another field of the tab (a board name) has the keyboard.
     var takesFocus: Bool
     /// Changed by the tab to give the keyboard back to this field.
@@ -24,10 +26,8 @@ struct ClipboardSearchField: NSViewRepresentable {
     func makeNSView(context: Context) -> WindowReportingSearchField {
         let field = WindowReportingSearchField()
         field.placeholderString = look == .library ? "Tìm trong clipboard" : "Tìm trong lịch sử"
-        if look == .notch {
-            // The notch is always black, whatever the system appearance.
-            field.appearance = NSAppearance(named: .darkAqua)
-        }
+        // The classic notch is black whatever the system appearance; on Liquid Glass the field takes the window's.
+        field.appearance = look.fieldAppearance(onGlass: onGlass).flatMap(NSAppearance.init(named:))
         if look.focusesWithWindow { field.focusRingType = .none }
         field.stringValue = text
         field.delegate = context.coordinator
@@ -44,6 +44,8 @@ struct ClipboardSearchField: NSViewRepresentable {
     func updateNSView(_ field: WindowReportingSearchField, context: Context) {
         let coordinator = context.coordinator
         coordinator.parent = self
+        let appearance = look.fieldAppearance(onGlass: onGlass)
+        if field.appearance?.name != appearance { field.appearance = appearance.flatMap(NSAppearance.init(named:)) }
         if field.stringValue != text {
             field.stringValue = text
             // Puts the caret after the new text, e.g. after the word a suggestion completed.
