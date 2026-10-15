@@ -236,8 +236,9 @@ final class SnapSession {
     }
 
     /// Puts the window in its zone. Beside a window MyNotch placed before whose real frame reaches into the zone, it asks
-    /// for the free part of the zone instead, so the two do not overlap; a window that cannot be that small goes into its
-    /// zone as it would have (and is said so), and a neighbour is never moved.
+    /// for the free part of the zone instead, so the two do not overlap. A window that cannot be that small stays where it
+    /// ends up (against the outer edge of the part, at the size it keeps: the least it can overlap) and is said so; a
+    /// neighbour is never moved. A neighbour nobody can see (minimised, or its app hidden) is not in the way.
     private func move(_ window: any SnapWindow, to target: SnapTarget, on notch: NotchDisplay, gap: SnapGap) {
         pendingMove = nil
         let screens = environment.screens()
@@ -250,27 +251,27 @@ final class SnapSession {
         let app = window.app
         let others = placed.current(excluding: window)
         let adjacent = others.filter { target.isNeighbour(of: $0.target) }
-        let room = zone.room(beside: adjacent.map(\.frame), gap: gap.points)
-        environment.log(SnapReport.neighbours(app: app, target: target, known: others.count, adjacent: adjacent.map(\.app), room: room))
+        // Only a window that reaches into the zone is worth a question to its app.
+        let hidden = adjacent.filter { zone.reaches($0.frame, gap: gap.points) && $0.window.isOutOfSight }
+        let beside = adjacent.filter { entry in !hidden.contains { $0.window.isSame(as: entry.window) } }
+        let room = zone.room(beside: beside.map(\.frame), gap: gap.points)
+        environment.log(SnapReport.neighbours(
+            app: app, target: target, known: others.count, adjacent: adjacent.map(\.app), hidden: hidden.map(\.app), room: room
+        ))
 
-        var result: Put
-        var asked = zone
-        // What the window would not go below when it did not fit the free part.
-        var kept: CGSize?
+        let asked: SnapPlacement
+        let result: Put
         if case .part(let free) = room {
-            result = put(window, app: app, in: target, as: .part, placement: free)
             asked = free
-            if result.moved, let size = result.actual?.size, free.isOversize(size) {
-                kept = size
-                result = put(window, app: app, in: target, as: .fallback, placement: zone)
-            }
+            result = put(window, app: app, in: target, as: .part, placement: free)
         } else {
+            asked = zone
             result = put(window, app: app, in: target, as: .zone, placement: zone)
         }
         // An app that refused to move got nothing to feel, say or remember.
         guard result.moved else { return }
         environment.feel()
-        if let size = kept ?? result.actual?.size, let text = SnapReport.notice(for: app, size: size, zone: asked.frame.size) {
+        if let size = result.actual?.size, let text = SnapReport.notice(for: app, size: size, zone: asked.frame.size) {
             environment.notify(text)
         }
         guard let actual = result.actual else { return }
@@ -292,7 +293,12 @@ final class SnapSession {
         _ window: any SnapWindow, app: SnapApp, in target: SnapTarget, as ask: SnapReport.Ask, placement: SnapPlacement
     ) -> Put {
         let moved = window.place(placement)
-        let actual = window.frame()
+        var actual = window.frame()
+        // A slow app may say yes before it has applied the size. One more look before judging a window that seems not to
+        // have taken it: a smallest size looks the same the second time, a late one does not.
+        if let seen = actual, !placement.takes(seen.size) {
+            actual = window.frame() ?? actual
+        }
         environment.log(SnapReport.placed(app: app, target: target, ask: ask, placement: placement, actual: actual, moved: moved))
         return Put(moved: moved, actual: actual)
     }

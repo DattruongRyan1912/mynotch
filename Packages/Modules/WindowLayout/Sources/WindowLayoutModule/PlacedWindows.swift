@@ -11,6 +11,7 @@ final class PlacedWindows {
 
     /// A window that is still where it was put.
     struct Placed {
+        let window: any SnapWindow
         let app: SnapApp
         let target: SnapTarget
         /// Where the window is now, in Accessibility coordinates.
@@ -43,7 +44,7 @@ final class PlacedWindows {
         entries = entries.filter { entry in
             if entry.window.isSame(as: window) { return true }
             guard let live = entry.window.frame(), Self.isStillThere(live, at: entry.frame) else { return false }
-            found.append(Placed(app: entry.app, target: entry.target, frame: live))
+            found.append(Placed(window: entry.window, app: entry.app, target: entry.target, frame: live))
             return true
         }
         return found

@@ -47,4 +47,15 @@ import Testing
         #expect(placement.isOversize(CGSize(width: 759, height: 945)))
         #expect(placement.isOversize(CGSize(width: 756, height: 948)))
     }
+
+    @Test func aPlacementTakesASizeWithinTwoPointsOfItsOwnEitherWay() {
+        let placement = SnapPlacement(
+            frame: CGRect(origin: .zero, size: zone), area: CGRect(x: 0, y: 0, width: 1512, height: 945),
+            anchor: SnapAnchor(horizontal: .leading, vertical: .top)
+        )
+        #expect(placement.takes(zone))
+        #expect(placement.takes(CGSize(width: 754, height: 947)))
+        #expect(!placement.takes(CGSize(width: 753, height: 945)), "a window that stayed smaller is looked at again too")
+        #expect(!placement.takes(CGSize(width: 800, height: 600)))
+    }
 }

@@ -226,13 +226,16 @@ import Testing
 
     // MARK: when even the free part is too small
 
-    @Test func aWindowThatCannotShrinkToTheFreePartTakesItsOwnZoneAndSaysSo() {
+    @Test func aWindowThatCannotShrinkToTheFreePartStaysAtItsSmallestSizeAgainstTheOuterEdgeAndSaysSo() {
         let narrow = window("com.example.narrow", name: "Music", minimum: CGSize(width: 600, height: 0))
         fixture.snap(cleanMyMac, tile: Self.leftTile)
         fixture.snap(narrow, tile: Self.rightTile)
-        // Tried the 472 pt the first window left, kept 600, then went where the layout says.
-        #expect(narrow.setFrames == [CGRect(x: 1040, y: 37, width: 472, height: 945), CGRect(x: 756, y: 37, width: 756, height: 945)])
-        #expect(narrow.current == CGRect(x: 756, y: 37, width: 756, height: 945))
+        // Asked for the 472 pt the first window left, it kept 600 and stays there, against the right edge: one round of
+        // writes into the app, and no second ask for the whole 756 pt zone, which would cover more of its neighbour.
+        #expect(narrow.setFrames == [CGRect(x: 1040, y: 37, width: 472, height: 945)])
+        #expect(narrow.current == CGRect(x: 912, y: 37, width: 600, height: 945))
+        let covered = cleanMyMac.current.map { $0.intersection(narrow.current ?? .null).width }
+        #expect(covered == 128, "the overlap is what the window cannot help (600 - 472), not the 284 pt of the whole zone")
         #expect(fixture.notices.last == "Music không thu nhỏ được tới ô này (tối thiểu 600 pt)")
         #expect(fixture.notices.count == 2)
         #expect(fixture.felt == 2, "both snapped")
@@ -257,6 +260,121 @@ import Testing
         let next = window("com.example.next")
         fixture.snap(next, tile: Self.thirdsTile, zone: 0)
         #expect(next.placements.count == 1)
+    }
+
+    // MARK: neighbours nobody can see
+
+    @Test func aMinimisedOrHiddenNeighbourIsIgnoredAndAskedAboutOnlyWhenItReachesTheZone() {
+        fixture.snap(cleanMyMac, tile: Self.leftTile)
+        let fitting = window("com.example.fits")
+        fixture.snap(fitting, tile: Self.thirdsTile, zone: 2)
+        cleanMyMac.isHidden = true
+        fixture.snap(music, tile: Self.rightTile)
+        #expect(music.current == CGRect(x: 756, y: 37, width: 756, height: 945), "no room kept for a window nobody sees")
+        #expect(music.setFrames.count == 1)
+        #expect(cleanMyMac.outOfSightChecks == 1)
+        #expect(fitting.outOfSightChecks == 0, "a window that does not reach the zone is not worth a question to its app")
+        #expect(fixture.logged.contains { $0.hasPrefix("neighbours app=com.apple.Music") && $0.contains("hidden=com.macpaw.CleanMyMac decision=whole") })
+    }
+
+    @Test func aHiddenNeighbourIsNeighbourAgainOnceItIsBack() {
+        fixture.snap(cleanMyMac, tile: Self.leftTile)
+        cleanMyMac.isHidden = true
+        fixture.snap(music, tile: Self.rightTile)
+        cleanMyMac.isHidden = false
+        let next = window("com.example.next")
+        fixture.snap(next, tile: Self.rightTile)
+        #expect(next.current == CGRect(x: 1040, y: 37, width: 472, height: 945), "the window was only skipped, not forgotten")
+    }
+
+    @Test func aWindowThatFitsItsZoneIsNeverAskedWhetherItIsHidden() {
+        fixture.snap(music, tile: Self.leftTile)
+        fixture.snap(window("com.example.next"), tile: Self.rightTile)
+        #expect(music.outOfSightChecks == 0)
+    }
+
+    // MARK: two displays
+
+    @Test func aWindowOnAnotherDisplayIsNeverANeighbour() {
+        fixture.addExternalDisplay()
+        let wide = window("com.example.wide", minimum: CGSize(width: 1500, height: 0))
+        fixture.snap(wide, tile: Self.leftTile, onExternal: true)
+        // The external display starts exactly where the MacBook's right half ends.
+        fixture.snap(music, tile: Self.rightTile)
+        #expect(wide.current == CGRect(x: 1512, y: -335, width: 1500, height: 1335))
+        #expect(music.current == CGRect(x: 756, y: 37, width: 756, height: 945))
+        #expect(music.setFrames.count == 1)
+        let before = window("com.example.before", minimum: CGSize(width: 1000, height: 0))
+        fixture.snap(before, tile: Self.rightTile)
+        let beside = window("com.example.beside")
+        fixture.snap(beside, tile: Self.leftTile, onExternal: true)
+        #expect(beside.current == CGRect(x: 1512, y: -335, width: 1280, height: 1335), "same zone as the wide one: stacked")
+    }
+
+    @Test func aNeighbourStillNarrowsTheZoneOnItsOwnDisplay() {
+        fixture.addExternalDisplay()
+        let wide = window("com.example.wide", minimum: CGSize(width: 1500, height: 0))
+        let next = window("com.example.next")
+        fixture.snap(wide, tile: Self.leftTile, onExternal: true)
+        fixture.snap(next, tile: Self.rightTile, onExternal: true)
+        // The external display's right half is 2792 to 4072; the wide window reaches 3012.
+        #expect(next.current == CGRect(x: 3012, y: -335, width: 1060, height: 1335))
+        #expect(!overlap(wide, next))
+    }
+
+    // MARK: who is a neighbour
+
+    @Test func aWindowInTheSameZoneIsStackedOnPurposeEvenWhenItLeavesRoomBeside() {
+        // A window that cannot grow past 400 pt leaves 356 pt of the left half free: a free part a neighbour would get.
+        let small = window("com.example.small")
+        small.maximum = CGSize(width: 400, height: 10_000)
+        fixture.snap(small, tile: Self.leftTile)
+        let same = window("com.example.same")
+        fixture.snap(same, tile: Self.leftTile)
+        #expect(small.current == CGRect(x: 0, y: 37, width: 400, height: 945))
+        #expect(same.current == CGRect(x: 0, y: 37, width: 756, height: 945))
+        #expect(same.setFrames.count == 1)
+    }
+
+    @Test func neighbourhoodIsAnotherZoneOfTheSameFamily() {
+        func target(_ layout: SnapLayout, _ zone: Int = 0) -> SnapTarget { SnapTarget(layout: layout, zone: zone) }
+        #expect(target(.leftHalf).isNeighbour(of: target(.rightHalf)))
+        #expect(target(.rightHalf).isNeighbour(of: target(.leftHalf)))
+        #expect(!target(.leftHalf).isNeighbour(of: target(.leftHalf)))
+        #expect(target(.thirds, 0).isNeighbour(of: target(.thirds, 2)))
+        #expect(!target(.thirds, 1).isNeighbour(of: target(.thirds, 1)))
+        #expect(target(.quarters, 0).isNeighbour(of: target(.quarters, 3)))
+        #expect(!target(.quarters, 2).isNeighbour(of: target(.quarters, 2)))
+        #expect(!target(.leftHalf).isNeighbour(of: target(.thirds, 0)))
+        #expect(!target(.quarters, 0).isNeighbour(of: target(.leftHalf)))
+        for layout in [SnapLayout.fullScreen, .focus] {
+            #expect(!target(layout).isNeighbour(of: target(layout)))
+            #expect(!target(layout).isNeighbour(of: target(.leftHalf)))
+            #expect(!target(.leftHalf).isNeighbour(of: target(layout)))
+        }
+    }
+
+    // MARK: slow apps
+
+    @Test func anAppThatAppliesItsSizeLateIsJudgedByTheSizeItEndsWithAndRememberedByIt() {
+        let slow = FakeWindow(app: SnapApp(bundleID: "com.example.slow", name: "Slow"), minimum: CGSize(width: 1040, height: 0))
+        slow.appliesSizeLate = true
+        let next = window("com.example.next")
+        fixture.snap(slow, tile: Self.leftTile)
+        #expect(slow.current == CGRect(x: 0, y: 37, width: 1040, height: 945), "the size it really has")
+        // Remembered at that size, not at the 800 x 600 it was read at first.
+        fixture.snap(next, tile: Self.rightTile)
+        #expect(next.current == CGRect(x: 1040, y: 37, width: 472, height: 945))
+        #expect(fixture.notices == ["Slow không thu nhỏ được tới ô này (tối thiểu 1040 pt)"])
+    }
+
+    @Test func aSlowAppThatTakesTheZoneSizeGetsNoNoticeFromItsOldSize() {
+        let slow = FakeWindow(app: SnapApp(bundleID: "com.example.slow", name: "Slow"))
+        slow.appliesSizeLate = true
+        fixture.snap(slow, tile: Self.thirdsTile, zone: 0)
+        #expect(slow.current == CGRect(x: 0, y: 37, width: 504, height: 945))
+        #expect(fixture.notices.isEmpty, "it was read at its old 800 pt width first")
+        #expect(fixture.logged.last?.contains("actual=504x945") == true)
     }
 
     // MARK: the notice
@@ -289,23 +407,22 @@ import Testing
         fixture.snap(cleanMyMac, tile: Self.leftTile)
         fixture.snap(music, tile: Self.rightTile)
         #expect(fixture.logged == [
-            "neighbours app=com.macpaw.CleanMyMac layout=leftHalf zone=0 known=0 adjacent=none decision=whole",
+            "neighbours app=com.macpaw.CleanMyMac layout=leftHalf zone=0 known=0 adjacent=none hidden=none decision=whole",
             "placed app=com.macpaw.CleanMyMac layout=leftHalf zone=0 ask=zone frame=0,37,756,945 requested=756x945 actual=1040x945 origin=0,37 landed=0,37 oversize=yes refused=no",
-            "neighbours app=com.apple.Music layout=rightHalf zone=0 known=1 adjacent=com.macpaw.CleanMyMac decision=part free=1040,37,472,945",
+            "neighbours app=com.apple.Music layout=rightHalf zone=0 known=1 adjacent=com.macpaw.CleanMyMac hidden=none decision=part free=1040,37,472,945",
             "placed app=com.apple.Music layout=rightHalf zone=0 ask=part frame=1040,37,472,945 requested=472x945 actual=472x945 origin=1040,37 landed=1040,37 oversize=no refused=no",
         ])
     }
 
-    @Test func aFitThatFailedAndAnOverlapThatStaysAreLogged() {
+    @Test func aFitThatFailedAndTheOverlapThatStaysAreLogged() {
         let narrow = window("com.example.narrow", minimum: CGSize(width: 600, height: 0))
         fixture.snap(cleanMyMac, tile: Self.leftTile)
         fixture.snap(narrow, tile: Self.rightTile)
         let lines = Array(fixture.logged.dropFirst(2))
         #expect(lines == [
-            "neighbours app=com.example.narrow layout=rightHalf zone=0 known=1 adjacent=com.macpaw.CleanMyMac decision=part free=1040,37,472,945",
+            "neighbours app=com.example.narrow layout=rightHalf zone=0 known=1 adjacent=com.macpaw.CleanMyMac hidden=none decision=part free=1040,37,472,945",
             "placed app=com.example.narrow layout=rightHalf zone=0 ask=part frame=1040,37,472,945 requested=472x945 actual=600x945 origin=912,37 landed=912,37 oversize=yes refused=no",
-            "placed app=com.example.narrow layout=rightHalf zone=0 ask=fallback frame=756,37,756,945 requested=756x945 actual=756x945 origin=756,37 landed=756,37 oversize=no refused=no",
-            "overlaps app=com.example.narrow with=com.macpaw.CleanMyMac layout=leftHalf zone=0 by=284x945 neighbour-moved=no",
+            "overlaps app=com.example.narrow with=com.macpaw.CleanMyMac layout=leftHalf zone=0 by=128x945 neighbour-moved=no",
         ])
     }
 

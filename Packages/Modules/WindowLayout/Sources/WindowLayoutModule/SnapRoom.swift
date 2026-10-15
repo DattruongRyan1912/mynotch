@@ -23,9 +23,24 @@ nonisolated extension SnapPlacement {
         (size.width - zone.width > oversizeTolerance, size.height - zone.height > oversizeTolerance)
     }
 
+    /// A window of `size` has the size this zone asked for, give or take rounding.
+    func takes(_ size: CGSize) -> Bool {
+        abs(size.width - frame.width) <= Self.oversizeTolerance && abs(size.height - frame.height) <= Self.oversizeTolerance
+    }
+
     func isOversize(_ size: CGSize) -> Bool {
         let overflow = Self.overflow(of: size, in: frame.size)
         return overflow.wide || overflow.tall
+    }
+
+    /// A neighbour at `frame` is in the way of this zone: it comes within `gap` of it by more than rounding.
+    func reaches(_ neighbour: CGRect, gap: CGFloat) -> Bool {
+        Self.isInTheWay(neighbour, of: frame, gap: gap)
+    }
+
+    private static func isInTheWay(_ neighbour: CGRect, of zone: CGRect, gap: CGFloat) -> Bool {
+        let overlap = zone.intersection(neighbour.insetBy(dx: -gap, dy: -gap))
+        return overlap.width > overlapTolerance && overlap.height > overlapTolerance
     }
 
     /// The zone minus the frames of `neighbours` (where their windows really are, which may reach past their own zones),
@@ -36,9 +51,8 @@ nonisolated extension SnapPlacement {
         var free = frame
         var reached = false
         for neighbour in neighbours {
+            guard Self.isInTheWay(neighbour, of: free, gap: gap) else { continue }
             let clear = neighbour.insetBy(dx: -gap, dy: -gap)
-            let overlap = free.intersection(clear)
-            guard overlap.width > Self.overlapTolerance, overlap.height > Self.overlapTolerance else { continue }
             reached = true
             // Right of it, left of it, below it and above it (y grows down).
             let parts = [

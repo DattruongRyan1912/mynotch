@@ -7,10 +7,9 @@ import Foundation
 /// from inside a window, so the whole line is public in the unified log (subsystem `io.lucasvu.mynotch`, category
 /// `window-layout`). Frames are Accessibility coordinates, `x,y,w,h`; sizes are `WxH`; `?` is something the app did not say.
 nonisolated enum SnapReport {
-    /// What a placement asked for: the layout's zone, the free part of it beside a neighbour, or the zone again because
-    /// the window kept more than the free part.
+    /// What a placement asked for: the layout's zone, or the free part of it beside a neighbour.
     enum Ask: String {
-        case zone, part, fallback
+        case zone, part
     }
 
     /// "<App> không thu nhỏ được tới ô này (tối thiểu 1040 pt)": a window that kept a size bigger than the place it was
@@ -28,20 +27,21 @@ nonisolated enum SnapReport {
     }
 
     /// What was found beside a window about to be placed: how many placed windows are still where they were put, which of
-    /// them sit in a neighbouring zone, and what that leaves of this one.
-    static func neighbours(app: SnapApp, target: SnapTarget, known: Int, adjacent: [SnapApp], room: SnapRoom) -> String {
+    /// them sit in a neighbouring zone, which of those reach into this one but were skipped because nobody can see them
+    /// (minimised, or their app hidden), and what that leaves of the zone.
+    static func neighbours(app: SnapApp, target: SnapTarget, known: Int, adjacent: [SnapApp], hidden: [SnapApp], room: SnapRoom) -> String {
         let decision: String
         switch room {
         case .whole: decision = "whole"
         case .part(let free): decision = "part free=\(rect(free.frame))"
         case .crowded: decision = "crowded"
         }
-        let beside = adjacent.isEmpty ? "none" : adjacent.map { $0.bundleID ?? "?" }.joined(separator: "+")
-        return "neighbours \(subject(app, target)) known=\(known) adjacent=\(beside) decision=\(decision)"
+        return "neighbours \(subject(app, target)) known=\(known) adjacent=\(names(adjacent)) hidden=\(names(hidden)) decision=\(decision)"
     }
 
     /// One placement: what was asked of the window, what it came to and where it went. `oversize` says the window kept a
-    /// size bigger than what was asked; `refused`, that the app would not move it. A refused window's size says nothing.
+    /// size bigger than what was asked (it overlaps whatever is beside the part it was given); `refused`, that the app
+    /// would not move it. A refused window's size says nothing.
     static func placed(app: SnapApp, target: SnapTarget, ask: Ask, placement: SnapPlacement, actual: CGRect?, moved: Bool) -> String {
         let origin = actual.map { point(placement.origin(for: $0.size)) } ?? "?"
         let oversize = moved && (actual.map { placement.isOversize($0.size) } ?? false)
@@ -54,6 +54,10 @@ nonisolated enum SnapReport {
     static func overlaps(app: SnapApp, other: PlacedWindows.Placed, by overlap: CGSize) -> String {
         "overlaps app=\(app.bundleID ?? "?") with=\(other.app.bundleID ?? "?") layout=\(other.target.layout.id) zone=\(other.target.zone)"
             + " by=\(size(overlap)) neighbour-moved=no"
+    }
+
+    private static func names(_ apps: [SnapApp]) -> String {
+        apps.isEmpty ? "none" : apps.map { $0.bundleID ?? "?" }.joined(separator: "+")
     }
 
     private static func subject(_ app: SnapApp, _ target: SnapTarget) -> String {

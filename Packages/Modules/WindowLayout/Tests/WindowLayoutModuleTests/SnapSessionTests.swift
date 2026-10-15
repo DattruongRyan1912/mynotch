@@ -27,6 +27,10 @@ final class SessionFixture {
     static let nearMacBook = CGPoint(x: 640, y: 975)
     static let macBookContent = NotchGeometry(screen: macBook, config: NotchLayoutConfig())
         .contentFrame(height: SnapTiles.height, in: macBook.frame)
+    /// The external display's notch (centred at x 2792, its top edge at y 1342) and its row of tiles; near it, as above.
+    static let externalContent = NotchGeometry(screen: external, config: NotchLayoutConfig())
+        .contentFrame(height: SnapTiles.height, in: external.frame)
+    static let nearExternal = CGPoint(x: 2792, y: 1320)
 
     /// The window being dragged: `snap(_:tile:)` swaps it for another one.
     private(set) var window = FakeWindow(frame: CGRect(x: 600, y: 300, width: 800, height: 600))
@@ -74,9 +78,20 @@ final class SessionFixture {
         return CGPoint(x: frame.midX, y: frame.midY)
     }
 
+    /// Shows the external display's notch too, and its visible area (full height of the menu bar and a Dock taken out).
+    func addExternalDisplay() {
+        notches.append(NotchDisplay(
+            id: 2, screenFrame: Self.external.frame, geometry: NotchGeometry(screen: Self.external, config: NotchLayoutConfig())
+        ))
+        screens = SnapScreens(
+            screens: [SnapScreen(id: 1, visibleFrame: Self.macBookVisible), SnapScreen(id: 2, visibleFrame: Self.externalVisible)],
+            primaryHeight: 982
+        )
+    }
+
     /// Where zone `zone` of tile `index` is in the picture, in its middle: the point that drops on exactly that zone.
-    func zonePoint(tile index: Int, zone: Int = 0, count: Int = 6) -> CGPoint {
-        let glyph = SnapTiles.glyphFrame(in: SnapTiles.frames(count: count, in: Self.macBookContent)[index])
+    func zonePoint(tile index: Int, zone: Int = 0, count: Int = 6, content: CGRect = SessionFixture.macBookContent) -> CGPoint {
+        let glyph = SnapTiles.glyphFrame(in: SnapTiles.frames(count: count, in: content)[index])
         let unit = SnapLayout.allCases[index].zones[zone].unit
         return CGPoint(x: glyph.minX + unit.midX * glyph.width, y: glyph.maxY - unit.midY * glyph.height)
     }
@@ -112,11 +127,12 @@ final class SessionFixture {
 
     /// Drags `moving` to the notch, drops it on zone `zone` of tile `tile` (an index of `SnapLayout.allCases`) and lets
     /// the move happen.
-    func snap(_ moving: FakeWindow, tile: Int, zone: Int = 0) {
+    func snap(_ moving: FakeWindow, tile: Int, zone: Int = 0, onExternal: Bool = false) {
         window = moving
         probe.focused = moving
-        openTiles()
-        let point = zonePoint(tile: tile, zone: zone)
+        startWindowDrag()
+        drag(to: onExternal ? Self.nearExternal : Self.nearMacBook)
+        let point = zonePoint(tile: tile, zone: zone, content: onExternal ? Self.externalContent : Self.macBookContent)
         drag(to: point)
         release(at: point)
         settle()

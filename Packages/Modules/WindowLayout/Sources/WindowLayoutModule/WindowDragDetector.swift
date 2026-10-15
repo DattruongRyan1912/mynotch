@@ -12,6 +12,11 @@ nonisolated struct SnapApp: Equatable, Sendable {
 /// the origin is the top left of the primary display and y grows down.
 protocol SnapWindow: AnyObject {
     var app: SnapApp { get }
+    /// The window is minimised or its app is hidden: nobody sees it, wherever its frame says it is. A window on another
+    /// Space is not told apart: Accessibility still answers for it, and the public ways to find out (the window list, which
+    /// has to be matched to the element by its bounds, or what `kAXWindowsAttribute` leaves out) are neither permission-free
+    /// nor documented.
+    var isOutOfSight: Bool { get }
     /// Position and size, or nil when the app does not answer.
     func frame() -> CGRect?
     /// Moves and resizes the window to the placement, and keeps it inside the placement's visible area when the app does not

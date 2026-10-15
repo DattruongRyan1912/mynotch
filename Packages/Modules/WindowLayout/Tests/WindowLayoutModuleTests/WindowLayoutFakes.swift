@@ -2,12 +2,14 @@ import CoreGraphics
 @testable import WindowLayoutModule
 
 /// A window that records what it was asked, so no real window is ever moved. Frames are in Accessibility coordinates.
-/// Like a real app it can keep a smallest size whatever it is asked for, and it can be closed.
+/// Like a real app it can keep a smallest or a largest size whatever it is asked for, apply a size a moment late, stop
+/// answering, be hidden and be closed.
 final class FakeWindow: SnapWindow {
     var current: CGRect?
     let app: SnapApp
-    /// The smallest size the app lets the window have.
+    /// The smallest and the largest size the app lets the window have.
     var minimum: CGSize
+    var maximum: CGSize?
     private(set) var placements: [SnapPlacement] = []
     /// Where the zones were, one per placement asked for.
     var setFrames: [CGRect] { placements.map(\.frame) }
@@ -15,6 +17,13 @@ final class FakeWindow: SnapWindow {
     var accepts = true
     /// An app that stops answering about the window once it has been moved.
     var goesSilentOnceMoved = false
+    /// A slow app: the window is moved at once but keeps its old size until it has been asked about it once.
+    var appliesSizeLate = false
+    /// The window is minimised or its app is hidden.
+    var isHidden = false
+    /// How often the module asked whether the window is out of sight.
+    private(set) var outOfSightChecks = 0
+    private var settled: CGRect?
 
     init(
         frame: CGRect? = CGRect(x: 100, y: 100, width: 800, height: 600),
@@ -25,13 +34,35 @@ final class FakeWindow: SnapWindow {
         self.minimum = minimum
     }
 
-    func frame() -> CGRect? { current }
+    var isOutOfSight: Bool {
+        outOfSightChecks += 1
+        return isHidden
+    }
+
+    func frame() -> CGRect? {
+        defer {
+            if let settled {
+                current = settled
+                self.settled = nil
+            }
+        }
+        return current
+    }
 
     func place(_ placement: SnapPlacement) -> Bool {
         placements.append(placement)
         guard accepts else { return false }
-        let size = CGSize(width: max(placement.frame.width, minimum.width), height: max(placement.frame.height, minimum.height))
-        current = goesSilentOnceMoved ? nil : CGRect(origin: placement.origin(for: size), size: size)
+        var size = CGSize(width: max(placement.frame.width, minimum.width), height: max(placement.frame.height, minimum.height))
+        if let maximum { size = CGSize(width: min(size.width, maximum.width), height: min(size.height, maximum.height)) }
+        let final = CGRect(origin: placement.origin(for: size), size: size)
+        if goesSilentOnceMoved {
+            current = nil
+        } else if appliesSizeLate, let old = current {
+            current = CGRect(origin: final.origin, size: old.size)
+            settled = final
+        } else {
+            current = final
+        }
         return true
     }
 

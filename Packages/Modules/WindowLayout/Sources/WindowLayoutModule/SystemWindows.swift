@@ -16,12 +16,21 @@ final class AccessibilityWindow: SnapWindow, WindowAttributes {
     }
 
     /// The owner of the element, for the log and the notice. No Accessibility call: the element knows its process.
-    var app: SnapApp {
+    private var owner: NSRunningApplication? {
         var pid: pid_t = 0
-        guard AXUIElementGetPid(element, &pid) == .success, let running = NSRunningApplication(processIdentifier: pid) else {
-            return SnapApp(bundleID: nil, name: nil)
-        }
-        return SnapApp(bundleID: running.bundleIdentifier, name: running.localizedName)
+        guard AXUIElementGetPid(element, &pid) == .success else { return nil }
+        return NSRunningApplication(processIdentifier: pid)
+    }
+
+    var app: SnapApp { SnapApp(bundleID: owner?.bundleIdentifier, name: owner?.localizedName) }
+
+    /// The app's own flag first (no call into the app), then the window's minimised attribute (one read).
+    var isOutOfSight: Bool {
+        if owner?.isHidden == true { return true }
+        var raw: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXMinimizedAttribute as CFString, &raw) == .success,
+              let raw, CFGetTypeID(raw) == CFBooleanGetTypeID() else { return false }
+        return CFBooleanGetValue(unsafeDowncast(raw, to: CFBoolean.self))
     }
 
     func frame() -> CGRect? {
