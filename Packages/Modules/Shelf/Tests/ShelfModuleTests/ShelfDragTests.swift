@@ -108,6 +108,44 @@ import UniformTypeIdentifiers
         #expect(!ShelfDragSourceView.takes(nil))
     }
 
+    @Test func aPlainClickPicksTheCardAndADoubleClickOpensItLeavingItAsItWas() throws {
+        func event(_ type: NSEvent.EventType, clickCount: Int) throws -> NSEvent {
+            try #require(NSEvent.mouseEvent(
+                with: type, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+                context: nil, eventNumber: 0, clickCount: clickCount, pressure: 1
+            ))
+        }
+        let view = ShelfDragSourceView()
+        var clicks = 0, opens = 0
+        view.onClick = { clicks += 1 }
+        view.onOpen = { opens += 1 }
+
+        view.mouseDown(with: try event(.leftMouseDown, clickCount: 1))
+        view.mouseUp(with: try event(.leftMouseUp, clickCount: 1))
+        #expect(clicks == 1 && opens == 0)
+
+        // A double click: the first click picked the card, so the second puts it back.
+        clicks = 0
+        view.mouseDown(with: try event(.leftMouseDown, clickCount: 1))
+        view.mouseUp(with: try event(.leftMouseUp, clickCount: 1))
+        view.mouseDown(with: try event(.leftMouseDown, clickCount: 2))
+        view.mouseUp(with: try event(.leftMouseUp, clickCount: 2))
+        #expect(clicks == 2 && opens == 1)
+    }
+
+    @Test func clickingTheCardsLayerPicksItsFile() async throws {
+        let fixture = ShelfFixture()
+        await fixture.start()
+        let file = try makeTempFile(in: try makeTempDirectory())
+        _ = await fixture.module.add(providers: [NSItemProvider(object: file as NSURL)])
+        let item = try #require(fixture.items.first)
+        let layer = try dragLayer(of: ShelfCardView(item: item, state: fixture.module.state, module: fixture.module)).layer
+        layer.onClick()
+        #expect(fixture.module.isSelected(item))
+        layer.onClick()
+        #expect(!fixture.module.isSelected(item))
+    }
+
     // MARK: What a card carries
 
     private func pasteboard(holding writer: (any NSPasteboardWriting)?) throws -> NSPasteboard {

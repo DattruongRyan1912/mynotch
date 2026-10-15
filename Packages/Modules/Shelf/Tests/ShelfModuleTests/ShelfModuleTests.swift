@@ -45,10 +45,17 @@ nonisolated final class GatedProvider: @unchecked Sendable {
 struct ShelfFixture {
     let module: ShelfModule
     let harness: RegistryHarness
+    /// What the module would copy; never the system clipboard.
+    let pasteboard: FakePasteboard
 
-    /// Each fixture has its own notification center, so a quit posted in one test reaches no other module.
-    init(notifications: NotificationCenter = NotificationCenter()) {
-        module = ShelfModule(notifications: notifications)
+    /// Each fixture has its own notification center, so a quit posted in one test reaches no other module. Text
+    /// recognition, cut-outs and the clipboard are fakes, so no test runs Vision or writes a pasteboard.
+    init(
+        notifications: NotificationCenter = NotificationCenter(), pasteboard: FakePasteboard = FakePasteboard(),
+        recognizer: FakeRecognizer = FakeRecognizer(), cutter: FakeCutter = FakeCutter()
+    ) {
+        self.pasteboard = pasteboard
+        module = ShelfModule(notifications: notifications, pasteboard: pasteboard, recognizer: recognizer, cutter: cutter)
         harness = RegistryHarness([module])
     }
 
@@ -88,7 +95,7 @@ struct ShelfFixture {
         #expect(module.descriptor.order == 800)
         let tab = try #require(module.makeTab())
         #expect(tab.title == "Khay")
-        #expect(tab.preferredHeight == 170)
+        #expect(tab.preferredHeight == 184)
         #expect(tab.dropTypes == [.fileURL, .url, .plainText, .image])
         #expect(tab.onDrop != nil)
     }
@@ -100,10 +107,16 @@ struct ShelfFixture {
         #expect(settings.value(keys.clearOnQuit) == false)
         #expect(settings.value(keys.removeAfterDragOut) == false)
         #expect(settings.value(keys.maxItems) == 50)
+        #expect(settings.value(keys.imageQuality) == 0.85)
+        #expect(settings.value(keys.stripLocation) == true)
         settings.set(5, for: keys.maxItems)
         #expect(settings.value(keys.maxItems) == 10)
         settings.set(500, for: keys.maxItems)
         #expect(settings.value(keys.maxItems) == 200)
+        settings.set(0.01, for: keys.imageQuality)
+        #expect(settings.value(keys.imageQuality) == 0.1)
+        settings.set(3, for: keys.imageQuality)
+        #expect(settings.value(keys.imageQuality) == 1)
         #expect(fixture.module.makeSettingsView(fixture.harness.settingsEnvironment(for: "shelf")!) != nil)
     }
 

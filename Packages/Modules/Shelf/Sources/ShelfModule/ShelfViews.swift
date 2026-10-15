@@ -8,11 +8,14 @@ struct ShelfTabView: View {
     let module: ShelfModule
 
     @Environment(\.notch) private var notch
+    /// A menu of this app is being tracked: a card's context menu, or one of the action buttons.
+    @State private var isMenuOpen = false
 
     var body: some View {
         let items = state.store?.items ?? []
+        let isIdle = state.actions.phase == .idle
         VStack(spacing: 6) {
-            if items.isEmpty {
+            if items.isEmpty && isIdle {
                 Text("Thả file, link hoặc văn bản vào notch")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
@@ -26,19 +29,38 @@ struct ShelfTabView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
-                ScrollView(.horizontal) {
-                    LazyHGrid(rows: [GridItem(.fixed(78))], spacing: 8) {
-                        ForEach(items) { item in
-                            ShelfCardView(item: item, state: state, module: module)
+                if isIdle {
+                    ScrollView(.horizontal) {
+                        LazyHGrid(rows: [GridItem(.fixed(78))], spacing: 8) {
+                            ForEach(items) { item in
+                                ShelfCardView(item: item, state: state, module: module)
+                            }
                         }
                     }
+                    .scrollIndicators(.hidden)
+                    ShelfActionsRow(module: module)
+                } else {
+                    ShelfActionStatusView(state: state, module: module)
                 }
-                .scrollIndicators(.hidden)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { state.store?.refreshLocations() }
-        .onChange(of: state.sharingID) { notch.setPinned(state.sharingID != nil) }
+        // The menus are outside the notch's reach: a click there counts as outside and the pointer may leave the
+        // notch, so it stays pinned while one is open. The pin is set right here, not in `onChange`, which could wait
+        // until the menu's tracking loop ends.
+        .onReceive(NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)) { _ in
+            isMenuOpen = true
+            notch.setPinned(true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSMenu.didEndTrackingNotification)) { _ in
+            isMenuOpen = false
+            notch.setPinned(state.sharingID != nil)
+        }
+        .onChange(of: state.sharingID) { notch.setPinned(state.sharingID != nil || isMenuOpen) }
+        .onDisappear {
+            if isMenuOpen { notch.setPinned(false) }
+        }
     }
 }
 
@@ -57,6 +79,7 @@ struct ShelfCardView: View {
         }
         .frame(width: 76, height: 78)
         .background(.white.opacity(0.08), in: .rect(cornerRadius: 8))
+        .overlay(alignment: .topLeading) { selectionMark }
         .background(ShelfShareAnchor(items: { module.shareItems(for: item) }, isPresented: isSharing))
         .overlay(ShelfCardDragSource(item: item, module: module, image: dragImage))
         .contextMenu {
@@ -68,6 +91,20 @@ struct ShelfCardView: View {
             Button("Chia sẻ…", systemImage: "square.and.arrow.up") { state.sharingID = item.id }
             Divider()
             Button("Xoá khỏi khay", systemImage: "trash", role: .destructive) { module.remove(item) }
+        }
+    }
+
+    /// A ring and a tick on a card picked for an action.
+    @ViewBuilder private var selectionMark: some View {
+        if module.isSelected(item) {
+            RoundedRectangle(cornerRadius: 8).stroke(Color.accentColor, lineWidth: 2)
+                .overlay(alignment: .topLeading) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color.accentColor, .white)
+                        .padding(3)
+                }
+                .accessibilityLabel("Đã chọn")
         }
     }
 
@@ -156,6 +193,11 @@ struct ShelfSettingsView: View {
                 value: settings.binding(keys.maxItems), in: ShelfSettingKeys.maxItemsRange, step: 10
             )
             Toggle("Xoá khỏi khay sau khi kéo ra", isOn: settings.binding(keys.removeAfterDragOut))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Chất lượng ảnh JPEG, HEIC và PDF: \(Int((settings.value(keys.imageQuality) * 100).rounded())) %")
+                Slider(value: settings.binding(keys.imageQuality), in: ShelfSettingKeys.imageQualityRange, step: 0.05)
+            }
+            Toggle("Xoá vị trí (GPS) khỏi ảnh đã xử lý", isOn: settings.binding(keys.stripLocation))
         }
     }
 }

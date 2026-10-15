@@ -11,6 +11,12 @@ final class ShelfState {
     var store: ShelfStore?
     /// The card whose share picker is shown.
     var sharingID: UUID?
+    /// The file cards picked for an action, in the order they were picked (the page order of a merged PDF).
+    var selection: [UUID] = []
+    /// The choice used last in each group of the "Hành động" row; a file dropped on the group runs it.
+    var preferred: [ShelfActionGroup: FileAction] = [:]
+    /// The action that is running, or the report of the last one.
+    let actions = FileActionRunner()
 }
 
 /// A shelf in the notch: drop files, links or text on it, take them out again later.
@@ -26,15 +32,32 @@ public final class ShelfModule: FeatureModule {
     static let dropTypes: [UTType] = [.fileURL, .url, .plainText, .image]
 
     let state = ShelfState()
-    private var context: ModuleContext?
-    private var keys: ShelfSettingKeys?
+    private(set) var context: ModuleContext?
+    private(set) var keys: ShelfSettingKeys?
 
     private let notifications: NotificationCenter
     private var isObservingQuit = false
+    let pasteboard: any PasteboardWriting
+    let recognizer: any TextRecognizing
+    let cutter: any ForegroundCutting
 
-    public init() { notifications = .default }
+    public init() {
+        notifications = .default
+        pasteboard = SystemPasteboard()
+        recognizer = VisionTextRecognizer()
+        cutter = VisionForegroundCutter()
+    }
 
-    init(notifications: NotificationCenter) { self.notifications = notifications }
+    /// Tests pass fakes, so they never run Vision or write a pasteboard.
+    init(
+        notifications: NotificationCenter, pasteboard: any PasteboardWriting = SystemPasteboard(),
+        recognizer: any TextRecognizing = VisionTextRecognizer(), cutter: any ForegroundCutting = VisionForegroundCutter()
+    ) {
+        self.notifications = notifications
+        self.pasteboard = pasteboard
+        self.recognizer = recognizer
+        self.cutter = cutter
+    }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
         do {
@@ -50,8 +73,10 @@ public final class ShelfModule: FeatureModule {
     }
 
     public func stop() async {
+        state.actions.reset()
         state.store = nil
         state.sharingID = nil
+        state.selection = []
         context = nil
         keys = nil
     }
@@ -72,7 +97,7 @@ public final class ShelfModule: FeatureModule {
 
     public func makeTab() -> NotchTab? {
         NotchTab(
-            id: descriptor.id, title: "Khay", systemImage: descriptor.systemImage, preferredHeight: 170,
+            id: descriptor.id, title: "Khay", systemImage: descriptor.systemImage, preferredHeight: 184,
             dropTypes: Self.dropTypes,
             onDrop: { [weak self] in self?.drop($0) ?? false },
             content: AnyView(ShelfTabView(state: state, module: self))
@@ -91,9 +116,13 @@ public final class ShelfModule: FeatureModule {
     }
 
     /// Returns how many items were added.
-    func add(providers: [NSItemProvider]) async -> Int {
-        guard let store = state.store, let keys, let context else { return 0 }
-        var added = 0
+    func add(providers: [NSItemProvider]) async -> Int { await addItems(providers: providers).count }
+
+    /// The items the providers became, in the order of the drop (an item that was already there is moved to the
+    /// front and counts).
+    func addItems(providers: [NSItemProvider]) async -> [ShelfItem] {
+        guard let store = state.store, let keys, let context else { return [] }
+        var added: [ShelfItem] = []
         // The newest item goes first on the shelf, so the last provider goes in first and the order of the drop is kept.
         for provider in providers.reversed() {
             let kind = await ShelfDropLoader.load(provider, promisedDirectory: store.promisedDirectory)
@@ -108,7 +137,7 @@ public final class ShelfModule: FeatureModule {
                 continue
             }
             store.add(kind, limit: context.settings.value(keys.maxItems))
-            added += 1
+            if let item = store.items.first { added.insert(item, at: 0) }
         }
         return added
     }
@@ -133,8 +162,15 @@ public final class ShelfModule: FeatureModule {
         store.remove(id: item.id, deletingCopy: false)
     }
 
-    func remove(_ item: ShelfItem) { state.store?.remove(id: item.id) }
-    func removeAll() { state.store?.removeAll() }
+    func remove(_ item: ShelfItem) {
+        state.selection.removeAll { $0 == item.id }
+        state.store?.remove(id: item.id)
+    }
+
+    func removeAll() {
+        state.selection = []
+        state.store?.removeAll()
+    }
 
     /// What the system's sharing services take for this item. Called when sharing, not when drawing.
     func shareItems(for item: ShelfItem) -> [Any] {

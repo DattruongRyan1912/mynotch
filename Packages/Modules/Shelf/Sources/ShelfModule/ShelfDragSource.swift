@@ -49,6 +49,8 @@ final class ShelfDragSourceView: NSView {
     var writer: () -> (any NSPasteboardWriting)? = { nil }
     var image: () -> NSImage = { NSImage() }
     var onOpen: () -> Void = {}
+    /// A plain click, which picks the card for an action.
+    var onClick: () -> Void = {}
     var onBegin: () -> Void = {}
     var onEnd: (NSDragOperation) -> Void = { _ in }
 
@@ -72,7 +74,17 @@ final class ShelfDragSourceView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         pressedAt = event.locationInWindow
-        if event.clickCount == 2 { onOpen() }
+        // The first click of a double click has already picked the card, so the second puts it back.
+        if event.clickCount == 2 {
+            onOpen()
+            onClick()
+        }
+    }
+
+    /// A press that never became a drag is a click.
+    override func mouseUp(with event: NSEvent) {
+        defer { pressedAt = nil }
+        if pressedAt != nil, event.clickCount == 1 { onClick() }
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -105,6 +117,7 @@ struct ShelfCardDragSource: NSViewRepresentable {
         view.writer = { module.dragWriter(for: item) }
         view.image = image
         view.onOpen = { module.open(item) }
+        view.onClick = { module.toggleSelection(item) }
         view.onBegin = { notch.setDragging(true) }
         view.onEnd = { operation in
             notch.setDragging(false)
