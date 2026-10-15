@@ -9,6 +9,13 @@ nonisolated struct SnapTarget: Equatable, Sendable {
     func frame(in area: CGRect, gap: CGFloat) -> CGRect {
         layout.frame(zone: zone, in: area, gap: gap)
     }
+
+    /// A window in `other` sits beside one placed here: another zone of the same family (the two halves, the thirds, the
+    /// quarters). The same zone is a window stacked on purpose, and other families are not made to fit together.
+    func isNeighbour(of other: SnapTarget) -> Bool {
+        guard let family = layout.family, family == other.layout.family else { return false }
+        return layout != other.layout || zone != other.zone
+    }
 }
 
 /// The row of layout tiles in the open notch and which zone of which tile the pointer is over. The view draws the row

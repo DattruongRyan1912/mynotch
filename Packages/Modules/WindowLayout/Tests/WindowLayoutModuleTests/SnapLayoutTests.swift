@@ -114,6 +114,38 @@ import Testing
         }
     }
 
+    // MARK: fractional areas
+
+    /// A Dock of 60.5 pt on the right, 69.5 pt at the bottom, a menu bar of 37.3: edges that are not whole points.
+    static let fractional = [
+        CGRect(x: 0, y: 0, width: 1451.5, height: 944.5),
+        CGRect(x: 60.5, y: 69.5, width: 1451.5, height: 875.5),
+        CGRect(x: 0.4, y: 37.3, width: 1511.2, height: 944.6),
+    ]
+
+    @Test func aVisibleAreaWithFractionalEdgesStillGivesWholePointFramesInsideIt() {
+        for area in Self.fractional {
+            for layout in SnapLayout.allCases {
+                for gap in Self.gaps {
+                    for frame in frames(layout, in: area, gap: gap) {
+                        #expect(area.contains(frame), "\(layout) \(gap) in \(area): \(frame)")
+                        for value in [frame.minX, frame.minY, frame.width, frame.height] {
+                            #expect(value == value.rounded(), "\(layout) \(gap) in \(area): \(frame)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test func halvesOfAnAreaWithFractionalEdgesStillMeetAtOneEdge() {
+        for area in Self.fractional {
+            let left = frames(.leftHalf, in: area)[0], right = frames(.rightHalf, in: area)[0]
+            #expect(left.maxX == right.minX, "\(area)")
+            #expect(left.minX >= area.minX && right.maxX <= area.maxX, "\(area)")
+        }
+    }
+
     // MARK: gaps
 
     @Test func aGapIsTheSpaceBetweenWindowsAndAlsoBetweenAWindowAndTheEdgeOfTheArea() {

@@ -15,6 +15,15 @@ final class AccessibilityWindow: SnapWindow, WindowAttributes {
         AXUIElementSetMessagingTimeout(element, Self.readTimeout)
     }
 
+    /// The owner of the element, for the log and the notice. No Accessibility call: the element knows its process.
+    var app: SnapApp {
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(element, &pid) == .success, let running = NSRunningApplication(processIdentifier: pid) else {
+            return SnapApp(bundleID: nil, name: nil)
+        }
+        return SnapApp(bundleID: running.bundleIdentifier, name: running.localizedName)
+    }
+
     func frame() -> CGRect? {
         guard let origin = position(), let size = size() else { return nil }
         return CGRect(origin: origin, size: size)

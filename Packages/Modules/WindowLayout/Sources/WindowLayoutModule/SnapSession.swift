@@ -73,6 +73,10 @@ final class SnapSession {
         /// A window took the place of a tile: the light tap on the trackpad that goes with it, which the interface gives
         /// unless the user turned taps off.
         let feel: () -> Void
+        /// One line for the diagnostics log (`SnapReport`).
+        let log: (String) -> Void
+        /// A short line in the notch about a snap that did not turn out as the layout shows.
+        let notify: (String) -> Void
     }
 
     /// The tiles are open on `notch`, with these layouts.
@@ -91,6 +95,8 @@ final class SnapSession {
     private let scheduler: any Scheduler
     private var preview: (any SnapPreview)?
     private var open: Open?
+    /// The windows put in a zone so far, for the next one to be put beside them.
+    private let placed = PlacedWindows()
     /// Escape was pressed: the rest of this drag does nothing.
     private var isCancelled = false
     private var pendingMove: ScheduledAction?
@@ -127,6 +133,7 @@ final class SnapSession {
     func stop() {
         pendingMove?.cancel()
         pendingMove = nil
+        placed.removeAll()
         finishDrag()
         preview?.dismiss()
         preview = nil
@@ -228,17 +235,65 @@ final class SnapSession {
         events.setWatchingEscape(false)
     }
 
+    /// Puts the window in its zone. Beside a window MyNotch placed before whose real frame reaches into the zone, it asks
+    /// for the free part of the zone instead, so the two do not overlap; a window that cannot be that small goes into its
+    /// zone as it would have (and is said so), and a neighbour is never moved.
     private func move(_ window: any SnapWindow, to target: SnapTarget, on notch: NotchDisplay, gap: SnapGap) {
         pendingMove = nil
         let screens = environment.screens()
         guard let area = screens.screens.first(where: { $0.id == notch.id })?.visibleFrame else { return }
-        let frame = target.frame(in: area, gap: gap.points)
-        let snapped = window.place(SnapPlacement(
-            frame: SnapSpace.accessibilityFrame(of: frame, primaryHeight: screens.primaryHeight),
-            area: SnapSpace.accessibilityFrame(of: area, primaryHeight: screens.primaryHeight),
+        let zone = SnapPlacement(
+            frame: SnapSpace.accessibilityFrame(of: target.frame(in: area, gap: gap.points), primaryHeight: screens.primaryHeight),
+            area: SnapSpace.accessibilityFrame(of: area.insideWholePoints, primaryHeight: screens.primaryHeight),
             anchor: target.layout.zones[target.zone].anchor
-        ))
-        // An app that refused to move got nothing to feel.
-        if snapped { environment.feel() }
+        )
+        let app = window.app
+        let others = placed.current(excluding: window)
+        let adjacent = others.filter { target.isNeighbour(of: $0.target) }
+        let room = zone.room(beside: adjacent.map(\.frame), gap: gap.points)
+        environment.log(SnapReport.neighbours(app: app, target: target, known: others.count, adjacent: adjacent.map(\.app), room: room))
+
+        var result: Put
+        var asked = zone
+        // What the window would not go below when it did not fit the free part.
+        var kept: CGSize?
+        if case .part(let free) = room {
+            result = put(window, app: app, in: target, as: .part, placement: free)
+            asked = free
+            if result.moved, let size = result.actual?.size, free.isOversize(size) {
+                kept = size
+                result = put(window, app: app, in: target, as: .fallback, placement: zone)
+            }
+        } else {
+            result = put(window, app: app, in: target, as: .zone, placement: zone)
+        }
+        // An app that refused to move got nothing to feel, say or remember.
+        guard result.moved else { return }
+        environment.feel()
+        if let size = kept ?? result.actual?.size, let text = SnapReport.notice(for: app, size: size, zone: asked.frame.size) {
+            environment.notify(text)
+        }
+        guard let actual = result.actual else { return }
+        placed.record(window, in: target, frame: actual)
+        for other in others {
+            let overlap = actual.intersection(other.frame)
+            guard overlap.width > SnapPlacement.oversizeTolerance, overlap.height > SnapPlacement.oversizeTolerance else { continue }
+            environment.log(SnapReport.overlaps(app: app, other: other, by: overlap.size))
+        }
+    }
+
+    private struct Put {
+        let moved: Bool
+        /// Where the window really is afterwards, nil when the app does not answer.
+        let actual: CGRect?
+    }
+
+    private func put(
+        _ window: any SnapWindow, app: SnapApp, in target: SnapTarget, as ask: SnapReport.Ask, placement: SnapPlacement
+    ) -> Put {
+        let moved = window.place(placement)
+        let actual = window.frame()
+        environment.log(SnapReport.placed(app: app, target: target, ask: ask, placement: placement, actual: actual, moved: moved))
+        return Put(moved: moved, actual: actual)
     }
 }

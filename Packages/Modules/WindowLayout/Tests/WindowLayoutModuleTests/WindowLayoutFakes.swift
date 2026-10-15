@@ -2,16 +2,27 @@ import CoreGraphics
 @testable import WindowLayoutModule
 
 /// A window that records what it was asked, so no real window is ever moved. Frames are in Accessibility coordinates.
+/// Like a real app it can keep a smallest size whatever it is asked for, and it can be closed.
 final class FakeWindow: SnapWindow {
     var current: CGRect?
+    let app: SnapApp
+    /// The smallest size the app lets the window have.
+    var minimum: CGSize
     private(set) var placements: [SnapPlacement] = []
     /// Where the zones were, one per placement asked for.
     var setFrames: [CGRect] { placements.map(\.frame) }
     /// What `place` answers: an app that refuses to be moved.
     var accepts = true
+    /// An app that stops answering about the window once it has been moved.
+    var goesSilentOnceMoved = false
 
-    init(frame: CGRect? = CGRect(x: 100, y: 100, width: 800, height: 600)) {
+    init(
+        frame: CGRect? = CGRect(x: 100, y: 100, width: 800, height: 600),
+        app: SnapApp = SnapApp(bundleID: "com.example.fake", name: "Fake"), minimum: CGSize = .zero
+    ) {
         current = frame
+        self.app = app
+        self.minimum = minimum
     }
 
     func frame() -> CGRect? { current }
@@ -19,7 +30,8 @@ final class FakeWindow: SnapWindow {
     func place(_ placement: SnapPlacement) -> Bool {
         placements.append(placement)
         guard accepts else { return false }
-        current = placement.frame
+        let size = CGSize(width: max(placement.frame.width, minimum.width), height: max(placement.frame.height, minimum.height))
+        current = goesSilentOnceMoved ? nil : CGRect(origin: placement.origin(for: size), size: size)
         return true
     }
 
@@ -30,6 +42,9 @@ final class FakeWindow: SnapWindow {
         guard let frame = current else { return }
         current = CGRect(origin: origin, size: frame.size)
     }
+
+    /// The user closing the window: the app no longer answers for it.
+    func close() { current = nil }
 }
 
 /// Answers `focusedWindow` from a script and counts how often it was asked.

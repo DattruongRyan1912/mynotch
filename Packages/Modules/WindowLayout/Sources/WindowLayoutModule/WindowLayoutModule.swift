@@ -1,6 +1,7 @@
 import MyNotchCore
 import NotchUI
 import SwiftUI
+import os
 
 /// Snaps a window into a layout when it is dragged onto the notch: while a window is dragged and the pointer comes near
 /// the notch, the notch opens a row of layout tiles; letting go over a tile moves and resizes the window to that tile's
@@ -20,6 +21,8 @@ public final class WindowLayoutModule: FeatureModule {
 
     /// How long the notch holds the tiles at most. They close with the drag, so this only bounds a drag that never ends.
     static let tilesLifetime = Duration.seconds(30)
+    /// How long the notch shows the line about a window that did not fit its zone.
+    static let noticeLifetime = Duration.seconds(4)
 
     private let events: any DragEventSource
     private let probe: any WindowProbe
@@ -54,6 +57,7 @@ public final class WindowLayoutModule: FeatureModule {
         let permissions = context.permissions
         let presenter = context.presenter
         let interface = interface
+        let logger = Log.logger(category: "window-layout")
         let session = SnapSession(
             environment: SnapSession.Environment(
                 isTrusted: { permissions.status(of: .accessibility) == .granted },
@@ -62,7 +66,9 @@ public final class WindowLayoutModule: FeatureModule {
                 options: { keys.options(settings) },
                 showTiles: { presenter.showToast($0, duration: Self.tilesLifetime) },
                 hideTiles: { presenter.close() },
-                feel: { interface.feel(.alignment) }
+                feel: { interface.feel(.alignment) },
+                log: { logger.notice("\($0, privacy: .public)") },
+                notify: { presenter.showToast(AnyView(SnapNoticeView(text: $0)), duration: Self.noticeLifetime) }
             ),
             probe: probe, events: events, makePreview: makePreview, scheduler: context.scheduler
         )

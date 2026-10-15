@@ -171,6 +171,30 @@ final class ModuleFixture {
         #expect(fixture.window.setFrames.count == 1)
     }
 
+    // MARK: the notice
+
+    @Test func aWindowThatKeepsALargerSizeIsToldSoThroughTheNotch() async {
+        let fixture = ModuleFixture()
+        fixture.window.minimum = CGSize(width: 1040, height: 0)
+        await fixture.enable()
+        fixture.dragOverFirstTile()
+        fixture.events.send(.up(fixture.firstTile()))
+        #expect(fixture.harness.presenter.toastCount == 1, "only the tiles so far")
+        fixture.harness.scheduler.advance(by: .milliseconds(200))
+        #expect(fixture.window.current?.width == 1040)
+        #expect(fixture.harness.presenter.toastCount == 2, "then the notice")
+    }
+
+    @Test func aWindowThatFitsItsZoneGetsNoNotice() async {
+        let fixture = ModuleFixture()
+        await fixture.enable()
+        fixture.dragOverFirstTile()
+        fixture.events.send(.up(fixture.firstTile()))
+        fixture.harness.scheduler.advance(by: .milliseconds(200))
+        #expect(fixture.window.setFrames.count == 1)
+        #expect(fixture.harness.presenter.toastCount == 1)
+    }
+
     // MARK: the tap on the trackpad
 
     @Test func aWindowSnappedIntoATileTapsTheTrackpadWithAnAlignment() async {

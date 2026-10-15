@@ -28,7 +28,8 @@ final class SessionFixture {
     static let macBookContent = NotchGeometry(screen: macBook, config: NotchLayoutConfig())
         .contentFrame(height: SnapTiles.height, in: macBook.frame)
 
-    let window = FakeWindow(frame: CGRect(x: 600, y: 300, width: 800, height: 600))
+    /// The window being dragged: `snap(_:tile:)` swaps it for another one.
+    private(set) var window = FakeWindow(frame: CGRect(x: 600, y: 300, width: 800, height: 600))
     let probe: FakeWindowProbe
     let events = FakeDragEvents()
     let preview = FakePreview()
@@ -41,6 +42,9 @@ final class SessionFixture {
     private(set) var hidden = 0
     /// How many taps on the trackpad the session asked for.
     private(set) var felt = 0
+    /// What the session wrote to its log and what it told the user in the notch, in order.
+    private(set) var logged: [String] = []
+    private(set) var notices: [String] = []
     private(set) var session: SnapSession!
     private var time: TimeInterval = 0
 
@@ -54,7 +58,9 @@ final class SessionFixture {
                 options: { [unowned self] in options },
                 showTiles: { [unowned self] _ in shown += 1 },
                 hideTiles: { [unowned self] in hidden += 1 },
-                feel: { [unowned self] in felt += 1 }
+                feel: { [unowned self] in felt += 1 },
+                log: { [unowned self] in logged.append($0) },
+                notify: { [unowned self] in notices.append($0) }
             ),
             probe: probe, events: events, makePreview: { [preview] in preview }, scheduler: scheduler
         )
@@ -66,6 +72,13 @@ final class SessionFixture {
     func tilePoint(_ index: Int, count: Int = 6) -> CGPoint {
         let frame = SnapTiles.frames(count: count, in: Self.macBookContent)[index]
         return CGPoint(x: frame.midX, y: frame.midY)
+    }
+
+    /// Where zone `zone` of tile `index` is in the picture, in its middle: the point that drops on exactly that zone.
+    func zonePoint(tile index: Int, zone: Int = 0, count: Int = 6) -> CGPoint {
+        let glyph = SnapTiles.glyphFrame(in: SnapTiles.frames(count: count, in: Self.macBookContent)[index])
+        let unit = SnapLayout.allCases[index].zones[zone].unit
+        return CGPoint(x: glyph.minX + unit.midX * glyph.width, y: glyph.maxY - unit.midY * glyph.height)
     }
 
     func press() {
@@ -95,6 +108,18 @@ final class SessionFixture {
 
     func release(at point: CGPoint) {
         session.handle(.up(point))
+    }
+
+    /// Drags `moving` to the notch, drops it on zone `zone` of tile `tile` (an index of `SnapLayout.allCases`) and lets
+    /// the move happen.
+    func snap(_ moving: FakeWindow, tile: Int, zone: Int = 0) {
+        window = moving
+        probe.focused = moving
+        openTiles()
+        let point = zonePoint(tile: tile, zone: zone)
+        drag(to: point)
+        release(at: point)
+        settle()
     }
 
     func settle() {
@@ -469,7 +494,7 @@ final class SessionFixture {
         let session = SnapSession(
             environment: SnapSession.Environment(
                 isTrusted: { true }, notches: { [] }, screens: { fixture.screens }, options: { fixture.options },
-                showTiles: { _ in }, hideTiles: {}, feel: {}
+                showTiles: { _ in }, hideTiles: {}, feel: {}, log: { _ in }, notify: { _ in }
             ),
             probe: fixture.probe, events: fixture.events, makePreview: { built += 1; return fixture.preview }, scheduler: fixture.scheduler
         )

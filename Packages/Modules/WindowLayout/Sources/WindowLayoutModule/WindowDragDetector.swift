@@ -1,9 +1,17 @@
 import CoreGraphics
 import Foundation
 
+/// The app a window belongs to, as the log and the notice name it: never a window title or anything inside the window.
+nonisolated struct SnapApp: Equatable, Sendable {
+    let bundleID: String?
+    /// What the user knows the app as (`NSRunningApplication.localizedName`).
+    let name: String?
+}
+
 /// A window of another app, as far as the module needs to know it. `frame` and `place` use Accessibility coordinates:
 /// the origin is the top left of the primary display and y grows down.
 protocol SnapWindow: AnyObject {
+    var app: SnapApp { get }
     /// Position and size, or nil when the app does not answer.
     func frame() -> CGRect?
     /// Moves and resizes the window to the placement, and keeps it inside the placement's visible area when the app does not

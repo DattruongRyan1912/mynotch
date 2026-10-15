@@ -7,6 +7,17 @@ nonisolated enum SnapLayout: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
+    /// Layouts whose zones are meant to sit side by side on one display: a window in one zone of a family is the neighbour
+    /// of one placed in another zone of it. Full screen and the centred focus zone have nobody beside them.
+    var family: SnapFamily? {
+        switch self {
+        case .leftHalf, .rightHalf: .halves
+        case .thirds: .thirds
+        case .quarters: .quarters
+        case .fullScreen, .focus: nil
+        }
+    }
+
     var title: String {
         switch self {
         case .leftHalf: "Nửa trái"
@@ -47,7 +58,12 @@ nonisolated enum SnapLayout: String, CaseIterable, Identifiable, Sendable {
     /// The gap is the space between two windows and also between a window and the edge of the area, so a gap of 8 looks
     /// the same everywhere. A side the zone shares with another window's zone is moved in by half the gap, so the two
     /// windows end up a whole gap apart even though each was placed on its own.
+    ///
+    /// Zone edges are whole points, so an area whose own edges are not (a Dock of 60.5 pt) is first pulled in to whole
+    /// points: rounded to the nearest, an edge could end up half a point outside the area, where the window would be
+    /// pushed back in and overlap its neighbour by that much.
     func frame(zone index: Int, in area: CGRect, gap: CGFloat) -> CGRect {
+        let area = area.insideWholePoints
         let zone = zones[index]
         let unit = zone.unit
         // Never so deep that nothing is left, whatever the area: on a tiny one the gap just shrinks.
@@ -67,6 +83,11 @@ nonisolated enum SnapLayout: String, CaseIterable, Identifiable, Sendable {
         let minX = left.rounded(), minY = lower.rounded()
         return CGRect(x: minX, y: minY, width: max(right.rounded() - minX, 1), height: max(upper.rounded() - minY, 1))
     }
+}
+
+/// The layouts whose zones share a display: the two halves are two layouts of one family.
+nonisolated enum SnapFamily: Sendable {
+    case halves, thirds, quarters
 }
 
 /// One place a layout puts a window.
@@ -163,6 +184,14 @@ nonisolated struct SnapPlacement: Equatable, Sendable {
 
     private static func inside(_ start: CGFloat, length: CGFloat, from low: CGFloat, to high: CGFloat) -> CGFloat {
         length >= high - low ? low : min(max(start, low), high - length)
+    }
+}
+
+nonisolated extension CGRect {
+    /// The largest rectangle with whole-point edges inside this one.
+    var insideWholePoints: CGRect {
+        let left = minX.rounded(.up), top = minY.rounded(.up)
+        return CGRect(x: left, y: top, width: max(maxX.rounded(.down) - left, 0), height: max(maxY.rounded(.down) - top, 0))
     }
 }
 
