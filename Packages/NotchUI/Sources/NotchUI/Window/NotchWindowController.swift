@@ -17,6 +17,8 @@ final class NotchWindowController {
     private let panel: NotchPanel
     private let hosting: FirstMouseHostingView<NotchRootView>
     private let theme: NotchTheme?
+    /// The debug switches of the glass look, as read once when this notch was made; its root view is rebuilt with the same ones.
+    private let glassSwitches: NotchGlassSwitches
     private let registry: ModuleRegistry
     private let activities: ActivityCenter
     private let captureHiding: () -> CaptureHiding
@@ -59,6 +61,7 @@ final class NotchWindowController {
         systemAllowsSwipe: @escaping () -> Bool = { NSEvent.isSwipeTrackingFromScrollEventsEnabled },
         swipeToOpen: @escaping () -> SwipeSensitivity? = { nil },
         theme: NotchTheme? = nil,
+        glassSwitches: NotchGlassSwitches = .default,
         feel: @escaping (Haptic) -> Void = { _ in }
     ) {
         self.displayID = displayID
@@ -69,13 +72,16 @@ final class NotchWindowController {
         self.systemAllowsSwipe = systemAllowsSwipe
         self.swipeToOpen = swipeToOpen
         self.theme = theme
+        self.glassSwitches = glassSwitches
         self.feel = feel
         screenFrame = screen.frame
         geometry = NotchGeometry(screen: screen, config: config)
         model = NotchViewModel(scheduler: scheduler, availableTabs: { [weak registry] in registry?.tabs.map(\.id) ?? [] }, delays: delays)
         panel = NotchPanel(frame: geometry.panelFrame(in: screen.frame))
         hosting = FirstMouseHostingView(
-            rootView: NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry, theme: theme)
+            rootView: NotchRootView(
+                model: model, activities: activities, registry: registry, geometry: geometry, theme: theme, switches: glassSwitches
+            )
         )
         hosting.frame = CGRect(origin: .zero, size: geometry.panelSize)
         panel.contentView = hosting
@@ -116,7 +122,9 @@ final class NotchWindowController {
         model.bubbleCount = CompactAccessories.bubbleCount(activities: activities, geometry: newGeometry)
         // The new shape first, then the frame: `setFrame(display: true)` draws at once, and it must not draw the old shape
         // in the new frame.
-        hosting.rootView = NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry, theme: theme)
+        hosting.rootView = NotchRootView(
+            model: model, activities: activities, registry: registry, geometry: geometry, theme: theme, switches: glassSwitches
+        )
         panel.setFrame(geometry.panelFrame(in: screen.frame), display: true)
         hosting.frame = CGRect(origin: .zero, size: geometry.panelSize)
         refreshHitTesting()

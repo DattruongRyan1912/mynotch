@@ -26,11 +26,11 @@ nonisolated enum NotchGlassID: Hashable, Sendable {
 }
 
 nonisolated extension NotchSurface {
-    /// The `Glass` this surface draws, nil for the black and the classic blur. The regular variant, which adapts to what is
-    /// behind it, tinted with `accent` at low strength when the user asks for it.
-    func glass(accent: Color, interactive: Bool) -> Glass? {
+    /// The `Glass` this surface draws, nil for the black and the classic blur. The regular variant unless `variant` says clear
+    /// (a debug switch), which adapts to what is behind it, tinted with `accent` at low strength when the user asks for it.
+    func glass(accent: Color, interactive: Bool, variant: NotchGlassVariant = .regular) -> Glass? {
         guard case .liquidGlass(let tinted) = self else { return nil }
-        var glass = Glass.regular
+        var glass = variant.glass
         if tinted { glass = glass.tint(accent.opacity(NotchTokens.glassTintOpacity)) }
         return interactive ? glass.interactive() : glass
     }
@@ -47,6 +47,13 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
         let glass: Glass
     }
 
+    /// The notch's surface when an `NSGlassEffectView` draws it (the AppKit host) instead of `glassEffect`.
+    struct AppKitSurface: Equatable, Sendable {
+        let variant: NotchGlassVariant
+        /// The accent at low strength when the user asks for the tint.
+        let tint: Color?
+    }
+
     /// No glass at all: the classic look.
     static let none = NotchGlassPlan()
 
@@ -56,29 +63,69 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
     /// the other.
     static let containerSpacing: CGFloat = 4
 
+    /// How close two cards, chips or fields in the inner container (below) have to be to melt into each other: a little, so the
+    /// ones that sit 6 or 8 pt apart in a module's grid stay apart.
+    static let innerContainerSpacing: CGFloat = 2
+
     /// Whether the notch and its bubbles are wrapped in one `GlassEffectContainer`.
     let usesContainer: Bool
+    /// The notch's own shape when `glassEffect` draws it; nil in the AppKit host, which draws it itself (`appKitNotch`).
     let notch: Shape?
     /// The bubbles' shapes, in the order of the bubbles.
     let bubbles: [Shape]
+    /// The notch's surface in the AppKit host; nil when `glassEffect` draws it.
+    let appKitNotch: AppKitSurface?
+    /// How much black goes between the glass and the content, inside the notch's shape.
+    let dim: Double
+    /// The colour scheme forced on the content (the notch's and the bubbles'), not on the glass; nil leaves the window's own.
+    let contentScheme: ColorScheme?
+    /// The spacing of the inner `GlassEffectContainer` that holds the cards, chips and fields of the open notch, apart from the
+    /// notch's container; nil when they are not glass. See `cardContainerSpacing(surface:switches:)`.
+    let cardContainerSpacing: CGFloat?
 
     var containerSpacing: CGFloat? { usesContainer ? Self.containerSpacing : nil }
     var shapes: [Shape] { (notch.map { [$0] } ?? []) + bubbles }
 
     private init() {
-        (usesContainer, notch, bubbles) = (false, nil, [])
+        (usesContainer, notch, bubbles, appKitNotch, dim, contentScheme, cardContainerSpacing) = (false, nil, [], nil, 0, nil, nil)
+    }
+
+    /// The inner container's spacing for cards of `surface` under `switches`: one when the cards are glass on a glass notch.
+    ///
+    /// Why an inner container. A glass shape inside the content of another glass view (a card in the notch) gets a backdrop of
+    /// its own in the layer tree, apart from the notch's, with or without a container around it (a throwaway probe of the layer
+    /// tree showed it; nothing here can see what the window server then draws). What the container changes is the grouping: two
+    /// cards side by side with no container are one backdrop each (three with the notch's), and in one container they share one
+    /// (two with the notch's), and their blend distance is ours to set, below the gap a module leaves between cards. So the content
+    /// of the open notch gets one container of its own, not the notch's.
+    static func cardContainerSpacing(surface: NotchSurface, switches: NotchGlassSwitches) -> CGFloat? {
+        surface.isLiquidGlass && switches.cards == .glass ? innerContainerSpacing : nil
     }
 
     /// The plan for `surface` with a bubble for each of `bubbleIDs` (the `ActivitySlot.id`s). The notch's glass is not
-    /// interactive: it is a surface that holds controls, not a control. A bubble is a button, so its glass is.
-    init(surface: NotchSurface, bubbleIDs: [String], accent: Color) {
-        guard let notchGlass = surface.glass(accent: accent, interactive: false), let bubbleGlass = surface.glass(accent: accent, interactive: true) else {
+    /// interactive: it is a surface that holds controls, not a control. A bubble is a button, so its glass is. `switches` are the
+    /// debug switches, which only matter on glass: today's behaviour when they are left out.
+    init(surface: NotchSurface, bubbleIDs: [String], accent: Color, switches: NotchGlassSwitches = .default) {
+        guard let notchGlass = surface.glass(accent: accent, interactive: false, variant: switches.variant),
+              let bubbleGlass = surface.glass(accent: accent, interactive: true, variant: switches.variant)
+        else {
             self = .none
             return
         }
         usesContainer = true
-        notch = Shape(id: .notch, glass: notchGlass)
+        switch switches.host {
+        case .swiftui:
+            notch = Shape(id: .notch, glass: notchGlass)
+            appKitNotch = nil
+        case .appkit:
+            notch = nil
+            let tint: Color? = if case .liquidGlass(tinted: true) = surface { accent.opacity(NotchTokens.glassTintOpacity) } else { nil }
+            appKitNotch = AppKitSurface(variant: switches.variant, tint: tint)
+        }
         bubbles = bubbleIDs.map { Shape(id: .bubble($0), glass: bubbleGlass) }
+        dim = switches.dim
+        contentScheme = switches.scheme == .dark ? .dark : nil
+        cardContainerSpacing = Self.cardContainerSpacing(surface: surface, switches: switches)
     }
 
     /// The shape of the bubble of activity `id`, if the plan has one.
@@ -101,6 +148,11 @@ extension View {
         } else {
             self
         }
+    }
+
+    /// Forces `scheme` on the view's content when there is one; the view itself otherwise, so the default tree is unchanged.
+    @ViewBuilder func notchContentScheme(_ scheme: ColorScheme?) -> some View {
+        if let scheme { environment(\.colorScheme, scheme) } else { self }
     }
 
     /// Draws the view on the notch's own surface in `shape`: black in the classic look, Liquid Glass in the other, whichever the

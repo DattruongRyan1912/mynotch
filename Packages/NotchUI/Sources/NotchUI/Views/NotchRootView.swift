@@ -10,6 +10,9 @@ struct NotchRootView: View {
     let geometry: NotchGeometry
     /// The user's accent and glass; nothing is the notch's own purple and no glass.
     var theme: NotchTheme?
+    /// The debug switches of the glass look (U3c), which the window controller read from the defaults once. Today's behaviour when
+    /// left out.
+    var switches: NotchGlassSwitches = .default
 
     @Namespace private var glassNamespace
 
@@ -91,17 +94,20 @@ struct NotchRootView: View {
         let surface = surface
         // The bubbles are only drawn, and so only planned, beside the collapsed notch.
         let slots = surface.isLiquidGlass && state == .compact ? ActivitySlot.bubbles(of: activities, capacity: geometry.bubbleCapacity) : []
-        let plan = NotchGlassPlan(surface: surface, bubbleIDs: slots.map(\.id), accent: accent)
+        let plan = NotchGlassPlan(surface: surface, bubbleIDs: slots.map(\.id), accent: accent, switches: switches)
         NotchGlassFamily(plan) {
             ZStack(alignment: .top) {
-                NotchBackdrop(surface: surface, bodyHeight: geometry.notchSize.height)
+                NotchBackdrop(surface: surface, bodyHeight: geometry.notchSize.height, dim: plan.dim)
                     .overlay(alignment: .top) {
                         content(accessories)
                             .padding(.horizontal, radii.top)
                             .environment(\.notch, NotchHandle(model: model))
+                            .notchContentScheme(plan.contentScheme)
                     }
                     .clipShape(shape)
                     .frame(width: size.width, height: size.height)
+                    // The AppKit host's glass, if that is the one asked for; behind the shape, with its size and spring.
+                    .notchAppKitGlass(plan.appKitNotch, topRadius: radii.top, bottomRadius: radii.bottom)
                     // Above the animation below, so the glass takes its shape and size from the same spring as the notch.
                     .notchGlass(plan.notch, in: shape, namespace: glassNamespace)
                     .contentShape(shape)
@@ -125,6 +131,7 @@ struct NotchRootView: View {
         .environment(\.notchSurface, surface)
         .environment(\.notchGlassNamespace, surface.isLiquidGlass ? glassNamespace : nil)
         .environment(\.notchGlassPlan, plan)
+        .environment(\.notchGlassSwitches, switches)
     }
 
     /// The bubbles of the other live activities, beside the collapsed notch only. They appear and go with the pill's
@@ -198,25 +205,39 @@ struct NotchRootView: View {
     }
 
     private var tabPage: some View {
-        VStack(spacing: 0) {
-            if registry.tabs.count >= 2 {
-                TabBar(tabs: registry.tabs, selected: shownTab?.id) { model.open(tab: $0) }
-                    .padding(.bottom, 6)
-            }
-            if let shownTab {
-                shownTab.content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    // Esc while the tab has focus; the panel's cancelOperation covers the rest.
-                    .onExitCommand { model.close() }
-                    .notchLogLifecycle("tab \(shownTab.id.rawValue)")
-                    .id(shownTab.id)
-                    .transition(.opacity.animation(NotchTokens.swap))
-            } else {
-                Text("Chưa có module nào đang chạy")
-                    .foregroundStyle(surface.secondaryStyle)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The cards of the tab bar, the sample strip and the tab are one inner family when they are glass (see `NotchGlassPlan`);
+        // otherwise the group adds nothing.
+        NotchCardGroup(spacing: NotchGlassPlan.cardContainerSpacing(surface: surface, switches: switches)) {
+            VStack(spacing: 0) {
+                if registry.tabs.count >= 2 {
+                    TabBar(tabs: registry.tabs, selected: shownTab?.id) { model.open(tab: $0) }
+                        .padding(.bottom, 6)
+                }
+                // Below the tab bar and above the tab, taking room from the tab: the notch does not grow for it.
+                if switches.sample {
+                    NotchSampleStrip(cardRadius: sampleCardRadius)
+                }
+                if let shownTab {
+                    shownTab.content
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        // Esc while the tab has focus; the panel's cancelOperation covers the rest.
+                        .onExitCommand { model.close() }
+                        .notchLogLifecycle("tab \(shownTab.id.rawValue)")
+                        .id(shownTab.id)
+                        .transition(.opacity.animation(NotchTokens.swap))
+                } else {
+                    Text("Chưa có module nào đang chạy")
+                        .foregroundStyle(surface.secondaryStyle)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
+    }
+
+    /// The sample card's radius: the open notch's bottom radius less the padding between the card and the notch's edge, so the
+    /// card's corner is concentric with the notch's (24 - 14 = 10).
+    private var sampleCardRadius: CGFloat {
+        NotchCardPlan.concentricRadius(outer: geometry.cornerRadii(for: .open(nil)).bottom, inset: NotchTokens.padding)
     }
 
     private func expanded<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {

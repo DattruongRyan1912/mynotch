@@ -77,6 +77,8 @@ private struct ActivityBubble: View {
                     Text("+\(count)").font(.system(size: 11, weight: .semibold)).foregroundStyle(surface.primaryStyle)
                 }
             }
+            // The content only, as in the notch: the glass keeps the system's scheme (a debug switch can force the content dark).
+            .notchContentScheme(plan.contentScheme)
             .frame(width: diameter, height: diameter)
             .notchGlass(planned, in: Circle(), namespace: namespace)
             .glassBubbleTransition(planned: planned != nil)
