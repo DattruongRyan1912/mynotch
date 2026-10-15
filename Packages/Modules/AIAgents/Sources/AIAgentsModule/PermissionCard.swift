@@ -28,11 +28,14 @@ nonisolated enum PermissionCardText {
         case notWhole
         /// A character that is not printable ASCII: the card cannot promise to show it as it is.
         case notPlain
+        /// The folder in the title has a character that could not be drawn as what it is.
+        case folderUnreadable
     }
 
     static func eligibility(of request: PermissionRequest) -> Eligibility {
         guard request.isWhole else { return .notWhole }
-        return request.isPlain ? .offerable : .notPlain
+        guard request.isPlain else { return .notPlain }
+        return request.folderIsReadable ? .offerable : .folderUnreadable
     }
 
     /// "Cho phép" only for a whole, plain request whose whole text is on this card; `fits` is the layout's to say. A request
@@ -43,17 +46,14 @@ nonisolated enum PermissionCardText {
         switch eligibility(of: request) {
         case .offerable where fits: [Button("Cho phép", .allow), Button("Từ chối", .deny), Button("Hỏi trong terminal", .ask)]
         case .offerable where placement == .strip: [Button("Từ chối", .deny)]
-        case .offerable, .notWhole, .notPlain: [Button("Từ chối", .deny), Button("Trả lời trong terminal", .ask)]
+        case .offerable, .notWhole, .notPlain, .folderUnreadable: [Button("Từ chối", .deny), Button("Trả lời trong terminal", .ask)]
         }
     }
 
-    /// The agent and, when the request knows it, the folder it works in. The folder is shown only when it is plain text, like
-    /// the rest of what the card shows: one with anything else in it (a letter of a script that runs the other way, a look-alike)
-    /// is an ellipsis, since it is context and the user is not asked about it.
+    /// The agent and, when the request knows it, the folder it works in, cleaned: accents and other scripts as they are, and a
+    /// character that cannot be drawn as what it is replaced by U+FFFD (which also stops the request being allowed).
     static func title(of request: PermissionRequest) -> String {
-        guard let project = request.project else { return request.source.displayName }
-        let plain = project.unicodeScalars.allSatisfy { $0.value >= 0x20 && $0.value <= 0x7E }
-        return "\(request.source.displayName) • \(plain ? project : "…")"
+        request.project.map { "\(request.source.displayName) • \($0)" } ?? request.source.displayName
     }
 
     static func toolName(of request: PermissionRequest) -> String {
@@ -95,6 +95,7 @@ nonisolated enum PermissionCardText {
         case .offerable: placement == .strip ? "Mở tab AI để xem đủ" : "Quá dài để cho phép tại đây"
         case .notWhole: "Chưa đủ chi tiết để cho phép tại đây"
         case .notPlain: "Có ký tự ngoài ASCII: trả lời trong terminal"
+        case .folderUnreadable: "Tên thư mục có ký tự lạ: trả lời trong terminal"
         }
     }
 
@@ -218,10 +219,12 @@ struct PermissionCardLayout: View {
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if let queued = PermissionCardText.queued(others) {
+                    // The last to give way: the signal that more is waiting is worth more than the title or a long tool name.
                     Text(queued)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(NotchTokens.secondaryText)
                         .lineLimit(1)
+                        .layoutPriority(2)
                 }
             }
             // All of it, in as many lines as it takes, or a preview that ends in an ellipsis.

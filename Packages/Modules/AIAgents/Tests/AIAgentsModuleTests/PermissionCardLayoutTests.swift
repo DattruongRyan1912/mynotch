@@ -75,7 +75,7 @@ import Testing
     /// An armed queue holding nothing else: the card reads whether it takes answers from it.
     func armedQueue(for request: PermissionRequest) -> PermissionQueue {
         let queue = PermissionQueue(scheduler: scheduler)
-        queue.add(HookPayload(source: "claude", event: "PermissionRequest", sessionID: "s1", tool: request.tool, timestamp: t0, detail: request.detail)) { _ in }
+        queue.add(HookPayload(source: "claude", event: "PermissionRequest", sessionID: "s1", cwd: request.cwd, tool: request.tool, timestamp: t0, detail: request.detail)) { _ in }
         scheduler.advance(by: PermissionQueue.armingDelay)
         return queue
     }
@@ -367,18 +367,91 @@ import Testing
         }
     }
 
-    @Test func theTitleShowsTheFolderOnlyWhenItIsPlainText() {
-        func title(_ cwd: String?) -> String {
-            let payload = HookPayload(
-                source: "claude", event: "PermissionRequest", sessionID: "s1", cwd: cwd, tool: "Bash", timestamp: t0,
-                detail: PermissionDetail(text: "ls", hiddenLines: 0, isComplete: true)
-            )
-            return PermissionCardText.title(of: PermissionRequest(payload: payload, id: "id")!)
+    func folderRequest(_ cwd: String?, others: Int = 0) -> PermissionRequest {
+        let payload = HookPayload(
+            source: "claude", event: "PermissionRequest", sessionID: "s1", cwd: cwd, tool: "Bash", timestamp: t0,
+            detail: PermissionDetail(text: "ls", hiddenLines: 0, isComplete: true)
+        )
+        return PermissionRequest(payload: payload, id: "id")!
+    }
+
+    /// The title says where the agent works, cleaned: accents and every other letter as they are, and a character that cannot be
+    /// drawn as what it is replaced by U+FFFD, in which case the user cannot read the folder and is not offered "Cho phép".
+    @Test func theTitleShowsTheCleanedFolderAndAFolderThatCouldNotBeReadBlocksAllow() {
+        let shown: [(String, String)] = [
+            ("/Users/x/MyNotch", "MyNotch"), ("/Users/x/D\u{1EF1} \u{00E1}n", "D\u{1EF1} \u{00E1}n"), ("/Users/x/Caf\u{00E9}", "Caf\u{00E9}"),
+            // A Cyrillic capital em in front of "yNotch": it looks like the Latin one and is shown as it is.
+            ("/Users/x/\u{041C}yNotch", "\u{041C}yNotch"), ("/Users/x/\u{05D0}bc", "\u{05D0}bc"), ("/Users/x/\u{6F22}\u{5B57}", "\u{6F22}\u{5B57}"),
+        ]
+        for (cwd, folder) in shown {
+            let asking = folderRequest(cwd)
+            #expect(PermissionCardText.title(of: asking) == "Claude Code • \(folder)", "\(folder)")
+            #expect(asking.canAllow, "\(folder)")
+            #expect(PermissionCardText.eligibility(of: asking) == .offerable, "\(folder)")
         }
-        #expect(title("/Users/x/MyNotch") == "Claude Code • MyNotch")
-        #expect(title("/Users/x/D\u{1EF1} \u{00E1}n") == "Claude Code • …")
-        #expect(title("/Users/x/\u{05D0}bc") == "Claude Code • …")
-        #expect(title("/Users/x/pro\u{202E}ject") == "Claude Code • …")
-        #expect(title(nil) == "Claude Code")
+        let blocked: [(String, String)] = [
+            ("/Users/x/pro\u{202E}ject", "pro\u{FFFD}ject"), ("/Users/x/a\u{00A0}b", "a\u{FFFD}b"), ("/Users/x/a\u{200B}b", "a\u{FFFD}b"),
+            ("/Users/x/a\u{3164}b", "a\u{FFFD}b"), ("/Users/x/a\u{1B}b", "a\u{FFFD}b"),
+        ]
+        for (cwd, folder) in blocked {
+            let asking = folderRequest(cwd)
+            #expect(PermissionCardText.title(of: asking) == "Claude Code • \(folder)", "\(folder)")
+            #expect(!asking.canAllow, "\(folder)")
+            #expect(PermissionCardText.eligibility(of: asking) == .folderUnreadable, "\(folder)")
+            #expect(PermissionCardText.buttons(for: asking, fits: true, in: .strip).map(\.answer) == [.deny, .ask])
+            #expect(PermissionCardText.notice(of: asking, fits: true, in: .tab) == "Tên thư mục có ký tự lạ: trả lời trong terminal")
+        }
+        #expect(PermissionCardText.title(of: folderRequest(nil)) == "Claude Code")
+        #expect(folderRequest(nil).canAllow)
+        // Only what the title shows counts: a folder further up the path is not drawn.
+        #expect(folderRequest("/Users/\u{202E}x/MyNotch").canAllow)
+    }
+
+    @Test func aRequestOfAFolderWithAnAccentIsAllowedOnTheCardAndOneWithADirectionOverrideIsNot() async {
+        let accent = folderRequest("/Users/x/D\u{1EF1} \u{00E1}n")
+        let override = folderRequest("/Users/x/pro\u{202E}ject")
+        for strip in [narrowStrip, defaultStrip] {
+            #expect(await hasAllow(stripImage(accent, in: strip)))
+            #expect(await !hasAllow(stripImage(override, in: strip)))
+        }
+        let size = tab(Self.geometry())
+        #expect(await hasAllow(tabImage(accent, width: size.width, height: size.height)))
+        #expect(await !hasAllow(tabImage(override, width: size.width, height: size.height)))
+    }
+
+    // MARK: The count of what is waiting
+
+    /// The pixels of the part of the picture that is `width` wide at the right and `height` tall at the top.
+    func topRight(_ picture: NSBitmapImageRep, width: Int, height: Int) -> [UInt8] {
+        guard let bytes = picture.bitmapData else { return [] }
+        var result: [UInt8] = []
+        for y in 0..<min(height, picture.pixelsHigh) {
+            let row = bytes + y * picture.bytesPerRow
+            for x in max(picture.pixelsWide - width, 0)..<picture.pixelsWide { result += (0..<4).map { row[4 * x + $0] } }
+        }
+        return result
+    }
+
+    /// "+2 yêu cầu nữa" is drawn the same, in the same place, whatever the tool is called: it is the last thing to give way.
+    @Test func theCountOfWaitingRequestsIsWholeWhateverTheToolNameAndTheTitleAre() async {
+        let queue = PermissionQueue(scheduler: scheduler)
+        let widths: [CGFloat] = [narrowStrip.width, defaultStrip.width]
+        for width in widths {
+            func header(_ tool: String, project: String) async -> [UInt8] {
+                let payload = HookPayload(
+                    source: "claude", event: "PermissionRequest", sessionID: "s1", cwd: "/x/\(project)", tool: tool, timestamp: t0,
+                    detail: PermissionDetail(text: "ls", hiddenLines: 0, isComplete: true)
+                )
+                let asking = PermissionRequest(payload: payload, id: "id")!
+                let layout = PermissionCardLayout(request: asking, others: 2, queue: queue, placement: .strip, fits: true) { _, _ in }
+                guard let picture = await image(layout.frame(width: width, height: 80, alignment: .top)) else { return [] }
+                return topRight(picture, width: 80, height: 22)
+            }
+            let reference = await header("ls", project: "p")
+            #expect(!reference.isEmpty)
+            for tool in [String(("mcp__" + String(repeating: "t", count: 60)).prefix(23)), String(("mcp__" + String(repeating: "t", count: 60)).prefix(36)), String(("mcp__" + String(repeating: "t", count: 60)).prefix(60))] {
+                #expect(await header(tool, project: "MyNotchProject") == reference, "\(tool.count) characters at \(width) pt")
+            }
+        }
     }
 }

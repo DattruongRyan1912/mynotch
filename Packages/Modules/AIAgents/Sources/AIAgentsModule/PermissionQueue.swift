@@ -30,9 +30,15 @@ nonisolated struct PermissionRequest: Identifiable, Equatable, Sendable {
         guard let detail else { return false }
         return Self.isPlain(tool) && Self.isPlain(detail.text)
     }
-    /// True when the request may be allowed from the notch at all: whole, and plain. Whether all of its text fits the card
-    /// that shows it is the layout's to say, and the card offers "Cho phép" only when it does.
-    var canAllow: Bool { isWhole && isPlain }
+    /// True unless the folder the title shows had a character in it that cannot be drawn as what it is, and was replaced by
+    /// U+FFFD in cleaning: the user cannot read where the agent works then, and is not asked to approve for it. Any other folder
+    /// name is shown as it is, accents and other scripts included.
+    var folderIsReadable: Bool {
+        project?.unicodeScalars.contains("\u{FFFD}") != true
+    }
+    /// True when the request may be allowed from the notch at all: whole, plain, and for a folder the user can read. Whether
+    /// all of its text fits the card that shows it is the layout's to say, and the card offers "Cho phép" only when it does.
+    var canAllow: Bool { isWhole && isPlain && folderIsReadable }
 
     private static func isPlain(_ text: String) -> Bool {
         text.unicodeScalars.allSatisfy { ($0.value >= 0x20 && $0.value <= 0x7E) || $0 == "\n" }
