@@ -1,3 +1,4 @@
+import AppKit
 import NotchUI
 import SwiftUI
 
@@ -24,17 +25,33 @@ struct AgentActivityLeading: View {
     }
 }
 
+/// The colour of a label drawn on a solid accent: white, as it always was, unless the accent is so light that white could hardly
+/// be read on it (yellow, the oranges and the greens), where black is used.
+enum AccentLabel {
+    static func colour(on accent: Color) -> Color {
+        let rgb = NSColor(accent).usingColorSpace(.sRGB) ?? .black
+        func linear(_ component: CGFloat) -> Double {
+            let value = Double(component)
+            return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        let luminance = 0.2126 * linear(rgb.redComponent) + 0.7152 * linear(rgb.greenComponent) + 0.0722 * linear(rgb.blueComponent)
+        let whiteContrast = 1.05 / (luminance + 0.05)
+        return whiteContrast < 2.5 ? Color.black.opacity(0.85) : .white
+    }
+}
+
 /// How many subagents run, small enough to stay inside the circle a bubble clips the glyph to.
 private struct SubagentBadge: View {
     let count: Int
+    @Environment(\.notchAccent) private var accent
 
     var body: some View {
         Text(count > 9 ? "9+" : "\(count)")
             .font(.system(size: 8, weight: .bold, design: .rounded).monospacedDigit())
-            .foregroundStyle(.white)
+            .foregroundStyle(AccentLabel.colour(on: accent))
             .padding(.horizontal, 2.5)
             .frame(minWidth: 11, minHeight: 11)
-            .background(Capsule().fill(NotchTokens.accent))
+            .background(Capsule().fill(accent))
             .fixedSize()
             .accessibilityHidden(true)
     }

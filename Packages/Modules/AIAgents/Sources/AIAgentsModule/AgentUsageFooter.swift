@@ -53,12 +53,13 @@ private struct LimitBarView: View {
     static let barWidth: CGFloat = 48
 
     let bar: AgentTabState.LimitBar
+    @Environment(\.notchAccent) private var accent
 
     private var tint: Color {
         switch bar.percent {
         case 90...: .red
         case 70...: .orange
-        default: NotchTokens.accent
+        default: accent
         }
     }
 

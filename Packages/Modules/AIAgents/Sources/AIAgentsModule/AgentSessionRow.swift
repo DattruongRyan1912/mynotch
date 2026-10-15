@@ -75,10 +75,11 @@ struct AgentSessionRow: View {
 
 private struct StatusChip: View {
     let status: AgentTabState.Status
+    @Environment(\.notchAccent) private var accent
 
     private var tint: Color {
         switch status {
-        case .working: NotchTokens.accent
+        case .working: accent
         case .waitingForInput: .orange
         case .finished: .green
         case .idle: NotchTokens.secondaryText
