@@ -8,6 +8,13 @@ nonisolated struct ClipboardItem: Identifiable, Codable, Sendable, Hashable {
     var copiedAt: Date
     var sourceBundleID: String?
     var sourceAppName: String?
+    /// Whether a text is code, and in which language, decided when it was copied. nil for other kinds, and for a text
+    /// saved before this existed until the history loads.
+    var codeDetection: CodeDetection?
+
+    /// The language of a text that is code.
+    var codeLanguage: CodeLanguage? { codeDetection?.language }
+    var isCode: Bool { codeLanguage != nil }
 }
 
 /// A named collection of pinned items; items in any board are never pruned.

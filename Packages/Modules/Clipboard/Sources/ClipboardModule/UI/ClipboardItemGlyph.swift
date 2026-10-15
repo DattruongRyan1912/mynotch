@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The small picture that leads a list row: an image's thumbnail, a color's swatch, a file's icon, or the symbol of the
-/// kind. Shared by the library's list and the floating panel's rows.
+/// kind (braces for code). Shared by the library's list and the floating panel's rows.
 struct ClipboardItemGlyph: View {
     let item: ClipboardItem
     let imageURL: URL?
@@ -23,7 +23,7 @@ struct ClipboardItemGlyph: View {
                     .frame(width: iconSize, height: iconSize)
             }
         case .text, .richText, .link:
-            Image(systemName: item.content.kind.systemImage)
+            Image(systemName: item.isCode ? ClipboardSearchTerms.codeSystemImage : item.content.kind.systemImage)
                 .font(.system(size: 15))
                 .foregroundStyle(.secondary)
         }

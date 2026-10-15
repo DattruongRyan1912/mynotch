@@ -29,6 +29,41 @@ enum SearchFixtureApps {
         #expect(terms.text == "")
     }
 
+    @Test(arguments: ["@code", "@Code", "@CODE", "@mã", "@ma", "@MÃ", "@Mã"])
+    func codeTokensKeepTheTextsThatAreCode(input: String) throws {
+        let terms = terms(input + " ")
+        #expect(terms.wantsCode)
+        #expect(terms.kinds.isEmpty)
+        #expect(terms.appPrefixes.isEmpty)
+        #expect(terms.text == "")
+        let token = try #require(terms.tokens.first)
+        #expect(token.filter == .code)
+        #expect(token.title == "Mã")
+        #expect(token.raw == input)
+    }
+
+    @Test func codeTakesTheWordBeforeAnAppCalledCode() {
+        // The fixture has an app named "Code", which `@code` no longer reaches; its bundle component still does.
+        #expect(terms("@code ").appPrefixes.isEmpty)
+        #expect(terms("@vscode ").appPrefixes == ["vscode"])
+        #expect(!terms("@vscode ").wantsCode)
+    }
+
+    @Test func codeCombinesWithKindsAppsAndText() {
+        let terms = terms("foo @code @chrome bar @text ")
+        #expect(terms.wantsCode)
+        #expect(terms.kinds == [.text])
+        #expect(terms.appPrefixes == ["chrome"])
+        #expect(terms.text == "foo bar")
+        #expect(terms.chips.count == 3)
+    }
+
+    @Test func aCodeWordNotYetFinishedIsStillBeingTyped() throws {
+        let token = try #require(terms("@code").tokens.first)
+        #expect(token.isBeingTyped)
+        #expect(terms("@code").chips.isEmpty)
+    }
+
     @Test func aKindTokenKeepsWhatWasTypedAndNamesItsKindInVietnamese() throws {
         let token = try #require(terms("@màu ").tokens.first)
         #expect(token.raw == "@màu")
@@ -56,7 +91,6 @@ enum SearchFixtureApps {
         ("@google ", "Google Chrome", "google"),
         ("@safari ", "Safari", "safari"),
         ("@SAF ", "Safari", "saf"),
-        ("@code ", "Code", "code"),
         ("@vscode ", "Code", "vscode"),
         ("@co ", "Code", "co"),
         ("@ghi ", "Ghi chú", "ghi"),

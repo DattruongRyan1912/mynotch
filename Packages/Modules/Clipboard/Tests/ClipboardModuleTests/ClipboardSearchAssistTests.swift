@@ -46,7 +46,7 @@ import Testing
     @Test func theListOpensWhileATokenIsBeingTypedAndClosesAfterwards() {
         state.query.text = "@"
         #expect(state.suggestions.isOpen)
-        #expect(state.suggestions.items.map(\.token) == ["@text", "@link", "@image", "@color", "@file", "@Chrome", "@Safari"])
+        #expect(state.suggestions.items.map(\.token) == ["@text", "@code", "@link", "@image", "@color", "@file", "@Chrome", "@Safari"])
         state.query.text = "@ch"
         #expect(state.suggestions.items.map(\.token) == ["@Chrome"])
         state.query.text = "@chrome "
@@ -61,9 +61,9 @@ import Testing
         #expect(state.suggestions.highlighted == 1)
         #expect(state.handleSuggestionKey(.previous))
         #expect(state.handleSuggestionKey(.next))
-        // "@link".
+        // "@code".
         #expect(state.handleSuggestionKey(.complete))
-        #expect(state.query.text == "xin @link ")
+        #expect(state.query.text == "xin @code ")
         #expect(!state.suggestions.isOpen)
         #expect(visible.isEmpty)
         #expect(!state.handleSuggestionKey(.complete))
@@ -90,7 +90,7 @@ import Testing
 
     @Test func aClickCompletesTheRowClicked() {
         state.query.text = "@"
-        state.acceptSuggestion(at: 3)
+        state.acceptSuggestion(at: 4)
         #expect(state.query.text == "@color ")
         #expect(visible == [chromeColor])
     }
@@ -205,7 +205,7 @@ import Testing
 
     @Test func theListOpensWhileATokenIsBeingTypedAndAKeyCompletesIt() {
         model.searchText = "@"
-        #expect(model.suggestions.items.map(\.token) == ["@text", "@link", "@image", "@color", "@file", "@Chrome", "@Safari"])
+        #expect(model.suggestions.items.map(\.token) == ["@text", "@code", "@link", "@image", "@color", "@file", "@Chrome", "@Safari"])
         model.searchText = "@s"
         #expect(model.suggestions.items.map(\.token) == ["@Safari"])
         #expect(model.handleSearchKey(.complete))

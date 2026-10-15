@@ -19,6 +19,19 @@ enum ClipboardCardText {
         return String(text[start...].prefix(limit))
     }
 
+    /// Like `preview`, but starts at the line of the first character that is not blank, so that line keeps its indentation,
+    /// and shows a tab as four spaces, which a monospaced `Text` would squeeze to one.
+    static func codePreview(of text: String, limit: Int = previewCharacters) -> String {
+        var lineStart = text.startIndex
+        var index = text.startIndex
+        while index < text.endIndex, text[index].isWhitespace {
+            index = text.index(after: index)
+            if text[text.index(before: index)].isNewline { lineStart = index }
+        }
+        guard index < text.endIndex else { return "" }
+        return String(text[lineStart...].prefix(limit)).replacing("\t", with: "    ")
+    }
+
     /// "2 phút trước"; anything under a minute (or in the future, after a clock change) is "Vừa xong", since the tab
     /// refreshes these once a minute.
     static func relativeTime(_ date: Date, now: Date) -> String {
@@ -52,9 +65,15 @@ enum ClipboardCardText {
 
     /// What VoiceOver reads for a card: kind, content, time and whether it is pinned.
     static func accessibilityLabel(for item: ClipboardItem, isPinned: Bool, now: Date) -> String {
-        var parts = [item.content.kind.title, summary(of: item.content), relativeTime(item.copiedAt, now: now)]
+        var parts = [kindTitle(of: item), summary(of: item.content), relativeTime(item.copiedAt, now: now)]
         if isPinned { parts.append("đã ghim") }
         return parts.joined(separator: ", ")
+    }
+
+    /// "Mã Swift" for code, otherwise the name of its kind.
+    static func kindTitle(of item: ClipboardItem) -> String {
+        guard let language = item.codeLanguage else { return item.content.kind.title }
+        return language == .generic ? ClipboardSearchTerms.codeTitle : ClipboardSearchTerms.codeTitle + " " + language.title
     }
 
     /// What a list row calls the item: an image by its size, anything else by its summary.

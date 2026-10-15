@@ -28,7 +28,7 @@ struct ClipboardLibraryCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ClipboardContentPreview(content: item.content, imageURL: imageURL, thumbnails: thumbnails, style: .library(size))
+            ClipboardContentPreview(content: item.content, codeLanguage: item.codeLanguage, imageURL: imageURL, thumbnails: thumbnails, style: .library(size))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .clipped()
             footer

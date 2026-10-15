@@ -9,16 +9,17 @@ import Testing
     }
 
     @Test func anAtSignListsTheKindsThenTheAppsInTheOrderGiven() {
-        #expect(tokens("@") == ["@text", "@link", "@image", "@color", "@file", "@Chrome", "@VSCode", "@Safari", "@Notes", "@Lời"])
+        #expect(tokens("@") == ["@text", "@code", "@link", "@image", "@color", "@file", "@Chrome", "@VSCode", "@Safari", "@Notes", "@Lời"])
         #expect(tokens("hello @") == tokens("@"))
     }
 
     @Test func rowsNameTheKindOrTheApp() throws {
         let rows = ClipboardSearchSuggestions.suggestions(for: "@", apps: SearchFixtureApps.all)
-        #expect(rows.map(\.title) == ["Văn bản", "Link", "Ảnh", "Màu", "File", "Google Chrome", "Code", "Safari", "Ghi chú", "Lời nhắc"])
+        #expect(rows.map(\.title) == ["Văn bản", "Mã", "Link", "Ảnh", "Màu", "File", "Google Chrome", "Code", "Safari", "Ghi chú", "Lời nhắc"])
         #expect(rows[0].subject == .kind(.text))
-        #expect(rows[5].subject == .app(bundleID: "com.google.Chrome"))
-        #expect(rows[9].subject == .app(bundleID: nil))
+        #expect(rows[1].subject == .code)
+        #expect(rows[6].subject == .app(bundleID: "com.google.Chrome"))
+        #expect(rows[10].subject == .app(bundleID: nil))
     }
 
     @Test func nothingIsSuggestedUnlessAnAtWordIsBeingTyped() {
@@ -28,8 +29,9 @@ import Testing
     }
 
     @Test func theListNarrowsAsTheWordGrows() {
-        #expect(tokens("@c") == ["@color", "@Chrome", "@Code"])
-        #expect(tokens("@co") == ["@color", "@Code"])
+        #expect(tokens("@c") == ["@code", "@color", "@Chrome", "@VSCode"])
+        #expect(tokens("@co") == ["@code", "@color", "@VSCode"])
+        #expect(tokens("@cod") == ["@code", "@VSCode"])
         #expect(tokens("@col") == ["@color"])
         #expect(tokens("@l") == ["@link", "@Lời"])
         #expect(tokens("@li") == ["@link"])
@@ -44,11 +46,12 @@ import Testing
     }
 
     @Test func theVietnameseNameOfAKindIsSuggestedWhenItIsWhatMatches() {
-        #expect(tokens("@m") == ["@màu"])
+        #expect(tokens("@m") == ["@mã", "@màu"])
         #expect(tokens("@mau") == ["@màu"])
-        #expect(tokens("@MÀ") == ["@màu"])
+        #expect(tokens("@MÀ") == ["@mã", "@màu"])
         // English first when both fit.
-        #expect(tokens("@c").first == "@color")
+        #expect(tokens("@c").first == "@code")
+        #expect(tokens("@col").first == "@color")
     }
 
     @Test func anAppIsOfferedUnderTheNameThatMatched() {
@@ -66,10 +69,10 @@ import Testing
             for row in ClipboardSearchSuggestions.suggestions(for: typed, apps: SearchFixtureApps.all) {
                 let terms = ClipboardSearchTerms(parsing: row.token + " ", apps: SearchFixtureApps.all)
                 let token = try #require(terms.tokens.first, "\(row.token)")
-                if case .kind(let kind) = row.subject {
-                    #expect(token.filter == .kind(kind))
-                } else {
-                    #expect(token.title == row.title)
+                switch row.subject {
+                case .kind(let kind): #expect(token.filter == .kind(kind))
+                case .code: #expect(token.filter == .code)
+                case .app: #expect(token.title == row.title)
                 }
             }
         }
@@ -77,13 +80,34 @@ import Testing
 
     @Test func aKindAlreadyChosenIsNotOfferedAgain() {
         #expect(tokens("@link @") == ["@Chrome", "@VSCode", "@Safari", "@Notes", "@Lời"])
-        #expect(tokens("@link @c") == ["@Chrome", "@Code"])
+        #expect(tokens("@link @c") == ["@Chrome", "@VSCode"])
         #expect(tokens("@link @text") == [])
     }
 
+    @Test func codeIsOfferedOnceAndNotWithAnotherKind() {
+        #expect(tokens("@code @") == ["@Chrome", "@VSCode", "@Safari", "@Notes", "@Lời"])
+        #expect(tokens("@code @c") == ["@Chrome", "@VSCode"])
+        #expect(tokens("@text @") == ["@Chrome", "@VSCode", "@Safari", "@Notes", "@Lời"])
+        #expect(tokens("@code @text") == [])
+    }
+
+    @Test func anAppCalledCodeIsOfferedUnderTheEndOfItsBundleID() {
+        // "@Code" would be the code filter; the app is reached as "@VSCode", whatever was typed.
+        for typed in ["@c", "@co", "@cod", "@code"] {
+            let rows = ClipboardSearchSuggestions.suggestions(for: typed, apps: SearchFixtureApps.all)
+            #expect(rows.contains { $0.subject == .app(bundleID: "com.microsoft.VSCode") && $0.token == "@VSCode" }, "\(typed)")
+            #expect(!rows.contains { $0.subject != .code && $0.token.lowercased() == "@code" }, "\(typed)")
+        }
+    }
+
+    @Test func anAppWithNoOtherNameThanCodeIsLeftOut() {
+        let apps = [ClipboardLibraryApp(id: "name:Code", bundleID: nil, name: "Code", count: 1)]
+        #expect(tokens("@co", apps: apps) == ["@code", "@color"])
+    }
+
     @Test func anAppAlreadyChosenIsNotOfferedAgain() {
-        #expect(tokens("@chrome @") == ["@text", "@link", "@image", "@color", "@file"])
-        #expect(tokens("foo @safari @c") == ["@color"])
+        #expect(tokens("@chrome @") == ["@text", "@code", "@link", "@image", "@color", "@file"])
+        #expect(tokens("foo @safari @c") == ["@code", "@color"])
         #expect(tokens("@link @chrome @") == [])
     }
 
@@ -135,7 +159,7 @@ import Testing
         var list = makeList("@")
         #expect(list.isOpen)
         #expect(list.highlighted == 0)
-        #expect(list.items.count == 10)
+        #expect(list.items.count == 11)
         list.update(text: "@zzz", apps: apps)
         #expect(!list.isOpen)
         list.update(text: "", apps: apps)
@@ -151,7 +175,7 @@ import Testing
         #expect(list.highlighted == 1)
         list.move(-1)
         list.move(-1)
-        #expect(list.highlighted == 9)
+        #expect(list.highlighted == 10)
         list.move(1)
         #expect(list.highlighted == 0)
     }
@@ -168,7 +192,7 @@ import Testing
         list.move(1)
         list.move(1)
         list.update(text: "@c", apps: apps)
-        #expect(list.items.map(\.token) == ["@color", "@Chrome", "@Code"])
+        #expect(list.items.map(\.token) == ["@code", "@color", "@Chrome", "@VSCode"])
         #expect(list.highlighted == 0)
     }
 
@@ -181,7 +205,7 @@ import Testing
     @Test func tabAndReturnCompleteTheHighlightedRow() {
         for command in [ClipboardKeyCommand.complete, .activate] {
             var list = makeList("hello @c")
-            list.move(1)
+            list.move(2)
             var text = "hello @c"
             #expect(list.handle(command, text: &text))
             #expect(text == "hello @Chrome ")
@@ -200,7 +224,7 @@ import Testing
     @Test func aRowCanBeChosenByIndexLikeAClick() {
         let list = makeList("@")
         var text = "@"
-        list.accept(3, into: &text)
+        list.accept(4, into: &text)
         #expect(text == "@color ")
         list.accept(99, into: &text)
         #expect(text == "@color ")

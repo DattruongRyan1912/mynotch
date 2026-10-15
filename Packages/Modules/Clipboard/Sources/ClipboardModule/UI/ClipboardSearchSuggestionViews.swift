@@ -74,6 +74,9 @@ struct ClipboardSuggestionListView: View {
         case .kind(let kind):
             Image(systemName: kind.systemImage)
                 .font(.system(size: 11))
+        case .code:
+            Image(systemName: ClipboardSearchTerms.codeSystemImage)
+                .font(.system(size: 11))
         case .app(let bundleID):
             if let bundleID, let icon = ClipboardIcons.app(bundleID: bundleID) {
                 Image(nsImage: icon)

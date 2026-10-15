@@ -180,12 +180,19 @@ struct ClipboardPanelView: View {
     @ViewBuilder private var preview: some View {
         if let item = model.selectedItem {
             VStack(alignment: .leading, spacing: 10) {
-                ClipboardContentPreview(content: item.content, imageURL: imageURL(of: item), thumbnails: model.thumbnails, style: .panel)
+                ClipboardContentPreview(
+                    content: item.content, codeLanguage: item.codeLanguage, imageURL: imageURL(of: item), thumbnails: model.thumbnails,
+                    style: .panel
+                )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .clipped()
                 Divider()
                 HStack(spacing: 6) {
-                    Label(item.content.kind.title, systemImage: item.content.kind.systemImage)
+                    if let language = item.codeLanguage {
+                        Label(language.title, systemImage: ClipboardSearchTerms.codeSystemImage)
+                    } else {
+                        Label(item.content.kind.title, systemImage: item.content.kind.systemImage)
+                    }
                     Spacer(minLength: 8)
                     ClipboardLibraryAppIcon(item: item, size: 13)
                     Text([item.sourceAppName, model.timeLabel(for: item)].compactMap(\.self).joined(separator: " · "))

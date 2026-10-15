@@ -79,6 +79,37 @@ import Testing
         #expect(ClipboardCardText.preview(of: "  Xin chào", limit: 3) == "Xin")
     }
 
+    @Test func aCodePreviewStartsAtTheFirstLineWithSomethingInItSoItsIndentationSurvives() {
+        #expect(ClipboardCardText.codePreview(of: "\n\n    let a = 1\n    let b = 2") == "    let a = 1\n    let b = 2")
+        #expect(ClipboardCardText.codePreview(of: "   \n\t\r\nx = 1") == "x = 1")
+        #expect(ClipboardCardText.codePreview(of: "  x = 1") == "  x = 1")
+        #expect(ClipboardCardText.codePreview(of: "") == "")
+        #expect(ClipboardCardText.codePreview(of: " \n  \n") == "")
+    }
+
+    @Test func aCodePreviewShowsTabsAsFourSpacesAndIsCutAtTheLimit() {
+        #expect(ClipboardCardText.codePreview(of: "\tfoo()\n\t\tbar()") == "    foo()\n        bar()")
+        #expect(ClipboardCardText.codePreview(of: String(repeating: "a", count: 10_000)).count == ClipboardCardText.previewCharacters)
+        #expect(ClipboardCardText.codePreview(of: String(repeating: "a", count: 10_000), limit: 1_500).count == 1_500)
+    }
+
+    @Test func aCodeCardReadsAsCodeAndItsLanguage() {
+        func item(_ detection: CodeDetection?) -> ClipboardItem {
+            ClipboardItem(
+                id: UUID(), content: .text("let x = 1"), contentHash: "", copiedAt: now.addingTimeInterval(-120),
+                sourceBundleID: nil, sourceAppName: nil, codeDetection: detection
+            )
+        }
+        #expect(ClipboardCardText.accessibilityLabel(for: item(.code(.swift)), isPinned: false, now: now)
+            == "Mã Swift, let x = 1, 2 phút trước")
+        #expect(ClipboardCardText.accessibilityLabel(for: item(.code(.generic)), isPinned: false, now: now)
+            == "Mã, let x = 1, 2 phút trước")
+        #expect(ClipboardCardText.accessibilityLabel(for: item(.notCode), isPinned: false, now: now)
+            == "Văn bản, let x = 1, 2 phút trước")
+        #expect(ClipboardCardText.accessibilityLabel(for: item(nil), isPinned: false, now: now)
+            == "Văn bản, let x = 1, 2 phút trước")
+    }
+
     @Test func rowsNameAnImageBySizeAndOtherContentBySummary() {
         let image = ClipboardImage(fileName: "a.png", pixelWidth: 1920, pixelHeight: 1080, byteCount: 1)
         #expect(ClipboardCardText.rowTitle(of: .image(image)) == "Ảnh 1920 × 1080")

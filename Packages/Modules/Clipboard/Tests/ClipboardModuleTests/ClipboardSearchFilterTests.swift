@@ -73,7 +73,7 @@ import Testing
     @Test func appTokensKeepTheItemsOfThatApp() {
         #expect(ids("@chrome") == [css, hello].sorted(by: order))
         #expect(ids("@safari") == [link, rocks].sorted(by: order))
-        #expect(ids("@code") == [hex])
+        #expect(ids("@vscode") == [hex])
         #expect(ids("@finder") == [files])
     }
 

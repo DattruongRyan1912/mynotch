@@ -7,6 +7,13 @@ struct ClipboardCardMenu: View {
     /// so the menu still opens at once for a huge copy.
     static let transformCheckLimit = 200_000
 
+    /// "Dán dạng văn bản thường" is for a rich text, whose plain paste differs from the default one, and for code, which a
+    /// plain "Dán" already pastes as plain text but which the user may still look for here.
+    static func offersPlainTextPaste(for item: ClipboardItem) -> Bool {
+        if case .richText = item.content { return true }
+        return item.isCode
+    }
+
     let module: ClipboardModule
     let item: ClipboardItem
     /// The board on show, which "Bỏ ghim" unpins from; nil unpins from every board.
@@ -23,6 +30,9 @@ struct ClipboardCardMenu: View {
         Button("Dán", systemImage: "doc.on.clipboard") { onResult(module.paste(item)) }
         if case .richText = item.content {
             Button("Chép dạng văn bản thuần", systemImage: "textformat") { onResult(module.copy(item, plainText: true)) }
+        }
+        if Self.offersPlainTextPaste(for: item) {
+            Button("Dán dạng văn bản thường", systemImage: "text.alignleft") { onResult(module.paste(item, plainText: true)) }
         }
         if item.content.kind == .text, let text = item.content.plainText {
             transforms(of: text)

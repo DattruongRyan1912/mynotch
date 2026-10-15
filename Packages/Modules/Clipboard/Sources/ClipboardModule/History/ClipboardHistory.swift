@@ -29,15 +29,24 @@ nonisolated struct ClipboardHistory: Codable, Equatable, Sendable {
             item.copiedAt = date
             item.sourceBundleID = source.bundleID
             item.sourceAppName = source.name
+            // The same hash is the same text, so the answer stays; only an item from before detection has none yet.
+            item.codeDetection = item.codeDetection ?? ClipboardCodeDetector.detect(content)
             items.insert(item, at: 0)
             return .moved(item.id)
         }
         let item = ClipboardItem(
             id: UUID(), content: content, contentHash: hash, copiedAt: date,
-            sourceBundleID: source.bundleID, sourceAppName: source.name
+            sourceBundleID: source.bundleID, sourceAppName: source.name, codeDetection: ClipboardCodeDetector.detect(content)
         )
         items.insert(item, at: 0)
         return .inserted(item.id)
+    }
+
+    /// Decides, once, whether each text saved before code detection existed is code. Items that have an answer keep it.
+    mutating func classifyUnclassifiedTexts() {
+        for index in items.indices where items[index].codeDetection == nil {
+            items[index].codeDetection = ClipboardCodeDetector.detect(items[index].content)
+        }
     }
 
     /// Called when MyNotch reuses an item, so the most recently used one is first.

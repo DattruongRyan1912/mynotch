@@ -88,9 +88,11 @@ final class FakeSystem {
     }
 
     static func item(_ content: ClipboardContent, copiedAt: Date) -> ClipboardItem {
+        // As the module records an item, which decides what a text is when it is copied.
         ClipboardItem(
             id: UUID(), content: content, contentHash: ClipboardContent.hash(of: content),
-            copiedAt: copiedAt, sourceBundleID: "com.apple.Safari", sourceAppName: "Safari"
+            copiedAt: copiedAt, sourceBundleID: "com.apple.Safari", sourceAppName: "Safari",
+            codeDetection: ClipboardCodeDetector.detect(content)
         )
     }
 

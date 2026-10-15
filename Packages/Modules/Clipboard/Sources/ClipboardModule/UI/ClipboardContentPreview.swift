@@ -15,10 +15,12 @@ struct ClipboardContentPreview: View {
         var fileIconSize: CGFloat
         /// How much of a long text is laid out; the card's four lines never need more than a few hundred.
         var textCharacters = ClipboardCardText.previewCharacters
+        /// The colours of code, which follow the system's appearance unless the card is always dark.
+        var codePalette = CodePalette.adaptive
 
         static let notch = Style(
             primary: NotchTokens.primaryText, secondary: NotchTokens.secondaryText, swatchBorder: .white.opacity(0.2),
-            textLines: 4, textSize: 11, detailSize: 10, fileIconSize: 32
+            textLines: 4, textSize: 11, detailSize: 10, fileIconSize: 32, codePalette: .dark
         )
 
         /// The floating panel's preview pane, which has the room for a longer excerpt.
@@ -36,6 +38,8 @@ struct ClipboardContentPreview: View {
     }
 
     let content: ClipboardContent
+    /// Set for a text that is code, which is then coloured by this language.
+    var codeLanguage: CodeLanguage?
     /// The stored PNG of an image item.
     let imageURL: URL?
     let thumbnails: ClipboardThumbnailCache
@@ -44,10 +48,17 @@ struct ClipboardContentPreview: View {
     var body: some View {
         switch content {
         case .text(let text), .richText(let text, _):
-            Text(ClipboardCardText.preview(of: text, limit: style.textCharacters))
-                .font(.system(size: style.textSize))
-                .foregroundStyle(style.primary)
-                .lineLimit(style.textLines)
+            if let codeLanguage {
+                ClipboardCodeText(
+                    text: ClipboardCardText.codePreview(of: text, limit: style.textCharacters), language: codeLanguage,
+                    palette: style.codePalette, size: style.textSize, lines: style.textLines, color: style.primary
+                )
+            } else {
+                Text(ClipboardCardText.preview(of: text, limit: style.textCharacters))
+                    .font(.system(size: style.textSize))
+                    .foregroundStyle(style.primary)
+                    .lineLimit(style.textLines)
+            }
         case .link(let url):
             let link = ClipboardCardText.link(url)
             VStack(alignment: .leading, spacing: 3) {

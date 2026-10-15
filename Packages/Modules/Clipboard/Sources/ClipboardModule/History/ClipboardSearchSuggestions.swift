@@ -4,6 +4,7 @@ import Foundation
 nonisolated struct ClipboardSearchSuggestion: Identifiable, Equatable, Sendable {
     enum Subject: Equatable, Sendable {
         case kind(ClipboardKind)
+        case code
         case app(bundleID: String?)
     }
 
@@ -30,12 +31,17 @@ nonisolated enum ClipboardSearchSuggestions {
         let typed = ClipboardSearchIndex.fold(String(last.dropFirst()))
         let chosen = ClipboardSearchTerms(parsing: String(text.dropLast(last.count)), apps: apps)
         var rows: [ClipboardSearchSuggestion] = []
-        if chosen.kinds.isEmpty {
+        // `@code` is a kind of its own, so it is not offered with another kind (nothing would match) or twice.
+        if chosen.kinds.isEmpty, !chosen.wantsCode {
             // One row per kind, under the first of its words that fits: "@color", or "@màu" for what only it matches.
-            rows += ClipboardKind.libraryOrder.compactMap { kind in
-                ClipboardSearchTerms.kindWords
-                    .first { $0.kind == kind && ClipboardSearchIndex.fold($0.word).hasPrefix(typed) }
-                    .map { ClipboardSearchSuggestion(token: "@" + $0.word, title: kind.title, subject: .kind(kind)) }
+            // Code comes right after text, which it is a part of.
+            for kind in ClipboardKind.libraryOrder {
+                if let entry = ClipboardSearchTerms.kindWords.first(where: { $0.kind == kind && ClipboardSearchIndex.fold($0.word).hasPrefix(typed) }) {
+                    rows.append(ClipboardSearchSuggestion(token: "@" + entry.word, title: kind.title, subject: .kind(kind)))
+                }
+                if kind == .text, let word = ClipboardSearchTerms.codeWords.first(where: { ClipboardSearchIndex.fold($0).hasPrefix(typed) }) {
+                    rows.append(ClipboardSearchSuggestion(token: "@" + word, title: ClipboardSearchTerms.codeTitle, subject: .code))
+                }
             }
         }
         if chosen.appPrefixes.isEmpty { rows += appRows(matching: typed, in: apps) }
@@ -62,12 +68,13 @@ nonisolated enum ClipboardSearchSuggestions {
     }
 
     /// The last component of the bundle ID when it starts with what was typed ("Chrome", short for "Google Chrome"),
-    /// otherwise the first word of the name.
+    /// otherwise the first word of the name. A word that names a kind (an app called "Code" would give `@code`) is passed
+    /// over for the bundle component, since the token would reach the kind and not the app.
     private static func word(for app: ClipboardLibraryApp, startingWith typed: String) -> String {
-        if let component = ClipboardAppName.component(of: app.bundleID), ClipboardSearchIndex.fold(component).hasPrefix(typed) {
-            return component
-        }
-        return app.name.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
+        let component = ClipboardAppName.component(of: app.bundleID)
+        let firstWord = app.name.split(whereSeparator: \.isWhitespace).first.map(String.init)
+        let preferred = component.flatMap { ClipboardSearchIndex.fold($0).hasPrefix(typed) ? $0 : nil } ?? firstWord
+        return [preferred, component].compactMap(\.self).first { !ClipboardSearchTerms.isReserved(ClipboardSearchIndex.fold($0)) } ?? ""
     }
 }
 

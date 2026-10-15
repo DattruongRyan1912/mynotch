@@ -4,6 +4,8 @@ import Foundation
 nonisolated struct ClipboardSearchToken: Equatable, Identifiable, Sendable {
     enum Filter: Equatable, Sendable {
         case kind(ClipboardKind)
+        /// Texts that are code, whatever the language.
+        case code
         /// Items whose app has a name, or a bundle ID ending, that starts with this (folded) text.
         case app(prefix: String)
     }
@@ -20,13 +22,24 @@ nonisolated struct ClipboardSearchToken: Equatable, Identifiable, Sendable {
 }
 
 /// The search text split into the filters in it and the free text that is left. A word starting with "@" is a filter when
-/// it names a kind (`@text`, `@link`, `@image`, `@color` or `@màu`, `@file`) or starts the name of an app in the
-/// history (`@chrome`); any other word, `@` words included, stays in the free text.
+/// it names a kind (`@text`, `@link`, `@image`, `@color` or `@màu`, `@file`), says `@code` or `@mã`, or starts the name of an
+/// app in the history (`@chrome`); any other word, `@` words included, stays in the free text.
 nonisolated struct ClipboardSearchTerms: Equatable, Sendable {
     /// What may follow "@" for each kind, in the order suggestions offer them. A kind is matched whole, an app by prefix.
     static let kindWords: [(word: String, kind: ClipboardKind)] = [
         ("text", .text), ("link", .link), ("image", .image), ("color", .color), ("màu", .color), ("file", .file),
     ]
+
+    /// What may follow "@" for the texts that are code, in the order suggestions offer them. Matched whole, like a kind: an app
+    /// called "Code" is reached by the end of its bundle ID (`@vscode`) instead.
+    static let codeWords = ["code", "mã"]
+    static let codeTitle = "Mã"
+    static let codeSystemImage = "curlybraces"
+
+    /// Whether `folded` is a word that names a kind or code, so an app token must not use it.
+    static func isReserved(_ folded: String) -> Bool {
+        kindWords.contains { ClipboardSearchIndex.fold($0.word) == folded } || codeWords.contains { ClipboardSearchIndex.fold($0) == folded }
+    }
 
     /// Every filter once, in the order typed.
     private(set) var tokens: [ClipboardSearchToken] = []
@@ -36,6 +49,11 @@ nonisolated struct ClipboardSearchTerms: Equatable, Sendable {
     /// Several tokens combine with AND, so an item has to be of every kind named: two different kinds match nothing.
     var kinds: [ClipboardKind] {
         tokens.compactMap { if case .kind(let kind) = $0.filter { kind } else { nil } }
+    }
+
+    /// Texts that are code are asked for.
+    var wantsCode: Bool {
+        tokens.contains { $0.filter == .code }
     }
 
     var appPrefixes: [String] {
@@ -87,6 +105,7 @@ nonisolated struct ClipboardSearchTerms: Equatable, Sendable {
         if let entry = kindWords.first(where: { ClipboardSearchIndex.fold($0.word) == name }) {
             return (.kind(entry.kind), entry.kind.title)
         }
+        if codeWords.contains(where: { ClipboardSearchIndex.fold($0) == name }) { return (.code, codeTitle) }
         guard let app = apps.first(where: { $0.matches(prefix: name) }) else { return nil }
         return (.app(prefix: name), app.name)
     }

@@ -112,6 +112,8 @@ public final class ClipboardModule: FeatureModule {
         // Images are deleted before the save that drops their items, so a crash in between leaves items without images.
         _ = history.remove(ids: Set(loaded.items.filter { !hasImageFile($0, in: store) }.map(\.id)))
         history.removeDanglingPins()
+        // Texts saved before code detection existed are classified now, once; the save below keeps the answer.
+        history.classifyUnclassifiedTexts()
         let removed = prune(&history)
         state.history = history
         store.deleteImages(for: removed)
@@ -341,9 +343,10 @@ public final class ClipboardModule: FeatureModule {
         put(item, paste: false, plainTextOnly: plainText)
     }
 
+    /// With `plainText`, the formatting of a rich text is left behind ("Dán dạng văn bản thường").
     @discardableResult
-    func paste(_ item: ClipboardItem) -> ClipboardPaster.Outcome? {
-        put(item, paste: true)
+    func paste(_ item: ClipboardItem, plainText: Bool = false) -> ClipboardPaster.Outcome? {
+        put(item, paste: true, plainTextOnly: plainText)
     }
 
     /// Records the transformed text as a new item (classified like a copy, so a decoded URL becomes a link) and copies it.
@@ -622,9 +625,10 @@ public final class ClipboardModule: FeatureModule {
         }
     }
 
-    /// Puts the item on the pasteboard and moves it to the top. A paste always closes the notch, at once, so keyboard
-    /// focus is back in the previous app before ⌘V is sent; a copy closes it when "close after action" is on.
-    /// A failed write changes nothing and keeps the notch open. A paste from the library window hands the keyboard
+    /// Puts the item on the pasteboard and moves it to the top. Code is always put as plain text, whatever formatting it
+    /// was copied with: an editor that takes rich text would paste the colours of the app it came from. A paste always
+    /// closes the notch, at once, so keyboard focus is back in the previous app before ⌘V is sent; a copy closes it when
+    /// "close after action" is on. A failed write changes nothing and keeps the notch open. A paste from the library window hands the keyboard
     /// back to the app behind it and waits longer for that before sending ⌘V. `beforePaste` is the floating panel's way to
     /// get the keyboard out of its own window between the write and ⌘V; a refusal pastes nothing and asks the user to
     /// press ⌘V. `touchesHistory` is off for the stack, whose pastes must not reorder the history. `afterKeysUp` is the
@@ -639,7 +643,7 @@ public final class ClipboardModule: FeatureModule {
         // Remembers a refusal, which comes back as a plain `.copied`.
         var keyboardRefused = false
         let outcome = paster.perform(
-            item, imageURL: imageURL(of: item), paste: paste, plainTextOnly: plainTextOnly,
+            item, imageURL: imageURL(of: item), paste: paste, plainTextOnly: plainTextOnly || item.isCode,
             delay: fromLibrary ? Self.libraryPasteDelay : nil,
             beforePaste: beforePaste.map { ask in
                 {

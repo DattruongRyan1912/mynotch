@@ -40,7 +40,7 @@ struct ClipboardCardView: View {
     }
 
     private var preview: some View {
-        ClipboardContentPreview(content: item.content, imageURL: imageURL, thumbnails: thumbnails, style: .notch)
+        ClipboardContentPreview(content: item.content, codeLanguage: item.codeLanguage, imageURL: imageURL, thumbnails: thumbnails, style: .notch)
     }
 
     private var footer: some View {

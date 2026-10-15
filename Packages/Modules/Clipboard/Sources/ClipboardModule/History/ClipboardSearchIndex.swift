@@ -58,6 +58,9 @@ nonisolated final class ClipboardSearchIndex {
         if !kinds.isEmpty {
             items = items.filter { item in kinds.allSatisfy { $0 == item.content.kind } }
         }
+        if terms.wantsCode {
+            items = items.filter(\.isCode)
+        }
         let words = terms.text.split(whereSeparator: \.isWhitespace).map { Self.fold(String($0)) }
         let appPrefixes = terms.appPrefixes
         guard !words.isEmpty || !appPrefixes.isEmpty else { return items }
