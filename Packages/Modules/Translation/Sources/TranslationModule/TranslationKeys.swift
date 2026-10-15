@@ -29,6 +29,14 @@ struct TranslationKeys {
     /// The two time zones a time is also shown in, as IANA identifiers.
     let firstZone: SettingKey<String>
     let secondZone: SettingKey<String>
+    /// The `EngineChoice` that translates, by raw value. The keys of the engines that need one are not settings at all:
+    /// they live in the Keychain.
+    let engine: SettingKey<String>
+    /// The Microsoft resource's region, such as "southeastasia"; blank for a global resource.
+    let microsoftRegion: SettingKey<String>
+    /// Base address and model of the OpenAI-compatible server.
+    let openAIBaseURL: SettingKey<String>
+    let openAIModel: SettingKey<String>
 
     init(_ settings: ModuleSettings) {
         preferredPair = settings.key("preferredPair", default: PreferredPair(first: "vi", second: "en"))
@@ -40,5 +48,9 @@ struct TranslationKeys {
         currencyTarget = settings.key("currencyTarget", default: "VND")
         firstZone = settings.key("conversionZoneFirst", default: "America/Los_Angeles")
         secondZone = settings.key("conversionZoneSecond", default: "Europe/London")
+        engine = settings.key("engine", default: EngineChoice.apple.rawValue)
+        microsoftRegion = settings.key("microsoftRegion", default: "")
+        openAIBaseURL = settings.key("openAIBaseURL", default: "https://api.openai.com/v1")
+        openAIModel = settings.key("openAIModel", default: "gpt-4o-mini")
     }
 }

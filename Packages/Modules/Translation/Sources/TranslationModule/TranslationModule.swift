@@ -6,7 +6,10 @@ import SwiftUI
 /// "Dịch" tab: on-device translation of typed text, of the selection (⌃⌥T, through Accessibility) and of text sent
 /// through the "Dịch bằng MyNotch" service. Either text can be read aloud, and a translation of a selection can replace
 /// it in the app it was selected in. A text that is a quantity (a unit, a time, an expression, an amount of money) is
-/// converted above its translation, or instead of one when it is nothing else.
+/// converted above its translation, or instead of one when it is nothing else. A word or short phrase also gets its
+/// entry from the Mac's dictionary. Apple translates unless the user chose an engine that needs their own key (Google,
+/// Microsoft, an OpenAI-compatible server); its key stays in the Keychain, and when it fails the tab says so and offers
+/// Apple's translation instead of switching by itself.
 public final class TranslationModule: FeatureModule {
     public let descriptor = ModuleDescriptor(
         id: "translation",
@@ -32,6 +35,12 @@ public final class TranslationModule: FeatureModule {
     private let replacer: SelectionReplacer
     private let pasteboard: NSPasteboard
     private let conversion: ConversionSetup
+    private let dictionary: any DictionaryLooking
+    private let opener: any URLOpening
+    private let engineSetup: EngineSetup
+    /// The Settings rows of the engines. The page asks for its views again whenever it redraws, and what the model knows
+    /// (the saved keys, a check under way) must not start over each time, so there is one.
+    private(set) var engineSettings: EngineSettingsModel?
     private let shortcut: KeyboardShortcuts.Shortcut?
     private var context: ModuleContext?
     /// The shortcut's selection read; tests await it. A new press, Services text or stopping supersedes it.
@@ -55,6 +64,9 @@ public final class TranslationModule: FeatureModule {
             speech: SpeechPlayer(synthesizer: SystemSpeechSynthesizer()),
             replacer: SelectionReplacer(accessibility: accessibility, pasteboard: .general),
             conversion: ConversionSetup(),
+            dictionary: SystemDictionary(),
+            opener: WorkspaceURLOpener(),
+            engines: EngineSetup(),
             shortcut: Self.defaultShortcut
         )
     }
@@ -70,6 +82,9 @@ public final class TranslationModule: FeatureModule {
         speech: SpeechPlayer,
         replacer: SelectionReplacer,
         conversion: ConversionSetup,
+        dictionary: any DictionaryLooking,
+        opener: any URLOpening,
+        engines: EngineSetup,
         shortcut: KeyboardShortcuts.Shortcut?
     ) {
         self.engine = engine
@@ -80,6 +95,9 @@ public final class TranslationModule: FeatureModule {
         self.speech = speech
         self.replacer = replacer
         self.conversion = conversion
+        self.dictionary = dictionary
+        self.opener = opener
+        self.engineSetup = engines
         self.shortcut = shortcut
     }
 
@@ -93,9 +111,10 @@ public final class TranslationModule: FeatureModule {
             settings: context.settings, keys: TranslationKeys(context.settings), rates: rates, environment: conversion.environment,
             recognize: conversion.recognize
         )
+        let remote = remoteEngines(context.settings)
         translator = Translator(
-            state: state, engine: engine, converter: converter, scheduler: context.scheduler, settings: context.settings,
-            pasteboard: pasteboard
+            state: state, engines: EngineSet(apple: engine, remote: remote.engine(for:)), dictionary: DictionaryFinder(dictionary),
+            converter: converter, scheduler: context.scheduler, settings: context.settings, pasteboard: pasteboard
         )
         context.hotkeys.register("translateSelection", title: "Dịch đoạn chữ đang chọn", initial: shortcut) { [weak self] in
             self?.selectionShortcutPressed()
@@ -137,11 +156,13 @@ public final class TranslationModule: FeatureModule {
         context = nil
         state.input = ""
         state.output = ""
+        state.dictionary = nil
         state.source = nil
         state.detectedSource = nil
         state.pairStatus = nil
         state.isTranslating = false
         state.error = nil
+        state.offersAppleFallback = false
         state.conversions = []
         state.showsConversionsOnly = false
         state.isReadingSelection = false
@@ -157,7 +178,8 @@ public final class TranslationModule: FeatureModule {
             install: { [weak self] in self?.installLanguagePack() },
             replace: { [weak self] in self?.replaceSelection() },
             requestAccessibility: { [weak self] in self?.requestAccessibility() },
-            refreshAccessibility: { [weak self] in self?.refreshAccessibility() }
+            refreshAccessibility: { [weak self] in self?.refreshAccessibility() },
+            openDictionary: { [weak self] in self?.openInDictionary() }
         )
         return NotchTab(
             id: descriptor.id,
@@ -172,6 +194,10 @@ public final class TranslationModule: FeatureModule {
     public func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? {
         let settings = environment.settings
         let keys = TranslationKeys(settings)
+        let engineSettings = engineSettings ?? EngineSettingsModel(
+            keys: engineSetup.keys, engines: remoteEngines(settings), log: engineSetup.log
+        )
+        self.engineSettings = engineSettings
         return AnyView(TranslationSettingsView(
             preferredPair: settings.binding(keys.preferredPair),
             targetLanguage: settings.binding(keys.targetLanguage),
@@ -182,12 +208,28 @@ public final class TranslationModule: FeatureModule {
             currencyTarget: settings.binding(keys.currencyTarget),
             firstZone: settings.binding(keys.firstZone),
             secondZone: settings.binding(keys.secondZone),
+            engine: settings.binding(keys.engine),
+            microsoftRegion: settings.binding(keys.microsoftRegion),
+            openAIBaseURL: settings.binding(keys.openAIBaseURL),
+            openAIModel: settings.binding(keys.openAIModel),
+            engines: engineSettings,
             languages: languages,
             status: { [engine] pair in await engine.status(from: pair.source, to: pair.target) },
             install: { [weak self, installer] pair in
                 installer.install(pair) { self?.translator?.languagePackChanged() }
             }
         ))
+    }
+
+    /// The engines that need the user's key, reading their non-secret settings when they translate.
+    private func remoteEngines(_ settings: ModuleSettings) -> RemoteEngines {
+        let keys = TranslationKeys(settings)
+        return RemoteEngines(keys: engineSetup.keys, transport: engineSetup.transport, log: engineSetup.log) {
+            EngineConfig(
+                microsoftRegion: settings.value(keys.microsoftRegion), openAIBaseURL: settings.value(keys.openAIBaseURL),
+                openAIModel: settings.value(keys.openAIModel)
+            )
+        }
     }
 
     /// The shortcut. The tab opens at once, empty and saying it is reading, since a slow app can take most of a
@@ -222,6 +264,13 @@ public final class TranslationModule: FeatureModule {
         forgetSelection()
         receive(text)
         showTab(context)
+    }
+
+    /// The card's "Mở trong Từ điển" button: Dictionary opens at the word, over the notch, which closes.
+    func openInDictionary() {
+        guard let url = state.dictionary?.dictionaryURL else { return }
+        opener.open(url)
+        context?.presenter.close()
     }
 
     /// The banner's "Cài đặt…" button.

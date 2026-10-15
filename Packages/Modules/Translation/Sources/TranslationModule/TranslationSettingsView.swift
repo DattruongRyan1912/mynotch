@@ -11,6 +11,11 @@ struct TranslationSettingsView: View {
     @Binding var currencyTarget: String
     @Binding var firstZone: String
     @Binding var secondZone: String
+    @Binding var engine: String
+    @Binding var microsoftRegion: String
+    @Binding var openAIBaseURL: String
+    @Binding var openAIModel: String
+    let engines: EngineSettingsModel
     let languages: SupportedLanguages
     let status: (LanguagePair) async -> PairStatus
     let install: (LanguagePair) -> Void
@@ -24,6 +29,10 @@ struct TranslationSettingsView: View {
             languagePicker("Cặp ưa thích: ngôn ngữ 1", selection: $preferredPair.first, excluding: preferredPair.second)
             languagePicker("Cặp ưa thích: ngôn ngữ 2", selection: $preferredPair.second, excluding: preferredPair.first)
             languagePicker("Dịch sang", selection: $targetLanguage)
+            TranslationEngineSettingsView(
+                engine: $engine, microsoftRegion: $microsoftRegion, openAIBaseURL: $openAIBaseURL, openAIModel: $openAIModel,
+                model: engines
+            )
             Toggle(isOn: $autoTranslateOnOpen) {
                 Text("Dịch ngay khi mở")
                 Text("Chữ nhận được qua phím tắt hoặc Services được dịch luôn.")

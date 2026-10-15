@@ -20,6 +20,13 @@ struct ModuleFixture {
     let installer = FakeInstaller()
     /// The network: nothing in the tests reaches it, and rates are only asked for when the text has an amount of money.
     let ratesClient = FakeRatesClient()
+    /// Dictionary Services and the system's way of opening a URL: no test reads the real dictionary or launches Dictionary.
+    let dictionary = FakeDictionary()
+    let opener = FakeURLOpener()
+    /// The engines that need the user's own key: no test reads the Keychain, reaches a service or writes to the unified log.
+    let keyStore = FakeKeyStore()
+    let transport = FakeTransport()
+    let engineLog = FakeTranslationLog()
     /// 15 January 2026, noon UTC: winter in the northern hemisphere and 19:00 in Hanoi.
     let clock = TestClock("2026-01-15T12:00:00Z")
     /// Reads quantities like the real one, and records when and where.
@@ -49,6 +56,9 @@ struct ModuleFixture {
                 ),
                 recognize: { [recognizer] text, currency in recognizer.recognize(text, currency) }
             ),
+            dictionary: dictionary,
+            opener: opener,
+            engines: EngineSetup(keys: keyStore, transport: transport, log: engineLog),
             shortcut: nil
         )
         harness = RegistryHarness([module])

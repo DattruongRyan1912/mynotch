@@ -24,8 +24,12 @@ final class TranslationState {
     var conversions: [Conversion] = []
     /// `input` is nothing but quantities that were converted, so it is not translated and `output` stays empty.
     var showsConversionsOnly = false
+    /// The Mac's dictionary entry for `input` when it is a word or short phrase and some dictionary has one.
+    var dictionary: DictionaryEntry?
     /// Why the last translation failed, other than a missing or unsupported language pack.
     var error: String?
+    /// The chosen engine failed and Apple's could translate the same text: the tab offers the button that does it, once.
+    var offersAppleFallback = false
     /// Every language Translation supports, for the menus; empty until loaded.
     var languages: [Locale.Language] = []
     /// Bumped whenever the module opens the tab; the input field takes focus on each change.
@@ -56,6 +60,9 @@ final class TranslationState {
         case .installed, nil: nil
         }
     }
+
+    /// The card shows above the translation, never over a text that is only quantities.
+    var showsDictionary: Bool { dictionary != nil && !showsConversionsOnly }
 
     /// There is a translation, a language-pack banner or an error to show under the conversions.
     var hasTranslationContent: Bool { banner != nil || error != nil || !output.isEmpty }

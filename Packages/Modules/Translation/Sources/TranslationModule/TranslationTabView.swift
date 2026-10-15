@@ -7,6 +7,7 @@ struct TranslationTabActions {
     let replace: () -> Void
     let requestAccessibility: () -> Void
     let refreshAccessibility: () -> Void
+    let openDictionary: () -> Void
 }
 
 /// The "Dịch" tab: language menus on top, the text to translate on the left and the result on the right. Under them,
@@ -154,8 +155,12 @@ struct TranslationTabView: View {
                         )
                     }
                     if !state.showsConversionsOnly {
-                        if !state.conversions.isEmpty, state.hasTranslationContent {
-                            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+                        if !state.conversions.isEmpty, state.hasTranslationContent || state.dictionary != nil {
+                            divider
+                        }
+                        if let entry = state.dictionary {
+                            DictionaryCardView(entry: entry, open: actions.openDictionary)
+                            if state.hasTranslationContent { divider }
                         }
                         translationContent
                     }
@@ -178,12 +183,24 @@ struct TranslationTabView: View {
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
     }
 
+    private var divider: some View {
+        Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+    }
+
     @ViewBuilder private var translationContent: some View {
         if let banner = state.banner {
             bannerView(banner)
         } else if let error = state.error {
-            Label(error, systemImage: "exclamationmark.triangle")
-                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 8) {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                if state.offersAppleFallback {
+                    Button("Dịch bằng Apple", action: translator.translateWithApple)
+                        .buttonStyle(.borderedProminent)
+                        .tint(NotchTokens.accent)
+                        .controlSize(.small)
+                }
+            }
         } else {
             Text(state.output)
                 .textSelection(.enabled)

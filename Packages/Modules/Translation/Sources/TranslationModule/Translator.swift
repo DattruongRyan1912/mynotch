@@ -11,9 +11,12 @@ final class Translator {
     private(set) var translation: Task<Void, Never>?
     /// The wait for exchange rates after the newest request, if its text had an amount of money; tests await it.
     private(set) var conversion: Task<Void, Never>?
+    /// The dictionary lookup beside the newest translation, if its text is a word or short phrase; tests await it.
+    private(set) var lookup: Task<Void, Never>?
 
-    private let engine: any TranslationEngine
+    private let engines: EngineSet
     private let converter: QuickConverter
+    private let dictionary: DictionaryFinder
     private let detector = LanguageDetector()
     private let scheduler: any Scheduler
     private let settings: ModuleSettings
@@ -31,11 +34,12 @@ final class Translator {
     private var isStopped = false
 
     init(
-        state: TranslationState, engine: any TranslationEngine, converter: QuickConverter, scheduler: any Scheduler,
-        settings: ModuleSettings, pasteboard: NSPasteboard
+        state: TranslationState, engines: EngineSet, dictionary: DictionaryFinder, converter: QuickConverter,
+        scheduler: any Scheduler, settings: ModuleSettings, pasteboard: NSPasteboard
     ) {
         self.state = state
-        self.engine = engine
+        self.engines = engines
+        self.dictionary = dictionary
         self.converter = converter
         self.scheduler = scheduler
         self.settings = settings
@@ -51,7 +55,9 @@ final class Translator {
         pendingTyping?.cancel()
         state.input = text.flatMap { $0.allSatisfy(\.isWhitespace) ? nil : $0 } ?? ""
         state.output = ""
+        state.dictionary = nil
         state.error = nil
+        state.offersAppleFallback = false
         if translates {
             translate()
         } else {
@@ -75,6 +81,17 @@ final class Translator {
     /// Translates the input now (Return, a menu change, new text), superseding any translation in flight. A text that
     /// might be a quantity is first read off the main actor, and is not translated when that is all it is.
     func translate() {
+        start(using: nil)
+    }
+
+    /// The "Dịch bằng Apple" button under the error of another engine: translates the input once with Apple's engine.
+    /// The choice in Settings stays, so the next translation goes to that engine again; nothing switches by itself.
+    func translateWithApple() {
+        start(using: .apple)
+    }
+
+    /// `override` is the engine to use instead of the one chosen in Settings, which is read now, not when the module started.
+    private func start(using override: EngineChoice?) {
         guard !isStopped else { return }
         pendingTyping?.cancel()
         supersede()
@@ -85,6 +102,8 @@ final class Translator {
         }
         state.isTranslating = true
         let request = generation
+        let choice = override ?? EngineChoice(rawValue: settings.value(keys.engine)) ?? .apple
+        let engine = engines.engine(for: choice)
         // Most texts have no digit, and nothing to read: they are translated without waiting for anything.
         let readsQuantities = QuickConverter.mightHaveQuantities(text)
         var direction: LanguagePair?
@@ -117,7 +136,24 @@ final class Translator {
                 result = .failure(error)
             }
             guard let self, request == self.generation else { return }
-            self.show(result, for: pair)
+            self.show(result, for: pair, from: choice)
+        }
+    }
+
+    /// Starts the dictionary lookup beside the translation. A text that is no word or short phrase has none, and drops
+    /// the old card at once; a word keeps the old card until its own answer, so typing does not make it flicker.
+    private func lookUp(_ text: String) {
+        lookup?.cancel()
+        guard DictionaryQuery.term(in: text) != nil else {
+            lookup = nil
+            state.dictionary = nil
+            return
+        }
+        let request = generation
+        lookup = Task { [weak self, dictionary] in
+            let entry = await dictionary.entry(for: text)
+            guard let self, request == generation, !Task.isCancelled else { return }
+            state.dictionary = entry
         }
     }
 
@@ -127,6 +163,7 @@ final class Translator {
         state.detectedSource = state.source == nil ? pair.source : nil
         state.target = pair.target
         state.replaceFailure = nil
+        lookUp(text)
         // Same direction: keep the banner up while retranslating, so it doesn't flicker with every pause in typing.
         if pair != statusPair { state.pairStatus = nil }
         return pair
@@ -220,6 +257,7 @@ final class Translator {
         generation += 1
         translation?.cancel()
         conversion?.cancel()
+        lookup?.cancel()
         state.isTranslating = false
     }
 
@@ -237,31 +275,38 @@ final class Translator {
     private func showNoTranslation() {
         state.isTranslating = false
         state.output = ""
+        state.dictionary = nil
         state.error = nil
+        state.offersAppleFallback = false
         state.detectedSource = nil
         state.pairStatus = nil
         statusPair = nil
         state.replaceFailure = nil
     }
 
-    private func show(_ result: Result<String, TranslationFailure>, for pair: LanguagePair) {
+    private func show(_ result: Result<String, TranslationFailure>, for pair: LanguagePair, from choice: EngineChoice) {
         state.isTranslating = false
         switch result {
         case .success(let text):
             state.output = text
             state.error = nil
+            state.offersAppleFallback = false
             setStatus(.installed, for: pair)
         case .failure(.notInstalled):
             state.output = ""
             state.error = nil
+            state.offersAppleFallback = false
             setStatus(.supported, for: pair)
         case .failure(.unsupported):
             state.output = ""
             state.error = nil
+            state.offersAppleFallback = false
             setStatus(.unsupported, for: pair)
         case .failure(.failed(let message)):
             state.output = ""
             state.error = message
+            // The error is shown, and the user decides: Apple's engine is never asked on its own.
+            state.offersAppleFallback = choice != .apple
         case .failure(.cancelled):
             break   // nothing newer replaced it, so whatever the tab shows stays
         }
@@ -276,7 +321,9 @@ final class Translator {
         state.conversions = []
         state.showsConversionsOnly = false
         state.output = ""
+        state.dictionary = nil
         state.error = nil
+        state.offersAppleFallback = false
         state.detectedSource = nil
         state.pairStatus = nil
         statusPair = nil
