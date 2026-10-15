@@ -24,13 +24,18 @@ final class ClipboardLibraryWindowController: NSObject, ClipboardLibraryWindowin
 
     var isFrontmost: Bool { window?.isKeyWindow == true }
 
-    func show(_ content: AnyView, onClose: @escaping () -> Void) {
+    var frame: CGRect? { window?.frame }
+
+    func show(_ content: AnyView, model: ClipboardLibraryModel, onClose: @escaping () -> Void) {
         guard window == nil else {
             bringToFront()
             return
         }
         self.onClose = onClose
         let window = makeWindow(content)
+        (window as? ClipboardLibraryWindow)?.onPreviewKey = { [weak model] key, target, marked in
+            model?.handlePreviewKey(key, target: target, hasMarkedText: marked) ?? false
+        }
         window.delegate = self
         // AppKit saves the frame under this name on every move and resize, and restores it the next time.
         if !window.setFrameUsingName(Self.frameAutosaveName) { window.center() }
@@ -46,7 +51,7 @@ final class ClipboardLibraryWindowController: NSObject, ClipboardLibraryWindowin
         let controller = NSHostingController(rootView: ClipboardAccentHost(interface: interface) { content })
         // The toolbar items and the subtitle of the content go into the title bar.
         controller.sceneBridgingOptions = .all
-        let window = NSWindow(contentViewController: controller)
+        let window = ClipboardLibraryWindow(contentViewController: controller)
         window.title = "Thư viện Clipboard"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.setContentSize(NSSize(width: 980, height: 640))
@@ -85,6 +90,7 @@ extension ClipboardLibraryWindowController: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         guard let closing = notification.object as? NSWindow, closing === window else { return }
         window = nil
+        (closing as? ClipboardLibraryWindow)?.onPreviewKey = nil
         stopFollowingSetting()
         // Dropping the content ends the library's views at once and frees its thumbnails.
         closing.contentViewController = nil

@@ -221,7 +221,7 @@ struct ClipboardPanelView: View {
                 if module.state.needsAccessibility {
                     ClipboardAccessibilityHint(look: .panel) { module.requestAccessibility() }
                 } else {
-                    Text("↑↓ chọn  ·  ⏎ dùng  ·  ⌘1–9 chọn nhanh  ·  esc đóng")
+                    Text("↑↓ chọn  ·  ⏎ dùng  ·  ⌘1–9 chọn nhanh  ·  ␣ xem lớn  ·  esc đóng")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

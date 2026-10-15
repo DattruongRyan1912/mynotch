@@ -16,7 +16,7 @@ extension ClipboardModule: ClipboardPanelActions {}
 /// the keys, a click and ⌘1 to ⌘9 do, and what is pinned. It follows the module's `ClipboardState` only while it
 /// exists, and searches with the same index, `@` words and suggestions as the tab and the library.
 @Observable
-final class ClipboardPanelModel {
+final class ClipboardPanelModel: ClipboardPreviewHosting {
     /// ⌘1 to ⌘9.
     static let shortcutCount = 9
 
@@ -55,6 +55,8 @@ final class ClipboardPanelModel {
     /// Where the user dragged a pinned panel to: its frame's origin.
     @ObservationIgnored var onMove: ((CGPoint) -> Void)?
 
+    /// The large preview of the selected item (Space, ⌘Y), which follows the selection while it is open.
+    let preview = ClipboardPreviewState()
     /// What the user moved or clicked to; the first item stands in until then, or when it is gone.
     private var chosenID: UUID?
     private var history: ClipboardHistory
@@ -87,6 +89,7 @@ final class ClipboardPanelModel {
     /// Stops following the store and ignores everything from now on; called when the window closes.
     func detach() {
         isClosed = true
+        preview.close()
         state.stopObservingHistory(self)
     }
 
@@ -151,8 +154,8 @@ final class ClipboardPanelModel {
         case .activate:
             if let id = selectedID { activate(id) }
         case .clearSearch, .close:
-            // Esc closes the panel, with text in the field or not.
-            requestClose()
+            // Esc closes the panel, with text in the field or not; while the preview is open it closes only that.
+            cancel()
         case .complete:
             return false
         }
@@ -173,6 +176,8 @@ final class ClipboardPanelModel {
     /// A copy that failed changes nothing and says so.
     func activate(_ id: UUID) {
         guard !isClosed, let item = items.first(where: { $0.id == id }) else { return }
+        // Before anything is written or handed back, so the preview is never in the way of the keyboard or of ⌘V.
+        preview.close()
         chosenID = id
         var keyboardBack: Bool?
         let outcome = actions.activate(item) { [self] in
@@ -227,15 +232,70 @@ final class ClipboardPanelModel {
         if isPinned && !isClosed { onMove?(origin) }
     }
 
-    /// The panel lost the keyboard or the user clicked elsewhere: an unpinned panel is done.
+    /// The panel lost the keyboard or the user clicked elsewhere: an unpinned panel is done, and the preview of either is.
     func focusLost() {
+        preview.close()
         if !isPinned { requestClose() }
     }
 
     func requestClose() {
         guard !isClosed else { return }
         isClosed = true
+        preview.close()
         onClose?()
+    }
+
+    /// Esc that nothing else took: closes the preview while it is open, the panel otherwise.
+    func cancel() {
+        if preview.isOpen {
+            preview.close()
+        } else {
+            requestClose()
+        }
+    }
+
+    // MARK: The large preview
+
+    var isPreviewOpen: Bool { preview.isOpen }
+
+    @ObservationIgnored var onPreviewChange: ((Bool) -> Void)? {
+        get { preview.onChange }
+        set { preview.onChange = newValue }
+    }
+
+    /// The selected item while the preview is open.
+    var previewedItem: ClipboardItem? {
+        preview.isOpen ? previewableSelection : nil
+    }
+
+    /// Space and ⌘Y: opens the preview on the selected item, or closes it.
+    func togglePreview() {
+        if preview.isOpen {
+            preview.close()
+        } else if !isClosed, previewableSelection != nil {
+            preview.open()
+        }
+    }
+
+    func closePreview() {
+        preview.close()
+    }
+
+    /// A key the panel's window saw before its search field did. True when the preview took it, so the field never gets it.
+    func handlePreviewKey(_ key: ClipboardPreviewKeys.Key, target: ClipboardPreviewKeys.Target, hasMarkedText: Bool) -> Bool {
+        guard !isClosed else { return false }
+        let command = preview.command(
+            for: key, target: target, hasMarkedText: hasMarkedText, searchIsEmpty: searchText.isEmpty,
+            suggestionsAreOpen: suggestions.isOpen, hasItem: previewableSelection != nil
+        )
+        switch command {
+        case nil: return false
+        case .ignore: return true
+        case .toggle: togglePreview()
+        case .close: preview.close()
+        case .activate: if let id = selectedID { activate(id) }
+        }
+        return true
     }
 
     // MARK: Private
@@ -266,8 +326,18 @@ final class ClipboardPanelModel {
         notice = ClipboardLibraryNotice(id: noticeCount, text: text, systemImage: systemImage)
     }
 
+    private var previewableSelection: ClipboardItem? {
+        selectedItem.flatMap { history.canPreview($0.id) ? $0 : nil }
+    }
+
     /// The store changed: take its history and search it again.
     private func refreshAll() {
+        // An item that is gone (deleted, or its board locked) takes its preview with it, rather than the preview moving on
+        // to whatever the selection falls back to.
+        let previewed = preview.isOpen ? selectedID : nil
+        defer {
+            if let previewed, !history.items.contains(where: { $0.id == previewed }) { preview.close() }
+        }
         history = state.history
         pinnedIDs = Set(history.boards.flatMap(\.itemIDs))
         refreshItems()
@@ -278,5 +348,7 @@ final class ClipboardPanelModel {
         suggestions.update(text: searchText, apps: apps)
         items = searchIndex.filter(history, ClipboardQuery(text: searchText), apps: apps)
         if let chosenID, !items.contains(where: { $0.id == chosenID }) { self.chosenID = nil }
+        // Nothing left to show (a search with no match, an item that may not be previewed).
+        if preview.isOpen, previewableSelection == nil { preview.close() }
     }
 }

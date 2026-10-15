@@ -8,6 +8,8 @@ protocol ClipboardPanelWindowing: AnyObject {
     var isKey: Bool { get }
     /// The bottom left corner of the panel's frame while it is open.
     var origin: CGPoint? { get }
+    /// The panel's frame while it is open, which tells the large preview which display to appear on.
+    var frame: CGRect? { get }
     /// Opens the panel with `content`, over the app in front and without activating MyNotch: at `restoringOrigin` when
     /// it still fits on a screen, else beside the pointer. The window reports the model what happens to it (the
     /// keyboard leaving, a click elsewhere, ⌘1 to ⌘9, a drag). `onClose` runs once when it closes, whoever closes it.

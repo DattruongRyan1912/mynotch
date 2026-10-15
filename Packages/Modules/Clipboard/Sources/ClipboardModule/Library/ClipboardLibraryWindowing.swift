@@ -5,8 +5,11 @@ protocol ClipboardLibraryWindowing: AnyObject {
     var isOpen: Bool { get }
     /// The library window has the keyboard.
     var isFrontmost: Bool { get }
-    /// Opens the window with `content`. `onClose` runs once when it closes, whoever closes it.
-    func show(_ content: AnyView, onClose: @escaping () -> Void)
+    /// The window's frame while it is open, which tells the large preview which display to appear on.
+    var frame: CGRect? { get }
+    /// Opens the window with `content`. The window asks `model` what the large preview makes of a key press. `onClose` runs once
+    /// when it closes, whoever closes it.
+    func show(_ content: AnyView, model: ClipboardLibraryModel, onClose: @escaping () -> Void)
     func bringToFront()
     /// Lets the app behind the window take the keyboard, before a ⌘V that should reach it.
     func yieldKeyboardFocus()

@@ -42,6 +42,8 @@ final class ClipboardPanelController: NSObject, ClipboardPanelWindowing {
 
     var origin: CGPoint? { panel?.frame.origin }
 
+    var frame: CGRect? { panel?.frame }
+
     /// `interface` is where the "hide from screen recording" setting comes from: the app's shared one, or a test's own.
     init(
         interface: NotchInterface = .shared,
@@ -70,8 +72,11 @@ final class ClipboardPanelController: NSObject, ClipboardPanelWindowing {
             ?? ClipboardPanelPlacement.frame(size: size, pointer: pointer(), screens: screens)
         panel.setFrame(frame, display: false)
         panel.onQuickPick = { [weak model] in model?.pick(number: $0) ?? false }
-        panel.onCancel = { [weak model] in model?.requestClose() }
+        panel.onCancel = { [weak model] in model?.cancel() }
         panel.onResignKey = { [weak model] in model?.focusLost() }
+        panel.onPreviewKey = { [weak model] key, target, marked in
+            model?.handlePreviewKey(key, target: target, hasMarkedText: marked) ?? false
+        }
         self.panel = panel
         self.onClose = onClose
         watch(model)
@@ -107,6 +112,7 @@ final class ClipboardPanelController: NSObject, ClipboardPanelWindowing {
         panel.onQuickPick = nil
         panel.onCancel = nil
         panel.onResignKey = nil
+        panel.onPreviewKey = nil
         // Off the screen at once: the keyboard goes back to the app in front before ⌘V is sent.
         panel.orderOut(nil)
         // The panel is usually closed from inside one of its own event handlers (Return in the field, a click on a row,

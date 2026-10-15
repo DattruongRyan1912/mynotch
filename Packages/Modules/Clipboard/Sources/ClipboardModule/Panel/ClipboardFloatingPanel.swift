@@ -10,6 +10,8 @@ final class ClipboardFloatingPanel: NSPanel {
     var onCancel: (() -> Void)?
     /// Called after key status moved elsewhere, e.g. the user clicked into another app.
     var onResignKey: (() -> Void)?
+    /// What the large preview makes of a key press (Space, ⌘Y, Esc, Return), asked before the search field sees it.
+    var onPreviewKey: ClipboardPreviewKeys.Handler?
 
     init(size: CGSize) {
         super.init(contentRect: CGRect(origin: .zero, size: size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -31,6 +33,21 @@ final class ClipboardFloatingPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    /// Space in the search field is typed text, which never reaches it as a command, so every key press is looked at here first.
+    override func sendEvent(_ event: NSEvent) {
+        if offersToPreview(event), handlePreviewKey(event) { return }
+        super.sendEvent(event)
+    }
+
+    func offersToPreview(_ event: NSEvent) -> Bool {
+        event.type == .keyDown
+    }
+
+    /// The panel's only text input is its search field, so anything else that has the keyboard is not a place to type.
+    func handlePreviewKey(_ event: NSEvent) -> Bool {
+        ClipboardPreviewKeys.offer(event, in: self, to: onPreviewKey) { _ in true }
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if let number = ClipboardPanelKeys.quickPickNumber(keyCode: event.keyCode, modifiers: event.modifierFlags) {

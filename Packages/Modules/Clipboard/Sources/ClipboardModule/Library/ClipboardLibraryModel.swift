@@ -5,7 +5,7 @@ import Observation
 /// show, the counts beside them, which cards are selected and what keys, drops and deletes do. It follows the
 /// module's `ClipboardState` only while it exists, so a closed library costs nothing.
 @Observable
-final class ClipboardLibraryModel {
+final class ClipboardLibraryModel: ClipboardPreviewHosting {
     enum SelectMode {
         /// A plain click.
         case replace
@@ -65,6 +65,8 @@ final class ClipboardLibraryModel {
     @ObservationIgnored var onPreferencesChange: ((ClipboardLibraryPreferences) -> Void)?
     /// Owned by the library, so its thumbnails go with the window.
     @ObservationIgnored let thumbnails: ClipboardThumbnailCache
+    /// The large preview of the focused card (Space, ⌘Y), which follows the focus while it is open.
+    let preview = ClipboardPreviewState()
 
     @ObservationIgnored private let state: ClipboardState
     @ObservationIgnored private let actions: any ClipboardLibraryActions
@@ -93,6 +95,7 @@ final class ClipboardLibraryModel {
 
     /// Stops following the store; called when the window closes.
     func detach() {
+        preview.close()
         state.stopObservingHistory(self)
     }
 
@@ -237,6 +240,8 @@ final class ClipboardLibraryModel {
     @discardableResult
     func activate(_ id: UUID) -> Bool {
         guard let item = items.first(where: { $0.id == id }) else { return false }
+        // Before anything is written or pasted, so the preview is never in the way of the keyboard or of ⌘V.
+        preview.close()
         show(actions.activate(item))
         return true
     }
@@ -267,6 +272,49 @@ final class ClipboardLibraryModel {
 
     func dismissNotice(_ id: Int) {
         if notice?.id == id { notice = nil }
+    }
+
+    // MARK: The large preview
+
+    var isPreviewOpen: Bool { preview.isOpen }
+
+    @ObservationIgnored var onPreviewChange: ((Bool) -> Void)? {
+        get { preview.onChange }
+        set { preview.onChange = newValue }
+    }
+
+    /// The focused card while the preview is open.
+    var previewedItem: ClipboardItem? {
+        preview.isOpen ? previewableFocus : nil
+    }
+
+    /// Space and ⌘Y: opens the preview on the focused card, or closes it.
+    func togglePreview() {
+        if preview.isOpen {
+            preview.close()
+        } else if previewableFocus != nil {
+            preview.open()
+        }
+    }
+
+    func closePreview() {
+        preview.close()
+    }
+
+    /// A key the library's window saw before its search field or its cards did. True when the preview took it.
+    func handlePreviewKey(_ key: ClipboardPreviewKeys.Key, target: ClipboardPreviewKeys.Target, hasMarkedText: Bool) -> Bool {
+        let command = preview.command(
+            for: key, target: target, hasMarkedText: hasMarkedText, searchIsEmpty: searchText.isEmpty,
+            suggestionsAreOpen: suggestions.isOpen, hasItem: previewableFocus != nil
+        )
+        switch command {
+        case nil: return false
+        case .ignore: return true
+        case .toggle: togglePreview()
+        case .close: preview.close()
+        case .activate: activateSelection()
+        }
+        return true
     }
 
     // MARK: Deleting
@@ -344,6 +392,11 @@ final class ClipboardLibraryModel {
         items.map(\.id).filter(selectedIDs.contains)
     }
 
+    private var previewableFocus: ClipboardItem? {
+        guard let focusID, let item = items.first(where: { $0.id == focusID }), history.canPreview(item.id) else { return nil }
+        return item
+    }
+
     @discardableResult
     private func pin(_ ids: [UUID], to boardID: UUID) -> Bool {
         guard !ids.isEmpty, let board = history.boards.first(where: { $0.id == boardID }) else { return false }
@@ -364,6 +417,12 @@ final class ClipboardLibraryModel {
 
     /// The store changed: take its history, recount, and drop what no longer exists.
     private func refreshAll() {
+        // A card that is gone (deleted, or its board locked) takes its preview with it, rather than the preview moving on to
+        // whatever the focus falls back to.
+        let previewed = preview.isOpen ? focusID : nil
+        defer {
+            if let previewed, !history.items.contains(where: { $0.id == previewed }) { preview.close() }
+        }
         history = state.history
         counts = ClipboardLibraryContent.counts(of: history)
         pinnedIDs = Set(history.boards.flatMap(\.itemIDs))
@@ -391,5 +450,7 @@ final class ClipboardLibraryModel {
             self.focusID = items.last { selectedIDs.contains($0.id) }?.id
         }
         if let anchorID, !shown.contains(anchorID) { self.anchorID = focusID }
+        // Nothing left to show (a search or a filter that hides the card, a board with no cards).
+        if preview.isOpen, previewableFocus == nil { preview.close() }
     }
 }

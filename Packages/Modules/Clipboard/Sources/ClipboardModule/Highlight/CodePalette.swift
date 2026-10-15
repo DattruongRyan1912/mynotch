@@ -44,17 +44,28 @@ nonisolated enum CodePalette: Sendable, Hashable {
 
     /// Each colour is chosen when it is drawn, so one highlighted string serves both appearances.
     private static let adaptiveColors: [CodeTokenKind: Color] = Dictionary(uniqueKeysWithValues: kinds.map { kind in
-        (kind, Color(nsColor: NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            let rgb = rgb(for: kind, in: isDark ? .dark : .light)
-            return NSColor(srgbRed: rgb.red, green: rgb.green, blue: rgb.blue, alpha: 1)
-        }))
+        (kind, Color(nsColor: CodePalette.adaptive.nsColor(for: kind)))
     })
 
     func color(for kind: CodeTokenKind) -> Color {
         switch self {
         case .dark: Self.darkColors[kind] ?? .primary
         case .adaptive: Self.adaptiveColors[kind] ?? .primary
+        }
+    }
+
+    /// The same colour for a text view, which draws with `NSColor`s.
+    func nsColor(for kind: CodeTokenKind) -> NSColor {
+        switch self {
+        case .dark:
+            let rgb = Self.rgb(for: kind, in: .dark)
+            return NSColor(srgbRed: rgb.red, green: rgb.green, blue: rgb.blue, alpha: 1)
+        case .adaptive:
+            return NSColor(name: nil) { appearance in
+                let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                let rgb = Self.rgb(for: kind, in: isDark ? .dark : .light)
+                return NSColor(srgbRed: rgb.red, green: rgb.green, blue: rgb.blue, alpha: 1)
+            }
         }
     }
 }

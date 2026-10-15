@@ -10,6 +10,8 @@ final class FakeLibraryActions: ClipboardLibraryActions {
     private(set) var copied: [UUID] = []
     private(set) var deleted: [Set<UUID>] = []
     private(set) var pinned: [(ids: [UUID], board: UUID)] = []
+    /// Runs when an item is used, before the answer, so a test can see what had happened by then.
+    var onActivate: (() -> Void)?
 
     init(state: ClipboardState) {
         self.state = state
@@ -17,6 +19,7 @@ final class FakeLibraryActions: ClipboardLibraryActions {
 
     func activate(_ item: ClipboardItem) -> ClipboardPaster.Outcome? {
         activated.append(item.id)
+        onActivate?()
         return outcome
     }
 

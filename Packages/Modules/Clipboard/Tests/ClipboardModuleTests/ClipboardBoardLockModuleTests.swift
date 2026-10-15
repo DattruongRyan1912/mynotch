@@ -20,6 +20,8 @@ import Testing
     let keystrokes = FakeKeystrokeSender()
     let libraryWindow = FakeLibraryWindow()
     let panelWindow = FakePanelWindow()
+    let libraryPreview = FakePreviewWindow()
+    let panelPreview = FakePreviewWindow()
     let system = FakeSystem()
     let modifiers = FakeModifierState()
     let keychain = FakeBoardKeychain()
@@ -39,7 +41,7 @@ import Testing
             pasteboard: pasteboard, keystrokes: keystrokes,
             frontmostApp: { system.frontmost }, isTrusted: { system.trusted },
             pasteboardAccessBehavior: { system.accessBehavior }, modifiers: modifiers, now: { system.now },
-            libraryWindow: libraryWindow, panelWindow: panelWindow,
+            libraryWindow: libraryWindow, panelWindow: panelWindow, libraryPreview: libraryPreview, panelPreview: panelPreview,
             mcpSocketPath: { _ in folder + "/mcp.sock" }, installMCPHelper: { _ in },
             keychain: keychain, authenticator: authenticator, keyDerivation: Self.fast,
             lockTriggers: ClipboardLockTriggers(sources: [

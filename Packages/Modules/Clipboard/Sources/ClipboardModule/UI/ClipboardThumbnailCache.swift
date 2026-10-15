@@ -70,7 +70,7 @@ final class ClipboardThumbnailCache {
     }
 
     /// Reads only what the thumbnail needs, so a large screenshot is never decoded at full size.
-    @concurrent private nonisolated static func decode(_ url: URL, maxPixelSize: Int) async -> CGImage? {
+    @concurrent nonisolated static func decode(_ url: URL, maxPixelSize: Int) async -> CGImage? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else {
             return nil
         }
@@ -78,7 +78,7 @@ final class ClipboardThumbnailCache {
     }
 
     /// The same, from bytes held in memory.
-    @concurrent private nonisolated static func decode(_ data: Data, maxPixelSize: Int) async -> CGImage? {
+    @concurrent nonisolated static func decode(_ data: Data, maxPixelSize: Int) async -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else {
             return nil
         }

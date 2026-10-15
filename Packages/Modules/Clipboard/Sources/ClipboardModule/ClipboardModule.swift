@@ -62,6 +62,9 @@ public final class ClipboardModule: FeatureModule {
     private let libraryWindow: (any ClipboardLibraryWindowing)?
     /// nil in tests that never show it; the app passes the real panel.
     private let panelWindow: (any ClipboardPanelWindowing)?
+    /// The large preview of each of the two windows (Space, ⌘Y). Two, so each window closes only its own.
+    private let libraryPreviewWindow: (any ClipboardPreviewWindowing)?
+    private let panelPreviewWindow: (any ClipboardPreviewWindowing)?
     private(set) var context: ModuleContext?
     private(set) var keys: ClipboardSettingKeys?
     private var monitor: ClipboardMonitor?
@@ -97,7 +100,9 @@ public final class ClipboardModule: FeatureModule {
             pasteboardAccessBehavior: { NSPasteboard.general.accessBehavior },
             modifiers: SystemModifierState(),
             libraryWindow: ClipboardLibraryWindowController(),
-            panelWindow: ClipboardPanelController()
+            panelWindow: ClipboardPanelController(),
+            libraryPreview: ClipboardPreviewController(),
+            panelPreview: ClipboardPreviewController()
         )
     }
 
@@ -112,6 +117,8 @@ public final class ClipboardModule: FeatureModule {
         now: @escaping () -> Date = { .now },
         libraryWindow: (any ClipboardLibraryWindowing)? = nil,
         panelWindow: (any ClipboardPanelWindowing)? = nil,
+        libraryPreview: (any ClipboardPreviewWindowing)? = nil,
+        panelPreview: (any ClipboardPreviewWindowing)? = nil,
         mcpSocketPath: @escaping (URL) -> String = ClipboardModule.defaultMCPSocketPath,
         installMCPHelper: @escaping (URL) throws -> Void = ClipboardMCPHelperFile.installFromBundle,
         keychain: any BoardKeyKeychain = SystemBoardKeyKeychain(),
@@ -135,6 +142,8 @@ public final class ClipboardModule: FeatureModule {
         self.now = now
         self.libraryWindow = libraryWindow
         self.panelWindow = panelWindow
+        libraryPreviewWindow = libraryPreview
+        panelPreviewWindow = panelPreview
     }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
@@ -338,7 +347,8 @@ public final class ClipboardModule: FeatureModule {
         }
         model.thumbnails.openImages = openImages
         library = model
-        libraryWindow.show(AnyView(ClipboardLibraryView(module: self, model: model)), onClose: { [weak self] in
+        attachPreview(to: model, window: libraryPreviewWindow) { [weak libraryWindow] in libraryWindow?.frame }
+        libraryWindow.show(AnyView(ClipboardLibraryView(module: self, model: model)), model: model, onClose: { [weak self] in
             self?.libraryClosed(model)
         })
     }
@@ -366,6 +376,7 @@ public final class ClipboardModule: FeatureModule {
         model.onMove = { origin in settings.set(ClipboardPanelPosition(origin), for: keys.panelPosition) }
         model.thumbnails.openImages = openImages
         panel = model
+        attachPreview(to: model, window: panelPreviewWindow) { [weak panelWindow] in panelWindow?.frame }
         // Only a pinned panel is where it was left; an unpinned one is always beside the pointer.
         let restoredOrigin = pinned ? settings.value(keys.panelPosition)?.point : nil
         panelWindow.show(AnyView(ClipboardPanelView(module: self, model: model)), model: model, restoringOrigin: restoredOrigin) { [weak self] in
@@ -716,7 +727,23 @@ public final class ClipboardModule: FeatureModule {
     /// Called by the library window closing, whether the user closed it or the module did.
     private func libraryClosed(_ model: ClipboardLibraryModel) {
         model.detach()
+        libraryPreviewWindow?.close()
         if library === model { library = nil }
+    }
+
+    /// Shows the preview in `window` while `host` has it open, over the display of `hostFrame()`, and takes it away when the host
+    /// closes it or the user clicks anywhere but on it. The window is told nothing else: what it draws follows the host.
+    private func attachPreview(to host: some ClipboardPreviewHosting, window: (any ClipboardPreviewWindowing)?, hostFrame: @escaping () -> CGRect?) {
+        guard let window else { return }
+        host.onPreviewChange = { [weak self, weak host, weak window] open in
+            guard open, let self, let host else {
+                window?.close()
+                return
+            }
+            window?.show(AnyView(ClipboardPreviewView(host: host, module: self)), hostFrame: hostFrame()) { [weak host] in
+                host?.closePreview()
+            }
+        }
     }
 
     /// The panel was pinned or unpinned: remembered for the next time, along with where it is when pinned.
@@ -729,6 +756,7 @@ public final class ClipboardModule: FeatureModule {
     /// Called by the panel window closing, whether the user closed it or the module did.
     private func panelClosed(_ model: ClipboardPanelModel) {
         model.detach()
+        panelPreviewWindow?.close()
         if panel === model { panel = nil }
     }
 
@@ -974,6 +1002,14 @@ public final class ClipboardModule: FeatureModule {
         guard case .image(let image) = item.content else { return nil }
         if openImages.contains(image.fileName) { return ClipboardOpenImages.url(forFileName: image.fileName) }
         return store?.imageURL(fileName: image.fileName)
+    }
+
+    /// Where the preview reads an image item's picture from: the bytes of one in an open locked board (which are in no file), or its
+    /// stored file. nil for any other item, or while stopped.
+    func previewImageSource(of item: ClipboardItem) -> ClipboardPreviewImageSource? {
+        guard case .image(let image) = item.content else { return nil }
+        if let data = openImages.data(forFileName: image.fileName) { return .memory(data) }
+        return store?.imageURL(fileName: image.fileName).map { .file($0) }
     }
 
     func hasImageFile(_ item: ClipboardItem, in store: ClipboardStore) -> Bool {

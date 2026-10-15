@@ -8,12 +8,13 @@ import Testing
 final class FakeLibraryWindow: ClipboardLibraryWindowing {
     var isOpen = false
     var isFrontmost = false
+    var frame: CGRect? = CGRect(x: 80, y: 80, width: 980, height: 640)
     private(set) var showCount = 0
     private(set) var frontCount = 0
     private(set) var yieldCount = 0
     private var onClose: (() -> Void)?
 
-    func show(_ content: AnyView, onClose: @escaping () -> Void) {
+    func show(_ content: AnyView, model: ClipboardLibraryModel, onClose: @escaping () -> Void) {
         showCount += 1
         isOpen = true
         self.onClose = onClose
