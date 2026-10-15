@@ -62,11 +62,15 @@ public final class ClipboardModule: FeatureModule {
     private let libraryWindow: (any ClipboardLibraryWindowing)?
     /// nil in tests that never show it; the app passes the real panel.
     private let panelWindow: (any ClipboardPanelWindowing)?
-    /// The large preview of each of the two windows (Space, ⌘Y). Two, so each window closes only its own.
+    /// The large preview of each of the windows that have one (Space, ⌘Y): the library, the floating panel and the notch's tab. Each has
+    /// its own, so each closes only its own.
     private let libraryPreviewWindow: (any ClipboardPreviewWindowing)?
     private let panelPreviewWindow: (any ClipboardPreviewWindowing)?
     private(set) var context: ModuleContext?
     private(set) var keys: ClipboardSettingKeys?
+    private let tabPreviewWindow: (any ClipboardPreviewWindowing)?
+    /// The notch tab's large preview; it follows `state`, so it exists as long as the module does.
+    let tabPreview: ClipboardTabPreviewModel
     private var monitor: ClipboardMonitor?
     private var paster: ClipboardPaster?
     /// Closed on stop, so a ⌘V still waiting for the paste delay is never sent into whatever app is in front by then.
@@ -102,7 +106,8 @@ public final class ClipboardModule: FeatureModule {
             libraryWindow: ClipboardLibraryWindowController(),
             panelWindow: ClipboardPanelController(),
             libraryPreview: ClipboardPreviewController(),
-            panelPreview: ClipboardPreviewController()
+            panelPreview: ClipboardPreviewController(),
+            tabPreview: ClipboardPreviewController()
         )
     }
 
@@ -121,6 +126,7 @@ public final class ClipboardModule: FeatureModule {
         panelPreview: (any ClipboardPreviewWindowing)? = nil,
         mcpSocketPath: @escaping (URL) -> String = ClipboardModule.defaultMCPSocketPath,
         installMCPHelper: @escaping (URL) throws -> Void = ClipboardMCPHelperFile.installFromBundle,
+        tabPreview: (any ClipboardPreviewWindowing)? = nil,
         keychain: any BoardKeyKeychain = SystemBoardKeyKeychain(),
         authenticator: any UserAuthenticating = SystemUserAuthenticator(),
         keyDerivation: ClipboardVaultCrypto.Derivation = .standard,
@@ -146,6 +152,11 @@ public final class ClipboardModule: FeatureModule {
         panelPreviewWindow = panelPreview
     }
 
+        tabPreviewWindow = tabPreview
+        self.tabPreview = ClipboardTabPreviewModel(state: state)
+        self.tabPreview.onActivate = { [weak self] item in self?.activate(item) }
+        let tabModel = self.tabPreview
+        attachPreview(to: tabModel, window: tabPreview) { tabModel.hostWindow() }
     public func start(_ context: ModuleContext) async throws(ModuleError) {
         await finishDiskWork()
         do {
@@ -249,6 +260,8 @@ public final class ClipboardModule: FeatureModule {
         closePanel()
         keystrokeGate?.isOpen = false
         keystrokeGate = nil
+        tabPreview.closePreview()
+        tabPreviewWindow?.close()
         classificationStep?.cancel()
         classificationStep = nil
         classification?.cancel()

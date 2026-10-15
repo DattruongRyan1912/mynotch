@@ -46,6 +46,28 @@ extension ClipboardBoardLockModuleTests {
         #expect(!libraryPreview.isOpen)
     }
 
+    @Test func lockingTheBoardWhileItsCardIsShownLargeInTheNotchClosesThePreviewAndUnpinsTheNotch() async throws {
+        await start()
+        let board = try await makeLockedBoard()
+        try await module.unlockBoard(board, credential: .password(Self.password))
+        var pins: [Bool] = []
+        module.tabPreview.pinNotch = { pins.append($0) }
+        module.tabPreview.hostWindow = { (CGRect(x: 0, y: 700, width: 640, height: 200), nil) }
+        // Select the board's card in the row the way a click or the arrows do.
+        let secret = try item(Self.secretText)
+        state.query.text = Self.secretText
+        module.tabPreview.togglePreview()
+        #expect(module.tabPreview.previewedItem?.id == secret.id)
+        #expect(tabPreview.isOpen)
+
+        #expect(module.relockBoard(board))
+
+        #expect(!module.tabPreview.isPreviewOpen)
+        #expect(module.tabPreview.previewedItem == nil)
+        #expect(!tabPreview.isOpen)
+        #expect(pins == [true, false])
+    }
+
     @Test func aLockedBoardsItemsAreNeverOfferedToThePreviewOnceItIsClosed() async throws {
         await start()
         _ = try await makeLockedBoard()

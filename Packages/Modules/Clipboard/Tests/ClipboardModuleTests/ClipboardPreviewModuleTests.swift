@@ -222,6 +222,113 @@ extension ClipboardModuleTests {
         #expect(!libraryPreview.isOpen)
     }
 
+    // MARK: The notch's tab
+
+    /// The notch's window as the tab's key hook would report it, and a recorder for the pin.
+    func attachNotch(frame: CGRect = CGRect(x: 400, y: 700, width: 640, height: 200)) -> NotchRecorder {
+        let recorder = NotchRecorder()
+        module.tabPreview.hostWindow = { (frame, ObjectIdentifier(recorder)) }
+        module.tabPreview.pinNotch = { recorder.pins.append($0) }
+        return recorder
+    }
+
+    final class NotchRecorder {
+        var pins: [Bool] = []
+    }
+
+    @Test func theNotchTabsPreviewIsShownOverTheNotchsDisplayAndPinsTheNotch() async throws {
+        await start()
+        copy("Xin chào")
+        let notch = attachNotch()
+
+        module.tabPreview.togglePreview()
+
+        #expect(module.tabPreview.isPreviewOpen)
+        #expect(tabPreview.isOpen)
+        #expect(tabPreview.hostFrame == CGRect(x: 400, y: 700, width: 640, height: 200))
+        #expect(tabPreview.hostWindow == ObjectIdentifier(notch))
+        #expect(notch.pins == [true])
+        #expect(!panelPreview.isOpen && !libraryPreview.isOpen)
+    }
+
+    @Test func closingTheNotchTabsPreviewTakesTheWindowAwayAndUnpinsTheNotch() async throws {
+        await start()
+        copy("Xin chào")
+        let notch = attachNotch()
+        module.tabPreview.togglePreview()
+
+        module.tabPreview.closePreview()
+
+        #expect(!tabPreview.isOpen)
+        #expect(notch.pins == [true, false])
+    }
+
+    @Test func aClickOutsideTheNotchTabsPreviewClosesItAndUnpins() async throws {
+        await start()
+        copy("Xin chào")
+        let notch = attachNotch()
+        module.tabPreview.togglePreview()
+
+        tabPreview.clickOutside()
+
+        #expect(!module.tabPreview.isPreviewOpen)
+        #expect(notch.pins == [true, false])
+    }
+
+    @Test func stoppingTheModuleClosesTheNotchTabsPreviewToo() async throws {
+        await start()
+        copy("Xin chào")
+        let notch = attachNotch()
+        module.tabPreview.togglePreview()
+
+        await harness.registry.setEnabled(false, for: "clipboard")
+
+        #expect(!tabPreview.isOpen)
+        #expect(!module.tabPreview.isPreviewOpen)
+        #expect(notch.pins == [true, false])
+    }
+
+    @Test func theNotchTabsPreviewFollowsTheNewestCopyThatArrivesWhileItIsOpenOnlyIfItWasNotChosen() async throws {
+        await start()
+        copy("một")
+        _ = attachNotch()
+        module.tabPreview.togglePreview()
+        let shown = try #require(module.tabPreview.previewedItem)
+
+        copy("hai")
+        // The first card stood in for a selection nobody made; opening the preview made it the user's.
+        #expect(module.tabPreview.previewedItem?.id == shown.id)
+    }
+
+    /// Return in the notch: the preview goes, then the notch's own paste path (write, close the notch, ⌘V after its short delay).
+    @Test func returnWithTheNotchTabsPreviewOpenClosesItBeforeAnythingIsWrittenThenPastesThroughTheNotchsPath() async throws {
+        let (settings, keys) = try settings()
+        settings.set(.paste, for: keys.clickAction)
+        await start()
+        copy("Xin chào")
+        let notch = attachNotch()
+        module.tabPreview.togglePreview()
+        var writesWhenPreviewClosed: Int?
+        var notchClosesWhenPreviewClosed: Int?
+        tabPreview.onClose = { [self] in
+            writesWhenPreviewClosed = pasteboard.writes.count
+            notchClosesWhenPreviewClosed = harness.presenter.closeCount
+        }
+
+        let key = ClipboardPreviewKeys.Key(keyCode: 36, characters: "\r", modifiers: [])
+        #expect(module.tabPreview.handlePreviewKey(key, target: .searchField, hasMarkedText: false))
+
+        #expect(writesWhenPreviewClosed == 0)
+        #expect(notchClosesWhenPreviewClosed == 0)
+        #expect(pasteboard.writes.last?.content == .text("Xin chào"))
+        // The notch is closed by the paste, as for a click on the card; ⌘V goes out after the short delay.
+        #expect(harness.presenter.closeCount == 1)
+        #expect(keystrokes.pasteCount == 0)
+        harness.scheduler.advance(by: .milliseconds(80))
+        #expect(keystrokes.pasteCount == 1)
+        #expect(notch.pins == [true, false])
+    }
+
     // MARK: Pictures
 
     @Test func aStoredPictureIsReadFromItsFile() async throws {

@@ -22,7 +22,17 @@ struct ClipboardTabView: View {
 
     /// Menus and the board name field live outside the notch's reach: a click there counts as outside, and the pointer
     /// may leave the notch, so the notch stays pinned while either is shown.
-    private var needsPin: Bool { isMenuOpen || boardEditing != nil || showsVault }
+    private var needsPin: Bool {
+        Self.needsPin(menuOpen: isMenuOpen, editing: boardEditing != nil, vault: showsVault, previewing: preview.isPreviewOpen)
+    }
+
+    /// What keeps the notch open: a menu, a board name or a form being typed into, a prompt for a locked board, or the large preview.
+    static func needsPin(menuOpen: Bool, editing: Bool, vault: Bool, previewing: Bool) -> Bool {
+        menuOpen || editing || vault || previewing
+    }
+
+    /// The large preview of the selected card (Space, ⌘Y), which the module shows in a window of its own.
+    private var preview: ClipboardTabPreviewModel { module.tabPreview }
 
     /// The board on show when it is locked: its place is taken by the prompt that opens it.
     private var lockedBoard: ClipboardBoard? {
@@ -42,6 +52,8 @@ struct ClipboardTabView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // Gives Space and ⌘Y their large preview of the selected card, and Esc, Tab and Return their meaning while it is open.
+        .background { ClipboardNotchKeyHook(model: preview) }
         // Over the cards, right under the field.
         .overlay(alignment: .topLeading) {
             if state.suggestions.isOpen, !state.stack.isOn {
@@ -54,6 +66,10 @@ struct ClipboardTabView: View {
             // Each open starts from the newest item; the kind and board filters stay as chosen.
             state.query.text = ""
             state.selectedID = nil
+            // The preview keeps the notch open the way a menu does, on top of whatever else needs it.
+            preview.pinNotch = { previewing in
+                notch.setPinned(Self.needsPin(menuOpen: isMenuOpen, editing: boardEditing != nil, vault: showsVault, previewing: previewing))
+            }
         }
         // Menu tracking is one session at a time, submenus included, so a flag is enough. The pin is set right here,
         // not in `onChange`, which could wait until the menu's tracking loop ends.
@@ -63,9 +79,12 @@ struct ClipboardTabView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSMenu.didEndTrackingNotification)) { _ in
             isMenuOpen = false
-            notch.setPinned(boardEditing != nil)
+            notch.setPinned(boardEditing != nil || preview.isPreviewOpen)
         }
         .onDisappear {
+            // The tab going away (the notch closed, another tab) takes the preview with it.
+            preview.closePreview()
+            preview.pinNotch = nil
             if needsPin { notch.setPinned(false) }
             // Open locked boards close when the notch does, if Settings says so.
             module.notchDidClose()
@@ -75,7 +94,15 @@ struct ClipboardTabView: View {
         .onChange(of: state.query.boardID) { module.noteVaultActivity() }
         // The stack's shortcut can start a stack while a board name is being typed, which takes the field away.
         .onChange(of: state.stack.isOn) {
-            if state.stack.isOn { finishEditing(commit: false) }
+            if state.stack.isOn {
+                finishEditing(commit: false)
+                // The stack takes the place of the cards.
+                preview.closePreview()
+            }
+        }
+        // A menu, a board name or a prompt takes over the keyboard or the pointer: nothing is left of the preview for them to share.
+        .onChange(of: isMenuOpen || boardEditing != nil || showsVault) { _, busy in
+            if busy { preview.closePreview() }
         }
         // The board whose look is being chosen can be deleted from elsewhere (the library), which leaves nothing to choose for.
         .onChange(of: state.history.boards.map(\.id)) { _, ids in
@@ -288,6 +315,8 @@ struct ClipboardTabView: View {
     }
 
     private func activate(_ item: ClipboardItem) {
+        // Before anything is written or pasted, so the preview is never in the way of the keyboard or of ⌘V.
+        preview.closePreview()
         state.selectedID = item.id
         module.activate(item)
     }

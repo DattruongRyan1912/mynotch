@@ -17,7 +17,9 @@ final class ClipboardState {
             refreshVisibleItems()
         }
     }
-    var selectedID: UUID?
+    var selectedID: UUID? {
+        didSet { notifyShownObservers() }
+    }
     /// The copy stack: copies collected while it is on, to be pasted one by one. Changed only by the module.
     var stack = CopyStack()
     /// What to tell the user about a locked board that closed without its latest changes, until they dismiss it.
@@ -39,6 +41,23 @@ final class ClipboardState {
     /// Plain closures rather than observation, so the work stops the moment its owner is gone.
     @ObservationIgnored private var historyObservers: [ObjectIdentifier: () -> Void] = [:]
     var historyObserverCount: Int { historyObservers.count }
+
+    /// Told after the cards the tab shows or the selected one change: a search, a filter, a new copy, a deleted item, an arrow key.
+    /// Plain closures like the history's, so the work stops the moment its owner is gone.
+    @ObservationIgnored private var shownObservers: [ObjectIdentifier: () -> Void] = [:]
+
+    /// Replaces any action `owner` registered before.
+    func observeShown(_ owner: AnyObject, _ action: @escaping () -> Void) {
+        shownObservers[ObjectIdentifier(owner)] = action
+    }
+
+    func stopObservingShown(_ owner: AnyObject) {
+        shownObservers[ObjectIdentifier(owner)] = nil
+    }
+
+    private func notifyShownObservers() {
+        for action in Array(shownObservers.values) { action() }
+    }
 
     /// Replaces any action `owner` registered before.
     func observeHistory(_ owner: AnyObject, _ action: @escaping () -> Void) {
@@ -110,5 +129,6 @@ final class ClipboardState {
         apps = query.text.contains("@") ? ClipboardLibraryContent.counts(of: history).apps : []
         suggestions.update(text: query.text, apps: apps)
         visibleItems = searchIndex.filter(history, query, apps: apps)
+        notifyShownObservers()
     }
 }

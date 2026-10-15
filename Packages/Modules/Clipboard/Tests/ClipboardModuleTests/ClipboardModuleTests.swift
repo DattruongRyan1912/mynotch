@@ -22,6 +22,7 @@ final class FakeSystem {
     let panelWindow = FakePanelWindow()
     let libraryPreview = FakePreviewWindow()
     let panelPreview = FakePreviewWindow()
+    let tabPreview = FakePreviewWindow()
     let system = FakeSystem()
     let modifiers = FakeModifierState()
     let module: ClipboardModule
@@ -35,7 +36,8 @@ final class FakeSystem {
             pasteboard: pasteboard, keystrokes: keystrokes,
             frontmostApp: { system.frontmost }, isTrusted: { system.trusted },
             pasteboardAccessBehavior: { system.accessBehavior }, modifiers: modifiers, now: { system.now },
-            libraryWindow: libraryWindow, panelWindow: panelWindow, libraryPreview: libraryPreview, panelPreview: panelPreview
+            libraryWindow: libraryWindow, panelWindow: panelWindow, libraryPreview: libraryPreview, panelPreview: panelPreview,
+            tabPreview: tabPreview
         )
         harness = RegistryHarness([module])
         temporaryRoot = harness.storageRoot.applicationSupport.deletingLastPathComponent()
