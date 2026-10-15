@@ -33,6 +33,12 @@ final class NowPlayingStore {
     private(set) var syncedLyrics: [LyricLine]?
     /// lrclib has the words of the current track but no timing: the lyric row says so instead of following along.
     private(set) var lyricsAreUnsynced = false
+    /// Some line of the synced lyrics has the timing of its words (Apple Music's syllable lyrics, enhanced LRC).
+    private(set) var lyricsHaveWordTiming = false
+    /// The user wants the sung part of a line filled word by word ("Tô theo từng chữ"); the setting's value, set by the module.
+    private(set) var karaokeEnabled = true
+    /// The floating lyrics panel is up; set by the module from its setting, which the Media tab's button flips.
+    private(set) var lyricsPanelShown = false
     /// A lyrics source (lrclib and Apple, or YouTube captions) is turned on. The lyric row then keeps its place under
     /// the controls while there is nothing to show in it yet, so the player does not move as lyrics come and go.
     private(set) var lyricsAreOn = false
@@ -106,7 +112,21 @@ final class NowPlayingStore {
     /// Assigns only a real change, so the lyric row is redrawn only for new lyrics.
     func showLyrics(_ lines: [LyricLine]?) {
         if lines != syncedLyrics { syncedLyrics = lines }
+        let hasWords = lines?.contains { $0.words != nil } ?? false
+        if hasWords != lyricsHaveWordTiming { lyricsHaveWordTiming = hasWords }
         if lyricsAreUnsynced { lyricsAreUnsynced = false }
+    }
+
+    /// Lines are filled word by word: the setting is on and the lyrics have the timing for it. Lines without word timing are
+    /// shown as they always were, whatever this says.
+    var karaokeIsActive: Bool { karaokeEnabled && lyricsHaveWordTiming }
+
+    func setKaraokeEnabled(_ isEnabled: Bool) {
+        if isEnabled != karaokeEnabled { karaokeEnabled = isEnabled }
+    }
+
+    func setLyricsPanelShown(_ isShown: Bool) {
+        if isShown != lyricsPanelShown { lyricsPanelShown = isShown }
     }
 
     func showUnsyncedLyrics() {
@@ -158,6 +178,12 @@ final class NowPlayingStore {
     func lyricStrip(at date: Date) -> LyricStrip? {
         guard let syncedLyrics else { return nil }
         return LyricStrip(lines: syncedLyrics, position: position(at: date))
+    }
+
+    /// The panel's three lines at `date`; nil while the track has no synced lyrics.
+    func lyricPanel(at date: Date) -> LyricPanelLines? {
+        guard let syncedLyrics else { return nil }
+        return LyricPanelLines(lines: syncedLyrics, position: position(at: date))
     }
 
     /// Called by each bars view as it appears and disappears.

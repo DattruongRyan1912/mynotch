@@ -236,8 +236,8 @@ import Testing
     @Test func registersShortcutsWithoutDefaults() async {
         await harness.registry.bootstrap()
         let registrations = harness.hotkeys.registrations.filter { $0.owner == "media" }
-        #expect(registrations.map(\.id) == ["media_mediaPlayPause", "media_mediaNext", "media_mediaPrevious"])
-        #expect(registrations.map(\.title) == ["Phát/dừng nhạc", "Bài sau", "Bài trước"])
+        #expect(registrations.map(\.id) == ["media_mediaPlayPause", "media_mediaNext", "media_mediaPrevious", "media_lyricsPanel"])
+        #expect(registrations.map(\.title) == ["Phát/dừng nhạc", "Bài sau", "Bài trước", "Bật/tắt bảng lời nổi"])
         #expect(registrations.allSatisfy { harness.hotkeyBackend.getShortcut(for: $0.name) == nil })
     }
 

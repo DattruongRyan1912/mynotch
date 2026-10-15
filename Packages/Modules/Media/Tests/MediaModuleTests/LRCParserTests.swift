@@ -63,9 +63,10 @@ import Testing
         #expect(lines == [line(1, "first")])
     }
 
-    @Test func wordTimestampsAreStripped() {
+    @Test func wordTimestampsAreNotPartOfTheText() {
         let lines = LRCParser.parse("[00:10.00] <00:10.00>Hello <00:10.50>big <00:11.00> world <00:11.50>")
-        #expect(lines == [line(10, "Hello big world")])
+        #expect(lines.map(\.text) == ["Hello big world"])
+        #expect(lines.map(\.time) == [10])
     }
 
     @Test func angleBracketsThatAreNotTimestampsStay() {

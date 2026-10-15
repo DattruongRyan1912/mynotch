@@ -24,6 +24,18 @@ struct MediaSettingsKeys {
     let lyricsUnderNotch: SettingKey<Bool>
     /// The buttons beside play and pause in the Media tab.
     let controlButtons: SettingKey<MediaControlLayout>
+    /// The sung part of a line is filled word by word where the lyrics have the timing for it.
+    let karaoke: SettingKey<Bool>
+    /// The floating lyrics panel is up. Off by default; the Media tab's button and the hotkey flip it.
+    let lyricsPanel: SettingKey<Bool>
+    /// The current line's size in the panel, in points; the lines around it are smaller.
+    let lyricsPanelFontSize: SettingKey<Double>
+    /// How opaque the whole panel is.
+    let lyricsPanelOpacity: SettingKey<Double>
+    /// The pointer goes through the panel to what is under it, so it can be left over a window.
+    let lyricsPanelClickThrough: SettingKey<Bool>
+    /// Where the panel was left on each display. Written by the panel, not by a settings row.
+    let lyricsPanelFrames: SettingKey<LyricsPanelPlacement>
 
     init(_ settings: ModuleSettings) {
         showActivity = settings.key("showActivity", default: true)
@@ -34,6 +46,12 @@ struct MediaSettingsKeys {
         youtubeCaptions = settings.key("youtubeCaptions", default: false)
         lyricsUnderNotch = settings.key("lyricsUnderNotch", default: false)
         controlButtons = settings.key("controlButtons", default: .standard)
+        karaoke = settings.key("karaoke", default: true)
+        lyricsPanel = settings.key("lyricsPanel", default: false)
+        lyricsPanelFontSize = settings.key("lyricsPanelFontSize", default: LyricsPanelModel.defaultFontSize, clampedTo: LyricsPanelModel.fontSizeRange)
+        lyricsPanelOpacity = settings.key("lyricsPanelOpacity", default: 0.9, clampedTo: LyricsPanelController.opacityRange)
+        lyricsPanelClickThrough = settings.key("lyricsPanelClickThrough", default: false)
+        lyricsPanelFrames = settings.key("lyricsPanelFrames", default: LyricsPanelPlacement())
     }
 }
 
@@ -43,6 +61,8 @@ struct MediaActions {
     var seek: (Double) -> Void
     /// A button beside play and pause was pressed.
     var press: (MediaControlButton) -> Void = { _ in }
+    /// Puts the floating lyrics panel up or takes it down.
+    var toggleLyricsPanel: () -> Void = {}
 }
 
 /// A next or previous that went to the extension and waits for its answer.
@@ -144,6 +164,14 @@ public final class MediaModule: FeatureModule {
     private var lockScreenOffered = false
     private var deadlineTimer: ScheduledAction?
     private var scheduledDeadline: Date?
+    /// The floating lyrics panel and what it follows, while the module runs.
+    private var lyricsPanel: LyricsPanelHost?
+    /// Puts the lyrics panel on the screen; tests record it instead.
+    var presentLyricsPanel: (NSPanel) -> Void = { $0.orderFrontRegardless() }
+    /// The displays the panel is placed on, the main one first; tests give their own.
+    var lyricsPanelDisplays: @MainActor () -> [PanelDisplay] = LyricsPanelController.screens
+    var lyricsPanelController: LyricsPanelController? { lyricsPanel?.controller }
+    var lyricsPanelModel: LyricsPanelModel? { lyricsPanel?.model }
 
     /// The app passes the bundled mediaremote-adapter script and framework; nil when the build did not include them.
     public convenience init(adapterScript: URL?, adapterFramework: URL?) {
@@ -248,15 +276,31 @@ public final class MediaModule: FeatureModule {
         registerHotkeys(context.hotkeys)
         let settings = context.settings
         let keys = MediaSettingsKeys(settings)
+        let panel = LyricsPanelHost(
+            store: store, settings: settings, scheduler: context.scheduler, displays: lyricsPanelDisplays, present: presentLyricsPanel
+        )
+        lyricsPanel = panel
+        panel.apply()
         context.run { [weak self] in
             let changes = Observations {
                 (
                     settings.value(keys.showActivity), settings.value(keys.pauseGraceSeconds),
                     settings.value(keys.hiddenApps), settings.value(keys.realSpectrum), settings.value(keys.lyrics),
-                    settings.value(keys.youtubeCaptions), settings.value(keys.lyricsUnderNotch), settings.value(keys.controlButtons)
+                    settings.value(keys.youtubeCaptions), settings.value(keys.lyricsUnderNotch), settings.value(keys.controlButtons),
+                    settings.value(keys.karaoke)
                 )
             }
             for await _ in changes { self?.settingsChanged() }
+        }
+        // Not in the loop above: moving the panel writes its frame, which must not make the module look at its activity again.
+        context.run { [weak self] in
+            let changes = Observations {
+                (
+                    settings.value(keys.lyricsPanel), settings.value(keys.lyricsPanelFontSize),
+                    settings.value(keys.lyricsPanelOpacity), settings.value(keys.lyricsPanelClickThrough)
+                )
+            }
+            for await _ in changes { self?.lyricsPanel?.apply() }
         }
         let store = store
         context.run { [weak self] in
@@ -276,6 +320,8 @@ public final class MediaModule: FeatureModule {
     }
 
     public func stop() async {
+        lyricsPanel?.close()
+        lyricsPanel = nil
         source?.stop()
         source = nil
         store.setCanLike(false)
@@ -324,6 +370,11 @@ public final class MediaModule: FeatureModule {
             youtubeCaptions: environment.settings.binding(keys.youtubeCaptions),
             lyricsUnderNotch: environment.settings.binding(keys.lyricsUnderNotch),
             controlButtons: environment.settings.binding(keys.controlButtons),
+            karaoke: environment.settings.binding(keys.karaoke),
+            lyricsPanel: environment.settings.binding(keys.lyricsPanel),
+            lyricsPanelFontSize: environment.settings.binding(keys.lyricsPanelFontSize),
+            lyricsPanelOpacity: environment.settings.binding(keys.lyricsPanelOpacity),
+            lyricsPanelClickThrough: environment.settings.binding(keys.lyricsPanelClickThrough),
             youtubeBridge: youtubeBridgeModel(for: environment),
             store: store,
             appleAccount: appleAccount,
@@ -364,7 +415,8 @@ public final class MediaModule: FeatureModule {
         MediaActions(
             send: { [weak self] command in self?.send(command) },
             seek: { [weak self] seconds in self?.seek(toSeconds: seconds) },
-            press: { [weak self] button in self?.press(button) }
+            press: { [weak self] button in self?.press(button) },
+            toggleLyricsPanel: { [weak self] in self?.lyricsPanel?.toggle() }
         )
     }
 
@@ -466,6 +518,7 @@ public final class MediaModule: FeatureModule {
         hotkeys.register("mediaPlayPause", title: "Phát/dừng nhạc") { [weak self] in self?.send(.togglePlayPause) }
         hotkeys.register("mediaNext", title: "Bài sau") { [weak self] in self?.send(.nextTrack) }
         hotkeys.register("mediaPrevious", title: "Bài trước") { [weak self] in self?.send(.previousTrack) }
+        hotkeys.register("lyricsPanel", title: "Bật/tắt bảng lời nổi") { [weak self] in self?.lyricsPanel?.toggle() }
     }
 
     private func receive(_ line: String) {
@@ -502,6 +555,7 @@ public final class MediaModule: FeatureModule {
         lyricsUnderNotch = settings.value(keys.lyricsUnderNotch)
         youtubeCaptionsEnabled = settings.value(keys.youtubeCaptions)
         store.setControlLayout(settings.value(keys.controlButtons))
+        store.setKaraokeEnabled(settings.value(keys.karaoke))
         store.setLyricsOn(lyricsEnabled || youtubeCaptionsEnabled)
         updateYouTubeBridge()
     }

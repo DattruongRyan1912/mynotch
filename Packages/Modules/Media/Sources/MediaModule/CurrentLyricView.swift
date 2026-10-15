@@ -1,3 +1,4 @@
+import AppKit
 import NotchUI
 import SwiftUI
 
@@ -12,23 +13,46 @@ nonisolated enum LyricRow: Equatable, Sendable {
 /// The row keeps its height between lines, so the player does not jump at each pause in the song.
 struct CurrentLyricView: View {
     static let height: CGFloat = 14
+    /// What the button at the row's end takes on each side, so that the line stays centred and never runs under it.
+    static let toggleWidth: CGFloat = 24
 
     let store: NowPlayingStore
+    /// Puts the floating lyrics panel up or takes it down.
+    var togglePanel: () -> Void = {}
 
     var body: some View {
+        let hasRow = store.lyricRow != .absent
+        content
+            .padding(.horizontal, hasRow ? Self.toggleWidth : 0)
+            .overlay(alignment: .trailing) {
+                if hasRow { PanelToggleButton(isShown: store.lyricsPanelShown, action: togglePanel) }
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch store.lyricRow {
         case .absent:
             EmptyView()
         case .reserved:
             Color.clear.frame(height: Self.height)
         case .synced:
-            // Four times a second is fine-grained enough for lines that last seconds; the clock itself is exact.
-            NotchTimeline(every: 0.25) { date in
-                let text = store.lyric(at: date)?.text ?? ""
-                row(text)
-                    .foregroundStyle(NotchTokens.primaryText.opacity(0.9))
-                    .contentTransition(.opacity)
-                    .animation(.easeOut(duration: 0.2), value: text)
+            // At each line when it is filled word by word, else four times a second, which is fine-grained enough for lines
+            // that last seconds; the clock itself is exact.
+            LyricTimeline(store: store) { date in
+                let line = store.lyric(at: date)
+                let text = line?.text ?? ""
+                Group {
+                    if store.karaokeIsActive, let line, !text.isEmpty, line.words != nil {
+                        KaraokeLine(line: line, store: store, style: .row)
+                            .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height)
+                    } else {
+                        row(text)
+                            .foregroundStyle(NotchTokens.primaryText.opacity(0.9))
+                            .contentTransition(.opacity)
+                    }
+                }
+                .animation(.easeOut(duration: 0.2), value: text)
             }
         case .unsynced:
             row("Chỉ có lời không đồng bộ")
@@ -44,5 +68,46 @@ struct CurrentLyricView: View {
             .truncationMode(.tail)
             .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height, alignment: .center)
+    }
+}
+
+extension KaraokeStyle {
+    /// The current line of the Media tab's row, which is a little smaller and dimmer than the strip's.
+    static let row = KaraokeStyle(
+        fontSize: 11, weight: .medium, lit: NSColor(NotchTokens.primaryText).withAlphaComponent(0.9),
+        dim: NSColor(NotchTokens.secondaryText).withAlphaComponent(0.7)
+    )
+}
+
+/// How the button for the floating lyrics panel looks: the panel up is lit, like the lyrics button among the controls.
+enum LyricsPanelToggle {
+    static func look(isShown: Bool) -> MediaControlLook {
+        MediaControlLook(
+            symbol: isShown ? "pip.exit" : "pip.enter", label: "Bảng lời nổi: \(isShown ? "bật" : "tắt")", isEnabled: true, isActive: isShown
+        )
+    }
+}
+
+/// At the end of the lyric row: a small button that puts the panel up or takes it down.
+private struct PanelToggleButton: View {
+    let isShown: Bool
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        let look = LyricsPanelToggle.look(isShown: isShown)
+        Button(action: action) {
+            Image(systemName: look.symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(look.isActive ? NotchTokens.accent : NotchTokens.secondaryText)
+                .opacity(isHovering || look.isActive ? 1 : 0.7)
+                .frame(width: CurrentLyricView.toggleWidth - 4, height: CurrentLyricView.height)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help(look.label)
+        .accessibilityLabel(look.label)
+        .accessibilityAddTraits(look.isActive ? .isSelected : [])
     }
 }

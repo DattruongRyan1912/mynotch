@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import NotchUI
 import SwiftUI
@@ -63,13 +64,13 @@ struct NowPlayingLyricStrip: View {
     let store: NowPlayingStore
 
     var body: some View {
-        // Four times a second is fine-grained enough for lines that last seconds; the clock itself is exact. Not at all while the
-        // notch is hidden.
-        NotchTimeline(every: 0.25) { date in
+        // At each line when it is filled word by word, else four times a second, which is fine-grained enough for lines that
+        // last seconds; the clock itself is exact. Not at all while the notch is hidden.
+        LyricTimeline(store: store) { date in
             // The note alone while the lyrics are gone and the new ones are not there yet (between two tracks).
             let strip = store.lyricStrip(at: date) ?? .waiting
             ZStack {
-                rows(strip)
+                rows(strip, line: store.lyric(at: date))
                     // A new pair of lines slides up into place while the old one leaves.
                     .id(strip)
                     .transition(.asymmetric(
@@ -83,12 +84,17 @@ struct NowPlayingLyricStrip: View {
         }
     }
 
-    private func rows(_ strip: LyricStrip) -> some View {
+    private func rows(_ strip: LyricStrip, line: LyricLine?) -> some View {
         VStack(spacing: 2) {
-            Text(strip.current ?? LyricStrip.note)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(strip.current == nil ? NotchTokens.secondaryText : NotchTokens.primaryText)
-                .frame(height: 16)
+            if store.karaokeIsActive, let line, strip.current != nil, line.words != nil {
+                KaraokeLine(line: line, store: store, style: .strip)
+                    .frame(height: 16)
+            } else {
+                Text(strip.current ?? LyricStrip.note)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(strip.current == nil ? NotchTokens.secondaryText : NotchTokens.primaryText)
+                    .frame(height: 16)
+            }
             Text(strip.next ?? "")
                 .font(.system(size: 11))
                 .foregroundStyle(NotchTokens.secondaryText)
@@ -102,4 +108,9 @@ struct NowPlayingLyricStrip: View {
         .accessibilityLabel("Lời bài hát")
         .accessibilityValue(strip.spoken)
     }
+}
+
+extension KaraokeStyle {
+    /// The current line of the strip under the notch: the size and weight of its text row, the sung part lit.
+    static let strip = KaraokeStyle(fontSize: 12, weight: .semibold, lit: NSColor(NotchTokens.primaryText), dim: NSColor(NotchTokens.secondaryText))
 }

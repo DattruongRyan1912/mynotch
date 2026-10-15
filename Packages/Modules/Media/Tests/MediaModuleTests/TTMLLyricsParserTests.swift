@@ -11,6 +11,8 @@ import Testing
         return #"<?xml version="1.0" encoding="UTF-8"?><tt \#(Self.namespaces)\#(attribute) xml:lang="en"><head>\#(head)</head><body>\#(body)</body></tt>"#
     }
 
+    func word(_ text: String, _ begin: Double, _ end: Double) -> LyricWord { LyricWord(text: text, begin: begin, end: end) }
+
     // MARK: line timing
 
     @Test func lineTimingGivesOneLinePerParagraph() {
@@ -49,7 +51,9 @@ import Testing
         let ttml = document(timing: "Word", body: """
         <div><p begin="1.0" end="3.0"><span begin="1.0" end="1.4">la</span><span begin="1.4" end="2.0">la</span> <span begin="2.0" end="3.0">land</span></p></div>
         """)
-        #expect(TTMLLyricsParser.parse(ttml) == .synced([LyricLine(time: 1, text: "lala land")]))
+        #expect(TTMLLyricsParser.parse(ttml) == .synced([
+            LyricLine(time: 1, words: [word("la", 1, 1.4), word("la ", 1.4, 2), word("land", 2, 3)]),
+        ]))
     }
 
     @Test func whitespaceNodesBetweenSpansAreKept() {
@@ -57,7 +61,10 @@ import Testing
         <div><p begin="1"><span begin="1">one</span>
         <span begin="2">two</span> <span begin="3">three</span></p></div>
         """)
-        #expect(TTMLLyricsParser.parse(ttml) == .synced([LyricLine(time: 1, text: "one two three")]))
+        let result = TTMLLyricsParser.parse(ttml)
+        guard case .synced(let lines)? = result else { Issue.record("not synced: \(String(describing: result))"); return }
+        #expect(lines.map(\.text) == ["one two three"])
+        #expect(lines.first?.words?.map(\.text) == ["one ", "two ", "three"])
     }
 
     @Test func backgroundVocalsAreSkipped() {
@@ -66,24 +73,122 @@ import Testing
         <p begin="5"><span ttm:role="x-bg"><span begin="5">(only</span> <span begin="6">echo)</span></span></p></div>
         """)
         // The second paragraph holds nothing but a background vocal, so there is no line for it.
-        #expect(TTMLLyricsParser.parse(ttml) == .synced([LyricLine(time: 1, text: "main words")]))
+        let result = TTMLLyricsParser.parse(ttml)
+        guard case .synced(let lines)? = result else { Issue.record("not synced: \(String(describing: result))"); return }
+        #expect(lines.map(\.text) == ["main words"])
+        // Nor are the echo's syllables among the words.
+        #expect(lines.first?.words?.map(\.text) == ["main ", "words"])
     }
 
     @Test func translationsAndTransliterationsInsideAParagraphAreSkipped() {
         let ttml = document(timing: "Word", body: """
-        <div><p begin="1"><span begin="1">sung</span><span ttm:role="x-translation">other words</span><span ttm:role="x-roman">more words</span></p></div>
+        <div><p begin="1"><span begin="1" end="2">sung</span><span ttm:role="x-translation">other words</span><span ttm:role="x-roman">more words</span></p></div>
         """)
-        #expect(TTMLLyricsParser.parse(ttml) == .synced([LyricLine(time: 1, text: "sung")]))
+        let result = TTMLLyricsParser.parse(ttml)
+        guard case .synced(let lines)? = result else { Issue.record("not synced: \(String(describing: result))"); return }
+        #expect(lines.map(\.text) == ["sung"])
+        #expect(lines.first?.words?.map(\.text) == ["sung"])
     }
 
     @Test func aParagraphWithoutABeginTakesItsFirstSpansTime() {
         let ttml = document(timing: "Word", body: #"<div><p><span begin="2.5">one</span> <span begin="3">two</span></p></div>"#)
-        #expect(TTMLLyricsParser.parse(ttml) == .synced([LyricLine(time: 2.5, text: "one two")]))
+        let result = TTMLLyricsParser.parse(ttml)
+        guard case .synced(let lines)? = result else { Issue.record("not synced: \(String(describing: result))"); return }
+        #expect(lines.map(\.time) == [2.5])
+        #expect(lines.map(\.text) == ["one two"])
     }
 
     @Test func theTimingIsReadWhateverItsCase() {
-        let ttml = document(timing: "word", body: #"<div><p begin="1"><span begin="1">one</span></p></div>"#)
-        #expect(TTMLLyricsParser.parse(ttml) == .synced([LyricLine(time: 1, text: "one")]))
+        let ttml = document(timing: "word", body: #"<div><p begin="1"><span begin="1" end="2">one</span></p></div>"#)
+        #expect(TTMLLyricsParser.parse(ttml) == .synced([LyricLine(time: 1, words: [word("one", 1, 2)])]))
+    }
+
+    // MARK: word times
+
+    @Test func eachSpanIsAWordFromItsBeginToItsEnd() {
+        let ttml = document(timing: "Word", body: """
+        <div><p begin="1.0" end="3.5"><span begin="1.0" end="1.5">one</span> <span begin="1.5" end="2.25">two</span> <span begin="2.5" end="3.5">three</span></p></div>
+        """)
+        #expect(TTMLLyricsParser.parse(ttml) == .synced([
+            LyricLine(time: 1, words: [word("one ", 1, 1.5), word("two ", 1.5, 2.25), word("three", 2.5, 3.5)]),
+        ]))
+    }
+
+    @Test func aSpanWithoutAnEndEndsWhereTheNextOneBegins() {
+        let ttml = document(timing: "Word", body: #"<div><p begin="1"><span begin="1">one</span> <span begin="2.5" end="3">two</span></p></div>"#)
+        #expect(TTMLLyricsParser.parse(ttml) == .synced([LyricLine(time: 1, words: [word("one ", 1, 2.5), word("two", 2.5, 3)])]))
+    }
+
+    @Test func theLastSpanWithoutAnEndEndsWithTheParagraphOrElseAfterASecond() {
+        let withEnd = document(timing: "Word", body: #"<div><p begin="1" end="4"><span begin="1" end="2">one</span> <span begin="2">two</span></p></div>"#)
+        #expect(TTMLLyricsParser.parse(withEnd) == .synced([LyricLine(time: 1, words: [word("one ", 1, 2), word("two", 2, 4)])]))
+        let without = document(timing: "Word", body: #"<div><p begin="1"><span begin="1" end="2">one</span> <span begin="2">two</span></p></div>"#)
+        #expect(TTMLLyricsParser.parse(without) == .synced([LyricLine(time: 1, words: [word("one ", 1, 2), word("two", 2, 3)])]))
+    }
+
+    @Test func theLastSpanWithoutAnEndStopsWhereTheNextParagraphBegins() {
+        let ttml = document(timing: "Word", body: """
+        <div><p begin="1"><span begin="1" end="1.2">one</span> <span begin="1.2">two</span></p><p begin="1.5"><span begin="1.5" end="2">next</span> <span begin="2" end="3">one</span></p></div>
+        """)
+        guard case .synced(let lines)? = TTMLLyricsParser.parse(ttml) else { Issue.record("not synced"); return }
+        #expect(lines.first?.words?.last == word("two", 1.2, 1.5))
+    }
+
+    @Test func spansThatOverlapOrRunBackwardsNeverMakeWordsOverlap() {
+        let ttml = document(timing: "Word", body: """
+        <div><p begin="1"><span begin="1" end="3">one</span> <span begin="2" end="4">two</span> <span begin="1.5" end="5">three</span> <span begin="6" end="5">four</span></p></div>
+        """)
+        guard case .synced(let lines)? = TTMLLyricsParser.parse(ttml), let words = lines.first?.words else { Issue.record("no words"); return }
+        #expect(words.map(\.text) == ["one ", "two ", "three ", "four"])
+        for (earlier, later) in zip(words, words.dropFirst()) {
+            #expect(earlier.begin <= earlier.end)
+            #expect(earlier.end <= later.begin)
+        }
+        #expect(words[0] == word("one ", 1, 2))
+    }
+
+    @Test func aSpanWithoutABeginIsTextOfTheWordBeforeIt() {
+        let ttml = document(timing: "Word", body: #"<div><p begin="1"><span begin="1" end="2">one</span><span> two</span> <span begin="3" end="4">three</span></p></div>"#)
+        #expect(TTMLLyricsParser.parse(ttml) == .synced([LyricLine(time: 1, words: [word("one two ", 1, 2), word("three", 3, 4)])]))
+    }
+
+    @Test func wordsAreReadFromSpansNestedInASpanToo() {
+        let ttml = document(timing: "Word", body: #"<div><p begin="1"><span begin="1" end="2"><span>on</span>e</span> <span begin="2" end="3">two</span></p></div>"#)
+        #expect(TTMLLyricsParser.parse(ttml) == .synced([LyricLine(time: 1, words: [word("one ", 1, 2), word("two", 2, 3)])]))
+    }
+
+    @Test func lineTimingGivesNoWordsEvenWhereSpansHaveTimes() {
+        let ttml = document(timing: "Line", body: #"<div><p begin="1"><span begin="1" end="2">one</span> <span begin="2" end="3">two</span></p></div>"#)
+        #expect(TTMLLyricsParser.parse(ttml) == .synced([LyricLine(time: 1, text: "one two")]))
+    }
+
+    @Test func spansWithNoTimeAtAllGiveALineWithoutWords() {
+        let ttml = document(timing: "Word", body: #"<div><p begin="1"><span>one</span> <span>two</span></p></div>"#)
+        #expect(TTMLLyricsParser.parse(ttml) == .synced([LyricLine(time: 1, text: "one two")]))
+    }
+
+    @Test func aParagraphWithoutSpansAmongOnesWithThemStaysALine() {
+        let ttml = document(timing: "Word", body: """
+        <div><p begin="1"><span begin="1" end="2">one</span> <span begin="2" end="3">two</span></p><p begin="4">plain</p></div>
+        """)
+        guard case .synced(let lines)? = TTMLLyricsParser.parse(ttml) else { Issue.record("not synced"); return }
+        #expect(lines.map { $0.words != nil } == [true, false])
+        #expect(lines.last == LyricLine(time: 4, text: "plain"))
+    }
+
+    @Test func entitiesAndCDATAInSpansAreInTheWords() {
+        let ttml = document(timing: "Word", body: #"<div><p begin="1"><span begin="1" end="2">la &amp;</span> <span begin="2" end="3"><![CDATA[<3]]></span></p></div>"#)
+        #expect(TTMLLyricsParser.parse(ttml) == .synced([LyricLine(time: 1, words: [word("la & ", 1, 2), word("<3", 2, 3)])]))
+    }
+
+    @Test func theTextOfEveryLineIsItsWordsJoined() {
+        let ttml = document(timing: "Word", body: """
+        <div><p begin="1">  <span begin="1" end="2">  one </span>
+        <span begin="2" end="3">two</span><span begin="3" end="4">  three</span>  </p></div>
+        """)
+        guard case .synced(let lines)? = TTMLLyricsParser.parse(ttml), let line = lines.first else { Issue.record("not synced"); return }
+        #expect(line.text == "one two three")
+        #expect(line.words?.map(\.text).joined() == line.text)
     }
 
     // MARK: no timing

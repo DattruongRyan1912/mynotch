@@ -31,9 +31,16 @@ enum AppleReplies {
         return #"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" itunes:timing="\#(timing)"><body><div>\#(lines.joined())</div></body></tt>"#
     }
 
-    /// What `ttml(timing: "Line" or "Word", count:, tag:)` parses to.
-    static func lines(count: Int = 4, tag: String = "line") -> [LyricLine] {
-        (0..<count).map { LyricLine(time: Double($0 + 1), text: "\(tag) \($0 + 1)") }
+    /// What `ttml(timing: "Line", count:, tag:)` parses to, or with `words: true` what `timing: "Word"` does: each line has the
+    /// two words of its two spans, the first up to the second's begin and the second for a second.
+    static func lines(count: Int = 4, tag: String = "line", words: Bool = false) -> [LyricLine] {
+        (0..<count).map { index in
+            let time = Double(index + 1)
+            guard words else { return LyricLine(time: time, text: "\(tag) \(index + 1)") }
+            return LyricLine(time: time, words: [
+                LyricWord(text: "\(tag) ", begin: time, end: time), LyricWord(text: "\(index + 1)", begin: time, end: time + 1),
+            ])
+        }
     }
 
     /// `data[0].attributes.ttml`, as the web API sends it.
@@ -176,7 +183,7 @@ enum AppleReplies {
 
     @Test func aLyricsRequestCarriesTheLyricParametersWithTheirBracketsEncoded() async throws {
         route(syllable: AppleReplies.lyrics(ttml: AppleReplies.ttml(timing: "Word")))
-        #expect(await ask() == .synced(AppleReplies.lines(tag: "line")))
+        #expect(await ask() == .synced(AppleReplies.lines(tag: "line", words: true)))
         #expect(lookupCalls == [Self.api, "\(Self.api)/syllable-lyrics"])
         let request = try #require(lookupRequests.last)
         #expect(request.httpMethod == "GET")
@@ -551,13 +558,13 @@ enum AppleReplies {
 
     @Test func theLocalizationsAreReadBeforeTheTTML() async {
         route(syllable: AppleReplies.lyrics(ttml: AppleReplies.ttml(count: 3, tag: "plainttml"), localizations: AppleReplies.localizedTTML(count: 5, tag: "local")))
-        #expect(await ask() == .synced(AppleReplies.lines(count: 5, tag: "local")))
+        #expect(await ask() == .synced(AppleReplies.lines(count: 5, tag: "local", words: true)))
         #expect(lookupRequests.count == 2)
     }
 
     @Test func theLocalizationsAloneAreEnough() async {
         route(syllable: AppleReplies.lyrics(ttml: nil, localizations: AppleReplies.localizedTTML(count: 4, tag: "local")))
-        #expect(await ask() == .synced(AppleReplies.lines(count: 4, tag: "local")))
+        #expect(await ask() == .synced(AppleReplies.lines(count: 4, tag: "local", words: true)))
     }
 
     @Test func theTranslationsInTheHeadAreNotLyrics() async {

@@ -10,6 +10,8 @@ struct MediaSettingsView: View {
     static let lyricsExplanation = "Khi bật, tên bài, nghệ sĩ, album và thời lượng của mỗi bài mới (kể cả video phát trong trình duyệt) được gửi tới lrclib.net để lấy lời."
     static let lyricsUnderNotchTitle = "Hiện lời 2 dòng dưới notch"
     static let lyricsUnderNotchExplanation = "Khi có lời đồng bộ và nhạc đang phát, notch thu gọn hiện câu đang hát và câu sắp tới."
+    static let karaokeTitle = "Tô theo từng chữ"
+    static let karaokeExplanation = "Khi lời có thời gian từng chữ (Apple Music, hoặc lrclib dạng nâng cao), phần đã hát của câu được tô dần ở dưới notch, trong tab Media và trong bảng lời nổi. Lời chỉ có thời gian từng câu vẫn hiện như cũ."
 
     @Binding var showActivity: Bool
     @Binding var pauseGraceSeconds: Int
@@ -19,6 +21,11 @@ struct MediaSettingsView: View {
     @Binding var youtubeCaptions: Bool
     @Binding var lyricsUnderNotch: Bool
     @Binding var controlButtons: MediaControlLayout
+    @Binding var karaoke: Bool
+    @Binding var lyricsPanel: Bool
+    @Binding var lyricsPanelFontSize: Double
+    @Binding var lyricsPanelOpacity: Double
+    @Binding var lyricsPanelClickThrough: Bool
     let youtubeBridge: YouTubeBridgeModel
     /// Only for the permission hint; the module keeps the store for its whole life, running or not.
     let store: NowPlayingStore
@@ -60,7 +67,50 @@ struct MediaSettingsView: View {
                 Text(Self.lyricsUnderNotchTitle)
                 Text(Self.lyricsUnderNotchExplanation)
             }
+            Toggle(isOn: $karaoke) {
+                Text(Self.karaokeTitle)
+                Text(Self.karaokeExplanation)
+            }
+            LyricsPanelRows(isOn: $lyricsPanel, fontSize: $lyricsPanelFontSize, opacity: $lyricsPanelOpacity, clickThrough: $lyricsPanelClickThrough)
             MediaControlRows(layout: $controlButtons)
+        }
+    }
+}
+
+/// The floating lyrics panel: whether it is up, and how it looks. The Media tab's button and the hotkey flip the first.
+struct LyricsPanelRows: View {
+    static let title = "Bảng lời nổi"
+    static let explanation = "Một bảng nhỏ luôn nằm trên các cửa sổ, hiện câu trước, câu đang hát và câu sau. Kéo bảng đi đâu cũng được, kéo cạnh để đổi cỡ; vị trí được nhớ theo từng màn hình. Có nút bật/tắt trong tab Media và có thể gán phím tắt."
+    static let fontSizeTitle = "Cỡ chữ của bảng"
+    static let opacityTitle = "Độ mờ của bảng"
+    static let clickThroughTitle = "Cho chuột xuyên qua bảng"
+    static let clickThroughExplanation = "Bấm vào bảng sẽ bấm xuống cửa sổ bên dưới; bảng không kéo được cho tới khi tắt mục này."
+
+    @Binding var isOn: Bool
+    @Binding var fontSize: Double
+    @Binding var opacity: Double
+    @Binding var clickThrough: Bool
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            Text(Self.title)
+            Text(Self.explanation)
+        }
+        Stepper(value: $fontSize, in: LyricsPanelModel.fontSizeRange, step: 2) {
+            Text("\(Self.fontSizeTitle): \(Int(fontSize)) pt")
+        }
+        LabeledContent(Self.opacityTitle) {
+            HStack {
+                Slider(value: $opacity, in: LyricsPanelController.opacityRange)
+                    .frame(width: 140)
+                Text("\(Int((opacity * 100).rounded()))%")
+                    .monospacedDigit()
+                    .frame(width: 40, alignment: .trailing)
+            }
+        }
+        Toggle(isOn: $clickThrough) {
+            Text(Self.clickThroughTitle)
+            Text(Self.clickThroughExplanation)
         }
     }
 }

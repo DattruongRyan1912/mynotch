@@ -34,7 +34,7 @@ struct MediaTabView: View {
         // stay where they are whether it holds a line, the note or nothing.
         VStack(spacing: Self.lyricGap) {
             coverAndControls
-            CurrentLyricView(store: store)
+            CurrentLyricView(store: store, togglePanel: actions.toggleLyricsPanel)
         }
     }
 

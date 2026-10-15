@@ -8,6 +8,9 @@ nonisolated enum TTMLLyricsParser {
     /// A paragraph's text is everything written in it, the spans of one word run together and the whitespace between
     /// words kept, so a word sung in syllables reads as one word. Background vocals, translations and transliterations
     /// are left out, and so is the head with its metadata (songwriters, translations).
+    ///
+    /// With word timing, a paragraph whose spans have a `begin` also has `words`: one per span, from its `begin` to its
+    /// `end` (see `LyricWordTiming` for a missing end and for spans that overlap). Line timing has none.
     static func parse(_ ttml: String) -> LyricsResult? {
         let reader = Reader()
         let parser = XMLParser(data: Data(ttml.utf8))
@@ -48,15 +51,29 @@ nonisolated enum TTMLLyricsParser {
     private final class Reader: NSObject, XMLParserDelegate {
         private(set) var isTTML = false
         private var timing: String?
-        private var paragraphs: [(time: Double?, text: String)] = []
+        private var paragraphs: [Paragraph] = []
         private var isInHead = false
         private var isInParagraph = false
         private var begin: Double?
+        private var end: Double?
         private var firstSpanBegin: Double?
-        private var text = ""
+        /// What the paragraph holds so far: the timed spans, and between them the text nobody timed.
+        private var pieces: [LyricWordTiming.Piece] = []
+        /// The timed span being read, as an index into `pieces`; its characters, nested spans' included, are the word's.
+        private var openWord: Int?
+        /// Spans open inside the timed one, itself included.
+        private var timedDepth = 0
         /// Spans open inside an ignored one, itself included.
         private var ignoredDepth = 0
         private var sawRoot = false
+
+        private struct Paragraph {
+            var time: Double?
+            var end: Double?
+            var pieces: [LyricWordTiming.Piece]
+            /// All its text, whitespace collapsed.
+            var text: String
+        }
 
         func parser(
             _ parser: XMLParser, didStartElement name: String, namespaceURI: String?, qualifiedName: String?,
@@ -73,13 +90,21 @@ nonisolated enum TTMLLyricsParser {
             case "p" where !isInHead && !isInParagraph:
                 isInParagraph = true
                 begin = TTMLLyricsParser.seconds(attributes["begin"])
+                end = TTMLLyricsParser.seconds(attributes["end"])
                 firstSpanBegin = nil
-                text = ""
+                pieces = []
+                openWord = nil
+                timedDepth = 0
             case "span" where isInParagraph:
                 if ignoredDepth > 0 || TTMLLyricsParser.ignoredRoles.contains(attributes["ttm:role"] ?? "") {
                     ignoredDepth += 1
-                } else if firstSpanBegin == nil {
-                    firstSpanBegin = TTMLLyricsParser.seconds(attributes["begin"])
+                } else if openWord != nil {
+                    timedDepth += 1
+                } else if let spanBegin = TTMLLyricsParser.seconds(attributes["begin"]) {
+                    if firstSpanBegin == nil { firstSpanBegin = spanBegin }
+                    pieces.append(LyricWordTiming.Piece(text: "", begin: spanBegin, end: TTMLLyricsParser.seconds(attributes["end"])))
+                    openWord = pieces.count - 1
+                    timedDepth = 1
                 }
             default:
                 break
@@ -93,21 +118,37 @@ nonisolated enum TTMLLyricsParser {
             case "p" where isInParagraph:
                 isInParagraph = false
                 // Whitespace collapsed like a renderer would, and like the LRC parser does.
-                let words = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-                paragraphs.append((begin ?? firstSpanBegin, words))
-            case "span" where isInParagraph && ignoredDepth > 0:
-                ignoredDepth -= 1
+                let text = pieces.map(\.text).joined().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+                paragraphs.append(Paragraph(time: begin ?? firstSpanBegin, end: end, pieces: pieces, text: text))
+            case "span" where isInParagraph:
+                if ignoredDepth > 0 {
+                    ignoredDepth -= 1
+                } else if openWord != nil {
+                    timedDepth -= 1
+                    if timedDepth == 0 { openWord = nil }
+                }
             default:
                 break
             }
         }
 
         func parser(_ parser: XMLParser, foundCharacters string: String) {
-            if isInParagraph && ignoredDepth == 0 { text += string }
+            append(string)
         }
 
         func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
-            if isInParagraph && ignoredDepth == 0 { text += String(decoding: CDATABlock, as: UTF8.self) }
+            append(String(decoding: CDATABlock, as: UTF8.self))
+        }
+
+        private func append(_ string: String) {
+            guard isInParagraph, ignoredDepth == 0 else { return }
+            if let openWord {
+                pieces[openWord].text += string
+            } else if let last = pieces.indices.last, pieces[last].begin == nil {
+                pieces[last].text += string
+            } else {
+                pieces.append(LyricWordTiming.Piece(text: string, begin: nil, end: nil))
+            }
         }
 
         /// The lyrics, or nil when there are none. Timing "None" is plain text, "Line" and "Word" (any case) are synced;
@@ -124,10 +165,26 @@ nonisolated enum TTMLLyricsParser {
                 let plain = withText.map(\.text).joined(separator: "\n")
                 return plain.isEmpty ? nil : .plain(plain)
             }
-            let lines = withText.compactMap { paragraph in paragraph.time.map { LyricLine(time: $0, text: paragraph.text) } }
+            let timed = withText.compactMap { paragraph in paragraph.time.map { (time: $0, paragraph: paragraph) } }
             // Equal times keep their order in the document.
-            let sorted = lines.enumerated().sorted { ($0.element.time, $0.offset) < ($1.element.time, $1.offset) }.map(\.element)
-            return sorted.isEmpty ? nil : .synced(sorted)
+            let sorted = timed.enumerated().sorted { ($0.element.time, $0.offset) < ($1.element.time, $1.offset) }.map(\.element)
+            // Spans are timed words unless the document says that only its lines are timed.
+            let hasWords = timing?.lowercased() != "line"
+            let lines = sorted.enumerated().map { index, entry in
+                let next = index + 1 < sorted.count ? sorted[index + 1].time : nil
+                return line(entry.paragraph, at: entry.time, before: next, hasWords: hasWords)
+            }
+            return lines.isEmpty ? nil : .synced(lines)
+        }
+
+        /// The paragraph as a line, with its words when it has them. They are its own text cut up: a paragraph whose words
+        /// do not add up to it stays a line.
+        private func line(_ paragraph: Paragraph, at time: Double, before next: Double?, hasWords: Bool) -> LyricLine {
+            guard hasWords, let words = LyricWordTiming.words(from: paragraph.pieces, endsAt: paragraph.end, before: next),
+                  words.map(\.text).joined() == paragraph.text else {
+                return LyricLine(time: time, text: paragraph.text)
+            }
+            return LyricLine(time: time, text: paragraph.text, words: words)
         }
     }
 }

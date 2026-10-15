@@ -65,9 +65,10 @@ nonisolated struct TrackKey: Hashable, Sendable {
     }
 
     /// Bumped when the lookup changes, so answers of an older lookup are asked again: all "not found" for videos (v3),
-    /// the "not found" that Apple's 404 for a sign-in it did not accept was cached as (v5), and that of videos with
-    /// pipe-separated titles, which were asked for by their whole title (v6).
-    static let cacheVersion = "v6"
+    /// the "not found" that Apple's 404 for a sign-in it did not accept was cached as (v5), that of videos with
+    /// pipe-separated titles, which were asked for by their whole title (v6), and every answer kept before lyrics could
+    /// carry the timing of their words, which a cached one would lack for good (v7).
+    static let cacheVersion = "v7"
 
     /// SHA-256 of the fields as hex, a file name that is safe whatever the track is called. A lookup that asked Apple
     /// Music has its own key ("+am"): an answer found without the account, "not found" above all, does not stand for it.
