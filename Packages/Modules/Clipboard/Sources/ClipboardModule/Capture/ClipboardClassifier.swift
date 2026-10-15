@@ -24,11 +24,16 @@ nonisolated struct ClipboardClassifier: Sendable {
     var ignoreSensitive: Bool
     var colorsWithoutHash: Bool
 
+    /// Whether a password manager or similar marked the copy as a secret, whatever the user chose to keep in history.
+    static func isSensitive(_ snapshot: PasteboardSnapshot) -> Bool {
+        !Set(snapshot.types).isDisjoint(with: sensitiveTypes)
+    }
+
     /// Rules in priority order: sensitive, own write, files, image, then text (link, color as hex or as an rgb()/hsl()
     /// function, rich text, plain text).
     func classify(_ snapshot: PasteboardSnapshot) -> ClassificationResult {
         let types = Set(snapshot.types)
-        if ignoreSensitive, !types.isDisjoint(with: Self.sensitiveTypes) { return .skipped(.sensitive) }
+        if ignoreSensitive, Self.isSensitive(snapshot) { return .skipped(.sensitive) }
         if types.contains(Self.ownWriteType) { return .skipped(.ownWrite) }
         if !snapshot.fileURLs.isEmpty { return .content(.files(snapshot.fileURLs), imageData: nil) }
         if let image = Self.imageContent(snapshot) { return image }

@@ -47,6 +47,11 @@ struct ClipboardSettingKeys {
     let panelPinned: SettingKey<Bool>
     /// Where a pinned panel was left; nil until one is pinned.
     let panelPosition: SettingKey<ClipboardPanelPosition?>
+    /// Which copy the stack pastes next.
+    let stackOrder: SettingKey<CopyStackOrder>
+    /// Whether the stack is written to disk and comes back after a restart. Off by default: a stack is short-lived and
+    /// may hold secrets.
+    let stackPersist: SettingKey<Bool>
 
     init(_ settings: ModuleSettings) {
         paused = settings.key("paused", default: false)
@@ -64,5 +69,7 @@ struct ClipboardSettingKeys {
         libraryCardSize = settings.key("libraryCardSize", default: .medium)
         panelPinned = settings.key("panelPinned", default: false)
         panelPosition = settings.key("panelPosition", default: ClipboardPanelPosition?.none)
+        stackOrder = settings.key("stackOrder", default: .firstIn)
+        stackPersist = settings.key("stackPersist", default: false)
     }
 }

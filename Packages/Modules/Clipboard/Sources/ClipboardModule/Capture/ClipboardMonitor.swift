@@ -12,7 +12,7 @@ final class ClipboardMonitor {
     private let interval: Duration
     private let frontmostApp: () -> SourceApp
     private let shouldCapture: () -> CapturePolicy
-    private let onCapture: (ClipboardContent, Data?, SourceApp) -> Void
+    private let onCapture: (ClipboardContent, Data?, SourceApp, _ isSensitive: Bool) -> Void
     private var lastChangeCount = 0
     /// The front app at the previous tick. A copy lands between two ticks, so the user may already have
     /// switched apps by the tick that sees it; the app in front before the copy is the likelier source.
@@ -24,7 +24,7 @@ final class ClipboardMonitor {
         pasteboard: any PasteboardAccess, scheduler: any Scheduler, interval: Duration = .milliseconds(300),
         frontmostApp: @escaping () -> SourceApp,
         shouldCapture: @escaping () -> CapturePolicy,
-        onCapture: @escaping (ClipboardContent, Data?, SourceApp) -> Void
+        onCapture: @escaping (ClipboardContent, Data?, SourceApp, _ isSensitive: Bool) -> Void
     ) {
         self.pasteboard = pasteboard
         self.scheduler = scheduler
@@ -63,7 +63,8 @@ final class ClipboardMonitor {
         // and converting even a 96 MB TIFF to PNG measured 0.17 s.
         guard let snapshot = pasteboard.snapshot(),
               case .content(let content, let imageData) = policy.classifier.classify(snapshot) else { return }
-        onCapture(content, imageData, source)
+        // Still true with "ignore sensitive" off, so whoever must never keep a secret can tell.
+        onCapture(content, imageData, source, ClipboardClassifier.isSensitive(snapshot))
     }
 
     private static func isExcluded(_ app: SourceApp, by policy: CapturePolicy) -> Bool {

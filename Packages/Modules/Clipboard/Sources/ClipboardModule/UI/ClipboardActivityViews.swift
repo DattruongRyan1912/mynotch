@@ -26,6 +26,19 @@ struct ClipboardPasteKeyHint: View {
     }
 }
 
+/// The count or the word beside the closed notch for the copy stack: the 64 pt there fit a number or one short word.
+struct ClipboardStackActivityText: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 13, weight: .semibold).monospacedDigit())
+            .foregroundStyle(NotchTokens.primaryText)
+            .lineLimit(1)
+            .fixedSize()
+    }
+}
+
 /// A short message over the open tab; activities would stay hidden until the notch closes.
 struct ClipboardToast: View {
     let text: String

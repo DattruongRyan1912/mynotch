@@ -139,8 +139,8 @@ final class FakeSystem {
         await start()
 
         let registration = try #require(harness.hotkeys.registrations.first { $0.id == "clipboard_openClipboard" })
-        // The library's and the floating panel's come with it.
-        #expect(harness.hotkeys.registrations.count == 3)
+        // The library's, the floating panel's and the two of the copy stack come with it.
+        #expect(harness.hotkeys.registrations.count == 5)
         #expect(registration.id == "clipboard_openClipboard")
         #expect(registration.title == "Mở lịch sử clipboard")
         #expect(harness.hotkeyBackend.getShortcut(for: registration.name) == KeyboardShortcuts.Shortcut(.v, modifiers: [.control, .option]))

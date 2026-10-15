@@ -330,4 +330,70 @@ import Testing
         #expect(try Data(contentsOf: victim) == Data("keep".utf8))
         #expect(try contents(of: file("images")).isEmpty)
     }
+
+    // MARK: The copy stack
+
+    static func stack(_ texts: String...) -> CopyStack {
+        var stack = CopyStack()
+        stack.start()
+        for text in texts { stack.collect(item(.text(text))) }
+        return stack
+    }
+
+    @Test func aSavedStackLoadsBackEqual() async throws {
+        let store = makeStore()
+        _ = store.load()
+        let stack = Self.stack("một", "hai")
+
+        store.saveStack(stack)
+        await store.waitForWrites()
+
+        #expect(exists(file("stack.json")))
+        #expect(makeStore().loadStack() == stack)
+    }
+
+    @Test func thereIsNoStackToLoadWithoutAFileOrFromAFileThatCannotBeRead() throws {
+        let store = makeStore()
+        _ = store.load()
+        #expect(store.loadStack() == nil)
+
+        try Data("not json".utf8).write(to: file("stack.json"))
+        #expect(store.loadStack() == nil)
+    }
+
+    @Test func savingNothingDeletesTheFileAndIsFineWithoutOne() async throws {
+        let store = makeStore()
+        _ = store.load()
+        store.saveStack(nil)
+        await store.waitForWrites()
+        #expect(!exists(file("stack.json")))
+
+        store.saveStack(Self.stack("một"))
+        store.saveStack(nil)
+        await store.waitForWrites()
+        #expect(!exists(file("stack.json")))
+    }
+
+    @Test func theNewestSavedStackWins() async throws {
+        let store = makeStore()
+        _ = store.load()
+        store.saveStack(Self.stack("một"))
+        let newest = Self.stack("một", "hai")
+        store.saveStack(newest)
+
+        await store.flush()
+
+        #expect(makeStore().loadStack() == newest)
+    }
+
+    @Test func theStackIsKeptApartFromTheHistoryFiles() async throws {
+        let store = makeStore()
+        _ = store.load()
+        store.scheduleSave(Self.history())
+        store.saveStack(Self.stack("một"))
+        await store.flush()
+
+        #expect(makeStore().load().items.count == 3)
+        #expect(makeStore().loadStack()?.entries.count == 1)
+    }
 }

@@ -2,7 +2,8 @@ import Foundation
 import MyNotchCore
 import os
 
-/// Keeps the history on disk as `history.json`, `boards.json` and PNG files in `images/`.
+/// Keeps the history on disk as `history.json`, `boards.json` and PNG files in `images/`, and, when the user wants the copy
+/// stack kept between launches, the stack as `stack.json`.
 /// Saves wait one second after the last change (at most five after the first) so a burst of copies costs
 /// one write, encoding and writing run off the main thread, and a damaged file costs at most that file, never a crash.
 final class ClipboardStore {
@@ -87,6 +88,33 @@ final class ClipboardStore {
         }
     }
 
+    /// The stack kept by an earlier run; nil when there is none or the file cannot be read (it is replaced by the next
+    /// `saveStack`, since a stack is too short-lived to be worth moving aside).
+    func loadStack() -> CopyStack? {
+        let url = fileURL("stack.json")
+        guard fileExists(url) else { return nil }
+        do {
+            return try JSONDecoder().decode(CopyStack.self, from: Data(contentsOf: url))
+        } catch {
+            logFailure("Reading stack.json (starting without a stack)", error)
+            return nil
+        }
+    }
+
+    /// Writes the stack now, on the writer queue after every write before it, so the newest call is the one left on disk.
+    /// A stack changes only when the user copies or pastes, so there is nothing to wait for and batch. nil deletes the
+    /// file, which is how a stack the user no longer wants kept leaves the disk.
+    func saveStack(_ stack: CopyStack?) {
+        let url = fileURL("stack.json")
+        writer.async { [weak self] in
+            do {
+                try Self.write(stack, to: url)
+            } catch {
+                DispatchQueue.main.async { self?.logFailure("Saving the copy stack", error) }
+            }
+        }
+    }
+
     /// File names are content hashes, so an existing file already holds these bytes.
     /// Throws `CocoaError(.fileWriteInvalidFileName)` for a name `imageURL` rejects.
     func saveImage(_ pngData: Data, fileName: String) throws {
@@ -123,6 +151,19 @@ final class ClipboardStore {
             let result = Result { try Self.write(unsaved.history, boardsURL: boardsURL, itemsURL: itemsURL) }
             DispatchQueue.main.async { self?.finishWrite(version: unsaved.version, result: result) }
         }
+    }
+
+    /// Runs on the writer queue.
+    private nonisolated static func write(_ stack: CopyStack?, to url: URL) throws {
+        guard let stack else {
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch CocoaError.fileNoSuchFile {
+                // Nothing to delete.
+            }
+            return
+        }
+        try JSONEncoder().encode(stack).write(to: url, options: .atomic)
     }
 
     /// A failure leaves the history unsaved for the next save or flush, unless a newer change replaced it meanwhile.

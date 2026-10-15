@@ -58,6 +58,7 @@ struct ClipboardPanelView: View {
             .frame(height: 34)
             // Over the title, which takes no clicks, so the header's whole width drags.
             .overlay { ClipboardPanelDragArea(isEnabled: model.isPinned) { model.moved(to: $0) } }
+            stackButton
             Button {
                 model.togglePin()
             } label: {
@@ -84,6 +85,26 @@ struct ClipboardPanelView: View {
             .accessibilityLabel("Đóng bảng")
         }
         .padding(.horizontal, 12)
+    }
+
+    /// Starts or stops the copy stack, which the panel can feed and paste from by the shortcuts as usual.
+    private var stackButton: some View {
+        let stack = module.state.stack
+        return Button {
+            module.toggleStack()
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: stack.isOn ? "square.stack.3d.up.fill" : "square.stack.3d.up")
+                if stack.isOn { Text("\(stack.entries.count)").font(.system(size: 11, weight: .semibold).monospacedDigit()) }
+            }
+            .foregroundStyle(stack.isOn ? Color.accentColor : Color.secondary)
+            .frame(minWidth: 26, minHeight: 26)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(stack.isOn ? "Dừng ngăn xếp và bỏ các mục trong đó" : "Bật ngăn xếp: gom nhiều mục đã chép rồi dán lần lượt")
+        .accessibilityLabel(stack.isOn ? "Dừng ngăn xếp, đang có \(stack.entries.count) mục" : "Bật ngăn xếp")
+        .accessibilityAddTraits(stack.isOn ? .isSelected : [])
     }
 
     // MARK: Search

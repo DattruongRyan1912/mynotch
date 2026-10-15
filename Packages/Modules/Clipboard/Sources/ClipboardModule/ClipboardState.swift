@@ -18,6 +18,8 @@ final class ClipboardState {
         }
     }
     var selectedID: UUID?
+    /// The copy stack: copies collected while it is on, to be pasted one by one. Changed only by the module.
+    var stack = CopyStack()
     /// Pasteboard access is set to "always deny", so the tab explains how to allow it instead of showing an empty history.
     var pasteboardDenied = false
     /// A click pastes, but Accessibility is not allowed, so the tab and the library say how to allow it.
@@ -77,6 +79,7 @@ final class ClipboardState {
         query = ClipboardQuery()
         suggestions = ClipboardSuggestionList()
         selectedID = nil
+        stack = CopyStack()
         pasteboardDenied = false
         needsAccessibility = false
     }

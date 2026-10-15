@@ -52,12 +52,26 @@ struct ClipboardSettingsView: View {
             }
             Toggle("Đóng notch sau khi chép hoặc dán", isOn: settings.binding(keys.closeAfterAction))
             Toggle("Hiện thông báo khi chép", isOn: settings.binding(keys.showCopiedActivity))
+            copyStack
             excludedApps
             storage
             TimelineView(.periodic(from: .now, by: 2)) { _ in
                 pasteboardAccess(pasteboardAccessBehavior())
             }
         }
+    }
+
+    // MARK: Copy stack
+
+    @ViewBuilder
+    private var copyStack: some View {
+        Picker("Thứ tự dán của ngăn xếp", selection: settings.binding(keys.stackOrder)) {
+            ForEach(CopyStackOrder.allCases, id: \.self) { Text($0.title).tag($0) }
+        }
+        Toggle("Giữ ngăn xếp khi mở lại MyNotch", isOn: settings.binding(keys.stackPersist))
+        Text("Ngăn xếp có thể chứa dữ liệu riêng tư, nên mặc định mất khi thoát. Mục mà trình quản lý mật khẩu đánh dấu là bí mật không bao giờ vào ngăn xếp.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 
     // MARK: Excluded apps
@@ -183,6 +197,15 @@ private extension Retention {
         case .month: "1 tháng"
         case .year: "1 năm"
         case .forever: "Mãi mãi"
+        }
+    }
+}
+
+private extension CopyStackOrder {
+    var title: String {
+        switch self {
+        case .firstIn: "Vào trước, dán trước"
+        case .lastIn: "Vào sau, dán trước"
         }
     }
 }

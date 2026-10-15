@@ -24,50 +24,16 @@ struct ClipboardTabView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                ClipboardSearchField(
-                    text: queryBinding(\.text), takesFocus: boardEditing == nil, focusRequest: searchFocusRequest, onCommand: perform
-                )
-                .frame(minWidth: 140)
-                ClipboardKindChips(selection: queryBinding(\.kind))
-                libraryButton
+            if state.stack.isOn {
+                ClipboardStackView(module: module)
+            } else {
+                history
             }
-            HStack(spacing: 6) {
-                ClipboardBoardBar(
-                    boards: state.history.boards, selection: queryBinding(\.boardID), editing: boardEditing, name: $boardName,
-                    onEdit: startEditing, onFinish: finishEditing, onDelete: { module.deleteBoard($0) }
-                )
-                // The `@` filters the search text holds, as chips that remove them.
-                if !state.chips.isEmpty {
-                    ClipboardSearchChips(look: .notch, tokens: state.chips) { state.removeChip($0) }
-                        .fixedSize()
-                }
-                // Beside the boards, where there is room: the tab's content height is used up by the rows and the cards.
-                if state.needsAccessibility {
-                    ClipboardAccessibilityHint(look: .notch) {
-                        module.requestAccessibility()
-                        // The system's dialog and System Settings come up over the notch, which would close on its own anyway.
-                        notch.close()
-                    }
-                    .fixedSize()
-                }
-                // With no cards, the empty message already explains it.
-                if state.pasteboardDenied, !state.visibleItems.isEmpty {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.orange)
-                        .help(Self.deniedHint)
-                        .accessibilityLabel("Bị chặn đọc clipboard")
-                        .accessibilityHint(Self.deniedHint)
-                }
-            }
-            .frame(height: 22)
-            cards
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // Over the cards, right under the field.
         .overlay(alignment: .topLeading) {
-            if state.suggestions.isOpen {
+            if state.suggestions.isOpen, !state.stack.isOn {
                 ClipboardSuggestionListView(look: .notch, list: state.suggestions) { state.acceptSuggestion(at: $0) }
                     .padding(.top, 26)
             }
@@ -91,6 +57,10 @@ struct ClipboardTabView: View {
         .onDisappear {
             if needsPin { notch.setPinned(false) }
         }
+        // The stack's shortcut can start a stack while a board name is being typed, which takes the field away.
+        .onChange(of: state.stack.isOn) {
+            if state.stack.isOn { finishEditing(commit: false) }
+        }
         // While the tab is shown: when it appears, then every 2 s, so the hint goes by itself once Accessibility is allowed.
         .task {
             while !Task.isCancelled {
@@ -98,6 +68,50 @@ struct ClipboardTabView: View {
                 try? await Task.sleep(for: .seconds(2))
             }
         }
+    }
+
+    /// The history: search and filters on top, a row of cards below.
+    @ViewBuilder private var history: some View {
+        HStack(spacing: 8) {
+            ClipboardSearchField(
+                text: queryBinding(\.text), takesFocus: boardEditing == nil, focusRequest: searchFocusRequest, onCommand: perform
+            )
+            .frame(minWidth: 140)
+            ClipboardKindChips(selection: queryBinding(\.kind))
+            libraryButton
+        }
+        HStack(spacing: 6) {
+            ClipboardBoardBar(
+                boards: state.history.boards, selection: queryBinding(\.boardID), editing: boardEditing, name: $boardName,
+                onEdit: startEditing, onFinish: finishEditing, onDelete: { module.deleteBoard($0) }
+            )
+            // The `@` filters the search text holds, as chips that remove them.
+            if !state.chips.isEmpty {
+                ClipboardSearchChips(look: .notch, tokens: state.chips) { state.removeChip($0) }
+                    .fixedSize()
+            }
+            // Beside the boards, where there is room: the tab's content height is used up by the rows and the cards.
+            if state.needsAccessibility {
+                ClipboardAccessibilityHint(look: .notch) {
+                    module.requestAccessibility()
+                    // The system's dialog and System Settings come up over the notch, which would close on its own anyway.
+                    notch.close()
+                }
+                .fixedSize()
+            }
+            // With no cards, the empty message already explains it.
+            if state.pasteboardDenied, !state.visibleItems.isEmpty {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .help(Self.deniedHint)
+                    .accessibilityLabel("Bị chặn đọc clipboard")
+                    .accessibilityHint(Self.deniedHint)
+            }
+            ClipboardStackStartButton(module: module)
+        }
+        .frame(height: 22)
+        cards
     }
 
     // MARK: Cards

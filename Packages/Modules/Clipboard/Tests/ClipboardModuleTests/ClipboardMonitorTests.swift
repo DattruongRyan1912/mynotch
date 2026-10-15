@@ -9,6 +9,7 @@ import Testing
         let imageData: Data?
         let bundleID: String?
         let appName: String?
+        var isSensitive = false
     }
 
     static let interval: Duration = .milliseconds(300)
@@ -17,6 +18,7 @@ import Testing
     let scheduler = ManualScheduler()
     var paused = false
     var excluded: Set<String> = []
+    var ignoreSensitive = true
     var frontmost: (bundleID: String?, name: String?) = ("com.apple.Safari", "Safari")
     var captures: [Capture] = []
     var stopOnCapture = false
@@ -25,10 +27,12 @@ import Testing
         pasteboard: pasteboard, scheduler: scheduler,
         frontmostApp: { [unowned self] in frontmost },
         shouldCapture: { [unowned self] in
-            (paused: paused, excluded: excluded, classifier: ClipboardClassifier(ignoreSensitive: true, colorsWithoutHash: true))
+            (paused: paused, excluded: excluded, classifier: ClipboardClassifier(ignoreSensitive: ignoreSensitive, colorsWithoutHash: true))
         },
-        onCapture: { [unowned self] content, imageData, app in
-            captures.append(Capture(content: content, imageData: imageData, bundleID: app.bundleID, appName: app.name))
+        onCapture: { [unowned self] content, imageData, app, isSensitive in
+            captures.append(Capture(
+                content: content, imageData: imageData, bundleID: app.bundleID, appName: app.name, isSensitive: isSensitive
+            ))
             if stopOnCapture { monitor.stop() }
         }
     )
@@ -66,6 +70,19 @@ import Testing
 
         #expect(captures == [Capture(content: .text("Xin chào"), imageData: nil, bundleID: "com.apple.Safari", appName: "Safari")])
         #expect(pasteboard.snapshotCount == 1)
+    }
+
+    /// With "ignore sensitive" off the history keeps a secret, but the capture still says it is one.
+    @Test func aCopyMarkedSensitiveIsReportedAsSuchWhenTheSettingKeepsIt() {
+        ignoreSensitive = false
+        monitor.start()
+        pasteboard.copy(PasteboardSnapshot(types: ["org.nspasteboard.ConcealedType", "public.utf8-plain-text"], string: "hunter2"))
+        scheduler.advance(by: Self.interval)
+        pasteboard.copy(Self.text("Xin chào"))
+        scheduler.advance(by: Self.interval)
+
+        #expect(captures.map(\.isSensitive) == [true, false])
+        #expect(captures.map(\.content) == [.text("hunter2"), .text("Xin chào")])
     }
 
     @Test func everyChangeIsCaptured() {

@@ -3,7 +3,8 @@ import MyNotchCore
 import Observation
 import SwiftUI
 
-/// Clipboard history in the notch: records every copy, shows it in a tab and puts items back on request.
+/// Clipboard history in the notch: records every copy, shows it in a tab and puts items back on request. A copy stack
+/// collects copies while it is on and pastes them one by one.
 public final class ClipboardModule: FeatureModule {
     public let descriptor = ModuleDescriptor(
         id: "clipboard",
@@ -113,6 +114,7 @@ public final class ClipboardModule: FeatureModule {
         if history != loaded { store.scheduleSave(history) }
         refreshPasteboardAccess()
         refreshAccessibility()
+        restoreStack(from: store, keys: keys, settings: context.settings)
 
         let keystrokeGate = KeystrokeGate(keystrokes)
         self.keystrokeGate = keystrokeGate
@@ -129,7 +131,9 @@ public final class ClipboardModule: FeatureModule {
                     )
                 )
             },
-            onCapture: { [weak self] content, imageData, source in self?.record(content, imageData: imageData, source: source) }
+            onCapture: { [weak self] content, imageData, source, isSensitive in
+                self?.record(content, imageData: imageData, source: source, isSensitive: isSensitive)
+            }
         )
         self.monitor = monitor
         monitor.start()
@@ -144,10 +148,25 @@ public final class ClipboardModule: FeatureModule {
         context.hotkeys.register(
             "openPanel", title: "Mở bảng clipboard nổi", initial: KeyboardShortcuts.Shortcut(.c, modifiers: [.command, .shift])
         ) { [weak self] in self?.togglePanel() }
+        context.hotkeys.register(
+            "toggleStack", title: "Bật hoặc tắt ngăn xếp clipboard",
+            initial: KeyboardShortcuts.Shortcut(.c, modifiers: [.control, .option])
+        ) { [weak self] in self?.toggleStack() }
+        // Not ⌃⌥V, which already opens the history: two shortcuts on one combination would both fire.
+        context.hotkeys.register(
+            "pasteStack", title: "Dán mục kế tiếp trong ngăn xếp",
+            initial: KeyboardShortcuts.Shortcut(.v, modifiers: [.control, .option, .command])
+        ) { [weak self] in self?.pasteNextInStack() }
         context.run { [weak self] in
             // The first value arrives at once and prunes nothing new; later ones apply a changed limit right away.
             for await _ in Observations({ (settings.value(keys.historyLimit), settings.value(keys.retention), settings.value(keys.imageStorageLimitMB)) }) {
                 self?.update { _ in [] }
+            }
+        }
+        context.run { [weak self] in
+            // Keeping or not keeping the stack takes effect at once: the file is written, or deleted.
+            for await _ in Observations({ settings.value(keys.stackPersist) }) {
+                self?.writeStackFile()
             }
         }
     }
@@ -463,6 +482,66 @@ public final class ClipboardModule: FeatureModule {
         return ClipboardDragProvider.make(for: item.content, fileURLs: urls)
     }
 
+    // MARK: Copy stack
+
+    /// The ⌃⌥C shortcut and the stack buttons: starts a stack, or stops the one that is on.
+    func toggleStack() {
+        if state.stack.isOn { stopStack() } else { startStack() }
+    }
+
+    /// Does nothing while stopped or when a stack is already on, which keeps what it holds.
+    func startStack() {
+        updateStack { $0.start() }
+    }
+
+    /// Ends the stack and forgets what it held. Says so beside the notch, since the shortcut works from any app.
+    func stopStack() {
+        let wasOn = state.stack.isOn
+        updateStack { $0.stop() }
+        if wasOn { announceStack("Đã tắt ngăn xếp", short: "Tắt") }
+    }
+
+    func removeFromStack(_ id: UUID) {
+        updateStack { $0.remove(id: id) }
+    }
+
+    /// `source` and `destination` as a list's drag reports them.
+    func moveInStack(from source: IndexSet, to destination: Int) {
+        updateStack { $0.move(fromOffsets: source, toOffset: destination) }
+    }
+
+    /// Empties the stack and leaves it on.
+    func clearStack() {
+        updateStack { $0.clear() }
+    }
+
+    /// Which copy comes next, as the setting says; the list marks it.
+    var stackOrder: CopyStackOrder {
+        guard let context, let keys else { return .firstIn }
+        return context.settings.value(keys.stackOrder)
+    }
+
+    /// The ⌃⌥⌘V shortcut: pastes the next item into the app in front and moves on, through the same checked path as the
+    /// floating panel (the keyboard must be with that app, or the item is only copied and the stack stays where it was).
+    /// An empty stack turns itself off, and a stack that is off says so instead of pasting.
+    func pasteNextInStack() {
+        guard let context, let keys, store != nil else { return }
+        guard state.stack.isOn else {
+            announceStack("Ngăn xếp đang tắt", short: "Tắt")
+            return
+        }
+        guard let entry = state.stack.next(context.settings.value(keys.stackOrder)) else {
+            updateStack { $0.stop() }
+            announceStack("Ngăn xếp đã hết", short: "Hết")
+            return
+        }
+        // The history keeps its order: pasting a run of copies must not turn it upside down.
+        let outcome = put(entry.item, paste: true, touchesHistory: false) { [weak self] in
+            self?.keyboardIsReadyForStackPaste() ?? false
+        }
+        if outcome == .pasted { updateStack { $0.remove(id: entry.id) } }
+    }
+
     // MARK: Private
 
     /// Called by the library window closing, whether the user closed it or the module did.
@@ -495,7 +574,7 @@ public final class ClipboardModule: FeatureModule {
     }
 
     /// Called by the monitor for each new copy.
-    private func record(_ content: ClipboardContent, imageData: Data?, source: ClipboardMonitor.SourceApp) {
+    private func record(_ content: ClipboardContent, imageData: Data?, source: ClipboardMonitor.SourceApp, isSensitive: Bool) {
         guard let context, let keys, let store else { return }
         if let imageData, case .image(let image) = content {
             do {
@@ -507,9 +586,14 @@ public final class ClipboardModule: FeatureModule {
                 return
             }
         }
+        var addedID: UUID?
         update { history in
-            history.add(content, hash: ClipboardContent.hash(of: content), source: source, at: now())
+            addedID = history.add(content, hash: ClipboardContent.hash(of: content), source: source, at: now()).id
             return []
+        }
+        // A secret never goes on the stack, even when the history is set to keep it.
+        if state.stack.isOn, !isSensitive, let added = state.history.items.first(where: { $0.id == addedID }) {
+            updateStack { $0.collect(added) }
         }
         if context.settings.value(keys.showCopiedActivity) {
             context.activities.set(LiveActivity(
@@ -525,10 +609,11 @@ public final class ClipboardModule: FeatureModule {
     /// A failed write changes nothing and keeps the notch open. A paste from the library window hands the keyboard
     /// back to the app behind it and waits longer for that before sending ⌘V. `beforePaste` is the floating panel's way to
     /// get the keyboard out of its own window between the write and ⌘V; a refusal pastes nothing and asks the user to
-    /// press ⌘V.
+    /// press ⌘V. `touchesHistory` is off for the stack, whose pastes must not reorder the history.
     @discardableResult
     private func put(
-        _ item: ClipboardItem, paste: Bool, plainTextOnly: Bool = false, beforePaste: (() -> Bool)? = nil
+        _ item: ClipboardItem, paste: Bool, plainTextOnly: Bool = false, touchesHistory: Bool = true,
+        beforePaste: (() -> Bool)? = nil
     ) -> ClipboardPaster.Outcome? {
         guard let context, let keys, let paster else { return nil }
         let fromLibrary = paste && libraryWindow?.isFrontmost == true
@@ -567,9 +652,11 @@ public final class ClipboardModule: FeatureModule {
             return outcome
         }
         if fromLibrary { libraryWindow?.yieldKeyboardFocus() }
-        update { history in
-            history.touch(id: item.id, at: now())
-            return []
+        if touchesHistory {
+            update { history in
+                history.touch(id: item.id, at: now())
+                return []
+            }
         }
         return outcome
     }
@@ -586,6 +673,73 @@ public final class ClipboardModule: FeatureModule {
         // A newcomer no longer takes the notch from an activity of the same priority that is already live (the
         // "copied" one, or music), but the user has to see this one to know ⌘V is theirs to press.
         context.activities.raise(id: "pasteHint")
+    }
+
+    /// Whether a ⌘V now would reach the app in front. A floating panel that is open hands the keyboard back first (a
+    /// pinned one stays on screen); with none open it is only a check. Without a panel window, nothing is known: no.
+    private func keyboardIsReadyForStackPaste() -> Bool {
+        guard let panelWindow else { return false }
+        return panelWindow.isOpen ? panelWindow.returnKeyboard() : panelWindow.keyboardIsWithFrontApp()
+    }
+
+    /// Applies a change to the stack, then brings the live activity and the file on disk up to date. Does nothing while
+    /// stopped or when the change leaves the stack as it was.
+    private func updateStack(_ change: (inout CopyStack) -> Void) {
+        guard let context, let keys, store != nil else { return }
+        var stack = state.stack
+        change(&stack)
+        guard stack != state.stack else { return }
+        state.stack = stack
+        refreshStackActivity()
+        if context.settings.value(keys.stackPersist) { writeStackFile() }
+    }
+
+    /// While the stack is on, a live activity beside the notch counts what it holds; its summary is the whole sentence,
+    /// since the 64 pt beside the notch only fit the number.
+    private func refreshStackActivity() {
+        guard let context else { return }
+        let count = state.stack.entries.count
+        guard state.stack.isOn else {
+            context.activities.clear(id: "stack")
+            return
+        }
+        context.activities.set(LiveActivity(
+            id: "stack",
+            leading: AnyView(ClipboardActivityIcon(systemImage: "square.stack.3d.up.fill")),
+            trailing: AnyView(ClipboardStackActivityText(text: "\(count)")),
+            summary: "Ngăn xếp: \(count) mục"
+        ))
+    }
+
+    /// A few seconds beside the notch for what a shortcut pressed in another app did, or could not do.
+    private func announceStack(_ text: String, short: String) {
+        guard let context else { return }
+        context.activities.set(LiveActivity(
+            id: "stackNotice", expiresAfter: .seconds(2),
+            leading: AnyView(ClipboardActivityIcon(systemImage: "square.stack.3d.up")),
+            trailing: AnyView(ClipboardStackActivityText(text: short)),
+            summary: text
+        ))
+        // The user has to see it to know why nothing was pasted, even with music or another notice live.
+        context.activities.raise(id: "stackNotice")
+    }
+
+    /// A kept stack comes back, without the images whose file is gone. Then the file is made to agree with the setting,
+    /// so a stack file from a time the user kept stacks does not linger once they stopped.
+    private func restoreStack(from store: ClipboardStore, keys: ClipboardSettingKeys, settings: ModuleSettings) {
+        if settings.value(keys.stackPersist), var restored = store.loadStack() {
+            restored.removeEntries { !hasImageFile($0.item, in: store) }
+            state.stack = restored
+        }
+        writeStackFile()
+        refreshStackActivity()
+    }
+
+    /// Writes the stack when the user keeps stacks between launches and one is on; deletes the file otherwise.
+    private func writeStackFile() {
+        guard let context, let keys, let store else { return }
+        let keep = context.settings.value(keys.stackPersist) && state.stack.isOn
+        store.saveStack(keep ? state.stack : nil)
     }
 
     private func imageURL(of item: ClipboardItem) -> URL? {

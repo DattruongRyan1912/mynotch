@@ -8,7 +8,8 @@ import Testing
 /// Records what the module asks of the floating panel's window, so no test creates a real one.
 final class FakePanelWindow: ClipboardPanelWindowing {
     var isOpen = false
-    var isKey = true
+    /// A window that is not open has no keyboard; showing it gives it the keyboard.
+    var isKey = false
     /// Where the panel is while open.
     var origin: CGPoint? = CGPoint(x: 120, y: 340)
     private(set) var showCount = 0
@@ -21,6 +22,8 @@ final class FakePanelWindow: ClipboardPanelWindowing {
     var frontAppHasKeyboardAfterClose = true
     /// Runs when the keyboard is handed back, so a test can look at what had happened by then.
     var onReturnKeyboard: (() -> Void)?
+    /// The same for the check made once the panel has gone, or while there is none.
+    var onKeyboardCheck: (() -> Void)?
     private(set) var closeCount = 0
     private(set) var model: ClipboardPanelModel?
     private(set) var restoredOrigin: CGPoint?
@@ -49,6 +52,7 @@ final class FakePanelWindow: ClipboardPanelWindowing {
 
     func keyboardIsWithFrontApp() -> Bool {
         keyboardCheckCount += 1
+        onKeyboardCheck?()
         return !isKey && frontAppHasKeyboardAfterClose
     }
 
