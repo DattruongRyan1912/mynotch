@@ -24,9 +24,14 @@ final class FakeSkyLightShim: SkyLightShim {
 final class FakeLockScreenWindow: LockScreenWindow {
     let windowNumber: Int
     let log: EventLog
-    init(windowNumber: Int, log: EventLog) {
+    /// What the module asked the window to draw.
+    let content: AnyView
+    /// Click-through until the module says otherwise, like the real panel.
+    var takesClicks = false
+    init(windowNumber: Int, log: EventLog, content: AnyView = AnyView(EmptyView())) {
         self.windowNumber = windowNumber
         self.log = log
+        self.content = content
     }
     func show() { log.entries.append("show \(windowNumber)") }
     func dismiss() { log.entries.append("dismiss \(windowNumber)") }
@@ -39,9 +44,9 @@ final class WindowFactory {
     private(set) var windows: [FakeLockScreenWindow] = []
     init(log: EventLog) { self.log = log }
 
-    func make() -> (any LockScreenWindow)? {
+    func make(content: AnyView = AnyView(EmptyView())) -> (any LockScreenWindow)? {
         guard hasScreen else { return nil }
-        let window = FakeLockScreenWindow(windowNumber: 100 + windows.count + 1, log: log)
+        let window = FakeLockScreenWindow(windowNumber: 100 + windows.count + 1, log: log, content: content)
         windows.append(window)
         return window
     }
@@ -88,7 +93,7 @@ struct LockScreenFixture {
                 shimsMade.count += 1
                 return shim
             },
-            makeWindow: { _ in factory.make() },
+            makeWindow: { factory.make(content: $0) },
             distributedCenter: distributed,
             workspaceCenter: workspace,
             isScreenLocked: { session.isLocked }
@@ -102,8 +107,8 @@ struct LockScreenFixture {
     func enable() async { await harness.registry.setEnabled(true, for: "lockscreen") }
 
     /// What a contributor module would publish; the views are placeholders.
-    func offer(_ module: ModuleID, priority: ActivityPriority = .normal) {
-        harness.lockScreen.set(AnyView(Text(module.rawValue)), priority: priority, from: module)
+    func offer(_ module: ModuleID, priority: ActivityPriority = .normal, isInteractive: Bool = false) {
+        harness.lockScreen.set(AnyView(Text(module.rawValue)), priority: priority, isInteractive: isInteractive, from: module)
     }
 
     /// The notification and the session dictionary agree, as they do on a real Mac.
@@ -338,8 +343,8 @@ struct LockScreenFixture {
         let view = try #require(fixture.harness.registry.settingsView(for: "lockscreen"))
         #expect(String(describing: view).hasPrefix("AnyView(LockScreenSettingsView("))
         #expect(LockScreenSettingsView.warning == "Thử nghiệm — dùng API riêng của macOS")
-        // The media view has buttons now; the row says that whoever is at the keyboard can press them.
-        #expect(LockScreenSettingsView.mediaExplanation.contains("bấm"))
+        #expect(LockScreenSettingsView.mediaExplanation.contains("tiến trình"))
+        #expect(!LockScreenSettingsView.mediaExplanation.contains("bấm"), "the warning is on the controls' switch, not here")
     }
 
     @Test func hasNoTab() {

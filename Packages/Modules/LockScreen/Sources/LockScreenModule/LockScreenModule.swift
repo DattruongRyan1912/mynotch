@@ -1,6 +1,7 @@
 import AppKit
 import MyNotchCore
 import NotchUI
+import Observation
 import SwiftUI
 
 /// Setting names and defaults in one place, shared by the running module and the Settings rows.
@@ -8,11 +9,15 @@ struct LockScreenKeys {
     let showMedia: SettingKey<Bool>
     let showTimer: SettingKey<Bool>
     let showBattery: SettingKey<Bool>
+    /// The media view draws its buttons, and the panel takes clicks for them. Off, the track and its progress are shown and
+    /// nothing can be pressed.
+    let showMediaControls: SettingKey<Bool>
 
     init(_ settings: ModuleSettings) {
         showMedia = settings.key("showMedia", default: true)
         showTimer = settings.key("showTimer", default: true)
         showBattery = settings.key("showBattery", default: false)
+        showMediaControls = settings.key("showMediaControls", default: true)
     }
 
     /// Whether the user wants `module`'s view on the lock screen. A module with no switch here is never shown.
@@ -52,6 +57,8 @@ public final class LockScreenModule: FeatureModule {
     private var observer: LockStateObserver?
     private var window: (any LockScreenWindow)?
     private var pendingHide: ScheduledAction?
+    /// Keeps the panel's click-through state in step with what is shown and the controls setting, while the panel is up.
+    private var clickWatch: Task<Void, Never>?
 
     public convenience init() {
         self.init(
@@ -122,16 +129,42 @@ public final class LockScreenModule: FeatureModule {
         let settings = context.settings
         let keys = LockScreenKeys(settings)
         let isAllowed: (ModuleID) -> Bool = { keys.allows($0, in: settings) }
-        guard context.lockScreen.current(allowing: isAllowed) != nil,
-              let window = makeWindow(AnyView(LockScreenRootView(lockScreen: context.lockScreen, isAllowed: isAllowed))) else { return }
+        let root = LockScreenRootView(
+            lockScreen: context.lockScreen, isAllowed: isAllowed, controlsEnabled: { settings.value(keys.showMediaControls) }
+        )
+        guard context.lockScreen.current(allowing: isAllowed) != nil, let window = makeWindow(AnyView(root)) else { return }
         self.window = window
+        window.takesClicks = takesClicks()
+        watchClicks(of: window)
         shim.makeLockScreenSpace()
         window.show()
         shim.attach(windowNumber: window.windowNumber)
     }
 
+    /// Clicks reach the panel only while the view shown has buttons and the user lets them show. Anything else, and the panel is
+    /// click-through, so it cannot swallow a click it has no button for.
+    private func takesClicks() -> Bool {
+        guard let context else { return false }
+        let settings = context.settings
+        let keys = LockScreenKeys(settings)
+        let entry = context.lockScreen.current(allowing: { keys.allows($0, in: settings) })
+        return entry?.isInteractive == true && settings.value(keys.showMediaControls)
+    }
+
+    private func watchClicks(of window: any LockScreenWindow) {
+        clickWatch?.cancel()
+        clickWatch = Task { [weak self, weak window] in
+            for await takesClicks in Observations({ self?.takesClicks() ?? false }) {
+                guard let window else { return }
+                window.takesClicks = takesClicks
+            }
+        }
+    }
+
     private func hide() {
         pendingHide = nil
+        clickWatch?.cancel()
+        clickWatch = nil
         guard let window else { return }
         self.window = nil
         shim?.detach(windowNumber: window.windowNumber)

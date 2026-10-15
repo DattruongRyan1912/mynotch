@@ -11,10 +11,13 @@ struct LockScreenRootView: View {
 
     let lockScreen: LockScreenPublisher
     let isAllowed: (ModuleID) -> Bool
+    /// The user lets a view with buttons draw them ("Điều khiển nhạc trên màn hình khoá"); read here, so a change reaches the view.
+    let controlsEnabled: () -> Bool
 
     var body: some View {
         if let entry = lockScreen.current(allowing: isAllowed) {
             entry.view
+                .environment(\.lockScreenControlsEnabled, controlsEnabled())
                 .id(entry.module)
                 .padding(.horizontal, 16)
                 .padding(.vertical, Self.verticalPadding)
@@ -28,8 +31,10 @@ struct LockScreenRootView: View {
 /// Plain rows: the Settings page provides the Form and the section.
 struct LockScreenSettingsView: View {
     static let warning = "Thử nghiệm — dùng API riêng của macOS"
-    /// Says what the media view lets a stranger at the keyboard do, because it is the one view here that can be clicked.
-    static let mediaExplanation = "Có nút phát/dừng, bài trước, bài sau và thanh tiến trình. Ai đứng trước máy cũng bấm được các nút này."
+    static let mediaExplanation = "Hiện bìa, tên bài, nghệ sĩ và thanh tiến trình của nhạc đang phát."
+    static let controlsTitle = "Điều khiển nhạc trên màn hình khoá"
+    /// Says what the buttons let a stranger at the keyboard do, because they are the one thing here that can be clicked.
+    static let controlsExplanation = "Thêm nút phát/dừng, bài trước và bài sau. Ai đứng trước máy cũng bấm được các nút này. Tắt đi thì chỉ xem được bài đang phát."
 
     let settings: ModuleSettings
     let keys: LockScreenKeys
@@ -42,6 +47,11 @@ struct LockScreenSettingsView: View {
                 Text("Hiện bài đang phát")
                 Text(Self.mediaExplanation)
             }
+            Toggle(isOn: settings.binding(keys.showMediaControls)) {
+                Text(Self.controlsTitle)
+                Text(Self.controlsExplanation)
+            }
+            .disabled(!settings.value(keys.showMedia))
             Toggle("Hiện hẹn giờ", isOn: settings.binding(keys.showTimer))
             Toggle("Hiện pin", isOn: settings.binding(keys.showBattery))
         }

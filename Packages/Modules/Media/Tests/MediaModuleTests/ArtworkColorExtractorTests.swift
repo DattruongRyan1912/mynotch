@@ -257,4 +257,82 @@ extension SRGBColor {
         #expect(ArtworkColorExtractor.palette(imageData: Data([1, 2, 3])) == nil)
         #expect(ArtworkColorExtractor.palette(imageData: Data()) == nil)
     }
+
+    // MARK: near-white, one pixel, and covers too big to read
+
+    @Test func aNearWhiteCoverNeedsNoClampAndStaysAsItIs() throws {
+        let white = SRGBColor(red: 0.98, green: 0.98, blue: 0.98)
+        let palette = try #require(ArtworkColorExtractor.palette(of: SyntheticImage.solid(white)))
+        #expect(palette.primary.isClose(to: white, tolerance: 0.01))
+        #expect(palette.secondary == nil)
+        let pure = try #require(ArtworkColorExtractor.palette(of: SyntheticImage.solid(.white)))
+        #expect(pure.primary.isClose(to: .white, tolerance: 0.005))
+    }
+
+    @Test func aWhiteCoverWithAColouredEmblemTakesTheEmblemAsItsSecondColour() throws {
+        let image = SyntheticImage.make(width: 32, height: 32) { x, y in
+            x < 8 && y < 8 ? (0, 0.6, 1, 1) : (0.97, 0.97, 0.97, 1)
+        }
+        let palette = try #require(ArtworkColorExtractor.palette(of: image))
+        #expect(palette.primary.isClose(to: SRGBColor(red: 0.97, green: 0.97, blue: 0.97), tolerance: 0.02))
+        #expect(try #require(palette.secondary).isClose(to: SRGBColor(red: 0, green: 0.6, blue: 1), tolerance: 0.03))
+    }
+
+    @Test func aOnePixelImageIsItsOwnColour() throws {
+        let orange = SRGBColor(red: 1, green: 0.5, blue: 0)
+        let palette = try #require(ArtworkColorExtractor.palette(of: SyntheticImage.solid(orange, size: 1)))
+        #expect(palette.primary.isClose(to: orange))
+        #expect(palette.secondary == nil)
+        #expect(ArtworkColorExtractor.palette(of: SyntheticImage.make(width: 1, height: 1) { _, _ in (1, 0, 0, 0) }) == nil)
+    }
+
+    @Test func aOnePixelImageFromDataWorksToo() throws {
+        let png = SyntheticImage.png(SyntheticImage.solid(SRGBColor(red: 0, green: 1, blue: 0), size: 1))
+        #expect(try #require(ArtworkColorExtractor.palette(imageData: png)).primary.isClose(to: .fullGreen, tolerance: 0.05))
+    }
+
+    @Test func theLimitOnASourceImageIsOnItsPixelsAndNeverOverflows() {
+        #expect(ArtworkColorExtractor.acceptsSourceSize(width: 4000, height: 4000))
+        #expect(ArtworkColorExtractor.acceptsSourceSize(width: 1, height: 1))
+        #expect(!ArtworkColorExtractor.acceptsSourceSize(width: 20_000, height: 20_000))
+        #expect(!ArtworkColorExtractor.acceptsSourceSize(width: Int.max, height: Int.max))
+        #expect(!ArtworkColorExtractor.acceptsSourceSize(width: 0, height: 100))
+        #expect(!ArtworkColorExtractor.acceptsSourceSize(width: -5, height: 100))
+    }
+
+    /// A black gray-scale image of `size` by `size`, which PNG squeezes to a few kilobytes however big it is.
+    func blackPNG(size: Int) -> Data {
+        let provider = CGDataProvider(data: Data(count: size * size) as CFData)!
+        let image = CGImage(
+            width: size, height: size, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: size,
+            space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
+        )!
+        return SyntheticImage.png(image)
+    }
+
+    @Test func theSizeOfAnImageIsReadFromItsHeaderAlone() throws {
+        let real = SyntheticImage.png(SyntheticImage.solid(.fullRed, size: 40))
+        let small = try #require(ArtworkColorExtractor.pixelSize(ofImageData: real))
+        #expect(small.width == 40 && small.height == 40)
+        #expect(ArtworkColorExtractor.pixelSize(ofImageData: Data([1, 2, 3])) == nil)
+        #expect(ArtworkColorExtractor.pixelSize(ofImageData: Data()) == nil)
+    }
+
+    @Test func aCoverAboveTheLimitGivesNoTintInsteadOfBeingDecoded() throws {
+        // 7000 x 7000 is 49 million pixels, 196 MB as RGBA. A black image would give a palette (a grey) if it were read, so
+        // nothing coming back is the guard at work.
+        let png = blackPNG(size: 7_000)
+        #expect(png.count < 5_000_000, "a few kilobytes on disk, hundreds of megabytes decoded")
+        let size = try #require(ArtworkColorExtractor.pixelSize(ofImageData: png))
+        #expect(size.width == 7_000 && size.height == 7_000)
+        #expect(ArtworkColorExtractor.palette(imageData: png) == nil)
+        #expect(ArtworkColorExtractor.palette(imageData: blackPNG(size: 300)) != nil, "the same image below the limit is read")
+    }
+
+    @Test func aBigCoverThatIsWithinTheLimitIsReadFromAThumbnail() throws {
+        let png = SyntheticImage.png(SyntheticImage.twoTone(.fullRed, .fullGreen, size: 1000))
+        let palette = try #require(ArtworkColorExtractor.palette(imageData: png))
+        #expect([palette.primary, try #require(palette.secondary)].contains { $0.isClose(to: .fullRed, tolerance: 0.05) })
+    }
 }

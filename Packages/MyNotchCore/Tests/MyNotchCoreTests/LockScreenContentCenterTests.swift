@@ -89,4 +89,44 @@ import MyNotchTestSupport
         module.context?.lockScreen.set(AnyView(Text("late")))
         #expect(harness.lockScreen.current == nil)
     }
+
+    @Test func anEntryIsReadOnlyUnlessItsModuleSaysItHasControls() {
+        let center = LockScreenContentCenter()
+        center.set(view("timer"), priority: .normal, from: "timer")
+        center.set(view("media"), priority: .normal, isInteractive: true, from: "media")
+        #expect(center.entries.first { $0.module == "timer" }?.isInteractive == false)
+        #expect(center.entries.first { $0.module == "media" }?.isInteractive == true)
+    }
+
+    @Test func replacingAnEntryReplacesItsFlagToo() {
+        let center = LockScreenContentCenter()
+        center.set(view("a"), priority: .normal, isInteractive: true, from: "one")
+        center.set(view("b"), priority: .normal, from: "one")
+        #expect(center.current?.isInteractive == false)
+    }
+
+    @Test func changingTheFlagNotifiesWhoeverReadsCurrent() {
+        let center = LockScreenContentCenter()
+        center.set(view("a"), priority: .normal, from: "one")
+        nonisolated(unsafe) var changes = 0
+        withObservationTracking { _ = center.current?.isInteractive } onChange: { changes += 1 }
+        center.set(view("a"), priority: .normal, isInteractive: true, from: "one")
+        #expect(changes == 1)
+    }
+
+    @Test func thePublisherPassesTheFlagOn() {
+        let center = LockScreenContentCenter()
+        let publisher = LockScreenPublisher(center: center, module: "media")
+        publisher.set(view("m"), isInteractive: true)
+        #expect(publisher.current(allowing: { _ in true })?.isInteractive == true)
+        publisher.set(view("m"))
+        #expect(publisher.current(allowing: { _ in true })?.isInteractive == false)
+    }
+
+    @Test func theLockScreenLetsControlsBeShownUnlessTheUserTurnedThemOff() {
+        #expect(EnvironmentValues().lockScreenControlsEnabled)
+        var environment = EnvironmentValues()
+        environment.lockScreenControlsEnabled = false
+        #expect(!environment.lockScreenControlsEnabled)
+    }
 }

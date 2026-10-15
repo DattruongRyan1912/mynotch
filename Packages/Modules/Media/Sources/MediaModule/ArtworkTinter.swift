@@ -20,10 +20,11 @@ nonisolated struct ArtworkTintKey: Hashable, Sendable {
     }
 }
 
-/// The tints of the last tracks, so that a track played again is tinted at once. Least recently used goes first.
+/// The tints of the last tracks, so that a track played again is tinted at once. A cover that gave no colour is remembered as
+/// that, so a bad cover is not tried again each time it comes back. Least recently used goes first.
 nonisolated struct ArtworkTintCache {
     private let capacity: Int
-    private var palettes: [ArtworkTintKey: ArtworkPalette] = [:]
+    private var palettes: [ArtworkTintKey: ArtworkPalette?] = [:]
     /// Least recently used first.
     private var order: [ArtworkTintKey] = []
 
@@ -33,13 +34,17 @@ nonisolated struct ArtworkTintCache {
 
     var count: Int { palettes.count }
 
+    /// Whether `key` is known, with a tint or without.
+    func contains(_ key: ArtworkTintKey) -> Bool { palettes[key] != nil }
+
+    /// The tint of `key`; nil when it is not known and when the cover gave none (see `contains`).
     mutating func palette(for key: ArtworkTintKey) -> ArtworkPalette? {
-        guard let palette = palettes[key] else { return nil }
+        guard let entry = palettes[key] else { return nil }
         touch(key)
-        return palette
+        return entry
     }
 
-    mutating func store(_ palette: ArtworkPalette, for key: ArtworkTintKey) {
+    mutating func store(_ palette: ArtworkPalette?, for key: ArtworkTintKey) {
         palettes[key] = palette
         touch(key)
         while order.count > capacity { palettes[order.removeFirst()] = nil }
@@ -68,6 +73,9 @@ final class ArtworkTinter {
     private var lastInput: (track: TrackIdentity, revision: Int?)?
     /// The track the tint on its way is for; an answer for another one is only kept.
     private var current: ArtworkTintKey?
+    /// Covers being worked out. The same bytes arriving again under another revision wait for that answer instead of starting
+    /// another extraction.
+    private var inFlight: Set<ArtworkTintKey> = []
 
     init(capacity: Int = 32, extract: @escaping Extract = ArtworkTinter.backgroundExtract, show: @escaping (ArtworkPalette?) -> Void) {
         cache = ArtworkTintCache(capacity: capacity)
@@ -87,10 +95,12 @@ final class ArtworkTinter {
         }
         let key = ArtworkTintKey(track: track, artwork: artwork)
         current = key
-        if let palette = cache.palette(for: key) {
-            show(palette)
+        if cache.contains(key) {
+            show(cache.palette(for: key))
             return
         }
+        // Already on its way: its answer is shown when it comes, since this is the track it is for.
+        guard inFlight.insert(key).inserted else { return }
         let data = artwork.data
         Task { [weak self, extract] in
             let palette = await extract(data)
@@ -105,7 +115,8 @@ final class ArtworkTinter {
     }
 
     private func finished(_ palette: ArtworkPalette?, for key: ArtworkTintKey) {
-        if let palette { cache.store(palette, for: key) }
+        inFlight.remove(key)
+        cache.store(palette, for: key)
         guard key == current else { return }
         show(palette)
     }

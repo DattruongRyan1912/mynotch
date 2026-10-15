@@ -104,6 +104,16 @@ nonisolated final class FakeExtractor: @unchecked Sendable {
         #expect(cache.palette(for: key("a")) == red)
     }
 
+    @Test func aCoverThatGaveNothingIsRememberedAsSuch() {
+        var cache = ArtworkTintCache()
+        #expect(!cache.contains(key("bad")))
+        cache.store(nil, for: key("bad"))
+        #expect(cache.contains(key("bad")))
+        #expect(cache.palette(for: key("bad")) == nil)
+        cache.store(red, for: key("bad"))
+        #expect(cache.palette(for: key("bad")) == red)
+    }
+
     @Test func theKeyTellsCoversApartByTheirBytesAndTheirTrack() {
         let track = TrackIdentity(title: "a")
         let first = ArtworkTintKey(track: track, artwork: ArtworkData(data: Data([1, 2, 3]), mimeType: nil, revision: 1))
@@ -257,6 +267,31 @@ nonisolated final class FakeExtractor: @unchecked Sendable {
         tinter.stop()
         tinter.update(track: track("a"), artwork: cover(coverA))
         #expect(shown.values == [red, red], "from the cache, at once")
+    }
+
+    @Test func theSameBytesUnderANewRevisionWhileTheFirstIsOnItsWayAreNotExtractedTwice() async {
+        let tinter = makeTinter()
+        extractor.hold(coverA)
+        tinter.update(track: track("a"), artwork: cover(coverA, revision: 1))
+        tinter.update(track: track("a"), artwork: cover(coverA, revision: 2))
+        tinter.update(track: track("a"), artwork: cover(coverA, revision: 3))
+        extractor.release(coverA)
+        #expect(await waitUntil { shown.values.count >= 1 })
+        await letAnswersLand()
+        #expect(extractor.callCount == 1)
+        #expect(shown.values == [red])
+    }
+
+    @Test func aCoverThatCannotBeReadIsNotTriedAgainWhenItComesBack() async {
+        let tinter = makeTinter()
+        let bad = Data([0xFF])
+        tinter.update(track: track("a"), artwork: cover(bad))
+        #expect(await waitUntil { shown.values.count == 1 })
+        tinter.update(track: track("b"), artwork: cover(coverB))
+        #expect(await waitUntil { shown.values.count == 2 })
+        tinter.update(track: track("a"), artwork: cover(bad, revision: 5))
+        #expect(shown.values == [nil, green, nil], "at once, from what is known about it")
+        #expect(extractor.callCount == 2)
     }
 
     @Test func theOldestTrackIsForgottenWhenTheCacheIsFull() async {

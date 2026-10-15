@@ -101,12 +101,25 @@ import Testing
         #expect(panel.sharingType == .readOnly)
     }
 
-    @Test func thePanelTakesClicksForItsButtonsButNeverTheKeyboard() {
+    @Test func aNewPanelLetsEveryClickThroughUntilItIsToldItHasButtons() {
         let panel = makePanel(NotchInterface())
         defer { panel.dismiss() }
-        #expect(!panel.ignoresMouseEvents, "the media buttons have to be clickable")
-        #expect(!panel.canBecomeKey && !panel.canBecomeMain)
-        #expect(panel.styleMask.contains(.nonactivatingPanel), "a click never activates MyNotch, so the password field keeps the keyboard")
+        #expect(panel.ignoresMouseEvents)
+        #expect(!panel.takesClicks)
+        panel.takesClicks = true
+        #expect(!panel.ignoresMouseEvents, "the buttons have to be clickable")
+        panel.takesClicks = false
+        #expect(panel.ignoresMouseEvents)
+    }
+
+    @Test func whateverItDoesWithClicksThePanelNeverTakesTheKeyboard() {
+        let panel = makePanel(NotchInterface())
+        defer { panel.dismiss() }
+        for takesClicks in [false, true] {
+            panel.takesClicks = takesClicks
+            #expect(!panel.canBecomeKey && !panel.canBecomeMain)
+            #expect(panel.styleMask.contains(.nonactivatingPanel), "a click never activates MyNotch, so the password field keeps the keyboard")
+        }
     }
 
     @Test func aClickOnTheFirstTryReachesTheButtonBecauseThePanelIsNeverKey() throws {

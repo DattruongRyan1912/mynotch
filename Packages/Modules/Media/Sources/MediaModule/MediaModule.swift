@@ -833,7 +833,7 @@ public final class MediaModule: FeatureModule {
         guard policy.visible != lockScreenOffered else { return }
         lockScreenOffered = policy.visible
         if lockScreenOffered {
-            context.lockScreen.set(AnyView(NowPlayingLockScreenView(transport: lockScreenTransport)), priority: .normal)
+            context.lockScreen.set(AnyView(NowPlayingLockScreenView(transport: lockScreenTransport)), priority: .normal, isInteractive: true)
         } else {
             context.lockScreen.clear()
         }

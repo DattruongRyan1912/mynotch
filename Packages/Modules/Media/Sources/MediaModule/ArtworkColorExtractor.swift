@@ -15,6 +15,10 @@ nonisolated enum ArtworkColorExtractor {
     static let minimumSeparation = 0.25
     /// And has to be at least this part of the cover, so a speck does not become the second tint.
     static let minimumShare = 0.06
+    /// The most pixels a cover may claim in its header and still be read. ImageIO can scale a JPEG while it decodes it, but may
+    /// decode other formats in full before it scales, and 40 million pixels (6 000 by 6 000) are 160 MB. Album art is never near
+    /// it; a cover above it gets no tint rather than a transient spike of memory.
+    static let maxSourcePixels = 40_000_000
     /// Pixels that are less opaque than this say nothing about the cover.
     static let minimumAlpha = 0.5
     /// A group of this part of the picture counts for less when it is grey: its weight is share × (this + saturation).
@@ -34,13 +38,42 @@ nonisolated enum ArtworkColorExtractor {
         return CGSize(width: max(1, (size.width * scale).rounded()), height: max(1, (size.height * scale).rounded()))
     }
 
-    /// The tint of encoded image data (PNG, JPEG, ...), read as a thumbnail so a big cover is never decoded in full. nil for
-    /// data that is no image, or an image with no opaque pixel.
+    /// Whether an image that claims to be `width` by `height` is small enough to be read.
+    static func acceptsSourceSize(width: Int, height: Int) -> Bool {
+        guard width > 0, height > 0 else { return false }
+        let (pixels, overflowed) = width.multipliedReportingOverflow(by: height)
+        return !overflowed && pixels <= maxSourcePixels
+    }
+
+    /// What the header of encoded image data says its size is, without decoding anything; nil for data that is no image.
+    static func pixelSize(ofImageData data: Data) -> (width: Int, height: Int)? {
+        guard let source = imageSource(for: data) else { return nil }
+        return pixelSize(of: source)
+    }
+
+    private static func imageSource(for data: Data) -> CGImageSource? {
+        guard !data.isEmpty else { return nil }
+        // Not cached: the source is used once, for a thumbnail.
+        return CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary)
+    }
+
+    private static func pixelSize(of source: CGImageSource) -> (width: Int, height: Int)? {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int else { return nil }
+        return (width, height)
+    }
+
+    /// The tint of encoded image data (PNG, JPEG, ...), read as a thumbnail so a big cover is never decoded in full, and a cover
+    /// whose header claims more than `maxSourcePixels` is not read at all. nil for data that is no image, an image with no opaque
+    /// pixel, or one that is too big.
     static func palette(imageData: Data) -> ArtworkPalette? {
-        guard !imageData.isEmpty, let source = CGImageSourceCreateWithData(imageData as CFData, nil) else { return nil }
+        guard let source = imageSource(for: imageData), let size = pixelSize(of: source),
+              acceptsSourceSize(width: size.width, height: size.height) else { return nil }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCache: false,
             kCGImageSourceThumbnailMaxPixelSize: Int(maxDimension),
         ]
         guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }

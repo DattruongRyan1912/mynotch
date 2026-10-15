@@ -82,7 +82,7 @@ struct MediaControlsRow: View {
 }
 
 /// Play and pause: bigger than the others, and always in the middle.
-struct PlayPauseButton: View {
+private struct PlayPauseButton: View {
     let isPlaying: Bool
     let action: () -> Void
 
@@ -94,7 +94,7 @@ struct PlayPauseButton: View {
     }
 }
 
-struct ControlButton: View {
+private struct ControlButton: View {
     let look: MediaControlLook
     let action: () -> Void
 

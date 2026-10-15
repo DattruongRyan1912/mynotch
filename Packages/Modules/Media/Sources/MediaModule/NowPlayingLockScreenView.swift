@@ -5,6 +5,16 @@ import SwiftUI
 /// is faded and does nothing) and the same actions, which take the same route (a Chrome video's skip goes to the YouTube
 /// extension, anything else to MediaRemote).
 struct LockScreenTransport {
+    /// One button of the row, as the view draws it and as a test can press it.
+    struct Control: Identifiable {
+        enum Kind { case previous, playPause, next }
+
+        var kind: Kind
+        var look: MediaControlLook
+        var perform: () -> Void
+        var id: Kind { kind }
+    }
+
     let store: NowPlayingStore
     let actions: MediaActions
 
@@ -15,18 +25,36 @@ struct LockScreenTransport {
     /// From the activity's snapshot, which keeps the last track through the empty state between two tracks.
     var isPlaying: Bool { store.activityIsPlaying }
 
+    /// What pressing it will do: the icon of the other state, as the tab's button.
+    var playPause: MediaControlLook {
+        MediaControlLook(
+            symbol: isPlaying ? "pause.fill" : "play.fill", label: isPlaying ? "Tạm dừng" : "Phát", isEnabled: true, isActive: false
+        )
+    }
+
+    /// Left to right. The view draws exactly these, each with its own action.
+    var controls: [Control] {
+        [
+            Control(kind: .previous, look: previous, perform: skipBack),
+            Control(kind: .playPause, look: playPause, perform: togglePlayPause),
+            Control(kind: .next, look: next, perform: skipForward),
+        ]
+    }
+
     func togglePlayPause() { actions.send(.togglePlayPause) }
     func skipBack() { actions.press(.previous) }
     func skipForward() { actions.press(.next) }
 }
 
-/// Lock screen widget: cover, title, artist, the previous, play/pause and next buttons, and a thin progress bar under them. It reads
-/// the store, so it is offered once and follows the track.
+/// Lock screen widget: cover, title, artist and a thin progress bar, and, while the lock screen allows controls, the previous,
+/// play/pause and next buttons. It reads the store, so it is offered once and follows the track.
 struct NowPlayingLockScreenView: View {
     static let artworkSize: CGFloat = 40
     static let progressHeight: CGFloat = 3
 
     let transport: LockScreenTransport
+    /// The lock screen module's "Điều khiển nhạc trên màn hình khoá". Off, nothing here can be pressed.
+    @Environment(\.lockScreenControlsEnabled) private var controlsEnabled
 
     private var store: NowPlayingStore { transport.store }
 
@@ -47,10 +75,18 @@ struct NowPlayingLockScreenView: View {
                     }
                 }
                 Spacer(minLength: 0)
-                HStack(spacing: 2) {
-                    ControlButton(look: transport.previous, action: transport.skipBack)
-                    PlayPauseButton(isPlaying: transport.isPlaying, action: transport.togglePlayPause)
-                    ControlButton(look: transport.next, action: transport.skipForward)
+                if controlsEnabled {
+                    HStack(spacing: 2) {
+                        ForEach(transport.controls) { control in
+                            RowButton(
+                                symbol: control.look.symbol, label: control.look.label,
+                                symbolSize: control.kind == .playPause ? 20 : 14, isActive: control.look.isActive,
+                                action: control.perform
+                            )
+                            .disabled(!control.look.isEnabled)
+                            .opacity(control.look.isEnabled ? 1 : 0.35)
+                        }
+                    }
                 }
             }
             LockScreenProgress(store: store)
