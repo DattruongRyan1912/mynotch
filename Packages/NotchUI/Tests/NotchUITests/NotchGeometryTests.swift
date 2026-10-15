@@ -82,7 +82,7 @@ import Testing
     @Test func theMaxHeightCapsTheContentAndTheNotchIsAsTallAsItsContentUpToThat() {
         let notch: CGFloat = 32
         for (limit, content, expected) in [
-            (CGFloat(300), CGFloat(190), CGFloat(190)), (300, 450, 300), (200, 190, 190), (200, 230, 200), (200, 300, 200),
+            (CGFloat(300), CGFloat(190), CGFloat(190)), (300, 450, 300), (240, 190, 190), (240, 240, 240), (240, 300, 240),
             (400, 300, 300), (400, 350, 350), (400, 900, 400), (350, 120, 120), (400, 50, 120),
         ] {
             let geometry = NotchGeometry(screen: Self.macBook14, config: NotchLayoutConfig(maxContentHeight: limit))
@@ -92,8 +92,8 @@ import Testing
         }
     }
 
-    @Test func aMaxHeightOutsideTheRangeIsHeldTo200Through400() {
-        for (limit, expected) in [(CGFloat(0), CGFloat(200)), (199, 200), (401, 400), (.infinity, 400), (-50, 200)] {
+    @Test func aMaxHeightOutsideTheRangeIsHeldTo240Through400() {
+        for (limit, expected) in [(CGFloat(0), CGFloat(240)), (199, 240), (239, 240), (401, 400), (.infinity, 400), (-50, 240)] {
             let geometry = NotchGeometry(screen: Self.macBook14, config: NotchLayoutConfig(maxContentHeight: limit))
             #expect(geometry.maxContentHeight == expected, "\(limit)")
             #expect(geometry.shapeSize(for: .open(nil), contentHeight: 10_000).height == 32 + expected, "\(limit)")
@@ -105,7 +105,80 @@ import Testing
         #expect(geometry.openWidth == 600)
         #expect(geometry.maxContentHeight == 300)
         #expect(NotchLayoutConfig().openWidth == 600)
-        #expect(NotchLayoutConfig().maxContentHeight == NotchTab.heightRange.upperBound)
+        #expect(NotchLayoutConfig().maxContentHeight == 300)
+        #expect(NotchGeometry.defaultMaxContentHeight == 300)
+    }
+
+    // MARK: no tab is cut
+
+    @Test func theFloorOfTheMaxHeightIsTheMostATabMayAsk() {
+        // The floor is the tallest ask of the tabs there are (Clipboard asks 230 pt) with a little room.
+        #expect(NotchGeometry.contentHeightLimits.lowerBound == NotchTab.heightRange.upperBound)
+        #expect(NotchGeometry.contentHeightLimits == 240...400)
+        #expect(NotchGeometry.contentHeightLimits.contains(NotchGeometry.defaultMaxContentHeight))
+        #expect(NotchTab.heightRange.upperBound >= 230 + 10)
+    }
+
+    @Test func noMaxHeightEverCutsATabThatAsksForWhatATabMay() {
+        let notch: CGFloat = 32
+        var cut: [String] = []
+        // From below the range to past it, so even a setting that was stored by hand cannot cut a tab.
+        for limit in stride(from: CGFloat(0), through: 500, by: 5) {
+            let geometry = NotchGeometry(screen: Self.macBook14, config: NotchLayoutConfig(maxContentHeight: limit))
+            for ask in stride(from: NotchTab.heightRange.lowerBound, through: NotchTab.heightRange.upperBound, by: 1) {
+                for state in [NotchState.open("a"), .toast] where geometry.shapeSize(for: state, contentHeight: ask).height != notch + ask {
+                    cut.append("limit \(limit) ask \(ask) \(state)")
+                }
+            }
+        }
+        #expect(cut.isEmpty, "\(cut.prefix(5))")
+    }
+
+    // MARK: the panel is larger than the notch
+
+    @Test func aPointInsideTheLargePanelButOutsideASmallerNotchIsOutside() {
+        let screen = Self.macBook14
+        let geometry = NotchGeometry(screen: screen, config: NotchLayoutConfig(openWidth: 480, maxContentHeight: 240))
+        let panel = geometry.panelFrame(in: screen.frame)
+        let centre = screen.frame.midX + geometry.centerOffset
+        let top = screen.frame.maxY
+        // The 480 pt notch with 200 pt of content is 480 x 232; its hit area adds 8 pt on each side (40 while dragging).
+        let beside = [centre - 440, centre - 300, centre + 300, centre + 440].map { CGPoint(x: $0, y: top - 100) }
+        let below = [top - 232 - 60, top - 380, top - 425].map { CGPoint(x: centre, y: $0) }
+        let corners = [CGPoint(x: panel.minX + 2, y: panel.minY + 2), CGPoint(x: panel.maxX - 2, y: panel.minY + 2)]
+        for state in [NotchState.open(nil), .toast] {
+            for point in beside + below + corners {
+                #expect(panel.contains(point))
+                for dragging in [false, true] {
+                    let zone = geometry.pointerZone(at: point, state: state, contentHeight: 200, dragging: dragging, in: screen.frame)
+                    #expect(zone == .outside, "\(state) dragging \(dragging) \(point)")
+                }
+            }
+            // The same notch does count points inside it.
+            for point in [CGPoint(x: centre, y: top - 100), CGPoint(x: centre + 230, y: top - 100), CGPoint(x: centre, y: top - 225)] {
+                #expect(geometry.pointerZone(at: point, state: state, contentHeight: 200, in: screen.frame) == .notch, "\(state) \(point)")
+            }
+        }
+    }
+
+    @Test func theZoneOfAnyStateIsItsShapeAndNotThePanelEverywhereOnThePanel() {
+        let screen = Self.macBook14
+        for config in [NotchLayoutConfig(), NotchLayoutConfig(openWidth: 480, maxContentHeight: 240), NotchLayoutConfig(openWidth: 900, maxContentHeight: 400)] {
+            let geometry = NotchGeometry(screen: screen, config: config)
+            let panel = geometry.panelFrame(in: screen.frame)
+            for (state, height) in [(NotchState.open(nil), CGFloat(200)), (.toast, 190), (.closed, 190)] {
+                let hit = geometry.hitRect(for: state, contentHeight: height, in: screen.frame)
+                var wrong = 0
+                for x in stride(from: panel.minX + 1, to: panel.maxX, by: 7) {
+                    for y in stride(from: panel.minY + 1, to: panel.maxY, by: 7) {
+                        let point = CGPoint(x: x, y: y)
+                        let inside = geometry.pointerZone(at: point, state: state, contentHeight: height, in: screen.frame) != .outside
+                        if inside != hit.contains(point) { wrong += 1 }
+                    }
+                }
+                #expect(wrong == 0, "\(state) \(config.openWidth) x \(config.maxContentHeight)")
+            }
+        }
     }
 
     @Test func theHitAreaOfAWiderTallerOpenNotchGrowsWithIt() {
@@ -126,7 +199,7 @@ import Testing
     }
 
     @Test func thePanelDoesNotChangeWithTheSizeSettings() {
-        let small = NotchGeometry(screen: Self.external, config: NotchLayoutConfig(openWidth: 480, maxContentHeight: 200))
+        let small = NotchGeometry(screen: Self.external, config: NotchLayoutConfig(openWidth: 480, maxContentHeight: 240))
         let large = NotchGeometry(screen: Self.external, config: NotchLayoutConfig(openWidth: 900, maxContentHeight: 400))
         #expect(small.panelFrame(in: Self.external.frame) == large.panelFrame(in: Self.external.frame))
         #expect(small.panelSize == CGSize(width: 900, height: 25 + 400))
@@ -221,7 +294,7 @@ import Testing
         let configs = [
             NotchLayoutConfig(),
             NotchLayoutConfig(virtualNotchWidth: 300, virtualNotchHeight: 40, openWidth: 720),
-            NotchLayoutConfig(virtualNotchWidth: 120, virtualNotchHeight: 24, openWidth: 480, maxContentHeight: 200),
+            NotchLayoutConfig(virtualNotchWidth: 120, virtualNotchHeight: 24, openWidth: 480, maxContentHeight: 240),
             NotchLayoutConfig(virtualNotchWidth: 300, virtualNotchHeight: 40, openWidth: 900, maxContentHeight: 400),
             // Past the ends of both ranges: held to them.
             NotchLayoutConfig(virtualNotchWidth: 300, virtualNotchHeight: 40, openWidth: 5000, maxContentHeight: 5000),

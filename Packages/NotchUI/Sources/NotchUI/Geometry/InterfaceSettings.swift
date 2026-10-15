@@ -22,9 +22,10 @@ public enum InterfaceSettings {
         "interface.openWidth", default: 600.0,
         clampedTo: Double(NotchGeometry.openWidthLimits.lowerBound)...Double(NotchGeometry.openWidthLimits.upperBound)
     )
-    /// The tallest the open notch gets for the content of a tab: a tab asks for the height it needs, and this caps it.
+    /// The tallest the open notch gets for the content of a tab: a tab asks for the height it needs (never more than
+    /// `NotchTab.heightRange` allows, which this setting cannot go below), and this caps it.
     public static let maxOpenHeight = SettingKey(
-        "interface.maxOpenHeight", default: Double(NotchTab.heightRange.upperBound),
+        "interface.maxOpenHeight", default: Double(NotchGeometry.defaultMaxContentHeight),
         clampedTo: Double(NotchGeometry.contentHeightLimits.lowerBound)...Double(NotchGeometry.contentHeightLimits.upperBound)
     )
     public static let openDelayMs = SettingKey("interface.openDelayMs", default: 150, clampedTo: 0...1000)
@@ -44,11 +45,11 @@ nonisolated public struct NotchLayoutConfig: Equatable, Sendable {
     public var compactSideWidth: CGFloat = 64
     public var openWidth: CGFloat = 600
     /// The most the content of the open notch can be tall; `NotchGeometry` holds it to `contentHeightLimits`.
-    public var maxContentHeight: CGFloat = NotchTab.heightRange.upperBound
+    public var maxContentHeight: CGFloat = NotchGeometry.defaultMaxContentHeight
 
     public init(
         virtualNotchWidth: CGFloat = 185, virtualNotchHeight: CGFloat? = nil, compactSideWidth: CGFloat = 64, openWidth: CGFloat = 600,
-        maxContentHeight: CGFloat = NotchTab.heightRange.upperBound
+        maxContentHeight: CGFloat = NotchGeometry.defaultMaxContentHeight
     ) {
         self.virtualNotchWidth = virtualNotchWidth
         self.virtualNotchHeight = virtualNotchHeight

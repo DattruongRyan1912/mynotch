@@ -229,7 +229,7 @@ public final class ModuleRegistry {
         do {
             try await module.start(context)
             states[id] = .running
-            tabCache[id] = module.makeTab()
+            tabCache[id] = module.makeTab().map(Self.checked)
         } catch {
             tearDown(id)
             states[id] = ModuleState(error)
@@ -260,6 +260,13 @@ public final class ModuleRegistry {
         hotkeys.unregisterAll(owner: id)
         services.unregisterAll(owner: id)
         tabCache[id] = nil
+    }
+
+    /// Every running module's tab passes here, so a tab that outgrows `NotchTab.heightRange` stops a debug build (and the
+    /// module's own tests, which start it) instead of being cut on a user's screen.
+    private static func checked(_ tab: NotchTab) -> NotchTab {
+        assert(!tab.asksTooMuch, "Tab \(tab.id.rawValue) asks for \(tab.preferredHeight ?? 0) pt; a tab may ask for at most \(NotchTab.heightRange.upperBound) pt")
+        return tab
     }
 
     private func rebuildTabs() {

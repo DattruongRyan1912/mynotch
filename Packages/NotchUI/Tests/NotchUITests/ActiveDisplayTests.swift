@@ -182,4 +182,77 @@ import Testing
         fixture.scheduler.advance(by: ActiveDisplay.settleDelay)
         #expect(shown() == [2])
     }
+
+    // MARK: the app that came to the front
+
+    @Test func anAppComingToTheFrontMovesTheNotchToItsDisplayAtOnce() {
+        let fixture = Fixture()
+        fixture.active.activated(on: 2)
+        #expect(fixture.active.current == 2)
+        #expect(fixture.changes.count == 1)
+        #expect(fixture.scheduler.pendingCount == 0)
+    }
+
+    @Test func anAppOnTheDisplayTheNotchIsOnChangesNothing() {
+        let fixture = Fixture()
+        fixture.active.activated(on: 1)
+        #expect(fixture.changes.count == 0)
+    }
+
+    @Test func anAppWithNoWindowChangesNothing() {
+        let fixture = Fixture()
+        fixture.active.activated(on: nil)
+        #expect(fixture.active.current == 1)
+        #expect(fixture.changes.count == 0)
+    }
+
+    @Test func thePointerLeftBehindDoesNotPullTheNotchBackToItsDisplay() {
+        // Command-tab to an app on the other display, with the pointer still where it was: the pointer moving about
+        // there is not a move to another display.
+        let fixture = Fixture()
+        fixture.active.activated(on: 2)
+        for _ in 0..<30 {
+            fixture.active.pointerMoved(onto: 1)
+            fixture.scheduler.advance(by: .milliseconds(50))
+        }
+        #expect(fixture.scheduler.pendingCount == 0)
+        #expect(fixture.active.current == 2)
+        #expect(fixture.changes.count == 1)
+    }
+
+    @Test func thePointerThenFollowsAgainWhenItChangesDisplay() {
+        let fixture = Fixture(displays: [1, 2, 3])
+        fixture.active.activated(on: 2)
+        fixture.active.pointerMoved(onto: 3)
+        fixture.scheduler.advance(by: ActiveDisplay.settleDelay)
+        #expect(fixture.active.current == 3)
+        fixture.active.pointerMoved(onto: 1)
+        fixture.scheduler.advance(by: ActiveDisplay.settleDelay)
+        #expect(fixture.active.current == 1)
+    }
+
+    @Test func anActivationDropsAMoveThatWasWaitingForThePointer() {
+        let fixture = Fixture()
+        fixture.active.pointerMoved(onto: 2)
+        #expect(fixture.scheduler.pendingCount == 1)
+        // The app that came to the front is on the display the notch is on: the user is there.
+        fixture.active.activated(on: 1)
+        #expect(fixture.scheduler.pendingCount == 0)
+        fixture.scheduler.advance(by: .seconds(1))
+        #expect(fixture.active.current == 1)
+        #expect(fixture.changes.count == 0)
+    }
+
+    @Test func aPointerThatKeepsMovingOnOneDisplayIsNotAMoveEvenAfterAnActivationElsewhere() {
+        let fixture = Fixture()
+        fixture.active.pointerMoved(onto: 2)
+        fixture.scheduler.advance(by: ActiveDisplay.settleDelay)
+        #expect(fixture.active.current == 2)
+        fixture.active.activated(on: 1)
+        #expect(fixture.active.current == 1)
+        // The pointer is still on 2 and only moves about there.
+        for _ in 0..<10 { fixture.active.pointerMoved(onto: 2) }
+        fixture.scheduler.advance(by: .seconds(1))
+        #expect(fixture.active.current == 1)
+    }
 }

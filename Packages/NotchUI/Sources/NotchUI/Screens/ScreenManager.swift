@@ -19,11 +19,14 @@ public final class ScreenManager {
         onMove: { [weak self] point, dragTypes in self?.pointerMoved(to: point, dragTypes: dragTypes) },
         onMouseDown: { [weak self] point in self?.mouseDown(at: point) }
     )
-    private lazy var fullscreenDetector = FullscreenDetector { [weak self] displays in
-        if displays != self?.fullscreenDisplays { NotchLog.record("fullscreen displays=\(displays.sorted())") }
-        self?.fullscreenDisplays = displays
-        self?.applyVisibility()
-    }
+    private lazy var fullscreenDetector = FullscreenDetector(
+        onChange: { [weak self] displays in
+            if displays != self?.fullscreenDisplays { NotchLog.record("fullscreen displays=\(displays.sorted())") }
+            self?.fullscreenDisplays = displays
+            self?.applyVisibility()
+        },
+        onActivate: { [weak self] display in self?.activeDisplay.activated(on: display) }
+    )
 
     /// User toggle from the menu bar ("Show/Hide Notch").
     public var isHiddenByUser = false {

@@ -6,15 +6,18 @@ import Testing
 import MyNotchTestSupport
 
 @Suite struct CoreTypesTests {
-    @Test func tabHeightIsClampedWithDefault() {
+    @Test func aTabMayAskForUpTo240PointsOfContentAndTheDefaultIsInside() {
         func tab(_ height: CGFloat?) -> NotchTab {
             NotchTab(id: "x", title: "X", systemImage: "circle", preferredHeight: height, content: AnyView(EmptyView()))
         }
-        #expect(tab(nil).contentHeight == 190)
-        #expect(tab(50).contentHeight == 120)
-        #expect(tab(500).contentHeight == 300)
-        #expect(tab(120).contentHeight == 120)
-        #expect(tab(300).contentHeight == 300)
+        #expect(NotchTab.heightRange == 120...240)
+        #expect(NotchTab.heightRange.contains(NotchTab.defaultHeight))
+        for ask in [nil, 50, 120, 190, 230, 240] as [CGFloat?] {
+            #expect(!tab(ask).asksTooMuch, "\(String(describing: ask))")
+        }
+        for ask in [240.5, 241, 300, 500] as [CGFloat] {
+            #expect(tab(ask).asksTooMuch, "\(ask)")
+        }
     }
 
     @Test func tabsDoNotTakeTheKeyboardUnlessTheyAskForIt() {

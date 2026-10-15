@@ -80,4 +80,60 @@ import Testing
         #expect(DisplaySelection.display(at: CGPoint(x: 5000, y: 5000), in: Self.frames) == nil)
         #expect(DisplaySelection.display(at: CGPoint(x: 10, y: 10), in: []) == nil)
     }
+
+    // MARK: the app that came to the front
+
+    /// The same three displays in the coordinates windows use (origin top left of the main display, y down): the one
+    /// above the laptop is at negative y.
+    static let bounds: [(displayID: CGDirectDisplayID, bounds: CGRect)] = [
+        (laptop, CGRect(x: 0, y: 0, width: 1512, height: 982)),
+        (right, CGRect(x: 1512, y: 0, width: 1920, height: 1080)),
+        (above, CGRect(x: -1000, y: -1080, width: 1920, height: 1080)),
+    ]
+
+    func window(_ pid: pid_t, layer: Int = 0, _ bounds: CGRect) -> WindowInfo {
+        WindowInfo(ownerPID: pid, layer: layer, bounds: bounds)
+    }
+
+    @Test func theFrontWindowOfTheAppThatCameToTheFrontDecidesTheDisplay() {
+        // Front to back, as the window list has them: another app's window first, then the app's two windows.
+        let windows = [
+            window(9, CGRect(x: 100, y: 100, width: 800, height: 600)),
+            window(7, CGRect(x: 1700, y: 100, width: 800, height: 600)),
+            window(7, CGRect(x: 100, y: 100, width: 800, height: 600)),
+        ]
+        #expect(DisplaySelection.display(ofFrontWindowOf: 7, in: windows, on: Self.bounds) == Self.right)
+        #expect(DisplaySelection.display(ofFrontWindowOf: 9, in: windows, on: Self.bounds) == Self.laptop)
+    }
+
+    @Test func aWindowAboveTheMainDisplayIsOnTheDisplayAboveIt() {
+        let windows = [window(7, CGRect(x: -500, y: -700, width: 800, height: 600))]
+        #expect(DisplaySelection.display(ofFrontWindowOf: 7, in: windows, on: Self.bounds) == Self.above)
+    }
+
+    @Test func menuBarsAndFloatingPanelsAreNotTheWindowOfAnApp() {
+        // The app's menu bar item and a floating panel are at other layers; its real window is on the right.
+        let windows = [
+            window(7, layer: 25, CGRect(x: 0, y: 0, width: 1512, height: 24)),
+            window(7, layer: 3, CGRect(x: 100, y: 100, width: 300, height: 200)),
+            window(7, CGRect(x: 1700, y: 100, width: 800, height: 600)),
+        ]
+        #expect(DisplaySelection.display(ofFrontWindowOf: 7, in: windows, on: Self.bounds) == Self.right)
+    }
+
+    @Test func aWindowAcrossTwoDisplaysIsOnTheOneThatHoldsMostOfIt() {
+        // 212 pt of it is on the laptop (x 1300 to 1512), 388 pt on the right.
+        let mostlyRight = [window(7, CGRect(x: 1300, y: 100, width: 600, height: 400))]
+        #expect(DisplaySelection.display(ofFrontWindowOf: 7, in: mostlyRight, on: Self.bounds) == Self.right)
+        let mostlyLeft = [window(7, CGRect(x: 1100, y: 100, width: 600, height: 400))]
+        #expect(DisplaySelection.display(ofFrontWindowOf: 7, in: mostlyLeft, on: Self.bounds) == Self.laptop)
+    }
+
+    @Test func anAppWithoutAWindowOnAnyDisplayHasNoDisplay() {
+        #expect(DisplaySelection.display(ofFrontWindowOf: 7, in: [], on: Self.bounds) == nil)
+        #expect(DisplaySelection.display(ofFrontWindowOf: 7, in: [window(9, CGRect(x: 0, y: 0, width: 100, height: 100))], on: Self.bounds) == nil)
+        // A window that is on no display (parked far away).
+        #expect(DisplaySelection.display(ofFrontWindowOf: 7, in: [window(7, CGRect(x: 9000, y: 9000, width: 100, height: 100))], on: Self.bounds) == nil)
+        #expect(DisplaySelection.display(ofFrontWindowOf: 7, in: [window(7, CGRect(x: 0, y: 0, width: 100, height: 100))], on: []) == nil)
+    }
 }

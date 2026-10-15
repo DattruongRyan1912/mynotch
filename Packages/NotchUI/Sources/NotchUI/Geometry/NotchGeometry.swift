@@ -8,9 +8,12 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     /// Narrowest and widest the open notch can be; the Interface setting moves between them.
     public static let openWidthLimits: ClosedRange<CGFloat> = 480...900
     public static let maxOpenWidth: CGFloat = openWidthLimits.upperBound
-    /// Least and most the "max height" setting allows for the content of the open notch (tabs ask for 120 to 300 pt on
-    /// their own); the panel holds the most, below the notch, so no setting needs a window of another size.
-    public static let contentHeightLimits: ClosedRange<CGFloat> = 200...400
+    /// Least and most the "max height" setting allows for the content of the open notch. The least is the most a tab may
+    /// ask for (`NotchTab.heightRange`), so no setting can cut a tab; the panel holds the most, below the notch, so no
+    /// setting needs a window of another size.
+    public static let contentHeightLimits: ClosedRange<CGFloat> = NotchTab.heightRange.upperBound...400
+    /// The max height until the user chooses one: what the notch has always let a tab have.
+    public static let defaultMaxContentHeight: CGFloat = 300
     public static let hitPadding: CGFloat = 8
     /// Padding of the hit area while a drag with data is in progress, so the panel accepts the drop.
     public static let dragHitPadding: CGFloat = 40
@@ -18,7 +21,7 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     /// below the notch, so a strip this tall always fits inside it.
     public static let maxBottomHeight: CGFloat = 80
     /// Most the collapsed notch can grow downward for anything (a strip or the list), well inside what the panel holds below it.
-    static let maxExtraHeight: CGFloat = NotchTab.heightRange.upperBound
+    static let maxExtraHeight: CGFloat = contentHeightLimits.upperBound
 
     public let kind: NotchKind
     /// Size of the physical (or virtual) notch body.

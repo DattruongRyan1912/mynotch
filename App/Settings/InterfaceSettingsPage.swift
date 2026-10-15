@@ -24,9 +24,9 @@ struct InterfaceSettingsPage: View {
                     .disabled(settings.value(InterfaceSettings.virtualNotchMatchesMenuBar))
             }
             Section("Khi mở rộng") {
-                slider("Chiều rộng", InterfaceSettings.openWidth, 480...900, unit: "pt")
-                slider("Chiều cao tối đa", InterfaceSettings.maxOpenHeight, 200...400, unit: "pt")
-                Text("Notch cao theo nội dung từng trang, không quá mức này.")
+                slider("Chiều rộng", InterfaceSettings.openWidth, NotchGeometry.openWidthLimits, unit: "pt")
+                slider("Chiều cao tối đa", InterfaceSettings.maxOpenHeight, NotchGeometry.contentHeightLimits, unit: "pt")
+                Text("Notch cao theo nội dung từng trang, không quá mức này. Mức thấp nhất là \(Int(NotchTab.heightRange.upperBound)) pt, đủ cho mọi trang, nên không trang nào bị cắt.")
                     .font(.caption).foregroundStyle(.secondary)
                 Stepper("Trễ khi mở: \(settings.value(InterfaceSettings.openDelayMs)) ms",
                         value: settings.binding(InterfaceSettings.openDelayMs), in: 0...1000, step: 50)
@@ -41,9 +41,9 @@ struct InterfaceSettingsPage: View {
         .navigationTitle("Interface")
     }
 
-    private func slider(_ title: String, _ key: SettingKey<Double>, _ range: ClosedRange<Double>, unit: String) -> some View {
+    private func slider(_ title: String, _ key: SettingKey<Double>, _ range: ClosedRange<CGFloat>, unit: String) -> some View {
         LabeledContent("\(title): \(Int(settings.value(key))) \(unit)") {
-            Slider(value: settings.binding(key), in: range, step: 1)
+            Slider(value: settings.binding(key), in: Double(range.lowerBound)...Double(range.upperBound), step: 1)
         }
     }
 }

@@ -65,6 +65,17 @@ import Testing
         #expect(geometry(external, NotchLayoutConfig(virtualNotchWidth: 120, virtualNotchHeight: 24, openWidth: 480)).bubbleCapacity == 2)
     }
 
+    @Test func theWidestPillTheSettingsCanMakeStillHasRoomForTwoBubbles() {
+        // The side width is not a setting (it is 64 pt), so a pill is at most the widest virtual notch (300 pt) with it.
+        let widest = NotchLayoutConfig(virtualNotchWidth: 300, virtualNotchHeight: 40)
+        #expect(widest.compactSideWidth == 64)
+        for screen in [macBook, external, NotchGeometryTests.externalAboveLeft] {
+            let geometry = geometry(screen, widest)
+            #expect(geometry.bubbleCapacity == NotchGeometry.maxBubbles)
+            #expect(geometry.panelFrame(in: screen.frame).contains(geometry.bubbleScreenFrame(at: NotchGeometry.maxBubbles - 1, in: screen.frame)))
+        }
+    }
+
     @Test func aWidestPillLeavesRoomForOneBubbleOnly() {
         #expect(geometry(external, Self.crowded).bubbleCapacity == 1)
     }

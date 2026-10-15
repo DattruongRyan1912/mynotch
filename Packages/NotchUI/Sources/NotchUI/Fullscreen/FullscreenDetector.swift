@@ -5,9 +5,12 @@ final class FullscreenDetector {
     private var observers: [(center: NotificationCenter, token: NSObjectProtocol)] = []
     private var recheck: Task<Void, Never>?
     private let onChange: (Set<CGDirectDisplayID>) -> Void
+    private let onActivate: (CGDirectDisplayID?) -> Void
 
-    init(onChange: @escaping (Set<CGDirectDisplayID>) -> Void) {
+    /// `onActivate` hears the display the window of each app that comes to the front is on, once, when it does.
+    init(onChange: @escaping (Set<CGDirectDisplayID>) -> Void, onActivate: @escaping (CGDirectDisplayID?) -> Void = { _ in }) {
         self.onChange = onChange
+        self.onActivate = onActivate
     }
 
     func start() {
@@ -19,8 +22,13 @@ final class FullscreenDetector {
             (NotificationCenter.default, NSApplication.didChangeScreenParametersNotification),
         ]
         for (center, name) in subscriptions {
-            let token = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.evaluateSoon() }
+            let token = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
+                let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                let activatedPID = name == NSWorkspace.didActivateApplicationNotification ? app?.processIdentifier : nil
+                MainActor.assumeIsolated {
+                    self?.evaluateSoon()
+                    if let activatedPID { self?.activated(pid: activatedPID) }
+                }
             }
             observers.append((center: center, token: token))
         }
@@ -47,6 +55,11 @@ final class FullscreenDetector {
                 self?.evaluate()
             }
         }
+    }
+
+    private func activated(pid: pid_t) {
+        let displays = NSScreen.screens.compactMap { screen in screen.displayID.map { (displayID: $0, bounds: CGDisplayBounds($0)) } }
+        onActivate(DisplaySelection.display(ofFrontWindowOf: pid, in: Self.onScreenWindows(), on: displays))
     }
 
     private func evaluate() {

@@ -72,7 +72,7 @@ import Testing
             (NotchGeometryTests.macBook14, NotchLayoutConfig(openWidth: 480)),
             (NotchGeometryTests.external, NotchLayoutConfig(virtualNotchWidth: 240, openWidth: 700)),
             (NotchGeometryTests.macBook14, NotchLayoutConfig(openWidth: 900, maxContentHeight: 400)),
-            (NotchGeometryTests.external, NotchLayoutConfig(virtualNotchWidth: 240, openWidth: 800, maxContentHeight: 200)),
+            (NotchGeometryTests.external, NotchLayoutConfig(virtualNotchWidth: 240, openWidth: 800, maxContentHeight: 240)),
         ] {
             let geometry = NotchGeometry(screen: screen, config: config)
             let measured = try measuredContent(of: geometry, screen: screen)
