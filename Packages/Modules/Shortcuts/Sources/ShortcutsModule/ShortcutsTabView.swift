@@ -41,7 +41,7 @@ struct ShortcutsTabView: View {
     }
 }
 
-private struct ShortcutButton: View {
+struct ShortcutButton: View {
     let shortcut: ShortcutInfo
     let isRunning: Bool
     let action: () -> Void
@@ -58,7 +58,7 @@ private struct ShortcutButton: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            .background(NotchTokens.fill(0.1), in: RoundedRectangle(cornerRadius: 8))
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
