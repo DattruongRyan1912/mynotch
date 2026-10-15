@@ -405,14 +405,22 @@ extension ClipboardModuleTests {
         #expect(snapshotOfTheModuleFolder() == before)
     }
 
-    /// The preview has no way to write: nothing in its sources creates, copies or writes a file. A guard against the day someone
-    /// reaches for a temporary file to hand something to Quick Look.
-    @Test func thePreviewsSourcesNeverReachForTheFileSystemsWritingCalls() throws {
-        let folder = URL(fileURLWithPath: #filePath)
+    /// The preview, the editor and the inspector have no way to write: nothing in their sources creates, copies or writes a file (and
+    /// the editor's words, which may be a secret of an open board, are never put anywhere but the history). A guard against the day
+    /// someone reaches for a temporary file to hand something to Quick Look, or a draft of the editor to the disk.
+    @Test func theSourcesThatShowOrEditNeverReachForTheFileSystemsWritingCalls() throws {
+        let sources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appending(components: "Sources", "ClipboardModule", "Preview")
-        let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil).filter { $0.pathExtension == "swift" }
-        #expect(files.count >= 8)
+            .appending(components: "Sources", "ClipboardModule")
+        var files: [URL] = []
+        for folder in ["Preview", "Editor", "Inspector"] {
+            let found = try FileManager.default.contentsOfDirectory(at: sources.appending(path: folder), includingPropertiesForKeys: nil)
+                .filter { $0.pathExtension == "swift" }
+            #expect(found.count >= (folder == "Preview" ? 8 : 4), "\(folder) has \(found.count) sources")
+            files += found
+        }
+        // The module's side of the editor lives beside the module, not in the folder.
+        files.append(sources.appending(path: "ClipboardModule+Edit.swift"))
         let forbidden = [
             ".write(to", "createFile", "createDirectory", "copyItem", "moveItem", "temporaryDirectory", "NSTemporaryDirectory",
             "FileHandle(forWriting", "FileHandle(forUpdating", "NSSavePanel", "replaceItem", "atomically",

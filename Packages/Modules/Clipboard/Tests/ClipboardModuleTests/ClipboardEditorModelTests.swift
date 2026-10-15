@@ -188,6 +188,96 @@ import Testing
         #expect(closed == 1)
     }
 
+    // MARK: The original going away
+
+    @Test func whenTheOriginalIsGoneTheWordsAreAllThatIsLeftSoLeavingAsks() {
+        let model = make()
+        model.originalGone()
+        #expect(model.isOriginalGone)
+        // Not edited, but the only copy: closing would lose them.
+        #expect(!model.hasEditedWords && model.hasChanges && model.canSave)
+        #expect(!model.windowShouldClose())
+        #expect(model.isConfirmingDiscard)
+        model.keepEditing()
+        model.cancel()
+        #expect(closed == 0 && model.isConfirmingDiscard)
+        model.discard()
+        #expect(closed == 1)
+    }
+
+    @Test func whenTheOriginalIsGoneOnlySavingAsNewIsOffered() {
+        let model = make()
+        model.originalGone()
+        #expect(model.canSave && !model.canReplace)
+        model.save(.replace)
+        #expect(saves.isEmpty && closed == 0)
+        #expect(model.notice?.contains("không thay thế được") == true)
+        model.save(.saveAsNew)
+        #expect(saves.map(\.mode) == [.saveAsNew])
+        #expect(closed == 1)
+    }
+
+    @Test func theOriginalGoneNoticeIsNotTheNoticeAKeyClears() {
+        let model = make()
+        model.originalGone()
+        model.text = "Xin chào bạn"
+        #expect(model.isOriginalGone && model.notice == nil)
+        #expect(ClipboardEditorModel.originalGoneNotice.contains("lưu được thành mục mới"))
+    }
+
+    @Test func blankWordsCannotBeSavedEvenWhenTheOriginalIsGone() {
+        let model = make()
+        model.originalGone()
+        model.text = "  "
+        #expect(!model.canSave)
+    }
+
+    @Test func autosaveOnlyLooksAtEditedWords() {
+        let model = make()
+        model.originalGone()
+        #expect(!model.hasEditedWords)
+        model.text = "Xin chào bạn"
+        #expect(model.hasEditedWords)
+    }
+
+    // MARK: Typing in the editor of a secret
+
+    @Test func typingInAProtectedItemsEditorIsActivityAndInAnotherOnesIsNot() {
+        var notes = 0
+        let item = ClipboardItem(id: UUID(), content: .text("bí mật"), contentHash: "h", copiedAt: Self.start)
+        let secret = ClipboardEditorModel(item: item, text: "bí mật", isProtected: true, save: { _, _ in .stopped }, close: {})
+        secret.onActivity = { notes += 1 }
+        secret.text = "bí mật 1"
+        secret.text = "bí mật 12"
+        #expect(notes == 2)
+        // Setting the same words is no key.
+        secret.text = "bí mật 12"
+        #expect(notes == 2)
+        // The module tells the editor when the item stops being a secret.
+        secret.isProtected = false
+        secret.text = "bí mật 123"
+        #expect(notes == 2)
+
+        let plain = make()
+        plain.onActivity = { notes += 1 }
+        plain.text = "khác"
+        #expect(notes == 2)
+    }
+
+    @Test func theEditorRemembersWhetherTheItemWasASecret() {
+        var item = ClipboardItem(id: UUID(), content: .text("mã"), contentHash: "h", copiedAt: Self.start)
+        item.sensitive = true
+        let model = ClipboardEditorModel(item: item, text: "mã", save: { _, _ in .stopped }, close: {})
+        #expect(model.wasSensitive)
+        #expect(!make().wasSensitive)
+    }
+
+    @Test func theToastForADroppedEditSaysNothingOfTheWords() {
+        let text = ClipboardEditorModel.droppedOnLockNotice
+        #expect(text.contains("khoá"))
+        for word in ["BÍ-MẬT", "mật khẩu", "Xin chào"] { #expect(!text.contains(word)) }
+    }
+
     // MARK: The item going away
 
     @Test func whenTheItemIsGoneTheEditorClosesAtOnceAndForgetsItsWords() {
@@ -226,6 +316,15 @@ import Testing
         #expect(ClipboardEditorKeys.command(for: key(53, "\u{1B}"), hasMarkedText: true) == nil)
         // ⌘W is not part of a composition: it still closes.
         #expect(ClipboardEditorKeys.command(for: key(13, "w", modifiers: .command), hasMarkedText: true) == .cancel)
+    }
+
+    @Test func escapeWhileAFieldEditorHasTheKeyboardIsTheFieldsAndCommandWStillCancels() {
+        // The find bar's field uses Esc to close the bar.
+        #expect(ClipboardEditorKeys.command(for: key(53, "\u{1B}"), hasMarkedText: false, inFieldEditor: true) == nil)
+        #expect(ClipboardEditorKeys.command(for: key(53, "\u{1B}"), hasMarkedText: false, inFieldEditor: false) == .cancel)
+        #expect(ClipboardEditorKeys.command(for: key(13, "w", modifiers: .command), hasMarkedText: false, inFieldEditor: true) == .cancel)
+        // Composing and a field editor together: still the field's.
+        #expect(ClipboardEditorKeys.command(for: key(53, "\u{1B}"), hasMarkedText: true, inFieldEditor: true) == nil)
     }
 
     @Test func aHeldKeyIsOnlyAskedOnce() {

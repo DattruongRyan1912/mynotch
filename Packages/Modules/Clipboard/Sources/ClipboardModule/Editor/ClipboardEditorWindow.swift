@@ -14,7 +14,11 @@ final class ClipboardEditorWindow: NSWindow {
     /// True when the editor took the key.
     func handleKey(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown, let onCancel,
-              let command = ClipboardEditorKeys.command(for: ClipboardPreviewKeys.Key(event), hasMarkedText: ClipboardPreviewKeys.hasMarkedText(firstResponder))
+              let command = ClipboardEditorKeys.command(
+                  for: ClipboardPreviewKeys.Key(event), hasMarkedText: ClipboardPreviewKeys.hasMarkedText(firstResponder),
+                  // The document's text view is not a field editor; the find bar's field has one.
+                  inFieldEditor: (firstResponder as? NSTextView)?.isFieldEditor == true
+              )
         else { return false }
         if command == .cancel { onCancel() }
         return true

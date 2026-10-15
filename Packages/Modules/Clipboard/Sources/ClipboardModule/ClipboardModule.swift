@@ -258,6 +258,7 @@ public final class ClipboardModule: FeatureModule {
         stopMCP()
         // Every open board is sealed and closed first, so nothing of one outlives the module in memory or on disk.
         stopVault()
+        saveEditorDraftsBeforeStopping()
         closeLibrary()
         closePanel()
         tabPreview.closePreview()

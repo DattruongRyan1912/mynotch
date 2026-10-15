@@ -12,13 +12,14 @@ nonisolated enum ClipboardEditorKeys {
     private static let masked: NSEvent.ModifierFlags = [.shift, .control, .option, .command]
 
     /// nil leaves the key to the text view and the window. Esc while an input method is composing (Telex, VNI) belongs to the method,
-    /// which uses it to take back what it is composing; ⌘W is not part of a composition. ⌘W is found by the letter it types, so a
-    /// layout that moves W keeps it.
-    static func command(for key: ClipboardPreviewKeys.Key, hasMarkedText: Bool) -> Command? {
+    /// which uses it to take back what it is composing, and Esc while a field editor has the keyboard (the find bar's field) belongs to
+    /// that field, which uses it to close the bar; ⌘W is not part of either. ⌘W is found by the letter it types, so a layout that moves
+    /// W keeps it.
+    static func command(for key: ClipboardPreviewKeys.Key, hasMarkedText: Bool, inFieldEditor: Bool = false) -> Command? {
         let flags = key.modifiers.intersection(masked)
         switch key.keyCode {
         case 53 where flags.isEmpty:
-            guard !hasMarkedText else { return nil }
+            guard !hasMarkedText, !inFieldEditor else { return nil }
         default:
             guard flags == .command, key.characters?.lowercased() == "w" else { return nil }
         }

@@ -25,6 +25,33 @@ import Testing
         stack.entries.compactMap { $0.item.content.plainText }
     }
 
+    // MARK: When an item is changed
+
+    @Test func anItemThatWasChangedIsReplacedWhereverTheStackHoldsIt() {
+        var stack = Self.stack("một", "hai")
+        let first = stack.entries[0]
+        // The same item copied twice sits on the stack twice.
+        stack.collect(first.item)
+        var changed = first.item
+        changed.content = .text("một nghìn")
+        changed.contentHash = ClipboardContent.hash(of: changed.content)
+
+        stack.refresh(with: changed)
+
+        #expect(Self.texts(stack) == ["một nghìn", "hai", "một nghìn"])
+        // The entries keep their own ids and places.
+        #expect(stack.entries[0].id == first.id)
+        #expect(stack.entries.map(\.item.id) == [first.item.id, stack.entries[1].item.id, first.item.id])
+        #expect(stack.isOn)
+    }
+
+    @Test func changingAnItemThatIsNotOnTheStackChangesNothing() {
+        var stack = Self.stack("một")
+        let before = stack
+        stack.refresh(with: Self.item("khác"))
+        #expect(stack == before)
+    }
+
     // MARK: Collecting
 
     @Test func aNewStackIsOffAndEmpty() {

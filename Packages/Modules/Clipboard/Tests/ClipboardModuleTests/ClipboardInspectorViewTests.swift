@@ -147,6 +147,10 @@ import Testing
         #expect(!textView.isAutomaticLinkDetectionEnabled)
         #expect(!textView.isAutomaticDataDetectionEnabled)
         #expect(!textView.isContinuousSpellCheckingEnabled)
+        // What is typed may be a secret of an open board: nothing completes, predicts or rewrites it.
+        #expect(!textView.isAutomaticTextCompletionEnabled)
+        #expect(textView.inlinePredictionType == .no)
+        #expect(textView.writingToolsBehavior == .none)
     }
 
     @Test func theMonospacedToggleChoosesAFixedWidthFont() {

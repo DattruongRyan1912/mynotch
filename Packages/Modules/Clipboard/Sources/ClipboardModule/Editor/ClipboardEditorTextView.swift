@@ -60,6 +60,10 @@ struct ClipboardEditorTextView: NSViewRepresentable {
         textView.isAutomaticLinkDetectionEnabled = false
         textView.isAutomaticDataDetectionEnabled = false
         textView.isContinuousSpellCheckingEnabled = false
+        // What is typed here may be a secret of an open board: nothing reads it to complete, predict or rewrite it.
+        textView.isAutomaticTextCompletionEnabled = false
+        textView.inlinePredictionType = .no
+        textView.writingToolsBehavior = .none
         textView.setAccessibilityLabel("Nội dung đang sửa")
     }
 

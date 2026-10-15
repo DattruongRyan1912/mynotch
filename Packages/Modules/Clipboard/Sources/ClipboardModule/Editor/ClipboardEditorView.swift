@@ -8,6 +8,15 @@ struct ClipboardEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             ClipboardEditorTextView(model: model)
+            // Not the notice: a key clears that, and this stays true for as long as the editor is open.
+            if model.isOriginalGone {
+                Label(ClipboardEditorModel.originalGoneNotice, systemImage: "info.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+            }
             if let notice = model.notice {
                 Label(notice, systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 12))
@@ -26,7 +35,7 @@ struct ClipboardEditorView: View {
             Button("Bỏ thay đổi", role: .destructive) { model.discard() }
             Button("Tiếp tục sửa", role: .cancel) { model.keepEditing() }
         } message: {
-            Text("Những gì bạn vừa sửa chưa được lưu.")
+            Text(model.isOriginalGone ? "Mục gốc không còn, nên nội dung này chưa được lưu ở đâu cả." : "Những gì bạn vừa sửa chưa được lưu.")
         }
     }
 
@@ -52,8 +61,8 @@ struct ClipboardEditorView: View {
                 .help("Esc")
             Button("Thay thế mục này") { model.save(.replace) }
                 .keyboardShortcut("s", modifiers: [.command, .option])
-                .disabled(!model.canSave)
-                .help("Giữ ngày và nguồn của mục, đánh dấu là đã sửa (⌥⌘S)")
+                .disabled(!model.canReplace)
+                .help("Giữ nguồn của mục, đưa nó lên đầu với ngày hiện tại và đánh dấu là đã sửa (⌥⌘S)")
             Button("Lưu thành mục mới") { model.save(.saveAsNew) }
                 .keyboardShortcut("s", modifiers: .command)
                 .buttonStyle(.borderedProminent)

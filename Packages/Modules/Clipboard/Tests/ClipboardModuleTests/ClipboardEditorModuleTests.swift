@@ -255,7 +255,7 @@ final class FakeEditorWindow: ClipboardEditorWindowing {
 
     // MARK: Replacing
 
-    @Test func replacingChangesTheWordsInPlaceAndKeepsTheDateAndTheApp() async throws {
+    @Test func replacingChangesTheWordsKeepsTheAppAndDatesTheItemNow() async throws {
         await start()
         copy("một")
         copy("hai")
@@ -267,10 +267,10 @@ final class FakeEditorWindow: ClipboardEditorWindowing {
         model.text = "hai mươi"
         model.save(.replace)
 
-        #expect(history.items.map(\.content.plainText) == ["ba", "hai mươi", "một"])
+        #expect(history.items.map(\.content.plainText) == ["hai mươi", "ba", "một"])
         let replaced = try item("hai mươi")
         #expect(replaced.id == original.id)
-        #expect(replaced.copiedAt == original.copiedAt)
+        #expect(replaced.copiedAt == system.now && replaced.copiedAt != original.copiedAt)
         #expect(replaced.sourceBundleID == "com.apple.Safari" && replaced.sourceAppName == "Safari")
         #expect(replaced.isEdited)
         #expect(pasteboard.writes.isEmpty)
@@ -280,7 +280,7 @@ final class FakeEditorWindow: ClipboardEditorWindowing {
         let loaded = try #require(reload().items.first { $0.id == original.id })
         #expect(loaded.content == .text("hai mươi"))
         #expect(loaded.isEdited)
-        #expect(loaded.copiedAt == original.copiedAt)
+        #expect(loaded.copiedAt == system.now)
     }
 
     @Test func replacingKeepsAnItemsBoardAndItsCode() async throws {
@@ -390,22 +390,6 @@ final class FakeEditorWindow: ClipboardEditorWindowing {
 
     // MARK: What closes it
 
-    @Test func deletingTheItemClosesItsEditorAndDropsTheWords() async throws {
-        await start()
-        copy("Xin chào")
-        let item = try item("Xin chào")
-        let model = try openEditor(on: "Xin chào")
-        model.text = "Xin chào đang sửa dở"
-
-        module.delete(item)
-
-        #expect(!editorWindow.isOpen(item.id))
-        #expect(model.text.isEmpty)
-        #expect(!model.isConfirmingDiscard)
-        #expect(module.editors.open.isEmpty)
-        #expect(state.historyObserverCount == 0)
-    }
-
     @Test func stoppingTheModuleClosesEveryEditor() async throws {
         await start()
         copy("một")
@@ -417,8 +401,8 @@ final class FakeEditorWindow: ClipboardEditorWindowing {
         await stop()
 
         #expect(!editorWindow.isOpen(first.itemID) && !editorWindow.isOpen(second.itemID))
-        #expect(first.text.isEmpty)
         #expect(module.editors.open.isEmpty)
+        #expect(state.historyObserverCount == 0)
     }
 
     @Test func closingTheWindowForgetsTheEditor() async throws {

@@ -35,38 +35,60 @@ nonisolated extension ClipboardHistory {
     }
 
     /// Puts `content`, the classified result of an edit of item `id`, into the history. Never touches a pasteboard.
-    /// - `replace`: the item keeps its id (so its pins stay), place, date, source, count and secret flag, takes the words, is looked at
-    ///   again for code and is marked edited. Refused when another item already has these words.
-    /// - `saveAsNew`: an item with these words made now, from no app, carrying the secret flag of the original and, when the original is in
-    ///   a board that has a lock, pinned to it too, so a secret changed stays as private as it was. Words an item already has move that
-    ///   item to the top instead, with its own source and count.
-    mutating func applyEdit(to id: UUID, content: ClipboardContent, mode: ClipboardEditMode, at date: Date) -> ClipboardEditOutcome {
-        guard let index = items.firstIndex(where: { $0.id == id }) else { return .missing }
+    /// - `replace`: the item keeps its id (so its pins stay), source, count and secret flag, takes the words, is looked at again for
+    ///   code, is marked edited, and is dated now and put on top like any item that is used (an edit would otherwise leave it in the
+    ///   middle with an old date, to be pruned by it). Refused when another item already has these words.
+    /// - `saveAsNew`: an item with these words made now, from no app, carrying the secret flag of the original and, when the original is
+    ///   in a board that has a lock, pinned to it too, so a secret changed stays as private as it was. Words an item already has move
+    ///   that item to the top instead, with its own source and count, and never pin it anywhere: when the original is in a board that
+    ///   has a lock and that item is not in all of those boards, the save is refused (`duplicate`), since pinning it would take an
+    ///   ordinary item out of the history at the next lock, or an item of another locked board out of that one.
+    ///
+    /// `originalWasSensitive` is what the editor remembers of an original that has since left the history (pruned, deleted, cleared):
+    /// its words can still be saved as a new item, which pins nothing and carries that flag. nil for an original that is not known to
+    /// have been an ordinary item, so a missing one is `missing`.
+    mutating func applyEdit(
+        to id: UUID, content: ClipboardContent, mode: ClipboardEditMode, at date: Date, originalWasSensitive: Bool? = nil
+    ) -> ClipboardEditOutcome {
+        let hash = ClipboardContent.hash(of: content)
+        guard let index = items.firstIndex(where: { $0.id == id }) else {
+            guard mode == .saveAsNew, let originalWasSensitive else { return .missing }
+            return saveAsNew(content, hash: hash, at: date, isSensitive: originalWasSensitive, protectedBoards: [])
+        }
         guard canPreview(id) else { return .locked }
         let original = items[index]
         guard ClipboardEditing.text(of: original) != nil else { return .notEditable }
-        let hash = ClipboardContent.hash(of: content)
-        let other = items.first { $0.contentHash == hash && $0.id != id }
         switch mode {
         case .replace:
             if hash == original.contentHash { return .unchanged }
-            if let other { return .duplicate(other.id) }
-            items[index].content = content
-            items[index].contentHash = hash
-            items[index].codeDetection = ClipboardCodeDetector.detect(content)
-            items[index].edited = true
+            if let other = items.first(where: { $0.contentHash == hash && $0.id != id }) { return .duplicate(other.id) }
+            var item = items.remove(at: index)
+            item.content = content
+            item.contentHash = hash
+            item.codeDetection = ClipboardCodeDetector.detect(content)
+            item.edited = true
+            item.copiedAt = date
+            // Used now, so an ordinary item with a date of now, as `touch` makes one.
+            item.exemptFromLimits = nil
+            items.insert(item, at: 0)
             return .saved(id)
         case .saveAsNew:
             let protectedBoards = boards(containing: id).filter(\.isProtected).map(\.id)
-            let savedID: UUID
-            if let existing = items.first(where: { $0.contentHash == hash }) {
-                touch(id: existing.id, at: date)
-                savedID = existing.id
-            } else {
-                savedID = add(content, hash: hash, source: (nil, nil), at: date, isSensitive: original.isSensitive).id
-            }
-            for board in protectedBoards { pin(itemID: savedID, to: board) }
-            return .saved(savedID)
+            return saveAsNew(content, hash: hash, at: date, isSensitive: original.isSensitive, protectedBoards: protectedBoards)
         }
+    }
+
+    private mutating func saveAsNew(
+        _ content: ClipboardContent, hash: String, at date: Date, isSensitive: Bool, protectedBoards: [UUID]
+    ) -> ClipboardEditOutcome {
+        if let existing = items.first(where: { $0.contentHash == hash }) {
+            let pinnedTo = Set(boards(containing: existing.id).map(\.id))
+            guard protectedBoards.allSatisfy(pinnedTo.contains) else { return .duplicate(existing.id) }
+            touch(id: existing.id, at: date)
+            return .saved(existing.id)
+        }
+        let id = add(content, hash: hash, source: (nil, nil), at: date, isSensitive: isSensitive).id
+        for board in protectedBoards { pin(itemID: id, to: board) }
+        return .saved(id)
     }
 }

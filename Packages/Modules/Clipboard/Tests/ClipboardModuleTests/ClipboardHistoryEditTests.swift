@@ -128,7 +128,7 @@ import Testing
 
     // MARK: Replacing
 
-    @Test func replacingKeepsTheItemWhereAndWhenItWas() throws {
+    @Test func replacingKeepsWhatTheItemWasAndDatesItNowOnTop() throws {
         var (history, one, two, three, board) = Self.fixture()
         history.items[1].copyCount = 3
         history.items[1].sensitive = true
@@ -137,13 +137,15 @@ import Testing
         let outcome = history.applyEdit(to: two, content: .text("hai mươi"), mode: .replace, at: Self.start + 100)
 
         #expect(outcome == .saved(two))
-        #expect(history.items.map(\.id) == [three, two, one])
-        let after = history.items[1]
+        // Used now: on top, dated now, as the history is always newest first.
+        #expect(history.items.map(\.id) == [two, three, one])
+        let after = history.items[0]
         #expect(after.id == before.id)
         #expect(after.content == .text("hai mươi"))
         #expect(after.contentHash == Self.hash(.text("hai mươi")))
-        // The date, the app that copied it, how often and whether it is a secret stay.
-        #expect(after.copiedAt == before.copiedAt)
+        #expect(after.copiedAt == Self.start + 100 && after.copiedAt != before.copiedAt)
+        #expect(history.items.map(\.copiedAt) == history.items.map(\.copiedAt).sorted(by: >))
+        // The app that copied it, how often and whether it is a secret stay.
         #expect(after.sourceBundleID == "com.apple.Notes" && after.sourceAppName == "Ghi chú")
         #expect(after.timesCopied == 3)
         #expect(after.sensitive == true)
@@ -267,6 +269,106 @@ import Testing
         // A secret changed is as much a secret: it goes into the same board, so it is sealed with it and never written in the clear.
         #expect(history.boards.first { $0.id == board }?.itemIDs == [newID, two])
         #expect(!history.persistable.items.contains { $0.id == newID })
+    }
+
+    @Test func savingAsNewWordsWithNoOriginalLeftPinsNothingAndCarriesTheFlag() {
+        var history = ClipboardHistory()
+        let board = history.createBoard(name: "Số")
+        Self.add(.text("khác"), to: &history, at: 0)
+        let before = history.items
+
+        let outcome = history.applyEdit(
+            to: UUID(), content: .text("bản nháp"), mode: .saveAsNew, at: Self.start + 100, originalWasSensitive: true
+        )
+
+        guard case .saved(let newID) = outcome else {
+            Issue.record("Expected a new item, got \(outcome)")
+            return
+        }
+        #expect(history.items.map(\.id) == [newID] + before.map(\.id))
+        let new = history.items[0]
+        #expect(new.content == .text("bản nháp") && new.copiedAt == Self.start + 100)
+        #expect(new.sensitive == true)
+        #expect(new.sourceBundleID == nil && !new.isEdited)
+        #expect(history.boards.first { $0.id == board }?.itemIDs == [])
+    }
+
+    @Test func withNoOriginalLeftOnlySavingAsNewIsPossibleAndOnlyWhenTheEditorKnowsIt() {
+        var history = ClipboardHistory()
+        Self.add(.text("khác"), to: &history, at: 0)
+        let before = history
+        #expect(history.applyEdit(to: UUID(), content: .text("x"), mode: .replace, at: Self.start, originalWasSensitive: false) == .missing)
+        #expect(history.applyEdit(to: UUID(), content: .text("x"), mode: .saveAsNew, at: Self.start) == .missing)
+        #expect(history == before)
+    }
+
+    @Test func withNoOriginalLeftWordsAnotherItemHasMoveThatItemUpAndPinNothing() {
+        var (history, one, _, three, board) = Self.fixture()
+        let outcome = history.applyEdit(to: UUID(), content: .text("một"), mode: .saveAsNew, at: Self.start + 100, originalWasSensitive: false)
+        #expect(outcome == .saved(one))
+        #expect(history.items.map(\.id).first == one)
+        #expect(history.boards.first { $0.id == board }?.itemIDs.contains(one) == false)
+        #expect(history.items.contains { $0.id == three })
+    }
+
+    // MARK: Saving as new when the words are another item's
+
+    /// "một" is ordinary, "hai" and the secret "bí mật" are in the open board "Két", which has a lock.
+    static func lockedFixture() -> (history: ClipboardHistory, ordinary: UUID, secret: UUID, other: UUID, vault: UUID, second: UUID) {
+        var history = ClipboardHistory()
+        let ordinary = add(.text("một"), to: &history, at: 0)
+        let secret = add(.text("bí mật"), to: &history, at: 1)
+        let other = add(.text("hai"), to: &history, at: 2)
+        let vault = history.createBoard(name: "Két")
+        let second = history.createBoard(name: "Két hai")
+        history.pin(itemID: secret, to: vault)
+        history.pin(itemID: other, to: second)
+        history.boards[0].lock = ClipboardBoardLock(method: .password, itemCount: 1, isUnlocked: true)
+        history.boards[1].lock = ClipboardBoardLock(method: .password, itemCount: 1, isUnlocked: true)
+        return (history, ordinary, secret, other, vault, second)
+    }
+
+    @Test func aSaveFromASecretNeverPinsAnOrdinaryItemWithTheSameWordsIntoItsBoard() {
+        var (history, ordinary, secret, _, vault, _) = Self.lockedFixture()
+        let before = history
+
+        #expect(history.applyEdit(to: secret, content: .text("một"), mode: .saveAsNew, at: Self.start + 100) == .duplicate(ordinary))
+
+        // Nothing moved, nothing pinned: the ordinary item stays where everyone can see it.
+        #expect(history == before)
+        #expect(history.boards.first { $0.id == vault }?.itemIDs == [secret])
+    }
+
+    @Test func aSaveFromASecretNeverTakesAnItemOfAnotherLockedBoardIntoThisOne() {
+        var (history, _, secret, other, vault, second) = Self.lockedFixture()
+        let before = history
+
+        #expect(history.applyEdit(to: secret, content: .text("hai"), mode: .saveAsNew, at: Self.start + 100) == .duplicate(other))
+
+        #expect(history == before)
+        #expect(history.boards.first { $0.id == vault }?.itemIDs == [secret])
+        #expect(history.boards.first { $0.id == second }?.itemIDs == [other])
+    }
+
+    @Test func aSaveFromASecretWhoseWordsAreAlreadyInItsOwnBoardJustMovesThemUp() {
+        var (history, _, secret, _, vault, _) = Self.lockedFixture()
+        let twin = Self.add(.text("bí mật bản hai"), to: &history, at: 3)
+        history.pin(itemID: twin, to: vault)
+
+        let outcome = history.applyEdit(to: secret, content: .text("bí mật bản hai"), mode: .saveAsNew, at: Self.start + 100)
+
+        #expect(outcome == .saved(twin))
+        #expect(history.items.first?.id == twin)
+        #expect(Set(history.boards.first { $0.id == vault }?.itemIDs ?? []) == [secret, twin])
+    }
+
+    @Test func aSaveFromAnOrdinaryItemWithWordsInALockedBoardMovesThatItemUpAndPinsNothing() {
+        var (history, ordinary, secret, _, vault, _) = Self.lockedFixture()
+
+        #expect(history.applyEdit(to: ordinary, content: .text("bí mật"), mode: .saveAsNew, at: Self.start + 100) == .saved(secret))
+
+        #expect(history.boards.first { $0.id == vault }?.itemIDs == [secret])
+        #expect(history.boards.filter { $0.itemIDs.contains(ordinary) }.isEmpty)
     }
 
     // MARK: What the words become

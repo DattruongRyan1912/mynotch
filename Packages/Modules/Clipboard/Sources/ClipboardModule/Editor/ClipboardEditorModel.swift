@@ -13,8 +13,21 @@ final class ClipboardEditorModel {
     /// What the item said when the editor opened; "changed" means different from this.
     private(set) var originalText: String
     var text: String {
-        didSet { if text != oldValue { notice = nil } }
+        didSet {
+            guard text != oldValue else { return }
+            notice = nil
+            // Working in the editor of a secret is using the board it is in, which must not lock under it for being idle.
+            if isProtected { onActivity?() }
+        }
     }
+    /// The item is pinned to a board that has a lock (open, or it could not be edited): its words are a secret that must not outlive the
+    /// lock. Set when the editor opens and kept up to date by the module as the history changes, since the history no longer says so
+    /// at the change that takes the item away.
+    var isProtected: Bool
+    /// Whether the item was a secret when last seen, for the words to carry the flag if they are saved after it is gone.
+    var wasSensitive: Bool
+    /// Told when the user types and the item is protected.
+    @ObservationIgnored var onActivity: (() -> Void)?
     var isMonospaced: Bool
     /// The language the words look like they are in now, for the footer; found in the background as the user types.
     var detectedLanguage: CodeLanguage?
@@ -23,13 +36,18 @@ final class ClipboardEditorModel {
     private(set) var isConfirmingDiscard = false
     /// Why the last save did nothing, until the words change again.
     private(set) var notice: String?
+    /// The item left the history (pruned, deleted, cleared) while it was edited and it was not a secret: the words here are all that is
+    /// left of it. They stay, and only a new item can hold them.
+    private(set) var isOriginalGone = false
 
     @ObservationIgnored private let saveAction: Save
     @ObservationIgnored private let closeAction: () -> Void
     @ObservationIgnored private var isClosed = false
 
-    init(item: ClipboardItem, text: String, save: @escaping Save, close: @escaping () -> Void) {
+    init(item: ClipboardItem, text: String, isProtected: Bool = false, save: @escaping Save, close: @escaping () -> Void) {
         itemID = item.id
+        self.isProtected = isProtected
+        wasSensitive = item.isSensitive
         originalText = text
         self.text = text
         isMonospaced = item.isCode
@@ -39,13 +57,22 @@ final class ClipboardEditorModel {
         closeAction = close
     }
 
-    var hasChanges: Bool { text != originalText }
+    /// The words differ from the item's.
+    var hasEditedWords: Bool { text != originalText }
+    /// There is something to lose by closing: edited words, or words that are the only copy left of an item that is gone.
+    var hasChanges: Bool { hasEditedWords || isOriginalGone }
     /// Both save buttons: something changed, and the result is not blank.
     var canSave: Bool { hasChanges && !text.allSatisfy(\.isWhitespace) }
+    /// "Thay thế mục này" needs the item to be there.
+    var canReplace: Bool { canSave && !isOriginalGone }
 
     /// "Lưu thành mục mới" and "Thay thế mục này". Closes when the history took the words; otherwise stays and says why.
     func save(_ mode: ClipboardEditMode) {
         guard canSave else { return }
+        guard mode == .saveAsNew || !isOriginalGone else {
+            notice = Self.words(for: .missing)
+            return
+        }
         let outcome = saveAction(mode, text)
         if case .saved = outcome {
             closeNow()
@@ -75,8 +102,13 @@ final class ClipboardEditorModel {
         closeNow()
     }
 
-    /// The item is no longer in the history (deleted, or its board locked): there is nothing to save to or ask about, and the words
-    /// must not outlive a board that was locked, so the editor closes at once and lets go of them.
+    /// The item left the history and it was not a secret: the editor stays open with its words, and says so.
+    func originalGone() {
+        isOriginalGone = true
+    }
+
+    /// The item of a locked board is no longer in the history: there is nothing to save to or ask about, and the words must not
+    /// outlive the lock, so the editor closes at once and lets go of them.
     func itemGone() {
         isConfirmingDiscard = false
         originalText = ""
@@ -90,6 +122,11 @@ final class ClipboardEditorModel {
         closeAction()
     }
 
+    /// Over the editor while its original is gone.
+    static let originalGoneNotice = "Mục gốc không còn trong lịch sử. Nội dung này vẫn lưu được thành mục mới."
+    /// What a toast says when a lock closes an editor that had unsaved words: that, and nothing of the words or of the item.
+    static let droppedOnLockNotice = "Board đã khoá nên bản sửa chưa lưu đã bị bỏ"
+
     static func words(for outcome: ClipboardEditOutcome) -> String? {
         switch outcome {
         case .saved: nil
@@ -97,7 +134,7 @@ final class ClipboardEditorModel {
         case .blank: "Nội dung đang trống."
         case .tooLarge: "Nội dung quá dài: tối đa 2 MB."
         case .duplicate: "Đã có một mục khác với đúng nội dung này. Chọn “Lưu thành mục mới” để đưa mục đó lên đầu."
-        case .missing: "Mục gốc không còn trong lịch sử."
+        case .missing: "Mục gốc không còn trong lịch sử, nên không thay thế được."
         case .locked: "Không lưu được: mục này đang nằm trong board đã khoá."
         case .notEditable: "Loại mục này không sửa được."
         case .stopped: "Clipboard đang tắt nên chưa lưu được."

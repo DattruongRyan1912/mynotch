@@ -181,6 +181,35 @@ import Testing
         #expect(closed == 0)
     }
 
+    @Test func escapeInTheFindBarsFieldIsLeftToTheFieldAndTheDocumentTextStillCancels() throws {
+        var closed = 0
+        let editor = model { closed += 1 }
+        let window = makeController().makeWindow(AnyView(EmptyView()), model: editor)
+        let document = NSTextView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        let field = NSTextView(frame: NSRect(x: 0, y: 100, width: 100, height: 20))
+        field.isFieldEditor = true
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        container.addSubview(document)
+        container.addSubview(field)
+        window.contentView = container
+
+        // A field editor first: Esc is its own, whether the window is shown or not.
+        #expect(window.makeFirstResponder(field))
+        #expect(window.firstResponder === field)
+        #expect(!window.handleKey(try keyEvent("\u{1B}", code: 53)))
+        #expect(closed == 0)
+        // ⌘W is the window's wherever the keyboard is.
+        #expect(window.handleKey(try keyEvent("w", code: 13, modifiers: .command)))
+        #expect(closed == 1)
+
+        // The document's text view is not a field editor: Esc cancels.
+        let again = model { closed += 1 }
+        window.onCancel = { again.cancel() }
+        #expect(window.makeFirstResponder(document))
+        #expect(window.handleKey(try keyEvent("\u{1B}", code: 53)))
+        #expect(closed == 2)
+    }
+
     @Test func aWindowWithNoModelLeavesEveryKeyAlone() throws {
         let window = ClipboardEditorWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
         #expect(!window.handleKey(try keyEvent("\u{1B}", code: 53)))

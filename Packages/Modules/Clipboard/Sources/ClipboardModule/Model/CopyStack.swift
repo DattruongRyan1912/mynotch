@@ -62,6 +62,12 @@ nonisolated struct CopyStack: Codable, Equatable, Sendable {
         removeEntries { $0.id == id }
     }
 
+    /// The item was changed (its words replaced in the editor): the entries that hold it now hold the new version, so the stack never
+    /// pastes the old words, and never writes them to its file.
+    mutating func refresh(with item: ClipboardItem) {
+        entries = entries.map { $0.item.id == item.id ? CopyStackEntry(id: $0.id, item: item) : $0 }
+    }
+
     /// For entries that can no longer be used, like an image whose file is gone.
     mutating func removeEntries(where shouldRemove: (CopyStackEntry) -> Bool) {
         entries.removeAll(where: shouldRemove)
