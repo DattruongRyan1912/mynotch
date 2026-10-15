@@ -74,12 +74,67 @@ import Testing
         #expect(measured <= Self.room, "the hint needs \(measured) pt of \(Self.room)")
     }
 
+    // MARK: Leaving
+
+    /// The tab tells the module when it leaves the screen, which is when the notch closes or another tab is chosen.
+    /// Hosted in a window that is never shown, so nothing appears on screen.
+    @Test func theTabSaysWhenItAppearsAndWhenItLeaves() async {
+        var appeared = 0
+        var disappeared = 0
+        var actions = actions()
+        actions.appeared = { appeared += 1 }
+        actions.disappeared = { disappeared += 1 }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 452, height: 176), styleMask: [.borderless], backing: .buffered, defer: true)
+        window.contentView = NSHostingView(rootView: CalendarTabView(state: state(), actions: actions))
+        window.contentView?.layoutSubtreeIfNeeded()
+        await settle { appeared > 0 }
+        #expect(appeared == 1)
+        #expect(disappeared == 0)
+        window.contentView = nil
+        await settle { disappeared > 0 }
+        #expect(disappeared == 1)
+    }
+
     // MARK: Words
 
     @Test func theKeysAreNamedAndSavingIsSaid() {
-        #expect(QuickAddView.hint(for: .editing) == "Return để lưu · Esc để hủy")
-        #expect(QuickAddView.hint(for: .failed) == "Không lưu được sự kiện. Nhấn Return để thử lại.")
-        #expect(QuickAddView.hint(for: .saving) == "Đang lưu…")
+        #expect(QuickAddView.hint(for: .editing, isTyping: true) == "Return để lưu · Esc để hủy")
+        #expect(QuickAddView.hint(for: .saving, isTyping: true) == "Đang lưu…")
+        #expect(QuickAddView.hint(for: .failed, isTyping: true) == "Không lưu được sự kiện. Nhấn Return để thử lại.")
+    }
+
+    /// The notch can be open with the field showing and the keyboard still elsewhere (opened by hovering): then the
+    /// field says it needs a click, and the keys it names would be wrong, since Esc goes to the app in front.
+    @Test func aFieldThatIsNotTypedIntoSaysToClickIt() {
+        #expect(QuickAddView.hint(for: .editing, isTyping: false) == "Bấm vào ô để gõ")
+        #expect(QuickAddView.hint(for: .saving, isTyping: false) == "Đang lưu…")
+        #expect(QuickAddView.hint(for: .failed, isTyping: false) == "Không lưu được sự kiện. Nhấn Return để thử lại.")
+    }
+
+    // MARK: The notch stays open only for a line that is being typed
+
+    func field(_ text: String, canWrite: Bool = true) -> QuickAddState {
+        var quickAdd = QuickAddState(canWrite: canWrite)
+        quickAdd.text = text
+        return quickAdd
+    }
+
+    @Test func anEmptyFieldDoesNotKeepTheNotchOpen() {
+        #expect(!QuickAddView.pinsNotch(field(""), panelIsKey: true))
+        #expect(!QuickAddView.pinsNotch(field(""), panelIsKey: false))
+    }
+
+    @Test func aLineBeingTypedKeepsTheNotchOpen() {
+        #expect(QuickAddView.pinsNotch(field("họp"), panelIsKey: true))
+        #expect(QuickAddView.pinsNotch(field(" "), panelIsKey: true))
+    }
+
+    @Test func aLineWhoseKeyboardWentElsewhereLetsTheNotchGo() {
+        #expect(!QuickAddView.pinsNotch(field("họp"), panelIsKey: false))
+    }
+
+    @Test func theHintInsteadOfTheFieldNeverKeepsTheNotchOpen() {
+        #expect(!QuickAddView.pinsNotch(field("họp", canWrite: false), panelIsKey: true))
     }
 
     @Test func theButtonSaysWhatItDoes() {

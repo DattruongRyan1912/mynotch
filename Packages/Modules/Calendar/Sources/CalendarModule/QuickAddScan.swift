@@ -102,6 +102,46 @@ nonisolated struct QuickAddScan {
         return regex.firstMatch(in: head, range: NSRange(location: 0, length: location))
     }
 
+    // MARK: The typed text around a place
+
+    /// No lower-case letter anywhere: a line typed in capitals, where capitals say nothing about names.
+    var hasNoLowercaseLetter: Bool {
+        !String(decoding: original, as: UTF16.self).contains { $0.isLowercase }
+    }
+
+    /// Whether the range is all there is of the line.
+    func isWholeLine(_ range: NSRange) -> Bool {
+        String(decoding: original, as: UTF16.self).trimmingCharacters(in: .whitespacesAndNewlines) == typed(in: range)
+    }
+
+    /// The typed text before `location`, without the spaces just before it.
+    func typedBefore(_ location: Int) -> String {
+        String(decoding: original[0 ..< location], as: UTF16.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Whether the next word, past spaces and `, ; : . -`, begins with a capital letter. A line that ends has none.
+    func nextWordIsCapitalized(after location: Int) -> Bool {
+        let rest = String(decoding: original[location...], as: UTF16.self)
+        let skipped = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ",;:.-–—"))
+        guard let first = rest.unicodeScalars.first(where: { !skipped.contains($0) }) else { return false }
+        return Character(first).isUppercase
+    }
+
+    /// Whether what stands right before `location` (spaces apart) has been used up already.
+    func followsUsedText(at location: Int) -> Bool {
+        var index = location - 1
+        while index >= 0, folded[index] == 0x20 { index -= 1 }
+        return index >= 0 && folded[index] == Self.used
+    }
+
+    /// Whether nothing is left after `location` but spaces, punctuation and what has been used up.
+    func endsWithoutWords(after location: Int) -> Bool {
+        folded[location...].allSatisfy { unit in
+            guard let scalar = Unicode.Scalar(unit) else { return false }
+            return unit == Self.used || !(CharacterSet.alphanumerics.contains(scalar))
+        }
+    }
+
     // MARK: Using
 
     mutating func take(_ range: NSRange, as use: Use = .used) {

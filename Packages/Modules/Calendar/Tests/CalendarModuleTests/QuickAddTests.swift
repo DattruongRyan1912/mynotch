@@ -109,7 +109,7 @@ import Testing
         await module.saveQuickAdd()
 
         #expect(source.createdEvents == [
-            NewEvent(title: "Họp nhóm", start: calendar.on(15, at: 15), end: calendar.on(15, at: 16), isAllDay: false, calendarID: "personal"),
+            NewEvent(title: "Họp nhóm", start: calendar.on(15, at: 15), end: calendar.on(15, at: 16), isAllDay: false, calendarID: "personal", timeZone: calendar.timeZone),
         ])
         #expect(quickAdd == nil)
     }
@@ -131,7 +131,7 @@ import Testing
         #expect(quickAdd?.draft?.note == .noTime)
         await module.saveQuickAdd()
         #expect(source.createdEvents == [
-            NewEvent(title: "Đi chợ", start: calendar.on(14, at: 0), end: calendar.on(15, at: 0), isAllDay: true, calendarID: "personal"),
+            NewEvent(title: "Đi chợ", start: calendar.on(14, at: 0), end: calendar.on(15, at: 0), isAllDay: true, calendarID: "personal", timeZone: calendar.timeZone),
         ])
     }
 
@@ -288,6 +288,64 @@ import Testing
         await module.saveQuickAdd()
         #expect(source.createCalls == 0)
         #expect(quickAdd?.draft == nil)
+    }
+
+    // MARK: Leaving
+
+    @Test func theLineIsDroppedWhenTheTabLeavesTheScreen() async {
+        await start()
+        await open()
+        type("Họp nhóm 3h chiều mai")
+        module.tabDisappeared()
+        #expect(quickAdd == nil)
+        await module.saveQuickAdd()
+        #expect(source.createCalls == 0)
+        // Opened again it is a fresh field: nothing kept, so nothing stale to save.
+        await open()
+        #expect(quickAdd?.text == "")
+        #expect(quickAdd?.draft == nil)
+    }
+
+    @Test func leavingWithNoFieldOpenDoesNothing() async {
+        await start()
+        module.tabDisappeared()
+        #expect(quickAdd == nil)
+    }
+
+    @Test func aSaveInFlightWhenTheTabLeavesStillEndsUpOnTheList() async {
+        await start()
+        await open()
+        let gate = AsyncGate()
+        source.createGate = { await gate.wait() }
+        type("họp mai 9h")
+        async let saving: Void = module.saveQuickAdd()
+        await settle { source.createCalls >= 1 }
+        module.tabDisappeared()
+        gate.open()
+        await saving
+        #expect(source.createdEvents.count == 1)
+        #expect(quickAdd == nil)
+    }
+
+    @Test func theEventIsSavedInTheZoneItWasTypedIn() async {
+        // A zone no machine running the tests is likely to be set to.
+        let auckland = fixedCalendar("Pacific/Auckland")
+        let source = FakeCalendarDataSource()
+        source.calendars = self.source.calendars
+        let module = CalendarModule(
+            dataSource: source, now: { auckland.on(14, at: 9) }, calendar: auckland, openURL: { _ in true },
+            dayChangeCenter: NotificationCenter(), wakeCenter: NotificationCenter()
+        )
+        let harness = RegistryHarness([module])
+        harness.permissions.statuses[.calendars] = .granted
+        await harness.registry.bootstrap()
+        await settle { module.appliedRefreshes >= 1 }
+        module.openQuickAdd()
+        await settle { module.state.quickAdd?.calendar != nil }
+        module.editQuickAdd("họp mai 9h")
+        await module.saveQuickAdd()
+        #expect(source.createdEvents.first?.timeZone == auckland.timeZone)
+        #expect(source.createdEvents.first?.start == auckland.on(15, at: 9))
     }
 
     // MARK: Stopping

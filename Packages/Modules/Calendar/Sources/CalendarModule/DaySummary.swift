@@ -41,7 +41,7 @@ nonisolated enum DaySummary {
             return parts.joined(separator: ", ")
         }
         let startOfTomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
-        let end = lastEnd >= startOfTomorrow ? "sau nửa đêm" : "lúc \(AgendaFormat.time(lastEnd, calendar: calendar))"
+        let end = lastEnd > startOfTomorrow ? "sau nửa đêm" : "lúc \(time(lastEnd, endOfDay: startOfTomorrow, calendar: calendar))"
         guard lastEnd > now else {
             parts.append("đã kết thúc \(end)")
             if let first = firstStart(on: startOfTomorrow, in: agenda, calendar: calendar) {
@@ -57,7 +57,13 @@ nonisolated enum DaySummary {
     }
 
     private static func range(_ slot: DateInterval, calendar: Calendar) -> String {
-        "\(AgendaFormat.time(slot.start, calendar: calendar))–\(AgendaFormat.time(slot.end, calendar: calendar))"
+        let endOfDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: slot.start)) ?? slot.end
+        return "\(AgendaFormat.time(slot.start, calendar: calendar))–\(time(slot.end, endOfDay: endOfDay, calendar: calendar))"
+    }
+
+    /// The end of the day is 24:00, not 00:00 of a day that has not begun.
+    private static func time(_ date: Date, endOfDay: Date, calendar: Calendar) -> String {
+        date >= endOfDay ? "24:00" : AgendaFormat.time(date, calendar: calendar)
     }
 
     /// The first start of a timed event on the day beginning at `day`.
@@ -70,8 +76,11 @@ nonisolated enum DaySummary {
     /// of an hour from now.
     static func freeSlot(among events: [AgendaEvent], now: Date, hours: WorkingHours, calendar: Calendar) -> DateInterval? {
         let day = calendar.startOfDay(for: now)
-        guard let open = calendar.date(byAdding: .hour, value: hours.start, to: day),
-              let close = calendar.date(byAdding: .hour, value: hours.end, to: day)
+        // By the clock, not by counting hours: on the day the clocks change 9 o'clock is still 9 o'clock.
+        guard let open = calendar.date(bySettingHour: hours.start, minute: 0, second: 0, of: day),
+              let close = hours.end == 24
+                ? calendar.date(byAdding: .day, value: 1, to: day)
+                : calendar.date(bySettingHour: hours.end, minute: 0, second: 0, of: day)
         else { return nil }
         var cursor = max(open, roundedUp(now, from: day))
         for event in events.sorted(by: { $0.start < $1.start }) where event.end > cursor {

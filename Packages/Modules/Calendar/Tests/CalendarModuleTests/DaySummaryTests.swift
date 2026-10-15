@@ -149,4 +149,60 @@ import Testing
         let events = [meeting("t", (9, 30), (10, 0), day: 15)]
         #expect(summary(events, now: at(19)) == "Hôm nay: không có sự kiện")
     }
+
+    // MARK: Days that are not 24 hours long
+
+    /// New York, where the clocks go forward on 8 March 2026 (a 23-hour day) and back on 1 November (a 25-hour one).
+    let newYork = fixedCalendar("America/New_York")
+
+    func newYorkTime(_ month: Int, _ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+        newYork.date(from: DateComponents(year: 2026, month: month, day: day, hour: hour, minute: minute))!
+    }
+
+    func newYorkSummary(_ events: [AgendaEvent], now: Date, hours: WorkingHours = .standard) -> String {
+        let agenda = AgendaBuilder.build(events: events, now: now, calendar: newYork)
+        return DaySummary.text(for: agenda, now: now, workingHours: hours, calendar: newYork)
+    }
+
+    @Test func workingHoursAreTheClockHoursWhenTheClocksGoForward() {
+        let now = newYorkTime(3, 8, 8)
+        #expect(newYorkSummary([], now: now) == "Hôm nay: không có sự kiện, rảnh 09:00–18:00")
+        let meeting = event("a", newYorkTime(3, 8, 9), newYorkTime(3, 8, 10))
+        #expect(newYorkSummary([meeting], now: now) == "Hôm nay: 1 sự kiện, rảnh 10:00–18:00, kết thúc lúc 10:00")
+    }
+
+    @Test func workingHoursAreTheClockHoursWhenTheClocksGoBack() {
+        let now = newYorkTime(11, 1, 8)
+        #expect(newYorkSummary([], now: now) == "Hôm nay: không có sự kiện, rảnh 09:00–18:00")
+        let meeting = event("a", newYorkTime(11, 1, 9), newYorkTime(11, 1, 10))
+        #expect(newYorkSummary([meeting], now: now) == "Hôm nay: 1 sự kiện, rảnh 10:00–18:00, kết thúc lúc 10:00")
+    }
+
+    @Test func aWholeDayOfWorkingHoursEndsAtMidnightOnAShortAndOnALongDay() {
+        let all = WorkingHours(start: 0, end: 24)
+        #expect(newYorkSummary([], now: newYorkTime(3, 8, 0), hours: all) == "Hôm nay: không có sự kiện, rảnh 00:00–24:00")
+        #expect(newYorkSummary([], now: newYorkTime(11, 1, 0), hours: all) == "Hôm nay: không có sự kiện, rảnh 00:00–24:00")
+        let meeting = event("a", newYorkTime(3, 8, 9), newYorkTime(3, 8, 10))
+        #expect(newYorkSummary([meeting], now: newYorkTime(3, 8, 0), hours: all) == "Hôm nay: 1 sự kiện, rảnh 00:00–09:00, kết thúc lúc 10:00")
+    }
+
+    @Test func hoursAfterTheChangeAreNotShiftedEither() {
+        // 03:00 does not exist on the short day; the line must still say something sensible, not a wrong hour.
+        let hours = WorkingHours(start: 3, end: 6)
+        #expect(newYorkSummary([], now: newYorkTime(3, 8, 0), hours: hours) == "Hôm nay: không có sự kiện, rảnh 03:00–06:00")
+        #expect(newYorkSummary([], now: newYorkTime(11, 1, 0), hours: hours) == "Hôm nay: không có sự kiện, rảnh 03:00–06:00")
+    }
+
+    // MARK: Midnight
+
+    @Test func workingHoursUntilTheEndOfTheDayEndAtTwentyFour() {
+        #expect(summary([], now: at(7), hours: WorkingHours(start: 8, end: 24)) == "Hôm nay: không có sự kiện, rảnh 08:00–24:00")
+    }
+
+    @Test func anEventThatEndsAtMidnightEndsAtTwentyFourNotAfterIt() {
+        let evening = event("late", at(23), calendar.on(15, at: 0))
+        #expect(summary([evening], hours: WorkingHours(start: 20, end: 24)) == "Hôm nay: 1 sự kiện, rảnh 20:00–23:00, kết thúc lúc 24:00")
+        let later = event("later", at(23), calendar.on(15, at: 0, 30))
+        #expect(summary([later], hours: WorkingHours(start: 20, end: 24)) == "Hôm nay: 1 sự kiện, rảnh 20:00–23:00, kết thúc sau nửa đêm")
+    }
 }

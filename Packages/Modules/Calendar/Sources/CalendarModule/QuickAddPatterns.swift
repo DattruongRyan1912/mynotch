@@ -42,6 +42,10 @@ nonisolated enum QuickAddPatterns {
         #"\#(edge)(?:(?<p>\#(period))\s+)?(?:(?<mod>next|this|coming|\#(weeks))\s+)?(?<day>\#(weekdays))(?:\s+(?<after>\#(weeks)))?(?![a-z0-9])"#
     )
     static let week = regex(#"\#(edge)(?:tuan sau|tuan toi|next week)(?![a-z0-9])"#)
+    /// A time written out, right before the word: "Họp 9h Mai" says the day after the time.
+    static let timeBefore = regex(
+        #"(?<![a-z0-9:./])\d{1,2}(?::\d{2}|\s?(?:h|gio)(?:\s?\d{2})?|\s?(?:a\.?m|p\.?m))(?:\s?(?:\#(period)))?\s*$"#
+    )
     /// What stands before a part of the day to say it is part of what the event is: "ăn trưa", "bữa tối".
     static let mealBefore = regex(#"\#(edge)(?:an|bua|com)\s+$"#)
 
@@ -57,7 +61,9 @@ nonisolated enum QuickAddPatterns {
     /// "3 chiều": the hour and the part of the day, without "h" or "giờ".
     static let periodTime = regex(#"(?<h>\d{1,2})\s(?<p>sang|trua|chieu|dem|khuya|toi(?!\s*\d))(?![a-z0-9])"#)
     static let noon = regex(#"(?:noon|midday)(?![a-z0-9])"#)
-    static let bareTime = regex(#"(?<h>\d{1,2})(?!\d)"#)
+    static let bareTime = regex(#"(?<h>\d{1,2})(?![\d:/]|\.\d)"#)
+    /// The words that make a number alone a time: "at 3", "lúc 9", "@ 4", "từ 9".
+    static let timeConnector = regex(#"\#(edge)(?:vao luc|luc|at|@|tu|from)\s*$"#)
     /// "toi" is also "tới", the "to" of a range: it is only a part of the day when no number follows.
     static let periodSuffix = regex(#"\s?(?<p>sang|trua|chieu|dem|khuya|toi(?!\s*\d))(?![a-z0-9])"#)
     static let periodBefore = regex(#"\#(edge)(?<p>\#(period))\s*$"#)

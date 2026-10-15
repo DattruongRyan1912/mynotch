@@ -13,6 +13,8 @@ struct CalendarActions {
     var requestRemindersAccess: () -> Void
     /// The tab came on screen: access may have changed in Settings while it was away.
     var appeared: () -> Void
+    /// The tab left the screen: the notch closed or another tab was chosen.
+    var disappeared: () -> Void = {}
     var openQuickAdd: () -> Void = {}
     var editQuickAdd: (String) -> Void = { _ in }
     var saveQuickAdd: () -> Void = {}
@@ -161,6 +163,7 @@ public final class CalendarModule: FeatureModule {
             complete: { [weak self] reminder in self?.context?.run { await self?.complete(reminder) } },
             requestRemindersAccess: { [weak self] in self?.context?.run { await self?.requestRemindersAccess() } },
             appeared: { [weak self] in self?.tabAppeared() },
+            disappeared: { [weak self] in self?.tabDisappeared() },
             openQuickAdd: { [weak self] in self?.openQuickAdd() },
             editQuickAdd: { [weak self] text in self?.editQuickAdd(text) },
             saveQuickAdd: { [weak self] in self?.context?.run { await self?.saveQuickAdd() } },
@@ -243,6 +246,12 @@ public final class CalendarModule: FeatureModule {
         state.quickAdd = quickAdd
     }
 
+    /// The tab left the screen (the notch closed, or another tab was chosen): an unsent line goes with it. Kept, it would
+    /// be stale by the next open, and a field nobody sees must not keep the notch from closing.
+    func tabDisappeared() {
+        cancelQuickAdd()
+    }
+
     /// Esc: the line is dropped.
     func cancelQuickAdd() {
         quickAddSession += 1
@@ -258,7 +267,8 @@ public final class CalendarModule: FeatureModule {
         state.quickAdd?.phase = .saving
         let session = quickAddSession
         let event = NewEvent(
-            title: draft.title, start: draft.start, end: draft.end, isAllDay: draft.isAllDay, calendarID: quickAdd.calendar?.id
+            title: draft.title, start: draft.start, end: draft.end, isAllDay: draft.isAllDay, calendarID: quickAdd.calendar?.id,
+            timeZone: calendar.timeZone
         )
         do {
             try await dataSource.createEvent(event)

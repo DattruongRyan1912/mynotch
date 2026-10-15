@@ -37,6 +37,9 @@ struct QuickAddView: View {
 
     @FocusState private var isFocused: Bool
     @Environment(\.notch) private var notch
+    /// The notch's panel and whether it has the keyboard now. It can be shown without it (opened by hovering).
+    @State private var window: NSWindow?
+    @State private var panelIsKey = false
 
     static let prompt = "Thêm sự kiện: “họp nhóm 3h chiều mai”"
     static let examples = "Ví dụ: “gym 18h-19h”, “ăn trưa với Lan 12:30 thứ 6”, “call Sam tomorrow 9am 30m”."
@@ -46,13 +49,21 @@ struct QuickAddView: View {
     /// The permission hint the module already shows in Settings, with the step that grants it.
     static let noAccess = "Cần quyền truy cập Lịch đầy đủ để thêm sự kiện. \(Permission.calendars.instruction)"
 
-    /// The line at the bottom: the keys, or the state of the save.
-    static func hint(for phase: QuickAddState.Phase) -> String {
+    /// The line at the bottom: the keys, or the state of the save. Opened by hovering, the notch can show the field with the
+    /// keyboard still in another app; Esc would go there, so the field says it wants a click first.
+    static func hint(for phase: QuickAddState.Phase, isTyping: Bool) -> String {
         switch phase {
-        case .editing: "Return để lưu · Esc để hủy"
+        case .editing: isTyping ? "Return để lưu · Esc để hủy" : "Bấm vào ô để gõ"
         case .saving: "Đang lưu…"
         case .failed: saveFailed
         }
+    }
+
+    /// Whether the notch stays open while the pointer is elsewhere: only for a line that has been typed and whose panel
+    /// still has the keyboard. An empty field, the permission hint, or a panel the user left for another app must not
+    /// hold the notch open.
+    static func pinsNotch(_ quickAdd: QuickAddState, panelIsKey: Bool) -> Bool {
+        quickAdd.canWrite && !quickAdd.text.isEmpty && panelIsKey
     }
 
     var body: some View {
@@ -61,7 +72,7 @@ struct QuickAddView: View {
                 field
                 preview
                 Spacer(minLength: 0)
-                Text(Self.hint(for: quickAdd.phase))
+                Text(Self.hint(for: quickAdd.phase, isTyping: isFocused && panelIsKey))
                     .font(.system(size: 10))
                     .foregroundStyle(quickAdd.phase == .failed ? Color.red : NotchTokens.secondaryText)
                     .lineLimit(1)
@@ -75,8 +86,21 @@ struct QuickAddView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // The notch is always black, whatever the system appearance.
         .environment(\.colorScheme, .dark)
-        // Typing in the field must not be cut off by the pointer leaving the notch.
-        .onAppear { notch.setPinned(true) }
+        .background(WindowReader { window in
+            self.window = window
+            panelIsKey = window?.isKeyWindow ?? false
+        })
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            guard let window, note.object as? NSWindow === window else { return }
+            panelIsKey = true
+            isFocused = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
+            guard let window, note.object as? NSWindow === window else { return }
+            panelIsKey = false
+        }
+        // A line being typed must not be cut off by the pointer leaving the notch; nothing else holds it open.
+        .onChange(of: Self.pinsNotch(quickAdd, panelIsKey: panelIsKey), initial: true) { _, pins in notch.setPinned(pins) }
         .onDisappear { notch.setPinned(false) }
     }
 
@@ -95,10 +119,18 @@ struct QuickAddView: View {
             .onExitCommand(perform: actions.cancelQuickAdd)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-            .onAppear { isFocused = true }
-            // The notch panel turns key only after the click that opened the field, so the first request can come too early.
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in isFocused = true }
+            // A click on the padding goes to the field too. Behind the field, so it never takes a click from the text.
+            .background {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.white.opacity(0.1))
+                    .contentShape(RoundedRectangle(cornerRadius: 8))
+                    .onTapGesture { isFocused = true }
+            }
+            // Asked again a turn later: SwiftUI drops a request made in the pass that creates the field.
+            .onAppear {
+                isFocused = true
+                Task { @MainActor in isFocused = true }
+            }
     }
 
     @ViewBuilder
@@ -139,6 +171,30 @@ struct QuickAddView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(NotchTokens.secondaryText)
                 .lineLimit(1)
+        }
+    }
+}
+
+/// Hands over the window a view is in, once it has one, and again if it moves to another.
+private struct WindowReader: NSViewRepresentable {
+    let onChange: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = Reader()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {}
+
+    final class Reader: NSView {
+        var onChange: ((NSWindow?) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            let window = window
+            // After the view update that added it, so state may be set from the callback.
+            DispatchQueue.main.async { [weak self] in self?.onChange?(window) }
         }
     }
 }

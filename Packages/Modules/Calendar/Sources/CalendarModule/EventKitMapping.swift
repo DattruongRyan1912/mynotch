@@ -78,3 +78,12 @@ nonisolated extension CalendarInfo {
         )
     }
 }
+
+nonisolated extension NewEvent {
+    /// What EventKit is given for the event. An all-day event is the same day everywhere, so it has no zone, and Calendar
+    /// saves its end as the last second of its last day (the draft carries the start of the day after). The others are in the
+    /// zone they were typed in.
+    var eventKitTiming: (start: Date, end: Date, timeZone: TimeZone?) {
+        isAllDay ? (start, end.addingTimeInterval(-1), nil) : (start, end, timeZone)
+    }
+}

@@ -53,11 +53,8 @@ nonisolated enum QuickAddParser {
         var end = start.addingTimeInterval(length ?? defaultDuration)
         if let endMinutes = time.end {
             end = days.at(endMinutes, on: date)
-            if end <= start {
-                // "11h-1h" is eleven to one o'clock in the afternoon; "23h-1h" ends the next day.
-                let afternoon = end.addingTimeInterval(12 * 3_600)
-                end = time.start < 12 * 60 && afternoon > start ? afternoon : days.at(endMinutes, on: days.adding(1, to: date))
-            }
+            // "23h-1h" ends the next day.
+            if end <= start { end = days.at(endMinutes, on: days.adding(1, to: date)) }
         }
         return QuickAddDraft(title: title, start: start, end: end, isAllDay: false, note: nil)
     }
@@ -208,9 +205,10 @@ private nonisolated extension QuickAddParser {
     static func readNamedDay(_ scan: inout QuickAddScan, days: Days, hint: inout Period?) -> Day? {
         for match in scan.matches(QuickAddPatterns.periodDay) {
             guard let word = scan.range(of: "w", in: match), let period = scan.range(of: "p", in: match),
-                  let offset = dayOffset(of: scan.string(in: word), typed: scan.typed(in: word)),
                   let part = Period(scan.string(in: period))
             else { continue }
+            // After a part of the day "Mai" is the day whatever its case: "chiều Mai" is not a name.
+            let offset = scan.string(in: word) == "nay" ? 0 : 1
             hint = part
             if scan.range(of: "h", in: match) != nil {
                 // "3 chiều mai": the day is read here, and "3 chiều" is left for the time.
@@ -222,7 +220,7 @@ private nonisolated extension QuickAddParser {
         }
         for match in scan.matches(QuickAddPatterns.relativeDay) {
             let word = scan.string(in: match.range)
-            guard let offset = dayOffset(of: word, typed: scan.typed(in: match.range)) else { continue }
+            guard let offset = dayOffset(of: word, in: scan, at: match.range) else { continue }
             switch word {
             case "tonight", "this evening": hint = .evening
             case "this morning": hint = .morning
@@ -235,16 +233,32 @@ private nonisolated extension QuickAddParser {
         return nil
     }
 
-    /// Days from today. "Mai" with a capital is a name and "một" is one, not "mốt", so those two read the typed text.
-    static func dayOffset(of word: String, typed: String) -> Int? {
+    /// Days from today. "một" is one and not "mốt", so that word reads the typed text; "Mai" is a name or tomorrow
+    /// (`isDateWord`).
+    static func dayOffset(of word: String, in scan: QuickAddScan, at range: NSRange) -> Int? {
         switch word {
         case "nay", "hom nay", "today", "tonight", "this morning", "this afternoon", "this evening": 0
-        case "mai": typed == "mai" ? 1 : nil
+        case "mai": isDateWord(mai: range, in: scan) ? 1 : nil
         case "ngay mai", "tomorrow", "tmrw", "tmr": 1
-        case "mot": typed == "mốt" ? 2 : nil
+        case "mot": scan.typed(in: range) == "mốt" ? 2 : nil
         case "ngay mot", "ngay kia", "day after tomorrow": 2
         default: nil
         }
+    }
+
+    /// "mai" in lower case is tomorrow. "Mai" or "MAI" is a person's name unless the line shows it is the day: it is the
+    /// first word of the line (or follows a comma or a stop) or comes right after a time, and what follows is not another
+    /// capitalised word ("Mai họp 9h", "Mai 3pm", "Họp 9h Mai", but "Mai Anh họp 9h"); or the whole line is in capitals.
+    /// A line that is only "Mai" is a title.
+    static func isDateWord(mai range: NSRange, in scan: QuickAddScan) -> Bool {
+        let typed = scan.typed(in: range)
+        if typed == "mai" { return true }
+        guard typed.lowercased() == "mai", !scan.isWholeLine(range) else { return false }
+        if scan.hasNoLowercaseLetter { return true }
+        let before = scan.typedBefore(range.location)
+        let startsASentence = before.isEmpty || ",;:.".contains(before.last ?? " ")
+        let afterATime = scan.lastWord(before: range.location, in: QuickAddPatterns.timeBefore) != nil
+        return (startsASentence || afterATime) && !scan.nextWordIsCapitalized(after: range.location + range.length)
     }
 
     /// Takes a part of the day and the word after it, except when the part of the day is what the event is: "ăn tối nay"
@@ -359,16 +373,26 @@ private nonisolated extension QuickAddParser {
                 continue
             }
             if let separator = scan.match(QuickAddPatterns.separator, at: first.end),
-               let second = atom(in: scan, at: separator.range.location + separator.range.length, allowBare: false) {
+               let second = atom(in: scan, at: separator.range.location + separator.range.length, allowBare: first.isBare),
+               !(first.isBare && second.isBare) || isWorkRange(first, second) {
                 items.append((first, second))
                 location = second.end
             } else if first.isBare {
-                location += 1
+                // A number alone is a time only when the line says so: "at 3", or "tonight 8".
+                guard isSpoken(first, hint: hint, in: scan) else {
+                    location += 1
+                    continue
+                }
+                items.append((first, nil))
+                location = first.end
             } else {
                 items.append((first, nil))
                 location = first.end
             }
         }
+        // "9-5" is hours of work, but two numbers with a dash may be anything: a time with a unit anywhere in the line wins.
+        let isBareRange = { (item: (first: Atom, second: Atom?)) in item.first.isBare && item.second?.isBare == true }
+        if items.contains(where: { !isBareRange($0) }) { items.removeAll(where: isBareRange) }
         guard let head = items.first else { return nil }
 
         let before = scan.lastWord(before: head.first.range.location, in: QuickAddPatterns.periodBefore)
@@ -389,6 +413,18 @@ private nonisolated extension QuickAddParser {
             }
         }
         return time
+    }
+
+    /// "9-5", "10-6": a morning hour and a later one. Other pairs of numbers ("20-10", "3-5") are dates, pages, scores.
+    static func isWorkRange(_ first: Atom, _ second: Atom) -> Bool {
+        (8...12).contains(first.hour) && (1..<first.hour).contains(second.hour)
+    }
+
+    /// Whether a number alone is a time: it comes after "at", "lúc", "@", "từ", or it is the last word and follows the
+    /// day it belongs to ("tối nay 8"), which also says the part of the day.
+    static func isSpoken(_ atom: Atom, hint: Period?, in scan: QuickAddScan) -> Bool {
+        if scan.lastWord(before: atom.range.location, in: QuickAddPatterns.timeConnector) != nil { return true }
+        return hint != nil && scan.followsUsedText(at: atom.range.location) && scan.endsWithoutWords(after: atom.end)
     }
 
     static func atom(in scan: QuickAddScan, at location: Int, allowBare: Bool) -> Atom? {
@@ -444,13 +480,27 @@ private nonisolated extension QuickAddParser {
         let startPeriod = first.period ?? (startMeridiem == nil ? shared?.period : nil) ?? part
         let start = minutes(of: first, meridiem: startMeridiem, period: startPeriod)
         var time = TimeOfDay(start: start.minutes, endsTheDay: start.endsTheDay)
-        if let second {
-            time.end = minutes(of: second, meridiem: second.meridiem, period: second.period ?? part).minutes
+        guard let second else { return time }
+        let meridiem = second.meridiem
+        let period = second.period ?? part
+        if meridiem == nil, period == nil {
+            // Nothing says which half of the day the end is in: it is the first reading that comes after the start, so
+            // "7h-8h" is an evening hour and "11h-1h" ends at 13:00. The same number twice is no end.
+            let typed = max(second.hour * 60 + second.minute, 0)
+            let sameNumber = first.hour == second.hour && first.minute == second.minute
+            if !sameNumber {
+                let readings = (1...11).contains(second.hour) ? [typed, typed + 12 * 60] : [typed]
+                time.end = readings.first { $0 > start.minutes } ?? typed
+            }
+        } else {
+            let end = minutes(of: second, meridiem: meridiem, period: period).minutes
+            if end != start.minutes { time.end = end }
         }
         return time
     }
 
-    /// "3h" is 03:00 unless it says "chiều" or "pm". Hours from 13 are already a 24-hour clock and ignore the word.
+    /// "3h" is 15:00 unless it says "sáng" or "am"; with "chiều" or "pm" it is 15:00 too. Hours from 13 are already a
+    /// 24-hour clock and ignore the word.
     static func minutes(of atom: Atom, meridiem: Meridiem?, period: Period?) -> (minutes: Int, endsTheDay: Bool) {
         var hour = atom.hour
         var endsTheDay = false
@@ -469,6 +519,9 @@ private nonisolated extension QuickAddParser {
                     hour += 12
                 }
             }
+        } else if period == nil, (1...7).contains(hour) {
+            // No word says which half of the day: 1 to 7 is the afternoon, 8 to 11 the morning, 12 noon.
+            hour += 12
         }
         let total = hour * 60 + atom.minute
         return (total < 0 ? total + 24 * 60 : total, endsTheDay)

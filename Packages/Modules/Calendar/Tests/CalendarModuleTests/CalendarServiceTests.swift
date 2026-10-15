@@ -20,7 +20,7 @@ import Testing
     }
 
     @Test func savingWithoutAccessSaysAccessWasDeniedBeforeTouchingEventKit() async {
-        let event = NewEvent(title: "Họp", start: .now, end: .now.addingTimeInterval(3_600), isAllDay: false, calendarID: nil)
+        let event = NewEvent(title: "Họp", start: .now, end: .now.addingTimeInterval(3_600), isAllDay: false, calendarID: nil, timeZone: .current)
         await #expect(throws: CalendarServiceError.accessDenied) {
             try await denied.createEvent(event)
         }

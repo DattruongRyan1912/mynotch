@@ -23,4 +23,6 @@ nonisolated struct NewEvent: Equatable, Sendable {
     var end: Date
     var isAllDay: Bool
     var calendarID: String?
+    /// The zone the times were typed in (the module's calendar), so the saved event and its preview agree.
+    var timeZone: TimeZone
 }

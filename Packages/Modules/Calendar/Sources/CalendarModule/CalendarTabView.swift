@@ -44,6 +44,7 @@ struct CalendarTabView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear(perform: actions.appeared)
+        .onDisappear(perform: actions.disappeared)
     }
 
     private var header: some View {

@@ -38,7 +38,7 @@ nonisolated struct PhraseCase: Sendable, CustomTestStringConvertible {
         self.now = now
     }
 
-    static let table: [PhraseCase] = vietnamese + english + rolling + misc
+    static let table: [PhraseCase] = vietnamese + english + rolling + misc + bareHours + names
 
     // MARK: Vietnamese
 
@@ -188,11 +188,117 @@ nonisolated struct PhraseCase: Sendable, CustomTestStringConvertible {
         PhraseCase("họp thứ 4 21h", "họp", "14 21:00", "14 22:00", now: "14 20:00"),
         PhraseCase("họp thứ 4 19h", "họp", "21 19:00", "21 20:00", now: "14 20:00"),
         // An end before the start is the afternoon of a morning start, or else the next day.
-        PhraseCase("họp 11h-1h", "họp", "14 11:00", "14 13:00"),
         PhraseCase("họp 20h-8h", "họp", "14 20:00", "15 08:00"),
         // Past midnight is already the next day.
         PhraseCase("họp 23h-1h", "họp", "14 23:00", "15 01:00"),
         PhraseCase("họp 23h-1h", "họp", "15 23:00", "16 01:00", now: "14 23:30"),
+    ]
+
+    // MARK: Hours with no part of the day
+
+    /// 1 to 7 is the afternoon, 8 to 11 the morning, 12 noon; a part of the day or am/pm said out loud always wins. Now is
+    /// 09:00 unless a case says otherwise, so a morning hour has gone and is the next day's.
+    static let bareHours: [PhraseCase] = [
+        PhraseCase("3h", "", "14 15:00", "14 16:00"),
+        PhraseCase("họp 3h", "họp", "14 15:00", "14 16:00"),
+        PhraseCase("lúc 3 giờ", "", "14 15:00", "14 16:00"),
+        PhraseCase("họp 1h", "họp", "14 13:00", "14 14:00"),
+        PhraseCase("họp 2h", "họp", "14 14:00", "14 15:00"),
+        PhraseCase("họp 4h30", "họp", "14 16:30", "14 17:30"),
+        PhraseCase("họp 7h", "họp", "14 19:00", "14 20:00"),
+        PhraseCase("họp 8h", "họp", "15 08:00", "15 09:00"),
+        PhraseCase("họp 8h", "họp", "14 08:00", "14 09:00", now: "14 07:00"),
+        PhraseCase("họp 11h", "họp", "14 11:00", "14 12:00"),
+        PhraseCase("họp 12h", "họp", "14 12:00", "14 13:00"),
+        PhraseCase("họp 3:30", "họp", "14 15:30", "14 16:30"),
+        PhraseCase("standup 7:30", "standup", "14 19:30", "14 20:30"),
+        PhraseCase("họp 3h30 sáng", "họp", "15 03:30", "15 04:30"),
+        PhraseCase("họp 3h sáng", "họp", "15 03:00", "15 04:00"),
+        PhraseCase("họp 3am", "họp", "15 03:00", "15 04:00"),
+        PhraseCase("họp 7h sáng", "họp", "15 07:00", "15 08:00"),
+        PhraseCase("họp sáng mai 3h", "họp", "15 03:00", "15 04:00"),
+        PhraseCase("họp 3h chiều", "họp", "14 15:00", "14 16:00"),
+        PhraseCase("Họp 3pm", "Họp", "14 15:00", "14 16:00"),
+        // A number after "at", "lúc" is a time.
+        PhraseCase("at 3", "", "14 15:00", "14 16:00"),
+        PhraseCase("meeting at 3", "meeting", "14 15:00", "14 16:00"),
+        PhraseCase("Call John at 9 tomorrow", "Call John", "15 09:00", "15 10:00"),
+        PhraseCase("lúc 9", "", "14 09:00", "14 10:00"),
+        PhraseCase("họp lúc 9", "họp", "14 09:00", "14 10:00"),
+        PhraseCase("lunch at 12", "lunch", "14 12:00", "14 13:00"),
+        PhraseCase("họp vào lúc 5", "họp", "14 17:00", "14 18:00"),
+        PhraseCase("sync @ 4 friday", "sync", "16 16:00", "16 17:00"),
+        PhraseCase("at 25", "at 25", allDay: "14"),
+        // ...and so is one after the day it was said of ("tonight 8"), but only when nothing else follows it.
+        PhraseCase("movie tonight 8", "movie", "14 20:00", "14 21:00"),
+        PhraseCase("họp tối nay 8", "họp", "14 20:00", "14 21:00"),
+        PhraseCase("Họp tối nay 3 người", "Họp 3 người", allDay: "14"),
+        PhraseCase("tối nay họp phòng 8", "họp phòng 8", allDay: "14"),
+        PhraseCase("họp 9h-10 người", "họp -10 người", "14 09:00", "14 10:00"),
+        PhraseCase("meeting 9-5 tomorrow 3pm", "meeting 9-5", "15 15:00", "15 16:00"),
+        PhraseCase("Họp 3 người", "Họp 3 người", allDay: "14"),
+        // Ranges: both ends take the same part of the day, and the end comes after the start.
+        PhraseCase("gym 7h-8h", "gym", "14 19:00", "14 20:00"),
+        PhraseCase("họp 2h-3h", "họp", "14 14:00", "14 15:00"),
+        PhraseCase("họp 6h-7h30", "họp", "14 18:00", "14 19:30"),
+        PhraseCase("họp 1h-2h", "họp", "14 13:00", "14 14:00"),
+        PhraseCase("họp 12h-1h", "họp", "14 12:00", "14 13:00"),
+        PhraseCase("họp 10h-12h", "họp", "14 10:00", "14 12:00"),
+        PhraseCase("họp 11h-1h", "họp", "14 11:00", "14 13:00"),
+        PhraseCase("họp 8h-9h", "họp", "14 08:00", "14 09:00", now: "14 07:00"),
+        PhraseCase("họp 9h-5h", "họp", "14 09:00", "14 17:00"),
+        PhraseCase("họp 23h-1h", "họp", "14 23:00", "15 01:00"),
+        PhraseCase("họp 20h-8h", "họp", "14 20:00", "15 08:00"),
+        PhraseCase("họp 5:30-6:30", "họp", "14 17:30", "14 18:30"),
+        PhraseCase("họp 3-4pm", "họp", "14 15:00", "14 16:00"),
+        PhraseCase("họp 7h-8h tối", "họp", "14 19:00", "14 20:00"),
+        PhraseCase("họp 7h-8h sáng", "họp", "15 07:00", "15 08:00"),
+        PhraseCase("gym 6h-7h chiều mai", "gym", "15 18:00", "15 19:00"),
+        PhraseCase("meeting 9-5", "meeting", "14 09:00", "14 17:00"),
+        PhraseCase("call 9-5", "call", "14 09:00", "14 17:00"),
+        PhraseCase("họp 10-6", "họp", "14 10:00", "14 18:00"),
+        PhraseCase("at 9-5", "", "14 09:00", "14 17:00"),
+        // Two numbers with a dash are only hours of work when the first is a morning hour and the second a later one.
+        PhraseCase("Sinh nhật 20-10", "Sinh nhật 20-10", allDay: "14"),
+        PhraseCase("Read ch 3-5", "Read ch 3-5", allDay: "14"),
+        PhraseCase("Read ch 5-3", "Read ch 5-3", allDay: "14"),
+        PhraseCase("1-1 with Sam 3pm", "1-1 with Sam", "14 15:00", "14 16:00"),
+        // Equal ends are no end.
+        PhraseCase("call 9am-9am", "call", "14 09:00", "14 10:00"),
+        PhraseCase("họp 8h-8h", "họp", "14 08:00", "14 09:00", now: "14 07:00"),
+        // "9h" then "1h30" is still a length.
+        PhraseCase("họp 9h 1h30", "họp", "14 09:00", "14 10:30"),
+        PhraseCase("ăn sáng 7h", "ăn sáng", "15 07:00", "15 08:00"),
+    ]
+
+    // MARK: "Mai" is tomorrow or a name
+
+    /// "mai" in lower case is tomorrow. Capitalised it is a name, unless the line says it is a date: after a part of the day or
+    /// "ngày", first in the line (or after a comma) with a lower-case word or a number next, after a time, or in a line that
+    /// is all capitals.
+    static let names: [PhraseCase] = [
+        PhraseCase("Mai họp 9h", "họp", "15 09:00", "15 10:00"),
+        PhraseCase("MAI họp 9h", "họp", "15 09:00", "15 10:00"),
+        PhraseCase("Mai 3pm", "", "15 15:00", "15 16:00"),
+        PhraseCase("Mai: ăn trưa 12h", "ăn trưa", "15 12:00", "15 13:00"),
+        PhraseCase("Họp, Mai 3pm", "Họp", "15 15:00", "15 16:00"),
+        PhraseCase("Họp 3h chiều Mai", "Họp", "15 15:00", "15 16:00"),
+        PhraseCase("HỌP 3H CHIỀU MAI", "HỌP", "15 15:00", "15 16:00"),
+        PhraseCase("Họp chiều Mai 3h", "Họp", "15 15:00", "15 16:00"),
+        PhraseCase("Họp tối Mai 8h", "Họp", "15 20:00", "15 21:00"),
+        PhraseCase("ăn trưa Mai 12h", "ăn trưa", "15 12:00", "15 13:00"),
+        PhraseCase("Họp Ngày Mai 9h", "Họp", "15 09:00", "15 10:00"),
+        PhraseCase("Họp nhóm 9h Mai", "Họp nhóm", "15 09:00", "15 10:00"),
+        PhraseCase("HỌP NHÓM 9H MAI", "HỌP NHÓM", "15 09:00", "15 10:00"),
+        PhraseCase("MAI HỌP 9H", "HỌP", "15 09:00", "15 10:00"),
+        PhraseCase("Mai Anh họp 9h", "Mai Anh họp", "14 09:00", "14 10:00"),
+        PhraseCase("Mai Lan 3pm", "Mai Lan", "14 15:00", "14 16:00"),
+        PhraseCase("Họp với Mai 3pm", "Họp với Mai", "14 15:00", "14 16:00"),
+        PhraseCase("Gặp Mai 10h", "Gặp Mai", "14 10:00", "14 11:00"),
+        PhraseCase("sinh nhật Mai 5/11", "sinh nhật Mai", allDay: "11/5"),
+        PhraseCase("Mai", "Mai", allDay: "14"),
+        PhraseCase("họp 9h với Mai Lan", "họp với Mai Lan", "14 09:00", "14 10:00"),
+        PhraseCase("Họp 9h Mai Lan", "Họp Mai Lan", "14 09:00", "14 10:00"),
     ]
 
     // MARK: No time, odd input
