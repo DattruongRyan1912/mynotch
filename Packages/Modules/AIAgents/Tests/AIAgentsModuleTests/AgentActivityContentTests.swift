@@ -85,4 +85,44 @@ import Testing
         #expect(content([working, session(.waitingForInput, id: "asking", source: .codex)], showWorking: false)?.kind == .waitingForInput)
         #expect(content([working, session(.finished, id: "done", source: .codex)], showWorking: false)?.kind == .finished)
     }
+
+    // MARK: Subagents
+
+    func session(_ state: AgentState, id: String, running: Int, source: AgentSource = .claude) -> AgentSession {
+        var result = session(state, id: id, source: source, started: -30)
+        for index in 0..<running { result.subagents.started(id: "\(id)-\(index)", type: nil, at: t0) }
+        return result
+    }
+
+    @Test func aWorkingActivityCountsTheSubagentsOfEverySession() {
+        let working = AgentState.working(tool: nil, summary: nil)
+        let sessions = [
+            session(working, id: "a", running: 2), session(working, id: "b", running: 1, source: .codex), session(.idle, id: "c", running: 3),
+        ]
+        let activity = content(sessions)
+        #expect(activity?.kind == .working(since: t0 - 30))
+        #expect(activity?.subagents == 6)
+        #expect(activity != AgentActivityContent(kind: .working(since: t0 - 30), source: .claude))
+    }
+
+    @Test func noSubagentsMeansNoBadge() {
+        let working = AgentState.working(tool: nil, summary: nil)
+        #expect(content([session(working, id: "a", running: 0)])?.subagents == 0)
+    }
+
+    @Test func onlyAWorkingActivityCarriesTheCount() {
+        #expect(content([session(.waitingForInput, id: "a", running: 2)])?.subagents == 0)
+        #expect(content([session(.finished, id: "a", running: 2)])?.subagents == 0)
+    }
+
+    @Test func aSessionThatOnlyHasSubagentsShowsNothingWhileIdle() {
+        #expect(content([session(.idle, id: "a", running: 2)]) == nil)
+    }
+
+    @Test func theLabelSaysHowManySubagentsRun() {
+        let working = AgentState.working(tool: nil, summary: nil)
+        #expect(content([session(working, id: "a", running: 2)])?.accessibilityLabel == "Claude Code đang chạy, 2 agent con")
+        #expect(content([session(working, id: "a", running: 0)])?.accessibilityLabel == "Claude Code đang chạy")
+        #expect(content([session(working, id: "a", running: 1)])?.accessibilityLabel == "Claude Code đang chạy, 1 agent con")
+    }
 }

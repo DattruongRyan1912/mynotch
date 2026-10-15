@@ -23,6 +23,8 @@ nonisolated struct AgentActivityContent: Equatable, Sendable {
     var source: AgentSource
     /// Set while a request waits for the user's answer: the activity is then a card with the buttons.
     var ask: Ask?
+    /// How many subagents run, in every session, while the activity is a working one; 0 otherwise. The glyph shows it as a badge.
+    var subagents: Int
 
     /// A session waiting for the user outranks other activities, and a request with its buttons outranks that: it is time
     /// limited and only the notch can answer it. Working can go on for hours in the background, so it yields the notch to
@@ -42,16 +44,17 @@ nonisolated struct AgentActivityContent: Equatable, Sendable {
             return "\(source.displayName) xin quyền dùng \(PermissionCardText.spoken(of: request))"
         }
         return switch kind {
-        case .working: "\(source.displayName) đang chạy"
+        case .working: subagents > 0 ? "\(source.displayName) đang chạy, \(subagents) agent con" : "\(source.displayName) đang chạy"
         case .waitingForInput: "\(source.displayName) đang chờ bạn"
         case .finished: "\(source.displayName) đã xong"
         }
     }
 
-    init(kind: Kind, source: AgentSource, ask: Ask? = nil) {
+    init(kind: Kind, source: AgentSource, ask: Ask? = nil, subagents: Int = 0) {
         self.kind = kind
         self.source = source
         self.ask = ask
+        self.subagents = subagents
     }
 
     /// A pending request beats everything; then waiting beats working, which beats finished. Nil when there is nothing
@@ -65,7 +68,9 @@ nonisolated struct AgentActivityContent: Equatable, Sendable {
         var waiting: AgentSession?
         var working: AgentSession?
         var finished: AgentSession?
+        var subagents = 0
         for session in sessions {
+            subagents += session.subagents.runningCount
             switch session.state {
             case .waitingForInput:
                 waiting = Self.mostRecent(waiting, session)
@@ -80,7 +85,7 @@ nonisolated struct AgentActivityContent: Equatable, Sendable {
         if let waiting {
             self.init(kind: .waitingForInput, source: waiting.key.source)
         } else if let working {
-            self.init(kind: .working(since: Self.start(of: working)), source: working.key.source)
+            self.init(kind: .working(since: Self.start(of: working)), source: working.key.source, subagents: subagents)
         } else if let finished {
             self.init(kind: .finished, source: finished.key.source)
         } else {

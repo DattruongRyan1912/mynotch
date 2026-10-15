@@ -97,6 +97,7 @@ final class AgentSessionStore {
             guard let original = sessions[key] else { continue }
             var session = original
             if session.cwd == nil { session.cwd = info.cwd }
+            session.pid = info.pid
             // Busy since after the last event: a turn the transcript has not shown yet. A busy entry from before
             // it is stale, and would undo a finish whose registry write is still to come. While hooks arrive, they
             // know better than the registry: the next prompt or tool comes as a hook too.
@@ -111,10 +112,17 @@ final class AgentSessionStore {
         tick(now: clock())
     }
 
-    /// Ends the interrupted turns and drops the sessions that went quiet. Called by a timer while sessions exist.
+    /// Ends the interrupted turns and drops the sessions that went quiet, and the subagents whose stop never came. Called by a
+    /// timer while sessions exist.
     func tick(now: Date) {
-        for (key, session) in sessions where isInterrupted(session, now: now) {
-            sessions[key]?.state = .idle
+        for (key, session) in sessions {
+            if isInterrupted(session, now: now) {
+                sessions[key]?.state = .idle
+                // The subagents were stopped with it, and Esc fires no hook to say so.
+                sessions[key]?.subagents.reset()
+            } else if session.subagents.hasExpired(at: now) {
+                sessions[key]?.subagents.expire(at: now)
+            }
         }
         prune(now: now)
     }
@@ -148,7 +156,10 @@ final class AgentSessionStore {
         if !isUntimed {
             session.lastEventAt = max(session.lastEventAt, at)
             updateState(of: &session, from: previous, for: event.kind, at: at, now: now)
+            updateSubagents(of: &session, for: event, at: at)
         }
+        // Claude Code's registry names its process for certain; a hook's guess is for the sessions it does not list.
+        if let pid = event.pid, !(event.source == .claude && registry[event.sessionID] != nil) { session.pid = pid }
         if let usage = event.usage {
             session.ledger.record(usage)
             countToday(usage, of: event, at: at, now: now)
@@ -200,8 +211,23 @@ final class AgentSessionStore {
             } else if branch != nil {
                 session.branch = branch
             }
-        case .usageUpdated, .sessionEnded:
+        case .usageUpdated, .sessionEnded, .subagentRequested, .subagentStarted, .subagentStopped:
             break
+        }
+    }
+
+    /// Subagents are counted from the hooks' start and stop; the session's state is not theirs to change, since the main thread
+    /// says what it is doing. Any other event of a subagent only shows that it is alive.
+    private func updateSubagents(of session: inout AgentSession, for event: AgentEvent, at: Date) {
+        switch event.kind {
+        case let .subagentRequested(type, description):
+            session.subagents.requested(type: type, description: description, at: at)
+        case let .subagentStarted(type):
+            if let id = event.subagentID { session.subagents.started(id: id, type: type, at: at) }
+        case let .subagentStopped(type):
+            if let id = event.subagentID { session.subagents.stopped(id: id, type: type, at: at) }
+        default:
+            if let id = event.subagentID { session.subagents.touch(id: id, at: at) }
         }
     }
 

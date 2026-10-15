@@ -16,7 +16,27 @@ struct AgentActivityLeading: View {
             .font(.system(size: 14, weight: .semibold))
             .foregroundStyle(content.kind == .waitingForInput ? Color.orange : NotchTokens.primaryText)
             .notchPulse(isActive: isWorking)
+            // Beside the pulse, not in it: the count stands still while the glyph breathes.
+            .overlay(alignment: .bottomTrailing) {
+                if content.subagents > 0 { SubagentBadge(count: content.subagents).offset(x: 3, y: 3) }
+            }
             .accessibilityLabel(content.accessibilityLabel)
+    }
+}
+
+/// How many subagents run, small enough to stay inside the circle a bubble clips the glyph to.
+private struct SubagentBadge: View {
+    let count: Int
+
+    var body: some View {
+        Text(count > 9 ? "9+" : "\(count)")
+            .font(.system(size: 8, weight: .bold, design: .rounded).monospacedDigit())
+            .foregroundStyle(.white)
+            .padding(.horizontal, 2.5)
+            .frame(minWidth: 11, minHeight: 11)
+            .background(Capsule().fill(NotchTokens.accent))
+            .fixedSize()
+            .accessibilityHidden(true)
     }
 }
 

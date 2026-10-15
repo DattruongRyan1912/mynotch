@@ -15,8 +15,14 @@ import Testing
         store = AgentSessionStore(scheduler: ManualScheduler(), now: { clock.now }, calendar: hoChiMinhCalendar())
     }
 
-    func payload(_ event: String, source: String = "claude", tool: String? = nil, summary: String? = nil, type: String? = nil) -> HookPayload {
-        HookPayload(source: source, event: event, sessionID: "s1", tool: tool, summary: summary, notificationType: type, timestamp: clock.now)
+    func payload(
+        _ event: String, source: String = "claude", tool: String? = nil, summary: String? = nil, type: String? = nil,
+        agentID: String? = nil, agentType: String? = nil, processID: Int32? = nil
+    ) -> HookPayload {
+        HookPayload(
+            source: source, event: event, sessionID: "s1", tool: tool, summary: summary, notificationType: type, timestamp: clock.now,
+            agentID: agentID, agentType: agentType, processID: processID
+        )
     }
 
     func feed(_ payloads: HookPayload...) {
@@ -70,5 +76,83 @@ import Testing
         #expect(state == .error)
         feed(payload("SessionEnd"))
         #expect(state == nil)
+    }
+
+    // MARK: Subagents
+
+    var session: AgentSession? { store.sessions[AgentSessionKey(source: .claude, sessionID: "s1")] }
+
+    @Test func subagentStartAndStopMapToTheirKindsWithTheAgentId() throws {
+        let start = try #require(payload("SubagentStart", agentID: "a1", agentType: "Explore").agentEvents.first)
+        #expect(start.kind == .subagentStarted(type: "Explore"))
+        #expect(start.subagentID == "a1")
+        let stop = try #require(payload("SubagentStop", source: "codex", agentID: "a1", agentType: "worker").agentEvents.first)
+        #expect(stop.kind == .subagentStopped(type: "worker"))
+        #expect(stop.source == .codex)
+        #expect(payload("SubagentStart", agentID: "a1").agentEvents.map(\.kind) == [.subagentStarted(type: nil)])
+    }
+
+    @Test func aSubagentEventWithoutAnAgentIdIsIgnored() {
+        #expect(payload("SubagentStart", agentType: "Explore").agentEvents.isEmpty)
+        #expect(payload("SubagentStop").agentEvents.isEmpty)
+    }
+
+    @Test func anAgentCallIsAToolAndAlsoTellsWhatTheNextSubagentIsFor() {
+        for tool in ["Agent", "Task"] {
+            let kinds = payload("PreToolUse", tool: tool, summary: "Find API endpoints", agentType: "Explore").agentEvents.map(\.kind)
+            #expect(kinds == [.toolStarted(name: tool, summary: "Find API endpoints"), .subagentRequested(type: "Explore", description: "Find API endpoints")])
+        }
+        #expect(payload("PreToolUse", tool: "Agent", summary: "Look").agentEvents.map(\.kind) == [
+            .toolStarted(name: "Agent", summary: "Look"), .subagentRequested(type: nil, description: "Look"),
+        ])
+    }
+
+    @Test func anAgentCallWithoutADescriptionAndOtherToolsAreOnlyTools() {
+        #expect(payload("PreToolUse", tool: "Agent").agentEvents.map(\.kind) == [.toolStarted(name: "Agent", summary: nil)])
+        #expect(payload("PreToolUse", tool: "Bash", summary: "ls", agentType: "Explore").agentEvents.map(\.kind) == [.toolStarted(name: "Bash", summary: "ls")])
+        #expect(payload("PostToolUse", tool: "Agent", summary: "Look").agentEvents.map(\.kind) == [.toolFinished])
+    }
+
+    @Test func everyEventOfASubagentCarriesItsIdAndEveryEventTheProcess() throws {
+        let tool = try #require(payload("PreToolUse", tool: "Read", agentID: "a1", processID: 4_242).agentEvents.first)
+        #expect(tool.subagentID == "a1")
+        #expect(tool.pid == 4_242)
+        let main = try #require(payload("Stop").agentEvents.first)
+        #expect(main.subagentID == nil)
+        #expect(main.pid == nil)
+        #expect(try #require(payload("Stop", processID: 1).agentEvents.first).pid == nil)
+        #expect(try #require(payload("Stop", processID: -5).agentEvents.first).pid == nil)
+    }
+
+    @Test func theAppCleansWhatAHelperThatDidNotSent() throws {
+        let long = String(repeating: "x", count: 500)
+        let start = try #require(payload("SubagentStart", agentID: "a\u{202E}1" + long, agentType: "E\u{200B}x").agentEvents.first)
+        #expect(start.kind == .subagentStarted(type: "E\u{FFFD}x"))
+        #expect(start.subagentID?.hasPrefix("a\u{FFFD}1") == true)
+        #expect((start.subagentID?.count ?? 0) <= HookPayload.maxAgentFieldLength)
+        let call = try #require(payload("PreToolUse", tool: "Agent", summary: "a\u{202E}b\nc" + long).agentEvents.last)
+        guard case let .subagentRequested(_, description) = call.kind else { Issue.record("not a request"); return }
+        #expect(description.hasPrefix("a\u{FFFD}b c"))
+        #expect(description.count <= HookPayload.maxSummaryLength)
+    }
+
+    @Test func aSubagentRunsFromItsStartToItsStopWithoutChangingTheSessionsState() {
+        feed(payload("UserPromptSubmit"), payload("PreToolUse", tool: "Agent", summary: "Find API endpoints", agentType: "Explore"))
+        let working = state
+        feed(payload("SubagentStart", agentID: "a1", agentType: "Explore"))
+        #expect(session?.subagents.runningCount == 1)
+        #expect(state == working)
+        feed(payload("PreToolUse", tool: "Read", summary: "b.swift", agentID: "a1"))
+        feed(payload("SubagentStop", agentID: "a1", agentType: "Explore"))
+        #expect(session?.subagents.runningCount == 0)
+        #expect(session?.subagents.lastFinished?.label == "Find API endpoints")
+    }
+
+    @Test func codexSubagentsAreCountedToo() {
+        let codex = AgentSessionKey(source: .codex, sessionID: "s1")
+        store.apply(payload("SubagentStart", source: "codex", agentID: "w1", agentType: "worker").agentEvents, fromHooks: true)
+        #expect(store.sessions[codex]?.subagents.runningCount == 1)
+        store.apply(payload("SubagentStop", source: "codex", agentID: "w1", agentType: "worker").agentEvents, fromHooks: true)
+        #expect(store.sessions[codex]?.subagents.lastFinished?.label == "worker")
     }
 }

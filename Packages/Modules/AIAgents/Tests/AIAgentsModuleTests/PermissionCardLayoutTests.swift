@@ -103,7 +103,7 @@ import Testing
         for number in 1...4 {
             store.apply([AgentEvent(source: .claude, sessionID: "session-\(number)", timestamp: nil, kind: .turnStarted)])
         }
-        let actions = AgentTabActions(openInTerminal: { _ in false }, openFolder: { _ in }, copyPath: { _ in }, decide: { _, _ in })
+        let actions = AgentTabActions(jump: { _ in false }, openFolder: { _ in }, copyPath: { _ in }, decide: { _, _ in })
         let view = AIAgentsTabView(store: store, permissions: queue, actions: actions)
             .frame(width: width, height: height, alignment: .top)
         return await image(view)

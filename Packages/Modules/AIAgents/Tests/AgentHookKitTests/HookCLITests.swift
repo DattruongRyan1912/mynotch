@@ -32,6 +32,48 @@ import Testing
     }
 }
 
+extension HookCLITests {
+    func receiver() throws -> (path: String, receiver: TestDatagramReceiver, cleanUp: () -> Void) {
+        let directory = "/tmp/mn-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let path = directory + "/agent.sock"
+        return (path, try TestDatagramReceiver(path: path), { try? FileManager.default.removeItem(atPath: directory) })
+    }
+
+    @Test func aSubagentEventReachesTheAppWithItsAgentAndTheProcessThatRanTheHook() throws {
+        let (path, app, cleanUp) = try receiver()
+        defer { cleanUp() }
+        let stdin = Data("""
+        {"hook_event_name":"SubagentStop","session_id":"s1","cwd":"/p","agent_id":"def456","agent_type":"Explore",
+         "agent_transcript_path":"/x/SECRET.jsonl","last_assistant_message":"SECRET answer"}
+        """.utf8)
+        #expect(HookCLI.run(arguments: ["--source", "claude"], stdin: stdin, socketPath: path, now: now, parentProcessID: 4_242) == 0)
+        let datagram = try #require(app.receive())
+        let payload = try HookPayload.decode(datagram)
+        #expect(payload.event == "SubagentStop")
+        #expect(payload.agentID == "def456")
+        #expect(payload.agentType == "Explore")
+        #expect(payload.processID == 4_242)
+        #expect(!String(decoding: datagram, as: UTF8.self).contains("SECRET"))
+    }
+
+    @Test func noProcessIdIsSentForTheInitProcessOrNone() throws {
+        for parent: Int32 in [1, 0, -1] {
+            let (path, app, cleanUp) = try receiver()
+            defer { cleanUp() }
+            #expect(HookCLI.run(arguments: ["--source", "codex"], stdin: stopJSON, socketPath: path, now: now, parentProcessID: parent) == 0)
+            #expect(try HookPayload.decode(try #require(app.receive())).processID == nil, "\(parent)")
+        }
+    }
+
+    @Test func theRealHelperUsesItsOwnParent() throws {
+        let (path, app, cleanUp) = try receiver()
+        defer { cleanUp() }
+        #expect(HookCLI.run(arguments: ["--source", "claude"], stdin: stopJSON, socketPath: path, now: now) == 0)
+        #expect(try HookPayload.decode(try #require(app.receive())).processID == getppid())
+    }
+}
+
 /// A bound datagram socket that reads synchronously, standing in for the app.
 final class TestDatagramReceiver {
     private let fd: Int32

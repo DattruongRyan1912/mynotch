@@ -8,6 +8,7 @@ struct AIAgentsTabView: View {
     let store: AgentSessionStore
     let permissions: PermissionQueue
     let actions: AgentTabActions
+    var hint = AgentJumpHint()
 
     @Environment(\.notch) private var notch
     /// A menu of this app is being tracked, e.g. a row's context menu.
@@ -23,6 +24,9 @@ struct AIAgentsTabView: View {
                     PermissionCard(request: request, others: permissions.pending.count - 1, queue: permissions, placement: .tab, decide: actions.decide)
                         .padding(.horizontal, PermissionCard.tabInset)
                         .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
+                }
+                if let message = hint.message {
+                    HintBanner(message: message, dismiss: hint.dismiss)
                 }
                 if state.isEmpty {
                     EmptyState()
@@ -59,6 +63,33 @@ struct AIAgentsTabView: View {
             }
         }
         .scrollIndicators(.never)
+    }
+}
+
+/// What a click could not do and the user can fix, with a button that makes it go away.
+private struct HintBanner: View {
+    let message: String
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.orange)
+            Text(message)
+                .font(.system(size: 11))
+                .foregroundStyle(NotchTokens.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            Button("Đã hiểu", action: dismiss)
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(NotchTokens.primaryText)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
+        .accessibilityElement(children: .combine)
     }
 }
 

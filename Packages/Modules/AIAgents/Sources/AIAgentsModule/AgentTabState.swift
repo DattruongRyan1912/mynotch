@@ -42,11 +42,26 @@ nonisolated struct AgentTabState: Equatable, Sendable {
         var detail: String?
         var timing: Timing
         var cwd: String?
+        var subagentsRunning: Int
+        /// What the subagent that finished last was asked, or its type; nothing of its answer.
+        var lastSubagent: String?
+
+        /// The subagents on a line of their own below the row, nil when there is nothing to say.
+        var subagentLine: String? {
+            switch (subagentsRunning, lastSubagent) {
+            case (0, nil): nil
+            case let (0, finished?): "Agent con xong: \(finished)"
+            case let (running, nil): "\(running) agent con đang chạy"
+            case let (running, finished?): "\(running) agent con đang chạy · xong: \(finished)"
+            }
+        }
 
         init(_ session: AgentSession) {
             id = session.key
             source = session.key.source
             cwd = session.cwd
+            subagentsRunning = session.subagents.runningCount
+            lastSubagent = session.subagents.lastFinished?.label
             title = Self.title(of: session)
             switch session.state {
             case let .working(tool, summary):

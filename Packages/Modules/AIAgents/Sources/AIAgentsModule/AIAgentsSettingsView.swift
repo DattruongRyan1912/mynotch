@@ -26,7 +26,7 @@ struct AIAgentsSettingsView: View {
             }
             Toggle(isOn: $preciseStatus) {
                 Text("Trạng thái chính xác")
-                Text("Biết lúc agent chờ duyệt quyền. Cần cài hook cho Claude Code và Codex.")
+                Text("Biết lúc agent chờ duyệt quyền và đếm agent con đang chạy. Cần cài hook cho Claude Code và Codex.")
             }
             Toggle("Âm báo khi agent cần bạn", isOn: $soundOnRequest)
             Text(HookInstaller.permissionExplanation)

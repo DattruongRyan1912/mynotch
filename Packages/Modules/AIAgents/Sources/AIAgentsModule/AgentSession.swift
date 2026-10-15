@@ -27,6 +27,10 @@ nonisolated struct AgentSession: Identifiable, Equatable, Sendable {
     var lastEventAt: Date
     var rateLimits: AgentRateLimits?
     var ledger = SessionUsage()
+    /// The subagents that run, and the one that finished last; hooks only.
+    var subagents = SubagentTracker()
+    /// The agent's process, if known: from Claude Code's registry, or from the process that ran a hook. It leads to the terminal.
+    var pid: pid_t?
 
     init(key: AgentSessionKey, lastEventAt: Date) {
         self.key = key

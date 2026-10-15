@@ -22,6 +22,12 @@ nonisolated struct AgentEvent: Equatable, Sendable {
         case sessionEnded
         /// Only reports usage, cost or rate limits; the session's state does not change.
         case usageUpdated
+        /// The Agent tool was called with this description (at most 120 characters) and, if it said, the type of subagent. The
+        /// subagent itself starts a moment later, which is when the two are put together.
+        case subagentRequested(type: String?, description: String)
+        /// A subagent began; `AgentEvent.subagentID` says which. Hooks only: transcripts say nothing of subagents here.
+        case subagentStarted(type: String?)
+        case subagentStopped(type: String?)
     }
 
     var source: AgentSource
@@ -33,4 +39,8 @@ nonisolated struct AgentEvent: Equatable, Sendable {
     /// The session's total cost so far, as reported by Claude Code's `cost-state` records.
     var costUSD: Double?
     var rateLimits: AgentRateLimits?
+    /// The subagent this event is about or happened in; nil on the main thread. Any event of a running subagent shows it is alive.
+    var subagentID: String?
+    /// The agent's process, when a hook said which it was.
+    var pid: pid_t?
 }

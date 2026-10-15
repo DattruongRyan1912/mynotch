@@ -2,7 +2,7 @@ import NotchUI
 import SwiftUI
 
 /// One session: agent, project and branch, the tool it runs now, its state and how long the turn has run or took.
-/// Clicking opens the project folder in Terminal; the context menu opens it in Finder or copies its path.
+/// Clicking brings the terminal the session runs in to the front; the context menu opens the folder in Finder or copies its path.
 struct AgentSessionRow: View {
     let row: AgentTabState.Row
     let actions: AgentTabActions
@@ -11,6 +11,37 @@ struct AgentSessionRow: View {
     @State private var isHovering = false
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            header
+            if let line = row.subagentLine {
+                // Under the project, in line with its name rather than with the glyph.
+                Text(line)
+                    .font(.system(size: 10))
+                    .foregroundStyle(NotchTokens.secondaryText)
+                    .lineLimit(1)
+                    .padding(.leading, 24)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(isHovering ? 0.08 : 0)))
+        .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovering)
+        .onTapGesture(perform: open)
+        .contextMenu {
+            Button("Mở thư mục", systemImage: "folder") { actions.openFolder(row.cwd) }
+                .disabled(row.cwd == nil)
+            Button("Copy đường dẫn", systemImage: "doc.on.doc") { actions.copyPath(row.cwd) }
+                .disabled(row.cwd == nil)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Đưa terminal của phiên này lên trước")
+        .accessibilityAction(.default, open)
+    }
+
+    private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: row.source.systemImage)
                 .font(.system(size: 11, weight: .semibold))
@@ -33,27 +64,12 @@ struct AgentSessionRow: View {
             Elapsed(timing: row.timing)
                 .frame(width: 48, alignment: .trailing)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(isHovering ? 0.08 : 0)))
-        .contentShape(Rectangle())
-        .onHover { isHovering = $0 }
-        .animation(.easeOut(duration: 0.12), value: isHovering)
-        .onTapGesture(perform: open)
-        .contextMenu {
-            Button("Mở thư mục", systemImage: "folder") { actions.openFolder(row.cwd) }
-                .disabled(row.cwd == nil)
-            Button("Copy đường dẫn", systemImage: "doc.on.doc") { actions.copyPath(row.cwd) }
-                .disabled(row.cwd == nil)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Mở thư mục dự án trong Terminal")
-        .accessibilityAction(.default, open)
     }
 
     private func open() {
-        if actions.openInTerminal(row.cwd) { notch.close() }
+        Task {
+            if await actions.jump(row.id) { notch.close() }
+        }
     }
 }
 

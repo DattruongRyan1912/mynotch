@@ -76,7 +76,7 @@ import Testing
         let summary = try installer.mergeClaudeSettings(settingsURL: url, helperPath: helper)
 
         let merged = try object(at: url)
-        for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Notification", "Stop", "StopFailure", "SessionEnd"] {
+        for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Notification", "Stop", "StopFailure", "SessionEnd", "SubagentStart", "SubagentStop"] {
             #expect(ours(merged, event).count == 1, "\(event)")
             #expect(commands(ours(merged, event)[0]) == [HookInstaller.command(helperPath: helper, source: "claude")], "\(event)")
             #expect(firstHook(ours(merged, event)[0])?["timeout"] as? Int == HookInstaller.timeoutSeconds(for: event), "\(event)")
@@ -86,7 +86,7 @@ import Testing
         #expect(groups(merged, "SessionStart") == (original["hooks"] as? NSDictionary)?["SessionStart"] as? [NSDictionary])
         #expect(merged["statusLine"] as? NSDictionary == original["statusLine"] as? NSDictionary)
         #expect(merged["permissions"] as? NSDictionary == original["permissions"] as? NSDictionary)
-        #expect(summary.count == 8)
+        #expect(summary.count == 10)
 
         let backup = directory.appending(path: "settings.json.mynotch-20261014-120709.bak")
         #expect(try object(at: backup) == original)
@@ -110,7 +110,7 @@ import Testing
         let original = try object(at: url)
         _ = try installer.mergeClaudeSettings(settingsURL: url, helperPath: helper)
         let removed = try installer.removeClaude(settingsURL: url, helperPath: helper)
-        #expect(removed.count == 8)
+        #expect(removed.count == 10)
         #expect(try object(at: url) == original)
     }
 
@@ -223,7 +223,7 @@ import Testing
         let added = try installer.mergeCodexHooks(hooksURL: url, helperPath: helper)
         #expect(!added.isEmpty)
         let merged = try object(at: url)
-        for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd"] {
+        for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd", "SubagentStart", "SubagentStop"] {
             #expect(ours(merged, event).count == 1, "\(event)")
             #expect(commands(ours(merged, event)[0]) == [HookInstaller.command(helperPath: helper, source: "codex")], "\(event)")
             #expect(firstHook(ours(merged, event)[0])?["timeout"] as? Int == HookInstaller.timeoutSeconds(for: event), "\(event)")
@@ -249,6 +249,69 @@ import Testing
         #expect(try String(contentsOf: config, encoding: .utf8) == "notify = [\"x\"]\n")
     }
 
+    // MARK: Subagent events
+
+    @Test func theSubagentEventsAreInstalledForBothAgents() {
+        #expect(HookInstaller.claudeEvents.contains("SubagentStart") && HookInstaller.claudeEvents.contains("SubagentStop"))
+        #expect(HookInstaller.codexEvents.contains("SubagentStart") && HookInstaller.codexEvents.contains("SubagentStop"))
+        #expect(HookInstaller.timeoutSeconds(for: "SubagentStart") == 5)
+        #expect(HookInstaller.timeoutSeconds(for: "SubagentStop") == 5)
+    }
+
+    @Test func anOwnSubagentHookOfTheUserIsKeptAndRemovingTakesOnlyOurs() throws {
+        defer { cleanUp() }
+        let json = """
+        {"hooks": {
+          "SubagentStop": [{"matcher": "Explore", "hooks": [{"type": "command", "command": "/opt/other/audit-subagent", "timeout": 30}]}],
+          "SubagentStart": [{"hooks": [{"type": "command", "command": "/opt/other/start"}]}]
+        }}
+        """
+        let url = try write(json, to: "settings.json")
+        let original = try object(at: url)
+        _ = try installer.mergeClaudeSettings(settingsURL: url, helperPath: helper)
+        let merged = try object(at: url)
+        for event in ["SubagentStart", "SubagentStop"] {
+            #expect(groups(merged, event).count == 2, "\(event)")
+            #expect(ours(merged, event).count == 1, "\(event)")
+            #expect(ours(merged, event)[0]["matcher"] == nil, "\(event)")
+        }
+        #expect(groups(merged, "SubagentStop").filter { commands($0) == ["/opt/other/audit-subagent"] } == groups(original, "SubagentStop"))
+        _ = try installer.removeClaude(settingsURL: url, helperPath: helper)
+        #expect(try object(at: url) == original)
+    }
+
+    @Test func aFileInstalledBeforeSubagentsOnlyGainsTheTwoNewEventsAndNothingIsRewritten() throws {
+        defer { cleanUp() }
+        let command = HookInstaller.command(helperPath: helper, source: "claude")
+        var hooks: [String: Any] = [:]
+        for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop", "StopFailure", "SessionEnd"] {
+            hooks[event] = [["hooks": [["type": "command", "command": command, "timeout": 5]]]]
+        }
+        hooks["PermissionRequest"] = [["hooks": [["type": "command", "command": command, "timeout": 70]]]]
+        let json = try JSONSerialization.data(withJSONObject: ["theme": "dark", "hooks": hooks])
+        let url = try write(String(decoding: json, as: UTF8.self), to: "settings.json")
+        let original = try object(at: url)
+        let summary = try installer.mergeClaudeSettings(settingsURL: url, helperPath: helper)
+        #expect(summary.count == 2)
+        #expect(summary.allSatisfy { $0.hasPrefix("SubagentStart: + ") || $0.hasPrefix("SubagentStop: + ") })
+        let merged = try object(at: url)
+        for event in hooks.keys { #expect(groups(merged, event) == groups(original, event), "\(event)") }
+        #expect(merged["theme"] as? String == "dark")
+        #expect(try installer.mergeClaudeSettings(settingsURL: url, helperPath: helper).isEmpty)
+    }
+
+    @Test func codexInstallsThemAsWell() throws {
+        defer { cleanUp() }
+        let url = directory.appending(path: "hooks.json")
+        let summary = try installer.mergeCodexHooks(hooksURL: url, helperPath: helper)
+        #expect(summary.contains { $0.hasPrefix("SubagentStart: + ") } && summary.contains { $0.hasPrefix("SubagentStop: + ") })
+        for event in ["SubagentStart", "SubagentStop"] {
+            #expect(commands(ours(try object(at: url), event)[0]) == [HookInstaller.command(helperPath: helper, source: "codex")])
+        }
+        _ = try installer.removeCodex(hooksURL: url, helperPath: helper)
+        #expect(groups(try object(at: url), "SubagentStop").isEmpty)
+    }
+
     // MARK: Plugin
 
     @Test func thePluginIsValidJSONThatRunsTheHelper() throws {
@@ -258,6 +321,8 @@ import Testing
 
         let manifest = try object(at: plugin.appending(path: ".claude-plugin/plugin.json"))
         #expect(manifest["name"] as? String == "mynotch")
+        // The hooks gained the subagent events, so a plugin installed earlier must not look up to date.
+        #expect(manifest["version"] as? String == "1.1.0")
         let marketplace = try object(at: plugin.appending(path: ".claude-plugin/marketplace.json"))
         let entry = try #require((marketplace["plugins"] as? [NSDictionary])?.first)
         #expect(entry["name"] as? String == "mynotch")
@@ -265,7 +330,7 @@ import Testing
         let marketplaceName = try #require(marketplace["name"] as? String)
 
         let hooks = try object(at: plugin.appending(path: "hooks/hooks.json"))
-        for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Notification", "Stop", "StopFailure", "SessionEnd"] {
+        for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Notification", "Stop", "StopFailure", "SessionEnd", "SubagentStart", "SubagentStop"] {
             #expect(ours(hooks, event).count == 1, "\(event)")
             #expect(commands(ours(hooks, event)[0]) == [HookInstaller.command(helperPath: helper, source: "claude")], "\(event)")
             #expect(firstHook(ours(hooks, event)[0])?["timeout"] as? Int == HookInstaller.timeoutSeconds(for: event), "\(event)")

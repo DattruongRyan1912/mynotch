@@ -19,6 +19,8 @@ struct AIAgentsSettingsKeys {
     let preciseStatus: SettingKey<Bool>
     /// A short sound when an agent asks for permission and waits for you.
     let soundOnRequest: SettingKey<Bool>
+    /// The hint about Automation permission has been shown; it is shown only once.
+    let terminalHintShown: SettingKey<Bool>
 
     init(_ settings: ModuleSettings) {
         claudeEnabled = settings.key("claudeEnabled", default: true)
@@ -27,13 +29,15 @@ struct AIAgentsSettingsKeys {
         finishedSeconds = settings.key("finishedSeconds", default: 5, clampedTo: Self.finishedSecondsRange)
         preciseStatus = settings.key("preciseStatus", default: false)
         soundOnRequest = settings.key("soundOnRequest", default: true)
+        terminalHintShown = settings.key("terminalHintShown", default: false)
     }
 }
 
 /// What the tab does with a session, without handing the views the module.
 struct AgentTabActions {
-    /// True when there was a folder to open.
-    var openInTerminal: (String?) -> Bool
+    /// Brings the session's terminal to the front. True when the notch may close: something was opened, and there is no
+    /// hint left to read.
+    var jump: (AgentSessionKey) async -> Bool
     var openFolder: (String?) -> Void
     var copyPath: (String?) -> Void
     /// Answers the permission request with this id.
@@ -66,6 +70,10 @@ public final class AIAgentsModule: FeatureModule {
     private let claudeRoot: URL
     private let codexRoot: URL
     private let opener: AgentOpener
+    /// Finds a session's terminal and brings it to the front.
+    private let jumper: TerminalJumper
+    /// What the tab says after a click could not do all it should; shown once.
+    let jumpHint = AgentJumpHint()
     /// Nil is the real installer, which needs the module's storage and so is made with the Settings rows.
     private let hookSetup: HookSetup?
     /// Where the hook socket is; nil is the standard place in the module's storage.
@@ -91,19 +99,22 @@ public final class AIAgentsModule: FeatureModule {
     /// Reads the real `~/.claude` and `~/.codex`.
     public convenience init() {
         let roots = Self.defaultRoots(home: FileManager.default.homeDirectoryForCurrentUser)
-        self.init(fileSystem: LocalAgentFileSystem(), claudeRoot: roots.claude, codexRoot: roots.codex, opener: .system)
+        self.init(fileSystem: LocalAgentFileSystem(), claudeRoot: roots.claude, codexRoot: roots.codex, opener: .system, jumper: .system)
     }
 
     /// For tests: a fake file system, temporary roots, an opener that opens nothing, the socket and installer
-    /// they use instead of the real ones, and a sound that is not played.
+    /// they use instead of the real ones, a sound that is not played, and a jumper that finds no terminal unless the test
+    /// gives it a table and a fake machine.
     init(
         fileSystem: any AgentFileSystem, claudeRoot: URL, codexRoot: URL, opener: AgentOpener,
-        hookSetup: HookSetup? = nil, socketPath: String? = nil, alert: @escaping @MainActor () -> Void = { AgentAlertSound.play() }
+        hookSetup: HookSetup? = nil, socketPath: String? = nil, alert: @escaping @MainActor () -> Void = { AgentAlertSound.play() },
+        jumper: TerminalJumper = .inert
     ) {
         self.fileSystem = fileSystem
         self.claudeRoot = claudeRoot
         self.codexRoot = codexRoot
         self.opener = opener
+        self.jumper = jumper
         self.hookSetup = hookSetup
         self.socketPath = socketPath
         self.alert = alert
@@ -159,7 +170,7 @@ public final class AIAgentsModule: FeatureModule {
         guard let store, let permissions else { return nil }
         return NotchTab(
             id: descriptor.id, title: "AI", systemImage: "sparkles", preferredHeight: 200,
-            content: AnyView(AIAgentsTabView(store: store, permissions: permissions, actions: actions))
+            content: AnyView(AIAgentsTabView(store: store, permissions: permissions, actions: actions, hint: jumpHint))
         )
     }
 
@@ -194,11 +205,33 @@ public final class AIAgentsModule: FeatureModule {
 
     var actions: AgentTabActions {
         AgentTabActions(
-            openInTerminal: { [weak self] in self?.openInTerminal(cwd: $0) ?? false },
+            jump: { [weak self] in await self?.jump(to: $0) ?? false },
             openFolder: { [weak self] in self?.openFolder(cwd: $0) },
             copyPath: { [weak self] in self?.copyPath(cwd: $0) },
             decide: { [weak self] in self?.decide($0, $1) }
         )
+    }
+
+    /// Brings the terminal the session runs in to the front: the tab in Terminal.app and iTerm2, the folder in an editor, the app
+    /// for any other. When none is found (the session has no known process, or runs under tmux) the folder opens in Terminal as it
+    /// always did. True when the notch may close; false when nothing could be opened, or when a hint was just put in the tab.
+    func jump(to key: AgentSessionKey) async -> Bool {
+        let session = store?.sessions[key]
+        switch await jumper.jump(pid: session?.pid, folder: AgentOpener.directory(for: session?.cwd)) {
+        case .notFound: return openInTerminal(cwd: session?.cwd)
+        case .activatedAppWithoutAutomation: return !showAutomationHint()
+        case .selectedTab, .activatedApp, .openedFolder: return true
+        }
+    }
+
+    /// Shown the first time only: without the Automation permission the app comes to the front but not the right tab.
+    private func showAutomationHint() -> Bool {
+        guard let context else { return false }
+        let shown = AIAgentsSettingsKeys(context.settings).terminalHintShown
+        guard !context.settings.value(shown) else { return false }
+        context.settings.set(true, for: shown)
+        jumpHint.message = AgentJumpHint.automationDenied
+        return true
     }
 
     /// Opens a session's folder in Terminal; false when the session has no folder that exists.

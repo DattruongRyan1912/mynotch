@@ -24,6 +24,51 @@ import Testing
         AgentTabState(sessions: sessions, dayUsage: usage, now: now, calendar: calendar)
     }
 
+    // MARK: Subagents
+
+    func session(withSubagents running: [String], finished: String? = nil) -> AgentSession {
+        var result = session(.working(tool: "Agent", summary: "Look"), started: -30)
+        var index = 0
+        for type in running {
+            index += 1
+            result.subagents.started(id: "r\(index)", type: type, at: now - 10)
+        }
+        if let finished {
+            result.subagents.started(id: "done", type: finished, at: now - 20)
+            result.subagents.stopped(id: "done", type: finished, at: now - 5)
+        }
+        return result
+    }
+
+    @Test func aRowWithoutSubagentsHasNoSubagentLine() {
+        let row = state([session(.working(tool: "Bash", summary: "ls"))]).rows.first
+        #expect(row?.subagentsRunning == 0)
+        #expect(row?.lastSubagent == nil)
+        #expect(row?.subagentLine == nil)
+    }
+
+    @Test func aRowShowsHowManySubagentsRun() {
+        let row = state([session(withSubagents: ["Explore", "Plan"])]).rows.first
+        #expect(row?.subagentsRunning == 2)
+        #expect(row?.subagentLine == "2 agent con đang chạy")
+    }
+
+    @Test func aRowShowsTheLastSubagentThatFinishedByItsDescription() {
+        var done = session(.idle)
+        done.subagents.requested(type: "Explore", description: "Find API endpoints", at: now - 30)
+        done.subagents.started(id: "a1", type: "Explore", at: now - 20)
+        done.subagents.stopped(id: "a1", type: "Explore", at: now - 5)
+        let row = state([done]).rows.first
+        #expect(row?.lastSubagent == "Find API endpoints")
+        #expect(row?.subagentLine == "Agent con xong: Find API endpoints")
+    }
+
+    @Test func aRowWithBothShowsBothOnOneLine() {
+        let row = state([session(withSubagents: ["Plan"], finished: "Explore")]).rows.first
+        #expect(row?.subagentsRunning == 1)
+        #expect(row?.subagentLine == "1 agent con đang chạy · xong: Explore")
+    }
+
     // MARK: Rows
 
     @Test func noSessionsMeansTheEmptyState() {

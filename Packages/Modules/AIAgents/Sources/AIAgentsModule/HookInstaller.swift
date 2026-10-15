@@ -12,11 +12,19 @@ struct HookInstaller {
     }
 
     /// The Claude Code events whose hooks tell MyNotch what a session is doing.
-    static let claudeEvents = ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Notification", "Stop", "StopFailure", "SessionEnd"]
+    /// `SubagentStart` and `SubagentStop` count the subagents of a session.
+    static let claudeEvents = [
+        "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Notification", "Stop", "StopFailure", "SessionEnd",
+        "SubagentStart", "SubagentStop",
+    ]
     /// Codex has no notification or failure hooks.
-    static let codexEvents = ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd"]
+    static let codexEvents = [
+        "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd", "SubagentStart", "SubagentStop",
+    ]
     /// Shown after installing for Codex: it does not run a hook it has not been told to trust.
     static let codexTrustNote = "Codex sẽ hỏi bạn tin cậy hook mới (xem lại trong Codex) trước khi chạy chúng."
+    /// Raised whenever the plugin's hooks change, so that installing again replaces an older copy. 1.1.0 added the subagent events.
+    static let pluginVersion = "1.1.0"
     static let pluginName = "mynotch"
     static let marketplaceName = "mynotch-local"
     /// Shown with the plugin route: the app does not run the plugin commands, so it cannot undo them either.
@@ -50,7 +58,7 @@ struct HookInstaller {
         let hooks = directory.appending(path: "hooks", directoryHint: .isDirectory)
         for folder in [metadata, hooks] { try fileManager.createDirectory(at: folder, withIntermediateDirectories: true) }
         let description = "Shows what Claude Code is doing in the MyNotch notch."
-        try Self.write(["name": Self.pluginName, "version": "1.0.0", "description": description], to: metadata.appending(path: "plugin.json"))
+        try Self.write(["name": Self.pluginName, "version": Self.pluginVersion, "description": description], to: metadata.appending(path: "plugin.json"))
         try Self.write([
             "name": Self.marketplaceName,
             "owner": ["name": "MyNotch"],

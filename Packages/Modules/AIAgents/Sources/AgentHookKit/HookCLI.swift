@@ -12,16 +12,19 @@ public enum HookCLI {
     ///   - permissionTimeout: how long a permission request waits for the user.
     ///   - trustedUser: whose app is spoken to; the helper's own user. Nothing is sent to a folder or a listener that is
     ///     not that user's, however the agent's hook is set up.
+    ///   - parentProcessID: the process that ran the helper, which is the agent; it goes to the app so a click on the session can
+    ///     find the terminal it runs in. The init process (1) and anything below it say nothing.
     ///   - output: where the decision JSON goes; standard output for the real helper.
     public static func run(
         arguments: [String], stdin: Data, socketPath: String, now: Date,
         permissionTimeout: TimeInterval = PermissionClient.defaultTimeout, trustedUser: uid_t = geteuid(),
-        output: (Data) -> Void = writeToStandardOutput
+        parentProcessID: pid_t = getppid(), output: (Data) -> Void = writeToStandardOutput
     ) -> Int32 {
         guard let flag = arguments.firstIndex(of: "--source"), arguments.indices.contains(flag + 1),
-              let payload = HookPayloadFilter.make(source: arguments[flag + 1], hookJSON: stdin, now: now),
-              let datagram = payload.encodedDatagram()
+              var payload = HookPayloadFilter.make(source: arguments[flag + 1], hookJSON: stdin, now: now)
         else { return 0 }
+        if parentProcessID > 1 { payload.processID = parentProcessID }
+        guard let datagram = payload.encodedDatagram() else { return 0 }
         if payload.event == PermissionWire.eventName, let tool = payload.tool, !toolsThatAskTheUser.contains(tool) {
             let path = AgentSocket.permissionPath(besides: socketPath)
             switch PermissionClient.ask(payload, socketPath: path, timeout: permissionTimeout, trustedUser: trustedUser) {
