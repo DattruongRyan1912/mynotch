@@ -5,6 +5,8 @@ import Foundation
 public enum ClipboardMCPLimits {
     /// Characters of a search text.
     public static let maxQueryLength = 500
+    /// Words of a search text: each is looked for in every item, on the main actor.
+    public static let maxQueryWords = 10
     /// Characters of the `app` filter, which is a name.
     public static let maxAppLength = 100
     public static let defaultResultLimit = 10

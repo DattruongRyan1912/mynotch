@@ -143,7 +143,7 @@ public final class MCPSession {
             return success(id: id, result: [:], era: era)
         case "server/discover" where era == .modern:
             var result: [String: JSON] = [
-                "supportedVersions": .array(([Self.modernVersion] + Self.legacyVersions).map(JSON.string)),
+                "supportedVersions": .array([.string(Self.modernVersion)]),
                 "capabilities": .object(["tools": .object([:])]),
                 "ttlMs": .int(Self.cacheMilliseconds), "cacheScope": .string("private"),
             ]
@@ -211,7 +211,7 @@ public final class MCPSession {
         }
         guard requested == Self.modernVersion else {
             return .failure(code: -32022, message: "Unsupported protocol version", data: .object([
-                "supported": .array(([Self.modernVersion] + Self.legacyVersions).map(JSON.string)), "requested": .string(requested),
+                "supported": .array([.string(Self.modernVersion)]), "requested": .string(requested),
             ]))
         }
         guard case .object? = params["_meta"]?[Self.capabilitiesKey] else {

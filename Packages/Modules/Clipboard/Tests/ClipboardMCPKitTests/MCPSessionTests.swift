@@ -155,7 +155,7 @@ import Testing
             return
         }
         #expect(tools.compactMap { $0["name"]?.string } == ["search_clipboard", "get_clipboard_item"])
-        #expect(tools.allSatisfy { $0["inputSchema"]?["type"] == .string("object") && $0["annotations"]?["readOnlyHint"] == .bool(true) })
+        #expect(tools.allSatisfy { $0["inputSchema"]?["type"] == .string("object") && $0["annotations"]?["openWorldHint"] == .bool(false) })
         #expect(tools.allSatisfy { $0["title"]?.string?.isEmpty == false && $0["description"]?.string?.isEmpty == false })
         #expect(result["nextCursor"] == nil)
         #expect(result["resultType"] == nil)
@@ -223,7 +223,9 @@ import Testing
     @Test func discoverNamesTheVersionsToolsAndServer() {
         let result = send(#"{"jsonrpc":"2.0","id":"d","method":"server/discover","params":{\#(Self.meta)}}"#)?["result"]
         #expect(result?["resultType"] == .string("complete"))
-        #expect(result?["supportedVersions"] == .array(["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"].map(JSON.string)))
+        // Only the version this answer speaks: the older ones are for `initialize`, and a request that names one of them in `_meta`
+        // is refused, so offering them here would send a client into a refusal.
+        #expect(result?["supportedVersions"] == .array([.string("2026-07-28")]))
         #expect(result?["capabilities"]?["tools"] == .object([:]))
         #expect(result?["_meta"]?["io.modelcontextprotocol/serverInfo"] == .object(["name": .string("demo"), "title": .string("Demo"), "version": .string("9.9")]))
         #expect(result?["instructions"] == .string("Read me."))
@@ -238,6 +240,7 @@ import Testing
         #expect(list?["cacheScope"] == .string("private"))
         #expect(list?["_meta"]?["io.modelcontextprotocol/serverInfo"]?["name"] == .string("demo"))
         #expect(list?["tools"]?.arrayCount == 2)
+        #expect(list?["tools"]?.arrayFirst?["annotations"]?["readOnlyHint"] == nil)
 
         let call = send(#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_clipboard_item","arguments":{"id":"x"},\#(Self.meta)}}"#)?["result"]
         #expect(call?["resultType"] == .string("complete"))
@@ -254,7 +257,7 @@ import Testing
         let reply = send(#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"1900-01-01","io.modelcontextprotocol/clientCapabilities":{}}}}"#)
         #expect(errorCode(reply) == -32022)
         #expect(reply?["error"]?["data"]?["requested"] == .string("1900-01-01"))
-        #expect(reply?["error"]?["data"]?["supported"]?.arrayFirst == .string("2026-07-28"))
+        #expect(reply?["error"]?["data"]?["supported"] == .array([.string("2026-07-28")]))
     }
 
     @Test func aRequestWithoutCapabilitiesOrWithAVersionOfTheWrongTypeIsInvalid() {

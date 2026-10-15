@@ -11,6 +11,14 @@ import Testing
         #expect(ClipboardMCPWire.decodeRequest(line.dropLast()) == .request(request))
     }
 
+    @Test func aRequestThatWouldNotFitTheLimitIsNeverMade() {
+        // 100 characters, and each is a letter with twenty accents on it: few characters, many bytes.
+        let heavy = String(repeating: "a" + String(repeating: "\u{0301}", count: 20), count: 100)
+        #expect(heavy.count == 100)
+        #expect(ClipboardMCPWire.requestLine(.search(ClipboardMCPSearch(query: heavy))) == nil)
+        #expect(ClipboardMCPWire.requestLine(.search(ClipboardMCPSearch(query: String(repeating: "đ", count: 500)))) != nil)
+    }
+
     @Test func aRequestOfAnotherShapeIsUnreadable() {
         for text in [
             #"{"arguments":{"query":"x"},"tool":"search_clipboard"}"#,

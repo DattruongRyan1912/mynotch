@@ -27,7 +27,10 @@ import Testing
         #expect(ClipboardMCPMessages.settingName == "Cho AI agent đọc lịch sử clipboard (MCP)")
         let words = ClipboardMCPRows.explanation
         #expect(words.contains("không qua mạng"))
-        #expect(words.contains("bí mật không bao giờ được trả về"))
+        #expect(words.contains("MyNotch cố gắng ẩn mục nhạy cảm và mục trông giống mật khẩu hoặc khoá; đừng bật nếu clipboard của bạn chứa bí mật quan trọng."))
+        // Nothing is promised that the filter cannot keep.
+        #expect(!words.contains("không bao giờ"))
+        #expect(words.contains("tệp chỉ có tên"))
         #expect(words.contains("Mặc định tắt"))
         #expect(ClipboardMCPRows.addNote.contains("không tự sửa file cấu hình"))
         #expect(ClipboardMCPRows.logNote.contains("không ghi nội dung tìm kiếm"))

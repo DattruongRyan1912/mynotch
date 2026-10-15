@@ -7,6 +7,8 @@ final class ClipboardMCPController {
     private let state: ClipboardMCPState
     private let history: () -> ClipboardHistory
     private let index: ClipboardSearchIndex
+    /// What each item looks like to the filter for secrets, kept so the history is read once and not at every call.
+    private let secrets = ClipboardMCPSecretFilter.Cache()
     private let lockedBoardIDs: () -> Set<UUID>
     private let isEnabled: () -> Bool
     private let now: () -> Date
@@ -37,7 +39,7 @@ final class ClipboardMCPController {
         // Before the request is read, so a flood of requests that are not even valid costs the same as any other.
         let tool = Self.tool(in: line)
         guard limiter.allow(at: uptime()) else {
-            state.record(tool: tool ?? "unknown", outcome: .rateLimited, at: now())
+            state.record(tool: tool ?? "unknown", outcome: .rateLimited(count: 1), at: now())
             return .failure(.rateLimited, "Too many calls: at most \(ClipboardMCPLimits.maxCallsPerSecond) calls per second. Wait a moment and try again.")
         }
         switch ClipboardMCPWire.decodeRequest(line) {
@@ -47,9 +49,9 @@ final class ClipboardMCPController {
             return .failure(reason, message)
         case .request(let request):
             let answer = ClipboardMCPAnswerer.answer(
-                request, history: history(), index: index, lockedBoardIDs: lockedBoardIDs(), now: now()
+                request, history: history(), index: index, secrets: secrets, lockedBoardIDs: lockedBoardIDs(), now: now()
             )
-            state.record(tool: request.tool, outcome: .answered(count: answer.resultCount), at: now())
+            state.record(tool: request.tool, outcome: .answered(count: answer.resultCount, hidden: answer.hiddenCount), at: now())
             return answer.reply
         }
     }

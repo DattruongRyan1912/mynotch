@@ -16,7 +16,7 @@ struct ClipboardMCPActions {
 /// agent's configuration, what the agents asked for lately, and a button that turns it off at once. MyNotch never edits an
 /// agent's own files; the user pastes the lines.
 struct ClipboardMCPRows: View {
-    static let explanation = "Agent như Claude Code, Cursor hay Codex tìm trong lịch sử clipboard ngay trên máy này, qua một cổng nội bộ chỉ tài khoản của bạn mở được, không qua mạng. Mục mà trình quản lý mật khẩu đánh dấu là bí mật không bao giờ được trả về, và một ảnh chỉ được tả kích thước. Mặc định tắt."
+    static let explanation = "Agent như Claude Code, Cursor hay Codex tìm trong lịch sử clipboard ngay trên máy này, qua một cổng nội bộ chỉ tài khoản của bạn mở được, không qua mạng. MyNotch cố gắng ẩn mục nhạy cảm và mục trông giống mật khẩu hoặc khoá; đừng bật nếu clipboard của bạn chứa bí mật quan trọng. Ảnh chỉ được tả kích thước, tệp chỉ có tên. Mặc định tắt."
     static let addNote = "MyNotch không tự sửa file cấu hình của agent: bạn thêm đoạn dưới đây rồi khởi động lại agent."
     static let logNote = "Chỉ ghi giờ, công cụ và số kết quả, không ghi nội dung tìm kiếm. Nhật ký mất khi thoát MyNotch."
     static let notRunning = "Module Clipboard đang tắt: bật nó để agent truy vấn được."

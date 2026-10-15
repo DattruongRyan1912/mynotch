@@ -132,13 +132,26 @@ import Testing
         _ = controller.answer(line(.search(ClipboardMCPSearch(query: "nothing like it"))))
         _ = controller.answer(line(.item(UUID())))
         #expect(state.entries.map(\.tool) == ["get_clipboard_item", "search_clipboard", "search_clipboard"])
-        #expect(state.entries.map(\.outcome) == [.answered(count: 0), .answered(count: 0), .answered(count: 1)])
+        #expect(state.entries.map(\.outcome) == [.answered(count: 0, hidden: 0), .answered(count: 0, hidden: 0), .answered(count: 1, hidden: 0)])
     }
 
     @Test func aRefusedCallForGoingTooFastIsLoggedToo() {
         for _ in 0..<11 { _ = controller.answer(line(searchRequest)) }
         #expect(state.entries.count == 11)
-        #expect(state.entries.first?.outcome == .rateLimited)
+        #expect(state.entries.first?.outcome == .rateLimited(count: 1))
+    }
+
+    @Test func anItemThatLooksLikeASecretIsHeldBackAndTheLogCountsIt() {
+        env.history.items.append(ClipboardItem(
+            id: UUID(), content: .text("find the password: hunter2!"), contentHash: "h2", copiedAt: env.now, sourceBundleID: nil,
+            sourceAppName: nil, codeDetection: .notCode, sensitive: false
+        ))
+        guard case .success(let result) = controller.answer(line(searchRequest)) else {
+            Issue.record("not answered")
+            return
+        }
+        #expect(result["count"] == .int(1))
+        #expect(state.entries.first?.outcome == .answered(count: 1, hidden: 1))
     }
 
     @Test func theLogNeverHoldsWhatWasAsked() {
@@ -155,9 +168,6 @@ import Testing
         }
         #expect(state.entries.count == 50)
         #expect(state.entries.map(\.date) == state.entries.map(\.date).sorted(by: >))
-        #expect(ClipboardMCPAccess(date: env.now, tool: "search_clipboard", outcome: .answered(count: 3)).summary == "3 kết quả")
-        #expect(ClipboardMCPAccess(date: env.now, tool: "search_clipboard", outcome: .answered(count: 0)).summary == "Không có kết quả")
-        #expect(ClipboardMCPAccess(date: env.now, tool: "search_clipboard", outcome: .rateLimited).summary == "Bị chặn: quá 10 lệnh gọi mỗi giây")
         state.clearLog()
         #expect(state.entries.isEmpty)
     }

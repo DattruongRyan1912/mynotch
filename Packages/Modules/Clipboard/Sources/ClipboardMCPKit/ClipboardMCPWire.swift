@@ -33,9 +33,11 @@ public enum ClipboardMCPWire {
         case unreadable
     }
 
+    /// nil when the line would be over `maxRequestLength`, which the app would drop: characters can be many bytes.
     public static func requestLine(_ request: ClipboardMCPRequest) -> Data? {
         let object = JSON.object(["version": .int(version), "tool": .string(request.tool), "arguments": request.arguments])
-        return (try? object.encoded()).map { $0 + Data("\n".utf8) }
+        guard let encoded = try? object.encoded(), encoded.count <= maxRequestLength else { return nil }
+        return encoded + Data("\n".utf8)
     }
 
     /// `line` has no newline.

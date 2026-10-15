@@ -12,16 +12,19 @@ nonisolated final class ServerGeneration: Sendable {
 
 /// The folder the socket lives in: the user's own and closed to everyone else.
 enum PrivateDirectory {
-    /// One that exists is checked before anything is made or changed in it: `/tmp/mynotch-<uid>` is in a folder every user can
-    /// write to, so someone else may have made it first, or made it a link.
+    /// `/tmp/mynotch-<uid>` is in a folder every user can write to, so someone else may have made it first, or made it a link. The
+    /// folder is made with `mkdir`, which fails when something is there, and then checked and changed through a descriptor opened
+    /// without following a link, so nothing can be put in its place between the check and the change.
     static func prepare(_ directory: URL, user: uid_t) throws {
+        try FileManager.default.createDirectory(at: directory.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if mkdir(directory.path, 0o700) != 0, errno != EEXIST { throw ClipboardMCPServer.StartError.socket(errno: errno) }
+        let descriptor = open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+        guard descriptor >= 0 else { throw ClipboardMCPServer.StartError.directoryNotOwned }
+        defer { close(descriptor) }
         var info = stat()
-        if lstat(directory.path, &info) == 0, info.st_mode & S_IFMT != S_IFDIR || info.st_uid != user {
-            throw ClipboardMCPServer.StartError.directoryNotOwned
-        }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        // `attributes` of `createDirectory` apply only to a directory it creates.
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        guard fstat(descriptor, &info) == 0, info.st_uid == user else { throw ClipboardMCPServer.StartError.directoryNotOwned }
+        // `mkdir` makes it 0700 less the umask, and one that was there may be anything.
+        guard fchmod(descriptor, 0o700) == 0 else { throw ClipboardMCPServer.StartError.socket(errno: errno) }
     }
 }
 
@@ -36,6 +39,8 @@ final class ClipboardMCPServer {
     enum StartError: Error, Equatable {
         case pathTooLong
         case directoryNotOwned
+        /// Another process, such as a second MyNotch, listens on the path already.
+        case alreadyInUse
         case socket(errno: Int32)
     }
 
@@ -134,6 +139,8 @@ final class ClipboardMCPServer {
     private let generation = ServerGeneration()
     private var source: DispatchSourceRead?
     private var acceptor: Acceptor?
+    /// The socket file this server made, so that stopping removes that file and not another one made at the path since.
+    private var madeFile: (device: dev_t, inode: ino_t)?
 
     /// - Parameters:
     ///   - requestTimeout: how long a new connection has to send its request line before it is dropped.
@@ -162,6 +169,9 @@ final class ClipboardMCPServer {
         stop()
         guard let address = MCPSocketAddress(path: socketPath) else { throw StartError.pathTooLong }
         try PrivateDirectory.prepare(URL(filePath: socketPath).deletingLastPathComponent(), user: trustedUser)
+        // A file with a listener behind it is another MyNotch's: taking it over would leave that one without a socket, and the one
+        // that stops last would remove the other's. A file with nobody behind it is what a crashed run leaves.
+        if Self.hasListener(at: socketPath) { throw StartError.alreadyInUse }
         unlink(socketPath)
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else { throw StartError.socket(errno: errno) }
@@ -176,6 +186,8 @@ final class ClipboardMCPServer {
             unlink(socketPath)
             throw StartError.socket(errno: code)
         }
+        var made = stat()
+        if lstat(socketPath, &made) == 0 { madeFile = (made.st_dev, made.st_ino) }
         let ticket = generation.current
         let generation = generation
         let handler = handler
@@ -203,7 +215,25 @@ final class ClipboardMCPServer {
         guard let source else { return }
         source.cancel()
         self.source = nil
-        unlink(socketPath)
+        var current = stat()
+        if let madeFile, lstat(socketPath, &current) == 0, current.st_dev == madeFile.device, current.st_ino == madeFile.inode {
+            unlink(socketPath)
+        }
+        madeFile = nil
+    }
+
+    /// Whether something accepts connections at `path`: a connection that is made, or waits because the queue is full.
+    private static func hasListener(at path: String) -> Bool {
+        guard let address = MCPSocketAddress(path: path) else { return false }
+        let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { return false }
+        defer { close(descriptor) }
+        guard fcntl(descriptor, F_SETFL, O_NONBLOCK) == 0 else { return false }
+        var target = address.value
+        let connected = withUnsafePointer(to: &target) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        return connected == 0 || errno == EINPROGRESS || errno == EAGAIN
     }
 
     isolated deinit {

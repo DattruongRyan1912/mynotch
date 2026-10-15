@@ -6,20 +6,33 @@ import Observation
 /// there so the user can see that an agent looked, and a log of the questions would be one more place the clipboard leaks.
 nonisolated struct ClipboardMCPAccess: Identifiable, Equatable, Sendable {
     enum Outcome: Equatable, Sendable {
-        case answered(count: Int)
-        case rateLimited
+        /// `hidden` is how many items matched the request and were held back for being secrets or looking like them.
+        case answered(count: Int, hidden: Int = 0)
+        /// A run of calls refused for coming too fast within one second, which is one row.
+        case rateLimited(count: Int = 1)
     }
 
-    let id = UUID()
+    let id: UUID
     let date: Date
     let tool: String
     let outcome: Outcome
 
+    init(id: UUID = UUID(), date: Date, tool: String, outcome: Outcome) {
+        self.id = id
+        self.date = date
+        self.tool = tool
+        self.outcome = outcome
+    }
+
     /// What the Settings row says besides the time and the tool.
     var summary: String {
         switch outcome {
-        case .answered(let count): count == 0 ? "Không có kết quả" : "\(count) kết quả"
-        case .rateLimited: "Bị chặn: quá \(ClipboardMCPLimits.maxCallsPerSecond) lệnh gọi mỗi giây"
+        case .answered(let count, let hidden):
+            let found = count == 0 ? "Không có kết quả" : "\(count) kết quả"
+            return hidden == 0 ? found : "\(found) · \(hidden) mục bị ẩn vì có thể chứa bí mật"
+        case .rateLimited(let count):
+            let base = "Bị chặn: quá \(ClipboardMCPLimits.maxCallsPerSecond) lệnh gọi mỗi giây"
+            return count > 1 ? "\(base) (× \(count))" : base
         }
     }
 }
@@ -39,9 +52,20 @@ final class ClipboardMCPState {
     /// Why the helper could not be put where the agents' configuration points to.
     var helperFailure: String?
 
+    /// Refusals of one second are one row with a count, and when the log is full an older refusal goes before a real call does, so
+    /// a flood of refused calls cannot push out the ones that read the history.
     func record(tool: String, outcome: ClipboardMCPAccess.Outcome, at date: Date) {
+        if case .rateLimited(let more) = outcome, let newest = entries.first, case .rateLimited(let count) = newest.outcome,
+           Int(newest.date.timeIntervalSince1970) == Int(date.timeIntervalSince1970) {
+            entries[0] = ClipboardMCPAccess(id: newest.id, date: newest.date, tool: newest.tool, outcome: .rateLimited(count: count + more))
+            return
+        }
         entries.insert(ClipboardMCPAccess(date: date, tool: tool, outcome: outcome), at: 0)
-        if entries.count > Self.maxEntries { entries.removeLast(entries.count - Self.maxEntries) }
+        guard entries.count > Self.maxEntries else { return }
+        let olderRefusal = entries.indices.dropFirst().last { index in
+            if case .rateLimited = entries[index].outcome { true } else { false }
+        }
+        entries.remove(at: olderRefusal ?? entries.count - 1)
     }
 
     func clearLog() {

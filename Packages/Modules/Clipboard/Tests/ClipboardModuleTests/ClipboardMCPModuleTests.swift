@@ -146,6 +146,35 @@ import Testing
         #expect(reason == .notFound)
     }
 
+    @Test func anItemThatLooksLikeASecretIsNeverHandedOverAndTheLogCountsIt() async throws {
+        await start()
+        copy("password: hunter2!")
+        copy("my shopping list")
+        let secret = try #require(module.state.history.items.first { $0.content.plainText == "password: hunter2!" })
+        #expect(secret.sensitive == false)
+        try await turnOn()
+        #expect(count(of: await ask(search(""))) == 1)
+        guard case .reply(.failure(let reason, _)) = await ask(.item(secret.id)) else {
+            Issue.record("a secret-looking item was handed over by id")
+            return
+        }
+        #expect(reason == .notFound)
+        #expect(module.mcp.entries.map(\.outcome) == [.answered(count: 0, hidden: 1), .answered(count: 1, hidden: 1)])
+    }
+
+    @Test func aSocketAnotherMyNotchHoldsIsReportedAndNotTakenOver() async throws {
+        let other = ClipboardMCPServer(socketPath: socketPath) { _ in .failure(.failed, "other") }
+        try other.start()
+        await start()
+        let (settings, keys) = try settings()
+        settings.set(true, for: keys.mcpEnabled)
+        await until { module.mcp.listenFailure != nil }
+        #expect(!module.mcpListening)
+        #expect(module.mcp.listenFailure == "Một MyNotch khác đang giữ cổng này nên cổng chưa mở được.")
+        #expect(await ask(search("")) == .reply(.failure(.failed, "other")))
+        other.stop()
+    }
+
     @Test func eachQueryIsLoggedByToolAndCountAndNeverByItsWords() async throws {
         await start()
         copy("find me")

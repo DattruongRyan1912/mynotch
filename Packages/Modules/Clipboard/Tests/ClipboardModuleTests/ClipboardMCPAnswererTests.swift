@@ -21,7 +21,9 @@ import Testing
         _ request: ClipboardMCPRequest, _ items: [ClipboardItem], boards: [ClipboardBoard] = [], locked: Set<UUID> = []
     ) -> ClipboardMCPAnswer {
         let history = ClipboardHistory(items: items, boards: boards)
-        return ClipboardMCPAnswerer.answer(request, history: history, index: ClipboardSearchIndex(), lockedBoardIDs: locked, now: now)
+        return ClipboardMCPAnswerer.answer(
+            request, history: history, index: ClipboardSearchIndex(), secrets: ClipboardMCPSecretFilter.Cache(), lockedBoardIDs: locked, now: now
+        )
     }
 
     func search(_ query: String = "", kind: ClipboardMCPKind? = nil, app: String? = nil, limit: Int = 10, sinceDays: Int? = nil) -> ClipboardMCPRequest {
@@ -132,9 +134,62 @@ import Testing
         #expect(result(answer(search("hunter2"), all))?["matches"] == .int(1))
     }
 
-    @Test func anItemNotKnownToBeASecretIsReturnedSinceOnlyTheFlaggedOnesAreHeld() {
-        let unknown = item(.text("old copy"), sensitive: nil)
-        #expect(ids(of: answer(search(), [unknown])) == [unknown.id.uuidString])
+    @Test func anItemWhoseFlagIsUnknownIsReturnedOnlyWhenItDoesNotLookLikeASecret() {
+        let ordinary = item(.text("old copy of a shopping list"), sensitive: nil)
+        let looksLikeOne = item(.text("old copy: password: hunter2!"), sensitive: nil)
+        let found = answer(search(), [ordinary, looksLikeOne])
+        #expect(ids(of: found) == [ordinary.id.uuidString])
+    }
+
+    @Test func anItemThatLooksLikeASecretIsHiddenWhateverItsFlagSays() {
+        let key = "sk" + "-" + String(repeating: "aB3dE5gH7jK9", count: 4)
+        let unflagged = item(.text("my key \(key)"), sensitive: false)
+        let unknown = item(.text("my key \(key) again"), sensitive: nil)
+        let flagged = item(.text("my key \(key) third"), sensitive: true)
+        let plain = item(.text("my notes"), sensitive: false)
+        let found = answer(search(), [unflagged, unknown, flagged, plain])
+        #expect(ids(of: found) == [plain.id.uuidString])
+        #expect(result(found)?["count"] == .int(1))
+        #expect(result(found)?["matches"] == .int(1))
+    }
+
+    @Test func aSearchForASecretsOwnWordsFindsNothingAndCountsNothing() {
+        let secret = item(.text("aws_access_key_id=AK" + "IA" + "IOSFODNN7EXAMPLE"))
+        let found = answer(search("AKIA"), [secret, item(.text("other"))])
+        #expect(ids(of: found).isEmpty)
+        #expect(result(found)?["matches"] == .int(0))
+        #expect(found.resultCount == 0)
+    }
+
+    @Test func aSecretLookingItemIsNotFoundByIdAndLooksLikeOneThatIsNotThere() {
+        let secret = item(.text("password: hunter2!"), sensitive: false)
+        let missing = answer(.item(UUID()), [secret])
+        let hidden = answer(.item(secret.id), [secret])
+        #expect(hidden.reply == missing.reply)
+        #expect(hidden.resultCount == 0)
+    }
+
+    @Test func theLogLearnsHowManyMatchingItemsWereHeldBackAndTheAgentDoesNot() {
+        let key = "sk" + "-" + String(repeating: "aB3dE5gH7jK9", count: 4)
+        let hiddenByPattern = item(.text("link \(key)"), sensitive: false)
+        let hiddenByFlag = item(.text("link flagged"), sensitive: true)
+        let shown = item(.text("link plain"))
+        let elsewhere = item(.text("another thing entirely"), sensitive: true)
+        let found = answer(search("link"), [hiddenByPattern, hiddenByFlag, shown, elsewhere])
+        #expect(ids(of: found) == [shown.id.uuidString])
+        // Two matched the request and were held back; the one that did not match is not counted, and none of it is in the answer.
+        #expect(found.hiddenCount == 2)
+        let text = String(describing: found.reply)
+        #expect(!text.contains("hidden"))
+        #expect(!text.contains("withheld"))
+        #expect(answer(.item(hiddenByPattern.id), [hiddenByPattern]).hiddenCount == 1)
+        #expect(answer(.item(shown.id), [shown]).hiddenCount == 0)
+    }
+
+    @Test func anItemOfALockedBoardIsNotCountedAsHeldBack() {
+        let kept = item(.text("kept"))
+        let locked = ClipboardBoard(id: UUID(), name: "L", systemImage: "lock", itemIDs: [kept.id])
+        #expect(answer(search(), [kept], boards: [locked], locked: [locked.id]).hiddenCount == 0)
     }
 
     @Test func anItemOfALockedBoardIsNeverFoundEvenWhenAnOpenBoardHoldsItToo() {
@@ -157,8 +212,8 @@ import Testing
         let missing = answer(.item(UUID()), [secret, hidden], boards: [locked], locked: [locked.id])
         let secretAnswer = answer(.item(secret.id), [secret, hidden], boards: [locked], locked: [locked.id])
         let hiddenAnswer = answer(.item(hidden.id), [secret, hidden], boards: [locked], locked: [locked.id])
-        #expect(secretAnswer == missing)
-        #expect(hiddenAnswer == missing)
+        #expect(secretAnswer.reply == missing.reply)
+        #expect(hiddenAnswer.reply == missing.reply)
         guard case .failure(let reason, let message) = missing.reply else {
             Issue.record("not a failure")
             return
@@ -211,11 +266,41 @@ import Testing
         let hex = item(.color(hex: "#FF8800"))
         let rgb = item(.color(hex: "#FF8800", original: "rgb(255, 136, 0)"))
         let rich = item(.richText(plain: "plain words", rtf: Data("{\\rtf1 rich}".utf8)))
-        let files = item(.files([URL(filePath: "/tmp/a.txt"), URL(filePath: "/tmp/b.txt")]))
-        let texts = items(of: answer(search(limit: 10), [link, hex, rgb, rich, files])).map { $0["text"] }
-        #expect(texts == [
-            .string("https://example.com/a?b=1"), .string("#FF8800"), .string("rgb(255, 136, 0)"), .string("plain words"), .string("/tmp/a.txt\n/tmp/b.txt"),
-        ])
+        let texts = items(of: answer(search(limit: 10), [link, hex, rgb, rich])).map { $0["text"] }
+        #expect(texts == [.string("https://example.com/a?b=1"), .string("#FF8800"), .string("rgb(255, 136, 0)"), .string("plain words")])
+    }
+
+    @Test func aFileIsOnlyItsNameItsKindAndItsDateNeverItsPath() throws {
+        let files = item(.files([
+            URL(filePath: "/Users/ann/Clients/Acme Corp/2026/invoice.pdf"), URL(filePath: "/Users/ann/Desktop/notes.txt"),
+        ]))
+        let json = try #require(items(of: answer(search(), [files])).first)
+        #expect(json["kind"] == .string("file"))
+        #expect(json["files"] == .array([.string("invoice.pdf"), .string("notes.txt")]))
+        #expect(json["fileCount"] == .int(2))
+        #expect(json["text"] == nil)
+        #expect(json["copiedAt"] != nil)
+        let encoded = String(decoding: try json.encoded(), as: UTF8.self)
+        for part in ["/Users", "ann", "Clients", "Acme", "Desktop"] { #expect(!encoded.contains(part), "\(part)") }
+    }
+
+    @Test func aLongListOfFilesGivesTheFirstFiftyNamesAndTheWholeCount() throws {
+        let urls = (0..<120).map { URL(filePath: "/tmp/folder/file-\($0).txt") }
+        let json = try #require(items(of: answer(search(), [item(.files(urls))])).first)
+        guard case .array(let names)? = json["files"] else {
+            Issue.record("no names")
+            return
+        }
+        #expect(names.count == 50)
+        #expect(names.first == .string("file-0.txt"))
+        #expect(json["fileCount"] == .int(120))
+        #expect(json["truncated"] == .bool(true))
+    }
+
+    @Test func aFileSearchStillFindsByNameAndNeverByFolder() {
+        let report = item(.files([URL(filePath: "/Users/ann/Clients/Acme/report.pdf")]))
+        #expect(ids(of: answer(search("report"), [report])) == [report.id.uuidString])
+        #expect(ids(of: answer(search("Acme"), [report])).isEmpty)
     }
 
     @Test func anImageIsOnlyItsSizeAndNeverItsBytesOrItsFile() throws {

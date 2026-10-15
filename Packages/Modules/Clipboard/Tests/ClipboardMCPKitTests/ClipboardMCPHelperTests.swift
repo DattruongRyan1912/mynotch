@@ -51,6 +51,15 @@ import Testing
         #expect(asked.requests.isEmpty)
     }
 
+    @Test func aQueryThatIsTooBigOnceWrittenOutIsTheAgentsToShortenAndSaysSo() {
+        let heavy = String(repeating: "a" + String(repeating: "\u{0301}", count: 20), count: 100)
+        let result = search(heavy)
+        #expect(result.isError)
+        #expect(result.text.contains("query is too long"))
+        #expect(!result.text.contains("did not answer"))
+        #expect(asked.requests.isEmpty)
+    }
+
     @Test func aRefusalFromTheAppIsToldAsItIs() {
         asked.outcome = .reply(.failure(.disabled, "The clipboard is not shared right now."))
         #expect(search() == MCPToolResult(text: "The clipboard is not shared right now.", isError: true))

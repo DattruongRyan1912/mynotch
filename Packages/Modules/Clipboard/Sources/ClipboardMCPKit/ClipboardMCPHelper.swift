@@ -9,6 +9,7 @@ public enum ClipboardMCPMessages {
     static let notRunning = "MyNotch is not running, or \"\(settingName)\" is turned off. Ask the user to open MyNotch > Settings > Clipboard and turn it on."
     static let untrusted = "The connection to MyNotch was not used because its folder or socket is not private to your user, so nothing was sent."
     static let noAnswer = "MyNotch did not answer in time. Try again."
+    static let tooBig = "query is too long once written out: use at most \(ClipboardMCPLimits.maxQueryLength) characters, with few accents or symbols."
     static let rateLimited = "Too many calls: at most \(ClipboardMCPLimits.maxCallsPerSecond) calls per second. Wait a moment and try again."
 }
 
@@ -41,6 +42,7 @@ public enum ClipboardMCPHelper {
             } catch {
                 return MCPToolResult(text: error.message, isError: true)
             }
+            guard ClipboardMCPWire.requestLine(request) != nil else { return MCPToolResult(text: ClipboardMCPMessages.tooBig, isError: true) }
             // After the arguments, so a call that was wrong does not use up a place of one that is right.
             guard limiter.allow(at: now()) else { return MCPToolResult(text: ClipboardMCPMessages.rateLimited, isError: true) }
             switch ask(request) {

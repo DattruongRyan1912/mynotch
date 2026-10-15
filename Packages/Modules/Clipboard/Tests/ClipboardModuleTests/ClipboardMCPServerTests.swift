@@ -301,6 +301,48 @@ import Testing
         #expect(seen.lines.isEmpty)
     }
 
+    @Test func aSecondServerOnTheSamePathDoesNotTakeItOverAndTheFirstKeepsItsFile() async throws {
+        let first = makeServer()
+        try first.start()
+        let second = makeServer()
+        #expect(throws: ClipboardMCPServer.StartError.alreadyInUse) { try second.start() }
+        #expect(!second.isListening)
+        // The second one never owned the file, so stopping it leaves the file alone.
+        second.stop()
+        #expect(await ask() == .reply(answer))
+        first.stop()
+        try second.start()
+        #expect(await ask() == .reply(answer))
+        second.stop()
+    }
+
+    @Test func aSocketFileWithNobodyBehindItIsReplacedAndNotMistakenForAnotherServer() async throws {
+        try FileManager.default.createDirectory(at: folder.directory, withIntermediateDirectories: true)
+        chmod(folder.directory.path, 0o700)
+        // What a crashed run leaves: a real socket file whose listener is gone.
+        let leftover = socket(AF_UNIX, SOCK_STREAM, 0)
+        var address = try #require(MCPSocketAddress(path: folder.socketPath)).value
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(leftover, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        #expect(bound == 0)
+        close(leftover)
+        let server = makeServer()
+        try server.start()
+        #expect(await ask() == .reply(answer))
+        server.stop()
+    }
+
+    @Test func aServerThatStopsLeavesAFileThatIsNoLongerItsOwn() throws {
+        let server = makeServer()
+        try server.start()
+        // Another process took the path over; the first server's stop must not remove what is not its file.
+        unlink(folder.socketPath)
+        try Data("another".utf8).write(to: URL(filePath: folder.socketPath))
+        server.stop()
+        #expect(FileManager.default.fileExists(atPath: folder.socketPath))
+    }
+
     @Test func aPathThatDoesNotFitIsAnError() {
         let server = ClipboardMCPServer(socketPath: "/tmp/" + String(repeating: "d", count: 120) + "/mcp.sock") { _ in .failure(.failed, "") }
         #expect(throws: ClipboardMCPServer.StartError.pathTooLong) { try server.start() }

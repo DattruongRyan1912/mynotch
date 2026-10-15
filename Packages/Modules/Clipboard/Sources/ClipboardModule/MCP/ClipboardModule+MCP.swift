@@ -55,6 +55,9 @@ extension ClipboardModule {
             mcpServer = server
             mcp.isListening = true
             mcp.listenFailure = nil
+        } catch ClipboardMCPServer.StartError.alreadyInUse {
+            mcp.isListening = false
+            mcp.listenFailure = "Một MyNotch khác đang giữ cổng này nên cổng chưa mở được."
         } catch {
             mcp.isListening = false
             mcp.listenFailure = "Không mở được cổng cho AI agent (\(error))."
