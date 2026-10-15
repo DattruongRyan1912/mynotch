@@ -64,4 +64,30 @@ final class CountingHostingView<Content: View>: NSHostingView<Content> {
         #expect(!hosting.needsLayout)
         window.contentView = nil
     }
+
+    func bars(in view: NSView) -> SpectrumBarsView? {
+        if let bars = view as? SpectrumBarsView { return bars }
+        for subview in view.subviews {
+            if let bars = bars(in: subview) { return bars }
+        }
+        return nil
+    }
+
+    /// The tint changes the bars' layers and nothing SwiftUI draws: a new cover must not make the notch lay out either.
+    @Test func aNewTintNeverLaysTheHostingViewOutAgain() throws {
+        let store = playingStore()
+        let (hosting, window) = host(NowPlayingBars(store: store))
+        runLoopUntilQuiet { hosting.layouts }
+        let view = try #require(bars(in: hosting))
+        let layouts = hosting.layouts
+        for step in 0..<3 {
+            let before = view.layer?.sublayers?.first?.backgroundColor
+            store.showTint(ArtworkPalette(primary: SRGBColor(red: 0.9, green: Double(step) / 3, blue: 0.1), secondary: nil))
+            #expect(view.layer?.sublayers?.first?.backgroundColor != before, "the bars did take the colour")
+            run(for: 0.02)
+        }
+        #expect(hosting.layouts == layouts)
+        #expect(!hosting.needsLayout)
+        window.contentView = nil
+    }
 }

@@ -631,6 +631,27 @@ import Testing
         #expect(source.sent.isEmpty)
     }
 
+    @Test func theLockScreenButtonsTakeTheSameRouteAsTheTab() async throws {
+        await bootstrapWithCaptions()
+        playInChrome()
+        let host = try await connectHost()
+        let lockScreen = module.lockScreenTransport
+        lockScreen.skipForward()
+        lockScreen.skipBack()
+        lockScreen.togglePlayPause()
+        #expect(host.receiveFrames(count: 2) == [YouTubeCommand.next.json, YouTubeCommand.previous.json])
+        #expect(source.sent == [.togglePlayPause], "MediaRemote only hears what the extension cannot do")
+    }
+
+    @Test func aLockScreenSkipWithNoLiveSessionGoesToMediaRemoteLikeTheTabs() async {
+        await bootstrapWithCaptions()
+        playInChrome()
+        #expect(module.skipRoute() == .mediaRemote)
+        module.lockScreenTransport.skipForward()
+        module.lockScreenTransport.skipBack()
+        #expect(source.sent == [.nextTrack, .previousTrack])
+    }
+
     @Test func everythingButNextAndPreviousStillGoesToMediaRemote() async throws {
         await bootstrapWithCaptions()
         playInChrome()

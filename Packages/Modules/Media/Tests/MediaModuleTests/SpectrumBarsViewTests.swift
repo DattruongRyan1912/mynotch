@@ -101,6 +101,89 @@ import Testing
         window.contentView = nil
     }
 
+    // MARK: - Colours
+
+    let tint = ArtworkPalette(primary: SRGBColor(red: 0.9, green: 0.2, blue: 0.1), secondary: SRGBColor(red: 0.1, green: 0.4, blue: 0.9))
+
+    func srgb(_ color: SRGBColor) -> CGColor { CGColor(srgbRed: color.red, green: color.green, blue: color.blue, alpha: 1) }
+
+    func colours(_ view: SpectrumBarsView) -> [CGColor?] { view.layer?.sublayers?.map(\.backgroundColor) ?? [] }
+
+    func expectedColours(_ mode: SpectrumColorMode, tint: ArtworkPalette? = nil, start: SRGBColor = SpectrumColorMode.defaultStart, end: SRGBColor = SpectrumColorMode.defaultEnd) -> [CGColor?] {
+        (mode.colors(count: 4, tint: tint, start: start, end: end) ?? []).map { srgb($0) }
+    }
+
+    var accent: [CGColor?] { Array(repeating: NSColor(NotchTokens.accent).cgColor, count: 4) }
+
+    @Test func theBarsKeepTheAccentColourUntilAnythingElseIsAsked() {
+        let view = makeView()
+        #expect(colours(view) == accent)
+        store.showTint(tint)
+        store.setTintEnabled(false)
+        let other = makeView()
+        #expect(colours(other) == accent, "a tint that is switched off colours nothing")
+    }
+
+    @Test func aViewMadeLaterStartsWithTheColoursTheStoreHasNow() {
+        store.showTint(tint)
+        let view = makeView()
+        #expect(colours(view) == expectedColours(.artwork, tint: tint))
+    }
+
+    @Test func theCoversColoursReachABarsViewThatIsAlreadyOnScreenAtOnce() {
+        let view = makeView()
+        let window = attach(view)
+        store.showTint(tint)
+        #expect(colours(view) == expectedColours(.artwork, tint: tint))
+        #expect(colours(view).first != colours(view).last, "two colours make a gradient along the bars")
+        window.contentView = nil
+    }
+
+    @Test func theTintGoingAwayBringsTheAccentBack() {
+        let view = makeView()
+        let window = attach(view)
+        store.showTint(tint)
+        #expect(colours(view) != accent)
+        store.showTint(nil)
+        #expect(colours(view) == accent)
+        window.contentView = nil
+    }
+
+    @Test func whiteAndGradientAreAppliedToTheLayers() {
+        let view = makeView()
+        let window = attach(view)
+        store.setSpectrumColors(mode: .white, start: SpectrumColorMode.defaultStart, end: SpectrumColorMode.defaultEnd)
+        #expect(colours(view) == expectedColours(.white))
+        let start = SRGBColor(red: 1, green: 0.5, blue: 0)
+        let end = SRGBColor(red: 0, green: 0.5, blue: 1)
+        store.setSpectrumColors(mode: .gradient, start: start, end: end)
+        #expect(colours(view) == expectedColours(.gradient, start: start, end: end))
+        window.contentView = nil
+    }
+
+    @Test func aColourChangeMovesNoBarAndAnimatesNothing() {
+        let view = makeView()
+        let window = attach(view)
+        store.showSpectrum([0.2, 0.4, 0.6, 0.8])
+        scheduler.advance(by: .milliseconds(40))
+        let before = heights(view)
+        store.showTint(tint)
+        #expect(colours(view) != accent)
+        #expect(heights(view) == before)
+        #expect(view.layer?.sublayers?.allSatisfy { $0.animationKeys() == nil } == true)
+        window.contentView = nil
+    }
+
+    @Test func barsOffScreenTakeTheNewColoursTheMomentTheyAreBack() {
+        let view = makeView()
+        let window = attach(view)
+        view.isNotchOnScreen = false
+        store.showTint(tint)
+        view.isNotchOnScreen = true
+        #expect(colours(view) == expectedColours(.artwork, tint: tint))
+        window.contentView = nil
+    }
+
     // MARK: - On screen
 
     @Test func aViewInAWindowOfAVisibleNotchCountsAsBarsOnScreen() {
@@ -120,6 +203,14 @@ import Testing
         view.isNotchOnScreen = true
         #expect(store.spectrumViewCount == 1)
         window.contentView = nil
+    }
+
+    @Test func aViewThatLeavesItsWindowStopsListeningToTheColours() {
+        let view = makeView()
+        let window = attach(view)
+        window.contentView = nil
+        store.showTint(tint)
+        #expect(colours(view) == accent, "off screen nothing follows the store")
     }
 
     @Test func aViewAtTheEndOfItsLifeLeavesTheCount() {

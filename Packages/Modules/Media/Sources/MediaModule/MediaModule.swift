@@ -26,6 +26,12 @@ struct MediaSettingsKeys {
     let controlButtons: SettingKey<MediaControlLayout>
     /// The sung part of a line is filled word by word where the lyrics have the timing for it.
     let karaoke: SettingKey<Bool>
+    /// The player's progress bar, glow and (in the cover's mode) spectrum bars take their colours from the album cover.
+    let tintFromArtwork: SettingKey<Bool>
+    /// Where the spectrum bars' colours come from: the cover, white, or two colours the user picks.
+    let spectrumColorMode: SettingKey<SpectrumColorMode>
+    let spectrumGradientStart: SettingKey<SRGBColor>
+    let spectrumGradientEnd: SettingKey<SRGBColor>
     /// The floating lyrics panel is up. Off by default; the Media tab's button and the hotkey flip it.
     let lyricsPanel: SettingKey<Bool>
     /// The current line's size in the panel, in points; the lines around it are smaller.
@@ -47,6 +53,10 @@ struct MediaSettingsKeys {
         lyricsUnderNotch = settings.key("lyricsUnderNotch", default: false)
         controlButtons = settings.key("controlButtons", default: .standard)
         karaoke = settings.key("karaoke", default: true)
+        tintFromArtwork = settings.key("tintFromArtwork", default: true)
+        spectrumColorMode = settings.key("spectrumColorMode", default: .artwork)
+        spectrumGradientStart = settings.key("spectrumGradientStart", default: SpectrumColorMode.defaultStart)
+        spectrumGradientEnd = settings.key("spectrumGradientEnd", default: SpectrumColorMode.defaultEnd)
         lyricsPanel = settings.key("lyricsPanel", default: false)
         lyricsPanelFontSize = settings.key("lyricsPanelFontSize", default: LyricsPanelModel.defaultFontSize, clampedTo: LyricsPanelModel.fontSizeRange)
         lyricsPanelOpacity = settings.key("lyricsPanelOpacity", default: 0.9, clampedTo: LyricsPanelController.opacityRange)
@@ -115,6 +125,9 @@ public final class MediaModule: FeatureModule {
     private var realSpectrum = false
     private var lyricsEnabled = false
     private var lyricsUnderNotch = false
+    /// Works out the tint of each cover once and keeps it by track; hands it to `store`.
+    private let tinter: ArtworkTinter
+    private var tintEnabled = true
     private var lyricsService: LyricsService?
     /// Track the lyrics were asked for (or are shown for); nil while lyrics are off or the track has no key.
     private var lyricsTrack: TrackKey?
@@ -208,12 +221,13 @@ public final class MediaModule: FeatureModule {
         youtubeSocketPath: String? = nil,
         youtubeSetup: YouTubeBridgeSetup? = nil,
         youtubeLog: YouTubeBridgeLog = .silent,
-        volume: VolumeModel = VolumeModel(hardware: NoVolumeHardware(), queue: SerialVolumeQueue())
+        volume: VolumeModel = VolumeModel(hardware: NoVolumeHardware(), queue: SerialVolumeQueue()),
+        tintExtract: @escaping ArtworkTinter.Extract = ArtworkTinter.backgroundExtract
     ) {
         self.init(
             makeSource: { _ in source }, spectrum: spectrum, lyricsClient: lyricsClient,
             tokens: tokens, signIn: signIn, volume: volume, lookUpApp: lookUpApp, youtubeSocketPath: youtubeSocketPath,
-            youtubeSetup: youtubeSetup, youtubeLog: youtubeLog
+            youtubeSetup: youtubeSetup, youtubeLog: youtubeLog, tintExtract: tintExtract
         )
     }
 
@@ -227,7 +241,8 @@ public final class MediaModule: FeatureModule {
         lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed,
         youtubeSocketPath: String? = nil,
         youtubeSetup: YouTubeBridgeSetup? = nil,
-        youtubeLog: YouTubeBridgeLog = .system
+        youtubeLog: YouTubeBridgeLog = .system,
+        tintExtract: @escaping ArtworkTinter.Extract = ArtworkTinter.backgroundExtract
     ) {
         self.volume = volume
         self.youtubeSocketPath = youtubeSocketPath
@@ -239,7 +254,9 @@ public final class MediaModule: FeatureModule {
         appleAccount = AppleMusicAccount(tokens: tokens)
         appleClient = AppleMusicLyricsClient(client: lyricsClient, account: appleAccount)
         self.signIn = signIn
-        store = NowPlayingStore(lookUpApp: lookUpApp)
+        let store = NowPlayingStore(lookUpApp: lookUpApp)
+        self.store = store
+        tinter = ArtworkTinter(extract: tintExtract) { [weak store] palette in store?.showTint(palette) }
     }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
@@ -287,7 +304,8 @@ public final class MediaModule: FeatureModule {
                     settings.value(keys.showActivity), settings.value(keys.pauseGraceSeconds),
                     settings.value(keys.hiddenApps), settings.value(keys.realSpectrum), settings.value(keys.lyrics),
                     settings.value(keys.youtubeCaptions), settings.value(keys.lyricsUnderNotch), settings.value(keys.controlButtons),
-                    settings.value(keys.karaoke)
+                    settings.value(keys.karaoke), settings.value(keys.tintFromArtwork), settings.value(keys.spectrumColorMode),
+                    settings.value(keys.spectrumGradientStart), settings.value(keys.spectrumGradientEnd)
                 )
             }
             for await _ in changes { self?.settingsChanged() }
@@ -320,6 +338,7 @@ public final class MediaModule: FeatureModule {
     }
 
     public func stop() async {
+        tinter.stop()
         lyricsPanel?.close()
         lyricsPanel = nil
         source?.stop()
@@ -366,6 +385,10 @@ public final class MediaModule: FeatureModule {
             pauseGraceSeconds: environment.settings.binding(keys.pauseGraceSeconds),
             hiddenApps: environment.settings.binding(keys.hiddenApps),
             realSpectrum: environment.settings.binding(keys.realSpectrum),
+            tintFromArtwork: environment.settings.binding(keys.tintFromArtwork),
+            spectrumColorMode: environment.settings.binding(keys.spectrumColorMode),
+            spectrumGradientStart: environment.settings.binding(keys.spectrumGradientStart),
+            spectrumGradientEnd: environment.settings.binding(keys.spectrumGradientEnd),
             lyrics: environment.settings.binding(keys.lyrics),
             youtubeCaptions: environment.settings.binding(keys.youtubeCaptions),
             lyricsUnderNotch: environment.settings.binding(keys.lyricsUnderNotch),
@@ -410,6 +433,9 @@ public final class MediaModule: FeatureModule {
         appleAccount.disconnect()
         await signIn.removeWebsiteData()
     }
+
+    /// The lock screen's buttons: the Media tab's, through the same actions.
+    var lockScreenTransport: LockScreenTransport { LockScreenTransport(store: store, actions: actions) }
 
     var actions: MediaActions {
         MediaActions(
@@ -556,6 +582,12 @@ public final class MediaModule: FeatureModule {
         youtubeCaptionsEnabled = settings.value(keys.youtubeCaptions)
         store.setControlLayout(settings.value(keys.controlButtons))
         store.setKaraokeEnabled(settings.value(keys.karaoke))
+        tintEnabled = settings.value(keys.tintFromArtwork)
+        store.setTintEnabled(tintEnabled)
+        store.setSpectrumColors(
+            mode: settings.value(keys.spectrumColorMode), start: settings.value(keys.spectrumGradientStart),
+            end: settings.value(keys.spectrumGradientEnd)
+        )
         store.setLyricsOn(lyricsEnabled || youtubeCaptionsEnabled)
         updateYouTubeBridge()
     }
@@ -567,6 +599,20 @@ public final class MediaModule: FeatureModule {
         refreshLyrics()
         refreshActivity()
         updateSpectrum()
+        refreshTint()
+    }
+
+    /// Hands the tinter what plays, which it only looks at again when the track or its cover changes. Nothing is worked out while
+    /// the setting is off. The state is empty for a moment between two tracks, and the player keeps its tint through it, so that
+    /// it does not flash.
+    private func refreshTint() {
+        guard tintEnabled else {
+            tinter.stop()
+            store.showTint(nil)
+            return
+        }
+        guard store.state.isActive else { return }
+        tinter.update(track: store.state.trackIdentity, artwork: store.state.artwork)
     }
 
     /// Connecting changes what can be found for the track playing now, so it is looked up again. Losing the sign-in does
@@ -787,7 +833,7 @@ public final class MediaModule: FeatureModule {
         guard policy.visible != lockScreenOffered else { return }
         lockScreenOffered = policy.visible
         if lockScreenOffered {
-            context.lockScreen.set(AnyView(NowPlayingLockScreenView(store: store)), priority: .normal)
+            context.lockScreen.set(AnyView(NowPlayingLockScreenView(transport: lockScreenTransport)), priority: .normal)
         } else {
             context.lockScreen.clear()
         }

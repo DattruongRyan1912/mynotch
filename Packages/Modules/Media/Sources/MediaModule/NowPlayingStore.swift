@@ -46,6 +46,15 @@ final class NowPlayingStore {
     /// pressed again. For as long as the app runs; it is no setting.
     private(set) var lyricsHidden = false
 
+    /// The colours of the current cover, once they are worked out; nil while they are not, and for a track with no cover. They are
+    /// the tint, and change once per track, so views may read them.
+    private(set) var tint: ArtworkPalette?
+    /// "Màu theo ảnh bìa": the player's progress bar, glow and (in the cover's mode) the bars use `tint`; the setting's value.
+    private(set) var tintEnabled = true
+    private(set) var spectrumMode = SpectrumColorMode.artwork
+    private(set) var spectrumGradientStart = SpectrumColorMode.defaultStart
+    private(set) var spectrumGradientEnd = SpectrumColorMode.defaultEnd
+
     /// The buttons beside play and pause; the setting's value, set by the module.
     private(set) var controlLayout = MediaControlLayout.standard
     /// The source can send a like; set by the module from the source it runs.
@@ -87,7 +96,52 @@ final class NowPlayingStore {
         update(.empty)
         showInActivity(artwork: nil, icon: nil, isPlaying: false)
         showLyrics(nil)
+        showTint(nil)
         if failureMessage != nil { failureMessage = nil }
+    }
+
+    /// What the player's views tint with: `tint` while the setting is on.
+    var activeTint: ArtworkPalette? { tintEnabled ? tint : nil }
+
+    /// The colour of each bar by the user's choice, nil while the bars should keep their own colour. Not observable, like
+    /// `spectrumBands`: the bars are layers that read it as they are made and follow it through `observeSpectrumColors`. SwiftUI
+    /// evaluates a representable's `makeNSView` with its reads tracked, so an observable value read there would make the whole
+    /// notch lay out again at every new cover.
+    @ObservationIgnored private(set) var spectrumColors: [SRGBColor]?
+    @ObservationIgnored private var spectrumColorObservers: [Int: @MainActor ([SRGBColor]?) -> Void] = [:]
+
+    func showTint(_ palette: ArtworkPalette?) {
+        guard palette != tint else { return }
+        tint = palette
+        refreshSpectrumColors()
+    }
+
+    func setTintEnabled(_ isEnabled: Bool) {
+        guard isEnabled != tintEnabled else { return }
+        tintEnabled = isEnabled
+        refreshSpectrumColors()
+    }
+
+    func setSpectrumColors(mode: SpectrumColorMode, start: SRGBColor, end: SRGBColor) {
+        if mode != spectrumMode { spectrumMode = mode }
+        if start != spectrumGradientStart { spectrumGradientStart = start }
+        if end != spectrumGradientEnd { spectrumGradientEnd = end }
+        refreshSpectrumColors()
+    }
+
+    /// Calls `observer` with every change of `spectrumColors`, until the returned closure is called.
+    func observeSpectrumColors(_ observer: @escaping @MainActor ([SRGBColor]?) -> Void) -> () -> Void {
+        let id = nextSpectrumObserverID
+        nextSpectrumObserverID += 1
+        spectrumColorObservers[id] = observer
+        return { [weak self] in self?.spectrumColorObservers[id] = nil }
+    }
+
+    private func refreshSpectrumColors() {
+        let colors = spectrumMode.colors(count: NowPlayingBars.barCount, tint: activeTint, start: spectrumGradientStart, end: spectrumGradientEnd)
+        guard colors != spectrumColors else { return }
+        spectrumColors = colors
+        for observer in spectrumColorObservers.values { observer(colors) }
     }
 
     /// Assigns only real changes: the bars redraw for every assignment, about 30 times a second.

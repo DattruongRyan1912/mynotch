@@ -9,13 +9,18 @@ protocol LockScreenWindow: AnyObject {
     func dismiss()
 }
 
-/// A small, click-through panel under the notch. It never takes the keyboard or activates MyNotch,
-/// because on the lock screen it must not be able to steal anything from the password field.
+/// Takes the click that reaches it even though MyNotch is not the active app, which it never is on the lock screen.
+final class LockScreenHostingView: NSHostingView<AnyView> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// A small panel under the notch. It takes clicks, for the buttons of the media view, but never the keyboard and never
+/// activates MyNotch, because on the lock screen it must not be able to steal anything from the password field.
 ///
 /// It follows the user's hide-from-recording setting like the notch's own panels, as a widget under the collapsed
 /// notch: "when collapsed" and "always" keep it out of recordings and shared screens, "never" leaves it in.
 final class LockScreenPanel: NSPanel, LockScreenWindow {
-    static let size = CGSize(width: 300, height: 80)
+    static let size = CGSize(width: 340, height: 80)
     /// Space between the notch and the panel.
     static let gap: CGFloat = 8
 
@@ -47,10 +52,9 @@ final class LockScreenPanel: NSPanel, LockScreenWindow {
         level = .screenSaver
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         isMovable = false
-        ignoresMouseEvents = true
         isReleasedWhenClosed = false
         hidesOnDeactivate = false
-        contentView = NSHostingView(rootView: content)
+        contentView = LockScreenHostingView(rootView: content)
         // Before the panel can be shown, so no frame of it is ever recorded against the setting.
         follower = CaptureHidingFollower(self, as: .compact, interface: interface)
     }

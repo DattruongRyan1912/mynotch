@@ -33,6 +33,7 @@ final class SpectrumBarsView: NSView {
     private var levels = [Double](repeating: 0, count: NowPlayingBars.barCount)
     private var isFollowing = false
     private var stopListening: (() -> Void)?
+    private var stopListeningToColors: (() -> Void)?
     private var playingTask: Task<Void, Never>?
 
     /// Whether the notch the view is in can be seen, from the SwiftUI environment.
@@ -44,7 +45,6 @@ final class SpectrumBarsView: NSView {
         self.store = store
         bars = (0..<NowPlayingBars.barCount).map { _ in
             let bar = CALayer()
-            bar.backgroundColor = NSColor(NotchTokens.accent).cgColor
             bar.cornerRadius = NowPlayingBars.barWidth / 2
             bar.cornerCurve = .continuous
             return bar
@@ -52,6 +52,7 @@ final class SpectrumBarsView: NSView {
         super.init(frame: CGRect(origin: .zero, size: NowPlayingBars.size))
         wantsLayer = true
         bars.forEach { layer?.addSublayer($0) }
+        paint(store.spectrumColors)
         place(levels, animated: false)
         driver = BarsDriver(scheduler: scheduler, now: now) { [weak self] levels, animated in self?.show(levels, animated: animated) }
     }
@@ -89,17 +90,37 @@ final class SpectrumBarsView: NSView {
                 // The first value is the current one.
                 for await playing in Observations({ store.activityIsPlaying }) { self?.driver.setPlaying(playing) }
             }
+            // The colours may have changed while the bars were off screen, where nothing followed the store.
+            paint(store.spectrumColors)
+            stopListeningToColors = store.observeSpectrumColors { [weak self] colors in self?.paint(colors) }
             driver.setSpectrum(store.spectrumBands)
             driver.setPlaying(store.activityIsPlaying)
             driver.setOnScreen(true)
         } else {
             driver.setOnScreen(false)
+            stopListeningToColors?()
+            stopListeningToColors = nil
             stopListening?()
             stopListening = nil
             playingTask?.cancel()
             playingTask = nil
             store.spectrumViewDisappeared()
         }
+    }
+
+    /// The colour of each bar, or the accent colour where the store has none. Set on the layers once per change, with no
+    /// animation: a track changes the colours at most once, and nothing here is SwiftUI state.
+    private func paint(_ colors: [SRGBColor]?) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (index, bar) in bars.enumerated() {
+            if let colors, colors.indices.contains(index) {
+                bar.backgroundColor = CGColor(srgbRed: colors[index].red, green: colors[index].green, blue: colors[index].blue, alpha: 1)
+            } else {
+                bar.backgroundColor = NSColor(NotchTokens.accent).cgColor
+            }
+        }
+        CATransaction.commit()
     }
 
     private func show(_ newLevels: [Double], animated: Bool) {

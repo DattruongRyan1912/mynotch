@@ -36,6 +36,8 @@ struct MediaTabView: View {
             coverAndControls
             CurrentLyricView(store: store, togglePanel: actions.toggleLyricsPanel)
         }
+        // The cover's colours as a faint glow; a background, so it never changes the size the tab asks for.
+        .background { ArtworkGlow(tint: store.activeTint) }
     }
 
     private var coverAndControls: some View {
@@ -108,7 +110,8 @@ struct PlaybackProgressView: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.18))
                 Capsule()
-                    .fill(isActive ? NotchTokens.accent : NotchTokens.primaryText.opacity(0.85))
+                    .fill(Self.fill(tint: store.activeTint?.primary, isActive: isActive))
+                    .animation(.easeInOut(duration: 0.4), value: store.activeTint?.primary)
                     .frame(width: filled)
                 if isActive {
                     Circle()
@@ -129,6 +132,12 @@ struct PlaybackProgressView: View {
         .accessibilityElement()
         .accessibilityLabel("Tiến trình")
         .accessibilityValue("\(progress.elapsedText) / \(progress.duration.map(PlaybackProgress.format) ?? "--:--")")
+    }
+
+    /// The filled part of the bar: the cover's colour while there is one, else white, and the accent while the pointer is on it.
+    static func fill(tint: SRGBColor?, isActive: Bool) -> Color {
+        if let tint { return tint.color }
+        return isActive ? NotchTokens.accent : NotchTokens.primaryText.opacity(0.85)
     }
 
     private func seekGesture(width: CGFloat, progress: PlaybackProgress) -> some Gesture {

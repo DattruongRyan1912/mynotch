@@ -338,6 +338,8 @@ struct LockScreenFixture {
         let view = try #require(fixture.harness.registry.settingsView(for: "lockscreen"))
         #expect(String(describing: view).hasPrefix("AnyView(LockScreenSettingsView("))
         #expect(LockScreenSettingsView.warning == "Thử nghiệm — dùng API riêng của macOS")
+        // The media view has buttons now; the row says that whoever is at the keyboard can press them.
+        #expect(LockScreenSettingsView.mediaExplanation.contains("bấm"))
     }
 
     @Test func hasNoTab() {

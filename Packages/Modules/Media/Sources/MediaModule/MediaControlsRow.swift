@@ -82,7 +82,7 @@ struct MediaControlsRow: View {
 }
 
 /// Play and pause: bigger than the others, and always in the middle.
-private struct PlayPauseButton: View {
+struct PlayPauseButton: View {
     let isPlaying: Bool
     let action: () -> Void
 
@@ -94,7 +94,7 @@ private struct PlayPauseButton: View {
     }
 }
 
-private struct ControlButton: View {
+struct ControlButton: View {
     let look: MediaControlLook
     let action: () -> Void
 
@@ -105,7 +105,7 @@ private struct ControlButton: View {
     }
 }
 
-private struct RowButton: View {
+struct RowButton: View {
     let symbol: String
     let label: String
     let symbolSize: CGFloat
@@ -132,7 +132,7 @@ private struct RowButton: View {
     }
 }
 
-private struct PressableButtonStyle: ButtonStyle {
+struct PressableButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.86 : 1)
