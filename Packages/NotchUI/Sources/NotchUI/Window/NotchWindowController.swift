@@ -188,10 +188,11 @@ final class NotchWindowController {
         guard let step = openSwipe.feed(
             phase: phase, momentumPhase: momentumPhase, deltaX: deltaX, deltaY: fingersDeltaY, onNotch: model.hover == .notch,
             sensitivity: sensitivity
-        ), let action = step.action(state: model.state) else { return }
+        ), let action = step.action(state: model.state, keptOpen: model.isPinned || model.isDragging) else { return }
         NotchLog.record("swipe \(step) \(model.state.logDescription) -> \(action)")
         switch action {
-        case .open: model.open(tab: nil)
+        // Like a hover: the pointer is on the notch and nothing was clicked, so a keyboard tab does not take the keyboard.
+        case .open: model.open(tab: nil, onPurpose: false)
         case .close: model.close()
         }
         feel(.levelChange)

@@ -1,3 +1,4 @@
+import AppKit
 import MyNotchCore
 import NotchUI
 import SwiftUI
@@ -70,10 +71,13 @@ struct InterfaceSettingsPage: View {
 /// The accent as swatches: macOS's own, the eight colours of its picker, and a colour picker for any other.
 private struct AccentSwatches: View {
     let settings: SettingsStore
+    /// Counts the changes of macOS's own accent, so the "Hệ thống" swatch is drawn again with the new colour.
+    @State private var systemColorChanges = 0
 
     private var current: NotchAccent { settings.value(InterfaceSettings.accent) }
 
     var body: some View {
+        let _ = systemColorChanges
         HStack(spacing: 8) {
             choice(.system, label: "Hệ thống") {
                 HStack(spacing: 5) {
@@ -92,6 +96,7 @@ private struct AccentSwatches: View {
                 .overlay { ring(isCustom) }
                 .help("Màu tùy chọn")
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSColor.systemColorsDidChangeNotification)) { _ in systemColorChanges += 1 }
     }
 
     private var isCustom: Bool {

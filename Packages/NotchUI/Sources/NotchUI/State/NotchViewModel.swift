@@ -180,7 +180,14 @@ public final class NotchViewModel {
 
     /// Opens `tab`, or the last used tab, or the first available one, as an on-purpose open.
     public func open(tab: ModuleID?) {
-        show(tab: tab, onPurpose: true)
+        open(tab: tab, onPurpose: true)
+    }
+
+    /// As `open(tab:)`, with the choice of what kind of open it is. Only an on-purpose open (a click, the shortcut, the
+    /// tab bar, a module) lets a tab that takes the keyboard take it from the app in front; one that is not (a hover, a
+    /// swipe, with the pointer already on the notch and nothing clicked) leaves the keyboard where it is.
+    public func open(tab: ModuleID?, onPurpose: Bool) {
+        show(tab: tab, onPurpose: onPurpose)
     }
 
     private func show(tab: ModuleID?, onPurpose: Bool) {

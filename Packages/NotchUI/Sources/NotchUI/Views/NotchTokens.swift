@@ -8,6 +8,8 @@ public enum NotchTokens {
     public static let secondaryText = Color.white.opacity(0.6)
     /// Inner padding of the open notch; `nonisolated` because the geometry's maths reads it.
     nonisolated public static let padding: CGFloat = 14
+    /// Opacity of the accent behind the selected tab; `nonisolated` because the accent's legibility on black is worked out from it.
+    nonisolated public static let selectionOpacity: CGFloat = 0.32
     /// Space left and right of an activity's strip under the collapsed notch, inside the notch's body.
     public static let stripPadding: CGFloat = 12
     /// The one animation of the notch's size and shape; every state change moves it with this spring.

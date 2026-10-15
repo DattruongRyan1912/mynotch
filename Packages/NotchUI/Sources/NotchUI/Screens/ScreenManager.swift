@@ -58,7 +58,7 @@ public final class ScreenManager {
             MainActor.assumeIsolated { self?.syncScreens() }
         })
         // Before the notches exist and before the modules start, so none of them reads a stale setting.
-        interface.follow(settings)
+        interface.follow(settings, theme: theme)
         syncScreens()
         hoverTracker.start()
         fullscreenDetector.start()

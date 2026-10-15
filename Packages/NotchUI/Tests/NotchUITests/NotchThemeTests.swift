@@ -78,13 +78,23 @@ import Testing
         #expect(theme.resolvedAccent == RGB(red: 255, green: 69, blue: 58))
     }
 
-    @Test func aFixedAccentIsNotTouchedWhenMacOSChangesItsOwn() async {
-        let theme = makeTheme()
+    @Test func aFixedAccentDoesNotRedrawWhenMacOSChangesItsOwn() async {
+        let fixed = makeTheme()
         settings.set(.palette(.purple), for: InterfaceSettings.accent)
+        let notFollowing = Changed()
+        withObservationTracking { _ = fixed.accent } onChange: { notFollowing.value = true }
+        // A second theme on the same centre, made after the first and so told after it: once it has been told, so has the
+        // first, and nothing has to be waited for by the clock.
+        let followingSystem = NotchTheme(
+            settings: SettingsStore(defaults: makeIsolatedDefaults()), systemAccent: { [system] in system.accent }, notifications: center
+        )
+        let following = Changed()
+        withObservationTracking { _ = followingSystem.accent } onChange: { following.value = true }
         system.accent = RGB(red: 1, green: 2, blue: 3)
         center.post(name: NSColor.systemColorsDidChangeNotification, object: nil)
-        try? await Task.sleep(for: .milliseconds(50))
-        #expect(theme.resolvedAccent == NotchAccent.Palette.purple.rgb)
+        #expect(await eventually { following.value })
+        #expect(!notFollowing.value)
+        #expect(fixed.resolvedAccent == NotchAccent.Palette.purple.rgb)
     }
 
     // MARK: glass
@@ -220,5 +230,86 @@ import Testing
         let red = Color(.sRGB, red: 1, green: 0, blue: 0)
         #expect(try accentPixels(red, selected: "a") > 100)
         #expect(try accentPixels(red, selected: nil) == 0)
+    }
+
+    @Test func aVeryDarkCustomAccentStillMarksTheSelectedTab() throws {
+        settings.set(.custom(RGB(red: 0, green: 0, blue: 0)), for: InterfaceSettings.accent)
+        let theme = makeTheme()
+        let tabs = [
+            NotchTab(id: "a", title: "A", systemImage: "circle", content: AnyView(EmptyView())),
+            NotchTab(id: "b", title: "B", systemImage: "square", content: AnyView(EmptyView())),
+        ]
+        let view = TabBar(tabs: tabs, selected: "a") { _ in }.environment(\.notchAccent, theme.accent).background(Color.black)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 1
+        let bitmap = NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
+        // Inside the selected capsule, left of its icon: the colour of the capsule over black.
+        let color = try #require(bitmap.colorAt(x: 4, y: bitmap.pixelsHigh / 2))
+        func linear(_ value: CGFloat) -> Double { value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4) }
+        let luminance = 0.2126 * linear(color.redComponent) + 0.7152 * linear(color.greenComponent) + 0.0722 * linear(color.blueComponent)
+        #expect((luminance + 0.05) / 0.05 >= 1.3, "contrast of the capsule against black")
+    }
+
+    // MARK: the interface's accent, for windows and layers outside the notch's own view
+
+    func interface(following theme: NotchTheme) -> NotchInterface {
+        let interface = NotchInterface()
+        interface.follow(settings, theme: theme)
+        return interface
+    }
+
+    @Test func beforeAnyThemeTheInterfaceHasTheNotchsOwnPurple() {
+        let interface = NotchInterface()
+        #expect(interface.accent == NotchTokens.accent)
+        #expect(interface.accentRGB == RGB(red: 125, green: 92, blue: 255))
+    }
+
+    @Test func theInterfaceCarriesTheSameAccentAsTheNotchIsDrawnWith() {
+        let theme = makeTheme()
+        let interface = interface(following: theme)
+        #expect(interface.accentRGB == system.accent)
+        #expect(interface.accent == theme.accent)
+        settings.set(.palette(.green), for: InterfaceSettings.accent)
+        #expect(interface.accentRGB == NotchAccent.Palette.green.rgb)
+        #expect(interface.accent == theme.accent)
+        settings.set(.custom(RGB(red: 250, green: 20, blue: 20)), for: InterfaceSettings.accent)
+        #expect(interface.accentRGB == RGB(red: 250, green: 20, blue: 20))
+    }
+
+    @Test func theInterfaceGivesTheAccentAsAColourForLayers() throws {
+        settings.set(.palette(.orange), for: InterfaceSettings.accent)
+        let interface = interface(following: makeTheme())
+        #expect(interface.accentCGColor == NotchAccent.Palette.orange.rgb.cgColor)
+    }
+
+    @Test func aViewThatReadTheInterfacesAccentIsToldWhenTheSettingChanges() {
+        let interface = interface(following: makeTheme())
+        let changed = Changed()
+        withObservationTracking { _ = interface.accent } onChange: { changed.value = true }
+        settings.set(.palette(.pink), for: InterfaceSettings.accent)
+        #expect(changed.value)
+    }
+
+    @Test func aLayerCanWaitForTheNextAccentThroughObservations() async {
+        let interface = interface(following: makeTheme())
+        final class Seen { var colors: [RGB] = [] }
+        let seen = Seen()
+        let loop = Task {
+            for await rgb in Observations({ interface.accentRGB }) { seen.colors.append(rgb) }
+        }
+        defer { loop.cancel() }
+        #expect(await eventually { seen.colors.last == system.accent })
+        settings.set(.palette(.yellow), for: InterfaceSettings.accent)
+        #expect(await eventually { seen.colors.last == NotchAccent.Palette.yellow.rgb })
+    }
+
+    @Test func theInterfaceAlsoFollowsMacOSWhenTheSystemAccentIsInUse() async {
+        let interface = interface(following: makeTheme())
+        let changed = Changed()
+        withObservationTracking { _ = interface.accentRGB } onChange: { changed.value = true }
+        system.accent = RGB(red: 255, green: 69, blue: 58)
+        center.post(name: NSColor.systemColorsDidChangeNotification, object: nil)
+        #expect(await eventually { changed.value })
+        #expect(interface.accentRGB == RGB(red: 255, green: 69, blue: 58))
     }
 }

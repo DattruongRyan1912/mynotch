@@ -69,11 +69,13 @@ nonisolated struct NotchSwipeRecognizer {
 
 extension NotchSwipeRecognizer.Step {
     /// What this step does to a notch in `state`: down opens the collapsed notch, up closes the open one, and nothing else
-    /// does anything (a toast belongs to whatever showed it).
-    func action(state: NotchState) -> NotchSwipeRecognizer.Action? {
+    /// does anything (a toast belongs to whatever showed it). `keptOpen` is a pin or a drag in progress: what keeps the notch
+    /// open against a click outside and against the pointer leaving keeps it open against a swipe too, which carries no
+    /// more intent to close than those do. Opening is never held back.
+    func action(state: NotchState, keptOpen: Bool = false) -> NotchSwipeRecognizer.Action? {
         switch (self, state) {
         case (.down, .closed), (.down, .compact): .open
-        case (.up, .open): .close
+        case (.up, .open): keptOpen ? nil : .close
         default: nil
         }
     }

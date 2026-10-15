@@ -237,17 +237,31 @@ import Testing
         #expect(Step.down.action(state: .toast) == nil)
         #expect(Step.up.action(state: .toast) == nil)
     }
+
+    @Test func aNotchThatSomethingKeepsOpenIsNeverClosedByASwipeButStillOpens() {
+        for state in [NotchState.open(nil), .open("a")] {
+            #expect(Step.up.action(state: state, keptOpen: true) == nil, "\(state)")
+            #expect(Step.up.action(state: state, keptOpen: false) == .close, "\(state)")
+        }
+        #expect(Step.down.action(state: .closed, keptOpen: true) == .open)
+        #expect(Step.down.action(state: .compact, keptOpen: true) == .open)
+    }
 }
 
 private final class SwipeModule: FeatureModule {
     let descriptor: ModuleDescriptor
-    init(_ id: ModuleID, order: Int) {
+    private let acceptsKeyboard: Bool
+    init(_ id: ModuleID, order: Int, acceptsKeyboard: Bool = false) {
         descriptor = ModuleDescriptor(id: id, displayName: id.rawValue, systemImage: "circle", defaultEnabled: true, order: order)
+        self.acceptsKeyboard = acceptsKeyboard
     }
     func start(_ context: ModuleContext) async throws(ModuleError) {}
     func stop() async {}
     func makeTab() -> NotchTab? {
-        NotchTab(id: descriptor.id, title: descriptor.displayName, systemImage: "circle", content: AnyView(EmptyView()))
+        NotchTab(
+            id: descriptor.id, title: descriptor.displayName, systemImage: "circle", acceptsKeyboard: acceptsKeyboard,
+            content: AnyView(EmptyView())
+        )
     }
     func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? { nil }
 }
@@ -265,6 +279,12 @@ private final class SwipeModule: FeatureModule {
 
     /// `sensitivity` is what the controller reads from the setting at each gesture; nil is off.
     func makeController(sensitivity: @escaping () -> SwipeSensitivity? = { .medium }) async -> NotchWindowController {
+        await Self.makeController(harness: harness, felt: felt, sensitivity: sensitivity)
+    }
+
+    static func makeController(
+        harness: RegistryHarness, felt: Felt, sensitivity: @escaping () -> SwipeSensitivity? = { .medium }
+    ) async -> NotchWindowController {
         await harness.registry.bootstrap()
         let screen = ScreenDescriptor(
             frame: CGRect(x: 0, y: 0, width: 1512, height: 982), safeAreaTop: 32,
@@ -284,6 +304,10 @@ private final class SwipeModule: FeatureModule {
 
     /// One gesture of `dy` points (positive: fingers down), with momentum after it, as a trackpad sends it.
     func swipe(_ controller: NotchWindowController, dy: CGFloat, dx: CGFloat = 0, natural: Bool = true) {
+        Self.swipe(controller, dy: dy, dx: dx, natural: natural)
+    }
+
+    static func swipe(_ controller: NotchWindowController, dy: CGFloat, dx: CGFloat = 0, natural: Bool = true) {
         controller.handleScroll(phase: .began, momentumPhase: [], deltaX: 0, deltaY: 0, naturalScrolling: natural)
         for _ in 0..<5 {
             controller.handleScroll(phase: .changed, momentumPhase: [], deltaX: dx / 5, deltaY: dy / 5, naturalScrolling: natural)
@@ -511,5 +535,133 @@ private final class SwipeModule: FeatureModule {
         swipe(controller, dy: 10)
         controller.handleScroll(phase: [], momentumPhase: .changed, deltaX: 0, deltaY: 300)
         #expect(felt.haptics.isEmpty)
+    }
+}
+
+/// A swipe is not a click: what keeps the notch open for a module keeps it open here too.
+@Suite struct NotchSwipeKeptOpenTests {
+    let harness = RegistryHarness([SwipeModule("a", order: 1), SwipeModule("b", order: 2)])
+    let felt = NotchOpenSwipeTests.Felt()
+
+    func openNotchUnderThePointer() async -> NotchWindowController {
+        let controller = await NotchOpenSwipeTests.makeController(harness: harness, felt: felt)
+        controller.model.open(tab: "a")
+        controller.model.pointerEntered()
+        return controller
+    }
+
+    @Test func aPinnedNotchStaysOpenForASwipeUpAndNothingIsFelt() async {
+        let controller = await openNotchUnderThePointer()
+        defer { controller.close() }
+        controller.model.isPinned = true
+        NotchOpenSwipeTests.swipe(controller, dy: -200)
+        #expect(controller.model.state == .open("a"))
+        #expect(controller.model.isPinned)
+        #expect(felt.haptics.isEmpty)
+    }
+
+    @Test func aSwipeUpClosesItOnceNothingPinsItAnymore() async {
+        let controller = await openNotchUnderThePointer()
+        defer { controller.close() }
+        controller.model.isPinned = true
+        NotchOpenSwipeTests.swipe(controller, dy: -200)
+        controller.model.isPinned = false
+        NotchOpenSwipeTests.swipe(controller, dy: -200)
+        #expect(controller.model.state == .closed)
+        #expect(felt.haptics == [.levelChange])
+    }
+
+    @Test func aDragInProgressKeepsTheNotchOpenAndIsNotEnded() async {
+        let controller = await openNotchUnderThePointer()
+        defer { controller.close() }
+        controller.model.setDragging(true)
+        NotchOpenSwipeTests.swipe(controller, dy: -200)
+        #expect(controller.model.state == .open("a"))
+        #expect(controller.model.isDragging)
+        #expect(felt.haptics.isEmpty)
+    }
+
+    @Test func aNotchThatIsBothPinnedAndDraggedStaysOpenToo() async {
+        let controller = await openNotchUnderThePointer()
+        defer { controller.close() }
+        controller.model.isPinned = true
+        controller.model.setDragging(true)
+        NotchOpenSwipeTests.swipe(controller, dy: -200)
+        #expect(controller.model.state == .open("a"))
+        #expect(controller.model.isPinned && controller.model.isDragging)
+    }
+
+    @Test func aSwipeUpStillClosesAnUnpinnedNotchNotBeingDragged() async {
+        let controller = await openNotchUnderThePointer()
+        defer { controller.close() }
+        NotchOpenSwipeTests.swipe(controller, dy: -200)
+        #expect(controller.model.state == .closed)
+        #expect(felt.haptics == [.levelChange])
+    }
+
+    @Test func theTabSwipeIsNotHeldByThePinBecauseItClosesNothing() async {
+        let controller = await openNotchUnderThePointer()
+        defer { controller.close() }
+        controller.model.isPinned = true
+        NotchOpenSwipeTests.swipe(controller, dy: 0, dx: -200)
+        #expect(controller.model.state == .open("b"))
+        #expect(controller.model.isPinned)
+    }
+}
+
+/// Opening with a swipe is a hover-class gesture: the pointer is already on the notch and nothing was clicked, so a
+/// tab that takes the keyboard does not take it from the app in front. A click, the shortcut or the tab bar still do.
+@Suite struct NotchSwipeKeyboardTests {
+    let harness = RegistryHarness([SwipeModule("k", order: 1, acceptsKeyboard: true), SwipeModule("a", order: 2)])
+    let felt = NotchOpenSwipeTests.Felt()
+
+    func focuses(_ model: NotchViewModel) -> Bool {
+        NotchKeyboardPolicy.focusesKeyboard(
+            state: model.state, tabUnderToast: model.tabUnderToast, tabs: harness.registry.tabs, onPurpose: model.isOpenedOnPurpose
+        )
+    }
+
+    func wants(_ model: NotchViewModel) -> Bool {
+        NotchKeyboardPolicy.wantsKeyboard(state: model.state, tabUnderToast: model.tabUnderToast, tabs: harness.registry.tabs)
+    }
+
+    @Test func aSwipeOpenOnAKeyboardTabDoesNotTakeTheKeyboard() async {
+        let controller = await NotchOpenSwipeTests.makeController(harness: harness, felt: felt)
+        defer { controller.close() }
+        controller.model.pointerEntered()
+        NotchOpenSwipeTests.swipe(controller, dy: 200)
+        #expect(controller.model.state == .open("k"))
+        #expect(!controller.model.isOpenedOnPurpose)
+        // The tab can still take the keyboard when clicked into; it just does not grab it.
+        #expect(wants(controller.model))
+        #expect(!focuses(controller.model))
+        #expect(felt.haptics == [.levelChange])
+    }
+
+    @Test func aClickTheShortcutAndTheTabBarStillOpenOnPurposeAndTakeTheKeyboard() async {
+        let controller = await NotchOpenSwipeTests.makeController(harness: harness, felt: felt)
+        defer { controller.close() }
+        let model = controller.model
+        model.click()
+        #expect(model.isOpenedOnPurpose && focuses(model))
+        model.close()
+        model.toggle()
+        #expect(model.isOpenedOnPurpose && focuses(model))
+        model.close()
+        model.open(tab: "k")
+        #expect(model.isOpenedOnPurpose && focuses(model))
+        model.close()
+        #expect(model.openTab(of: "k"))
+        #expect(model.isOpenedOnPurpose)
+    }
+
+    @Test func theModelCanOpenWithHoverSemanticsOnAnyTab() async {
+        let controller = await NotchOpenSwipeTests.makeController(harness: harness, felt: felt)
+        defer { controller.close() }
+        let model = controller.model
+        model.open(tab: "k", onPurpose: false)
+        #expect(model.state == .open("k") && !model.isOpenedOnPurpose && !focuses(model))
+        model.open(tab: "k", onPurpose: true)
+        #expect(model.isOpenedOnPurpose && focuses(model))
     }
 }

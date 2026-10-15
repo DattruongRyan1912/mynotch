@@ -95,6 +95,41 @@ import Testing
         window.contentView = nil
     }
 
+    /// What a view inside the pulse reads from its environment, which a hosting view of its own does not inherit.
+    final class Seen {
+        var accents: [Color] = []
+    }
+
+    struct AccentReader: View {
+        let seen: Seen
+        @Environment(\.notchAccent) private var accent
+        var body: some View {
+            seen.accents.append(accent)
+            return Color.clear.frame(width: 10, height: 10)
+        }
+    }
+
+    @Test func theAccentOfTheNotchReachesTheContentOfAPulse() {
+        let green = Color(.sRGB, red: 0, green: 1, blue: 0)
+        let seen = Seen()
+        let (hosting, window) = host(AccentReader(seen: seen).notchPulse(isActive: false).environment(\.notchAccent, green))
+        hosting.layoutSubtreeIfNeeded()
+        #expect(seen.accents.last == green)
+        window.contentView = nil
+    }
+
+    @Test func aNewAccentReachesTheContentOfAPulseThatIsAlreadyThere() {
+        let seen = Seen()
+        let green = Color(.sRGB, red: 0, green: 1, blue: 0)
+        let red = Color(.sRGB, red: 1, green: 0, blue: 0)
+        let (hosting, window) = host(AccentReader(seen: seen).notchPulse(isActive: false).environment(\.notchAccent, green))
+        hosting.layoutSubtreeIfNeeded()
+        hosting.rootView = AccentReader(seen: seen).notchPulse(isActive: false).environment(\.notchAccent, red)
+        hosting.layoutSubtreeIfNeeded()
+        #expect(seen.accents.last == red)
+        window.contentView = nil
+    }
+
     #if DEBUG
     /// The point of it: a pulse that SwiftUI redrew every frame would keep the hosting view laying out.
     @Test func pulsingNeverMakesTheHostingViewLayOutAgain() {

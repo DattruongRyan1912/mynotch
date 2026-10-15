@@ -16,7 +16,7 @@ struct TabBar: View {
                         .font(.system(size: 13, weight: .semibold))
                         .frame(width: 30, height: 24)
                         .foregroundStyle(tab.id == selected ? NotchTokens.primaryText : NotchTokens.secondaryText)
-                        .background(tab.id == selected ? accent.opacity(0.32) : .clear, in: Capsule())
+                        .background(tab.id == selected ? accent.opacity(NotchTokens.selectionOpacity) : .clear, in: Capsule())
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)

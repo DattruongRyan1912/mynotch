@@ -36,19 +36,33 @@ nonisolated public enum NotchAccent: Equatable, Sendable {
             (self.red, self.green, self.blue) = (red, green, blue)
         }
 
-        /// The brightest channel a colour needs for a black notch not to swallow it.
-        static let minimumPeak: UInt8 = 102
+        /// How much the selection capsule has to stand out from the black notch, as a contrast ratio against black. The white
+        /// at 0.14 that the selected tab used to be is 1.35:1, so no accent marks a selection fainter than that did.
+        static let minimumSelectionContrast = 1.35
 
-        var peak: UInt8 { max(red, green, blue) }
+        /// The contrast against black (WCAG's ratio) of this colour drawn as the selected tab's capsule, which is the accent at
+        /// `NotchTokens.selectionOpacity` over black.
+        var selectionContrast: Double {
+            func linear(_ channel: UInt8) -> Double {
+                let value = Double(channel) / 255 * Double(NotchTokens.selectionOpacity)
+                return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+            }
+            let luminance = 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+            return (luminance + 0.05) / 0.05
+        }
 
-        /// Itself, or a colour of the same hue lifted until it shows on black: a custom pick of (nearly) black would
-        /// otherwise mark nothing.
+        /// Itself, or the colour mixed with as little white as it takes for the selection capsule to show on black: a custom
+        /// pick of (nearly) black, or a deep blue, would otherwise mark nothing. A dark colour stays the same kind of colour
+        /// (black has no hue and becomes grey), and one that already shows, which is every palette colour, is not changed.
         var legibleOnBlack: RGB {
-            guard peak < Self.minimumPeak else { return self }
-            guard peak > 0 else { return RGB(red: Self.minimumPeak, green: Self.minimumPeak, blue: Self.minimumPeak) }
-            let scale = Double(Self.minimumPeak) / Double(peak)
-            func lifted(_ channel: UInt8) -> UInt8 { UInt8((Double(channel) * scale).rounded()) }
-            return RGB(red: lifted(red), green: lifted(green), blue: lifted(blue))
+            guard selectionContrast < Self.minimumSelectionContrast else { return self }
+            func mixed(_ channel: UInt8, _ white: Double) -> UInt8 { UInt8((Double(channel) + (255 - Double(channel)) * white).rounded()) }
+            for step in 1...255 {
+                let white = Double(step) / 255
+                let candidate = RGB(red: mixed(red, white), green: mixed(green, white), blue: mixed(blue, white))
+                if candidate.selectionContrast >= Self.minimumSelectionContrast { return candidate }
+            }
+            return RGB(red: 255, green: 255, blue: 255)
         }
 
         var hex: String { String(format: "#%02X%02X%02X", red, green, blue) }
@@ -62,10 +76,19 @@ nonisolated public enum NotchAccent: Equatable, Sendable {
         public var color: Color {
             Color(.sRGB, red: Double(red) / 255, green: Double(green) / 255, blue: Double(blue) / 255, opacity: 1)
         }
+
+        /// For AppKit drawing.
+        public var nsColor: NSColor {
+            NSColor(srgbRed: CGFloat(red) / 255, green: CGFloat(green) / 255, blue: CGFloat(blue) / 255, alpha: 1)
+        }
+
+        /// For a layer's `backgroundColor`, `borderColor` or `shadowColor` and for Core Graphics drawing; a layer keeps the
+        /// colour it was given, so it has to be set again when the accent changes (see `NotchInterface.accentRGB`).
+        public var cgColor: CGColor { nsColor.cgColor }
     }
 
     /// The colour to draw with: the choice, or `system` (what macOS's accent is at that moment, only read when the choice
-    /// is `system`), held to what shows on a black notch.
+    /// is `system`), lifted if the selection capsule would not show on a black notch (see `RGB.legibleOnBlack`).
     public func resolved(system: @autoclosure () -> RGB) -> RGB {
         switch self {
         case .system: system().legibleOnBlack

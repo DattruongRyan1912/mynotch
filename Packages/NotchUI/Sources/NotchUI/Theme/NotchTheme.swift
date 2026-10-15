@@ -38,8 +38,10 @@ public final class NotchTheme {
     }
 
     public var resolvedAccent: NotchAccent.RGB {
-        _ = systemColorChanges
-        return settings.value(InterfaceSettings.accent).resolved(system: systemAccent())
+        let accent = settings.value(InterfaceSettings.accent)
+        // Only the system accent depends on what macOS says; a fixed one is not redrawn when it changes its own.
+        if accent == .system { _ = systemColorChanges }
+        return accent.resolved(system: systemAccent())
     }
 
     public var accent: Color { resolvedAccent.color }
