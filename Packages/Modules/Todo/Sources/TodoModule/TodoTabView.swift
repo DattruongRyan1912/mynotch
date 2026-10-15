@@ -35,6 +35,10 @@ struct TodoTabView: View {
         // The notch is always black, whatever the system appearance.
         .environment(\.colorScheme, .dark)
         .onAppear(perform: actions.appeared)
+        // While the hint shows, the tab watches for access: a grant elsewhere re-mounts nothing. Cancelled when it goes.
+        .task(id: state.phase) {
+            if state.phase == .needsAccess { await actions.watchAccess() }
+        }
     }
 
     private var header: some View {

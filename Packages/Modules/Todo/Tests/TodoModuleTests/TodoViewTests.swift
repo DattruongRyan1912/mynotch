@@ -22,7 +22,7 @@ import Testing
     }
 
     func actions() -> TodoActions {
-        TodoActions(complete: { _ in }, undo: { _ in }, add: { _ in true }, requestAccess: {}, retry: {}, appeared: {})
+        TodoActions(complete: { _ in }, undo: { _ in }, add: { _ in true }, requestAccess: {}, retry: {}, watchAccess: {}, appeared: {})
     }
 
     func size<V: View>(of view: V) -> CGSize {

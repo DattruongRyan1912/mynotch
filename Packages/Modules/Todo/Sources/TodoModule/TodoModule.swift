@@ -12,6 +12,9 @@ struct TodoActions {
     var requestAccess: () -> Void
     /// "Thử lại": the last read failed.
     var retry: () -> Void
+    /// Runs while the access hint is on screen, and reads again the moment access appears: nothing re-mounts a tab that
+    /// is already open when it is granted elsewhere.
+    var watchAccess: () async -> Void
     /// The tab came on screen: access or the day may have changed while it was away.
     var appeared: () -> Void
 }
@@ -41,6 +44,9 @@ public final class TodoModule: FeatureModule {
     /// How long the quick-add shortcut's request for the field waits for the tab to show it. A notch that never opened (a full
     /// screen app, say) must not leave the request to be served by some later, unrelated open.
     static let focusRequestLifetime = Duration.seconds(2)
+    /// After the prompt is answered the system can go on saying "not determined" for a moment, so the status is read again
+    /// every 100 ms for up to 2 s before the answer is believed.
+    static let defaultAccessRecheck = (interval: Duration.milliseconds(100), limit: Duration.seconds(2))
     /// Waits for a burst of wakes and day changes to settle before reading again. Changes in Reminders need no wait here:
     /// the data source has already let them settle.
     static let refreshDebounce = Duration.seconds(1)
@@ -52,6 +58,8 @@ public final class TodoModule: FeatureModule {
     private let dayChangeCenter: NotificationCenter
     private let wakeCenter: NotificationCenter
     private let activeCenter: NotificationCenter
+    private let accessRecheck: (interval: Duration, limit: Duration)
+    private let accessWatchInterval: Duration
     private var context: ModuleContext?
     /// The settings the latest refresh used; a settings write that leaves them as they are needs no refresh.
     private var usedSettings: TodoSettings?
@@ -71,9 +79,13 @@ public final class TodoModule: FeatureModule {
     private var noticeTimer: ScheduledAction?
     private var focusTimer: ScheduledAction?
     private var isAdding = false
+    /// Access was found missing and has not been found granted since: the next grant renews the store.
+    private var sawNoAccess = false
     /// Number of reads whose result was applied, and of requests for one; tests wait on them.
     private(set) var appliedRefreshes = 0
     private(set) var refreshRequests = 0
+    /// How many times the status was read again while waiting for the system to settle after a prompt; tests wait on it.
+    private(set) var accessRechecks = 0
     /// What the notch activity shows now; nil while none is published.
     private(set) var publishedActivity: TodoActivityContent?
 
@@ -93,7 +105,9 @@ public final class TodoModule: FeatureModule {
         calendar: Calendar = .autoupdatingCurrent,
         dayChangeCenter: NotificationCenter = .default,
         wakeCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
-        activeCenter: NotificationCenter = .default
+        activeCenter: NotificationCenter = .default,
+        accessRecheck: (interval: Duration, limit: Duration) = TodoModule.defaultAccessRecheck,
+        accessWatchInterval: Duration = .seconds(1)
     ) {
         self.dataSource = dataSource
         clock = now
@@ -101,6 +115,8 @@ public final class TodoModule: FeatureModule {
         self.dayChangeCenter = dayChangeCenter
         self.wakeCenter = wakeCenter
         self.activeCenter = activeCenter
+        self.accessRecheck = accessRecheck
+        self.accessWatchInterval = accessWatchInterval
         readAt = now()
         state = TodoState(now: readAt, calendar: calendar)
     }
@@ -141,6 +157,7 @@ public final class TodoModule: FeatureModule {
         wanted = [:]
         read = []
         isAdding = false
+        sawNoAccess = false
         publishedActivity = nil
         state.reset()
     }
@@ -159,7 +176,7 @@ public final class TodoModule: FeatureModule {
             keys: TodoSettingsKeys(environment.settings),
             permissions: environment.permissions,
             loadLists: { await dataSource.lists() },
-            accessAnswered: { [weak self] in self?.startRefresh() }
+            accessAnswered: { [weak self] in self?.context?.run { await self?.noticeAnswer() } }
         ))
     }
 
@@ -170,6 +187,7 @@ public final class TodoModule: FeatureModule {
             add: { [weak self] text in await self?.add(text) ?? false },
             requestAccess: { [weak self] in self?.context?.run { await self?.requestAccess() } },
             retry: { [weak self] in self?.startRefresh() },
+            watchAccess: { [weak self] in await self?.watchAccess() },
             appeared: { [weak self] in self?.tabAppeared() }
         )
     }
@@ -297,8 +315,37 @@ public final class TodoModule: FeatureModule {
     /// The button of the hint: the one place the module asks, and only because the user clicked.
     func requestAccess() async {
         guard let context else { return }
-        await RemindersAccess(permissions: context.permissions).request(openSettingsIfDenied: true)
+        let before = context.permissions.status(of: .reminders)
+        let answer = await RemindersAccess(permissions: context.permissions).request(openSettingsIfDenied: true)
+        context.logger.notice("\(TodoLog.request(before: before, after: answer), privacy: .public)")
+        await noticeAnswer()
+    }
+
+    /// The prompt's answer is only believed once the system agrees: its status can lag the answer, and a refresh in that
+    /// moment would show the hint to someone who has just said yes. So the status is read again, every 100 ms for up to 2 s,
+    /// until it is no longer "not determined"; then the list is read.
+    func noticeAnswer() async {
+        guard let context else { return }
+        var status = context.permissions.status(of: .reminders)
+        var polls = 0
+        let limit = max(Int(accessRecheck.limit / accessRecheck.interval), 1)
+        while status == .notDetermined, polls < limit {
+            do { try await Task.sleep(for: accessRecheck.interval) } catch { return }
+            polls += 1
+            accessRechecks += 1
+            status = context.permissions.status(of: .reminders)
+        }
+        if polls > 0 { context.logger.notice("\(TodoLog.recheck(status: status, polls: polls), privacy: .public)") }
         await refresh()
+    }
+
+    /// Runs while the hint is on screen: access granted in System Settings (or by a prompt answered elsewhere) is noticed
+    /// within a second, with no need for the tab to be opened again. Ends once the list shows, or when its task is cancelled.
+    func watchAccess() async {
+        while state.phase == .needsAccess {
+            do { try await Task.sleep(for: accessWatchInterval) } catch { return }
+            if needsRefresh() { await refresh() }
+        }
     }
 
     /// Nothing tells the module when access changes in System Settings or a midnight passed while it was asleep, so it
@@ -310,16 +357,18 @@ public final class TodoModule: FeatureModule {
         refreshIfStale()
     }
 
-    /// Reads again only if the list shows the wrong thing for the access there is now, or for the day it is now, or the last
-    /// read failed.
     private func refreshIfStale() {
-        guard let context, state.phase != .loading else { return }
+        if needsRefresh() { startRefresh() }
+    }
+
+    /// Whether the list shows the wrong thing for the access there is now, or for the day it is now, or the last read failed.
+    private func needsRefresh() -> Bool {
+        guard let context, state.phase != .loading else { return false }
         let status = context.permissions.status(of: .reminders)
         let granted = status == .granted
         let accessChanged = (state.phase == .ready) != granted || (!granted && (status == .denied) != state.accessIsDenied)
         let newDay = !calendar.isDate(state.now, inSameDayAs: clock())
-        guard accessChanged || newDay || state.loadFailed else { return }
-        startRefresh()
+        return accessChanged || newDay || state.loadFailed
     }
 
     // MARK: Refreshing
@@ -332,12 +381,20 @@ public final class TodoModule: FeatureModule {
         let settings = TodoSettings(context.settings)
         usedSettings = settings
         let status = context.permissions.status(of: .reminders)
+        context.logger.notice("\(TodoLog.refresh(status: status), privacy: .public)")
         guard status == .granted else {
+            sawNoAccess = true
             state.accessIsDenied = status == .denied
             apply(read: [], rules: TodoRules(), now: now, phase: .needsAccess)
             return
         }
         state.accessIsDenied = false
+        if sawNoAccess {
+            // A store from before the grant can go on answering with nothing: start over with a new one.
+            sawNoAccess = false
+            await dataSource.accessWasGranted()
+            context.logger.notice("\(TodoLog.storeRenewed, privacy: .public)")
+        }
         let lists = await dataSource.lists()
         let defaultList = settings.includeUndated ? TodoListChoice.resolve(chosenID: settings.defaultListID, in: lists)?.id : nil
         let day = calendar.dateInterval(of: .day, for: now) ?? DateInterval(start: calendar.startOfDay(for: now), duration: 86_400)
@@ -350,7 +407,7 @@ public final class TodoModule: FeatureModule {
             guard generation == refreshGeneration, self.context === context else { return }
             // Nothing read is not "nothing to do": the list stays as it was, with a line saying it could not be read.
             context.logger.error("Could not read reminders: \(String(describing: error), privacy: .public)")
-            if state.phase == .loading { state.phase = .ready }
+            if state.phase == .loading { setPhase(.ready) }
             state.loadFailed = true
             appliedRefreshes += 1
             return
@@ -358,6 +415,16 @@ public final class TodoModule: FeatureModule {
         guard generation == refreshGeneration, self.context === context else { return }
         let rules = TodoRules(hiddenListIDs: Set(settings.hiddenListIDs), includeUndated: settings.includeUndated, defaultListID: defaultList)
         apply(read: incomplete + completed, rules: rules, now: now, phase: .ready)
+        let line = TodoLog.read(lists: lists.count, incomplete: incomplete.count, completed: completed.count, items: state.items.count)
+        context.logger.notice("\(line, privacy: .public)")
+    }
+
+    /// Phase changes are logged, so a tab stuck on the hint can be told from one that never read.
+    private func setPhase(_ phase: TodoState.Phase) {
+        guard state.phase != phase else { return }
+        let line = TodoLog.phase(from: state.phase, to: phase)
+        context?.logger.notice("\(line, privacy: .public)")
+        state.phase = phase
     }
 
     private func apply(read: [TodoReminder], rules: TodoRules, now: Date, phase: TodoState.Phase) {
@@ -365,7 +432,7 @@ public final class TodoModule: FeatureModule {
         self.rules = rules
         readAt = now
         if state.loadFailed { state.loadFailed = false }
-        if state.phase != phase { state.phase = phase }
+        setPhase(phase)
         if state.now != now { state.now = now }
         rebuild()
         appliedRefreshes += 1

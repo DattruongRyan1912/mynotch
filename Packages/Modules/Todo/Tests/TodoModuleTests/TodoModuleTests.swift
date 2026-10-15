@@ -227,6 +227,143 @@ import Testing
         #expect(!f.state.accessIsDenied)
     }
 
+    // MARK: Noticing the grant
+
+    @Test func aStatusThatLagsThePromptsAnswerIsWaitedForAndThenTheListLoads() async {
+        f.harness.permissions.statuses[.reminders] = .notDetermined
+        // The prompt was answered, yet the system still reports "not determined" for a moment.
+        f.harness.permissions.requestResult = .notDetermined
+        await f.start()
+
+        let asking = Task { await f.module.requestAccess() }
+        await settle { f.module.accessRechecks >= 1 }
+        #expect(f.state.phase == .needsAccess)
+        f.harness.permissions.statuses[.reminders] = .granted
+        await asking.value
+
+        #expect(f.state.phase == .ready)
+        #expect(f.itemIDs.contains("report"))
+        #expect(f.module.accessRechecks >= 1)
+        #expect(f.harness.permissions.requested == [.reminders])
+    }
+
+    @Test func anAnswerThatIsAlreadyThereIsNotWaitedFor() async {
+        f.harness.permissions.statuses[.reminders] = .notDetermined
+        await f.start()
+        await f.module.requestAccess()
+        #expect(f.module.accessRechecks == 0)
+        #expect(f.state.phase == .ready)
+    }
+
+    @Test func aRefusalIsNotWaitedForEither() async {
+        f.harness.permissions.statuses[.reminders] = .notDetermined
+        f.harness.permissions.requestResult = .denied
+        await f.start()
+        await f.module.requestAccess()
+        #expect(f.module.accessRechecks == 0)
+        #expect(f.state.phase == .needsAccess)
+        #expect(f.state.accessIsDenied)
+    }
+
+    @Test func theWaitForAStatusThatNeverChangesEndsAndTheHintStays() async {
+        f.harness.permissions.statuses[.reminders] = .notDetermined
+        f.harness.permissions.requestResult = .notDetermined
+        await f.start()
+
+        await f.module.requestAccess()
+
+        // 40 ms in 2 ms steps in this fixture; a real run waits 2 s in 100 ms steps.
+        #expect((1...25).contains(f.module.accessRechecks))
+        #expect(f.state.phase == .needsAccess)
+        #expect(TodoModule.defaultAccessRecheck.interval == .milliseconds(100))
+        #expect(TodoModule.defaultAccessRecheck.limit == .seconds(2))
+    }
+
+    @Test func theStoreIsRenewedBeforeItIsReadOnceAccessGoesFromMissingToGranted() async throws {
+        f.harness.permissions.statuses[.reminders] = .notDetermined
+        await f.start()
+        #expect(f.source.accessGrantedCount == 0)
+
+        await f.module.requestAccess()
+
+        #expect(f.source.accessGrantedCount == 1)
+        let calls = f.source.calls
+        let renewed = try #require(calls.firstIndex(of: "accessGranted"))
+        let firstRead = try #require(calls.firstIndex(of: "lists"))
+        #expect(renewed < firstRead)
+    }
+
+    @Test func aStoreThatNeverLostAccessIsLeftAlone() async {
+        await f.start()
+        await f.refreshed { f.source.emitChange() }
+        #expect(f.source.accessGrantedCount == 0)
+    }
+
+    @Test func accessLostAndGrantedAgainRenewsTheStoreAgain() async {
+        await f.start()
+        f.harness.permissions.statuses[.reminders] = .denied
+        await f.refreshed { f.module.tabAppeared() }
+        f.harness.permissions.statuses[.reminders] = .granted
+        await f.refreshed { f.module.tabAppeared() }
+        #expect(f.source.accessGrantedCount == 1)
+        #expect(f.state.phase == .ready)
+
+        f.harness.permissions.statuses[.reminders] = .denied
+        await f.refreshed { f.module.tabAppeared() }
+        f.harness.permissions.statuses[.reminders] = .granted
+        await f.refreshed { f.module.tabAppeared() }
+        #expect(f.source.accessGrantedCount == 2)
+    }
+
+    @Test func aChangeOfTheStoreAfterTheGrantLoadsTheList() async {
+        f.harness.permissions.statuses[.reminders] = .notDetermined
+        await f.start()
+        #expect(f.state.phase == .needsAccess)
+
+        // EventKit posts EKEventStoreChanged after a grant; the module reads the status again with it.
+        f.harness.permissions.statuses[.reminders] = .granted
+        await f.refreshed { f.source.emitChange() }
+
+        #expect(f.state.phase == .ready)
+        #expect(f.itemIDs.contains("report"))
+    }
+
+    @Test func theHintOnScreenWatchesForAccessAndLoadsTheListWhenItComes() async {
+        f.harness.permissions.statuses[.reminders] = .notDetermined
+        await f.start()
+        #expect(f.state.phase == .needsAccess)
+
+        // The tab is already open and nothing re-mounts it; granting elsewhere (System Settings) must still show.
+        let watching = Task { await f.module.watchAccess() }
+        await letAnythingPending()
+        #expect(f.state.phase == .needsAccess)
+        f.harness.permissions.statuses[.reminders] = .granted
+        await settle { f.state.phase == .ready }
+
+        #expect(f.state.phase == .ready)
+        #expect(f.itemIDs.contains("report"))
+        #expect(f.harness.permissions.requested.isEmpty)
+        // With the list showing there is nothing left to watch for, so the loop ends by itself: cancelling is only tidiness.
+        watching.cancel()
+        await watching.value
+    }
+
+    @Test func watchingEndsAtOnceWhenThereIsNothingToWatchFor() async {
+        await f.start()
+        await f.module.watchAccess()
+        #expect(f.state.phase == .ready)
+    }
+
+    @Test func watchingStopsWhenItsTaskIsCancelled() async {
+        f.harness.permissions.statuses[.reminders] = .notDetermined
+        await f.start()
+        let watching = Task { await f.module.watchAccess() }
+        await letAnythingPending()
+        watching.cancel()
+        await watching.value
+        #expect(f.state.phase == .needsAccess)
+    }
+
     // MARK: A failed read
 
     @Test func aFailedFirstReadSaysSoInsteadOfShowingAnEmptyList() async {

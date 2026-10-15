@@ -15,8 +15,20 @@ actor TodoService: TodoDataSource {
     static let changeQuietPeriod = Duration.seconds(1)
 
     /// Created on first use, which only happens once access is granted: a store made before that can keep showing
-    /// nothing after the user allows it.
-    private lazy var store = EKEventStore()
+    /// nothing after the user allows it (`accessWasGranted` starts over if one was).
+    private var storage: EKEventStore?
+    /// Stores given up on, kept for the life of the app: Apple warns that "Releasing the event store instance before other
+    /// EventKit objects may result in an error", and a read that was under way may still hold its reminders.
+    private var retired: [EKEventStore] = []
+    /// How many stores were made, for tests.
+    private(set) var storesMade = 0
+    private var store: EKEventStore {
+        if let storage { return storage }
+        let made = EKEventStore()
+        storage = made
+        storesMade += 1
+        return made
+    }
     private let authorizationStatus: @Sendable () -> PermissionStatus
     private let notificationCenter: NotificationCenter
     private let quietPeriod: Duration
@@ -31,6 +43,15 @@ actor TodoService: TodoDataSource {
         self.authorizationStatus = authorizationStatus
         self.notificationCenter = notificationCenter
         quietPeriod = changeQuietPeriod
+    }
+
+    /// Resets the store as Apple documents, and takes a new one on the next read.
+    func accessWasGranted() async {
+        guard let old = storage else { return }
+        old.reset()
+        retired.append(old)
+        storage = nil
+        Log.logger(category: "todo").notice("\(TodoLog.storeRenewed, privacy: .public)")
     }
 
     func lists() async -> [TodoListInfo] {

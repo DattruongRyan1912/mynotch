@@ -6,6 +6,9 @@ import MyNotchTestSupport
 /// A module wired to fakes: no EventKit, no real clock, no notification of the system. "Now" is Wednesday 14 October 2026,
 /// 09:00, in Ho Chi Minh City, and Reminders access is granted unless a test takes it away.
 struct ModuleFixture {
+    /// The wait for a status that lags the prompt, shrunk so a test that never sees it change takes 40 ms, not 2 s.
+    static let recheck = (interval: Duration.milliseconds(2), limit: Duration.milliseconds(40))
+
     let calendar = fixedCalendar()
     let clock: TestClock
     let source: FakeTodoDataSource
@@ -22,7 +25,7 @@ struct ModuleFixture {
         source = FakeTodoDataSource(reminders: reminders, now: clock.now)
         module = TodoModule(
             dataSource: source, now: { clock.now }, calendar: calendar, dayChangeCenter: dayCenter, wakeCenter: wakeCenter,
-            activeCenter: activeCenter
+            activeCenter: activeCenter, accessRecheck: Self.recheck, accessWatchInterval: .milliseconds(5)
         )
         harness = RegistryHarness([module])
         harness.permissions.statuses[.reminders] = .granted

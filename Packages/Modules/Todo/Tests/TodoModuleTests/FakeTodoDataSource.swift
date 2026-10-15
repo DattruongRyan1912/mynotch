@@ -21,6 +21,8 @@ nonisolated final class FakeTodoDataSource: TodoDataSource {
         var creationFailure: (any Error)?
         var createGate: (@Sendable () async -> Void)?
         var fetchCount = 0
+        /// What was asked of the store, in order: "accessGranted", "lists", "incomplete", "completed".
+        var calls: [String] = []
         var fetchFailure: (any Error)?
         /// A completed repeating reminder's id and the id of the occurrence that took its place.
         var successors: [String: String] = [:]
@@ -94,14 +96,26 @@ nonisolated final class FakeTodoDataSource: TodoDataSource {
         for observer in observers { observer.yield() }
     }
 
+    /// The order of what was asked of the store, so a test can say that the store was renewed before it was read.
+    var calls: [String] { state.withLock { $0.calls } }
+    var accessGrantedCount: Int { calls.count { $0 == "accessGranted" } }
+
+    func accessWasGranted() async {
+        state.withLock { $0.calls.append("accessGranted") }
+    }
+
     func lists() async -> [TodoListInfo] {
-        state.withLock { $0.lists }
+        state.withLock {
+            $0.calls.append("lists")
+            return $0.lists
+        }
     }
 
     /// Like EventKit's predicate: due on or before `end`; reminders with no date only come from `undatedIn`.
     func incomplete(dueBy end: Date, undatedIn listID: String?) async throws -> [TodoReminder] {
         try state.withLock { state in
             state.fetchCount += 1
+            state.calls.append("incomplete")
             state.undatedLists.append(listID)
             if let failure = state.fetchFailure { throw failure }
             return state.reminders.filter { reminder in
@@ -114,6 +128,7 @@ nonisolated final class FakeTodoDataSource: TodoDataSource {
 
     func completed(from start: Date, to end: Date) async throws -> [TodoReminder] {
         try state.withLock { state in
+            state.calls.append("completed")
             if let failure = state.fetchFailure { throw failure }
             return state.reminders.filter { reminder in
                 reminder.isCompleted && (reminder.completionDate.map { $0 >= start && $0 < end } ?? false)

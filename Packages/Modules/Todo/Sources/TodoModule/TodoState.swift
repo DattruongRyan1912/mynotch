@@ -4,7 +4,7 @@ import Observation
 /// What the tab reads. The module fills it on every refresh.
 @Observable
 final class TodoState {
-    enum Phase: Equatable {
+    nonisolated enum Phase: Equatable {
         /// Nothing read yet.
         case loading
         case ready

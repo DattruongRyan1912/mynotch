@@ -38,6 +38,11 @@ nonisolated protocol TodoDataSource: Sendable {
     func create(_ new: NewTodo) async throws
     /// Signals that reminders changed, with bursts coalesced. Every access starts a new stream.
     var changes: AsyncStream<Void> { get }
+    /// Called when access goes from missing to granted, before the next read. A store that existed before the grant can keep
+    /// answering with nothing, so the source starts over with a new one. Apple: "If you request reminders before prompting
+    /// the person for access with this method, you'll need to reset the event store with the reset() method to receive data
+    /// after they grant access."
+    func accessWasGranted() async
 }
 
 /// Which list a new reminder goes to, and where the undated ones are read from.

@@ -12,13 +12,28 @@ struct TodoSettingsView: View {
     let accessAnswered: () -> Void
 
     @State private var lists: [TodoListInfo]?
+    /// Reminders access as the rows last read it. Nothing tells a view when TCC changes, so it is read again every second
+    /// while the rows are on screen, and the rows follow it.
+    @State private var status: PermissionStatus
     /// Bumped when access may have changed (after the prompt, or on coming back from System Settings), so the rows that
     /// depend on it are checked and the lists read again.
     @State private var accessRevision = 0
 
+    init(
+        settings: ModuleSettings, keys: TodoSettingsKeys, permissions: any PermissionCenter,
+        loadLists: @escaping () async -> [TodoListInfo], accessAnswered: @escaping () -> Void
+    ) {
+        self.settings = settings
+        self.keys = keys
+        self.permissions = permissions
+        self.loadLists = loadLists
+        self.accessAnswered = accessAnswered
+        _status = State(initialValue: permissions.status(of: .reminders))
+    }
+
     var body: some View {
         Group {
-            if permissions.status(of: .reminders) != .granted {
+            if status != .granted {
                 LabeledContent {
                     Button("Cho phép…") { Task { await requestAccess() } }
                 } label: {
@@ -39,6 +54,15 @@ struct TodoSettingsView: View {
             listRows
         }
         .task(id: accessRevision) { lists = await loadLists() }
+        .task {
+            while (try? await Task.sleep(for: .seconds(1))) != nil {
+                let now = permissions.status(of: .reminders)
+                if now != status {
+                    status = now
+                    accessRevision += 1
+                }
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             accessRevision += 1
         }
@@ -46,6 +70,7 @@ struct TodoSettingsView: View {
 
     private func requestAccess() async {
         await RemindersAccess(permissions: permissions).request(openSettingsIfDenied: true)
+        status = permissions.status(of: .reminders)
         accessRevision += 1
         accessAnswered()
     }
@@ -66,7 +91,7 @@ struct TodoSettingsView: View {
             Text("Danh sách cho việc mới")
             Text("Nơi lưu việc thêm từ tab, và nơi lấy việc không có ngày.")
         }
-        .disabled(permissions.status(of: .reminders) != .granted)
+        .disabled(status != .granted)
     }
 
     private func defaultList(among writable: [TodoListInfo]) -> Binding<String> {
@@ -89,7 +114,7 @@ struct TodoSettingsView: View {
             Text("Danh sách hiển thị")
             Text("Bỏ chọn danh sách để ẩn việc của nó khỏi tab. Mặc định là tất cả.")
         }
-        if permissions.status(of: .reminders) != .granted {
+        if status != .granted {
             Text("Cần quyền truy cập Lời nhắc để chọn danh sách.")
                 .font(.caption)
                 .foregroundStyle(.secondary)

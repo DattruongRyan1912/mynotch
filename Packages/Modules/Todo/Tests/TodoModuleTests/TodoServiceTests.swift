@@ -65,6 +65,20 @@ import Testing
         #expect(signals.value == before + 1)
     }
 
+    @Test func renewingTheStoreBeforeAnyUseMakesNoStore() async {
+        // Nothing to renew, and no EventKit store is made just to be thrown away.
+        let service = TodoService(authorizationStatus: { .granted })
+        await service.accessWasGranted()
+        #expect(await service.storesMade == 0)
+    }
+
+    @Test func aServiceWithoutAccessMakesNoStoreAtAll() async throws {
+        _ = await denied.lists()
+        _ = try await denied.incomplete(dueBy: .now, undatedIn: nil)
+        await denied.accessWasGranted()
+        #expect(await denied.storesMade == 0)
+    }
+
     @Test func theDefaultQuietPeriodIsOneSecond() {
         #expect(TodoService.changeQuietPeriod == .seconds(1))
     }
