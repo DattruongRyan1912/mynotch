@@ -6,6 +6,8 @@
 
 Điền **Đạt / Không đạt / Không kiểm được (lý do)** vào cột Kết quả.
 
+Checklist này chỉ có phần nền tảng. Bản gộp theo module (gồm các mục mới của 2026-10-15: Notch và giao diện, Việc cần làm, Chia cửa sổ, và mục mới của Clipboard, Media, Dịch…) là `manual-test-checklist-all.html`. Hai mục 9 và 28 dưới đây đã được đồng bộ với mã hiện tại (tên chế độ màn hình và dáng của tab Battery).
+
 Trước khi kiểm:
 - Thoát OneNotch và các app notch khác (hai app cùng chiếm vùng notch).
 - Chỉ chạy **một** bản MyNotch. Bản Debug (DerivedData) và bản Release (`/Applications`) nằm ở hai đường dẫn khác nhau; mở cả hai sẽ thành hai notch chồng nhau. Thoát bản cũ (menu bar → Quit MyNotch) trước khi mở bản kia.
@@ -27,7 +29,7 @@ Trước khi kiểm:
 |---|---|---|---|
 | 7 | Notch thật trên MacBook: notch đen trùng khít notch phần cứng, không lệch | | |
 | 8 | Màn ngoài: notch ảo ở giữa cạnh trên. Interface → Notch ảo: đổi Chiều rộng thì cập nhật ngay; tắt "Cao bằng menu bar" rồi kéo Chiều cao thì cập nhật ngay (slider bị khoá khi toggle đang bật) | | |
-| 9 | Interface → Màn hình: "Tất cả" → notch ở mọi màn; "Màn hình có con trỏ" → notch theo màn có con trỏ; "Màn hình chính" → chỉ màn được đặt làm màn chính trong System Settings → Displays (nếu màn 4K là màn chính thì notch MacBook biến mất — đúng thiết kế) | | |
+| 9 | Interface → Màn hình: "Tất cả" → notch ở mọi màn; "Màn hình đang dùng" (trước tên "Màn hình có con trỏ") → notch theo màn bạn đang làm việc (chuyển sau khi con trỏ ở lại màn khác khoảng 0,3 giây); "Màn hình chính" → chỉ màn được đặt làm màn chính trong System Settings → Displays (nếu màn 4K là màn chính thì notch MacBook biến mất — đúng thiết kế) | | |
 | 10 | Rê chuột vào notch ~150ms thì mở; rời ra ~300ms thì đóng. Đổi "Trễ khi mở/đóng" trong Interface thì độ trễ đổi theo; đổi Chiều rộng khi mở rộng thì notch mở rộng theo | | |
 | 11 | Rê chuột ở mép dưới màn 4K (đặt phía trên MacBook) **không** làm notch MacBook mở | | |
 | 12 | Click vào notch thì mở ngay; ⌃⌥N mở/đóng notch trên màn đang có con trỏ | | |
@@ -56,7 +58,7 @@ Trước khi kiểm:
 
 | # | Kịch bản | Kết quả | Ghi chú |
 |---|---|---|---|
-| 28 | Tab Battery hiển thị %, trạng thái, nguồn điện; khi đã cắm sạc mà máy đang giữ giới hạn sạc (ví dụ 80%) thì hiện "Đã cắm sạc · không sạc" | | |
+| 28 | Tab Battery (thiết kế mới) hiển thị %, trạng thái, nguồn điện; khi đã cắm sạc mà máy đang giữ giới hạn sạc (ví dụ 80%) thì cột thời gian hiện "Không sạc thêm" kèm nhãn "Đã cắm sạc" (không còn "Đã cắm sạc · không sạc") | | |
 | 29 | Cắm sạc: activity tia sét + % hiện khoảng 4 giây; rút sạc trong 4 giây thì activity tắt ngay | | |
 | 30 | Settings → Battery → tắt "Thông báo khi cắm sạc": cắm sạc thì không còn activity tia sét | | |
 | 31 | Pin yếu (rút sạc, pin ≤ 50%): Settings → Battery tăng ngưỡng lên trên % hiện tại → activity pin yếu (đỏ) hiện; hạ ngưỡng xuống dưới % hiện tại → tắt ngay. Các dòng cài đặt không bị lồng hộp trong hộp | | |
