@@ -64,6 +64,7 @@ struct CalendarTabView: View {
 struct UpcomingCard: View {
     let state: CalendarState
     let actions: CalendarActions
+    @Environment(\.notchAccent) private var accent
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -93,7 +94,7 @@ struct UpcomingCard: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(timeLine(of: event))
                     .font(.system(size: 11, weight: .medium).monospacedDigit())
-                    .foregroundStyle(NotchTokens.accent)
+                    .foregroundStyle(accent)
                     .lineLimit(1)
                 Text(event.title.isEmpty ? "(Không có tiêu đề)" : event.title)
                     .font(.system(size: 13, weight: .semibold))

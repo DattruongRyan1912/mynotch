@@ -37,6 +37,7 @@ struct QuickAddView: View {
 
     @FocusState private var isFocused: Bool
     @Environment(\.notch) private var notch
+    @Environment(\.notchAccent) private var accent
     /// The notch's panel and whether it has the keyboard now. It can be shown without it (opened by hovering).
     @State private var window: NSWindow?
     @State private var panelIsKey = false
@@ -113,7 +114,7 @@ struct QuickAddView: View {
             .textFieldStyle(.plain)
             .font(.system(size: 13))
             .foregroundStyle(NotchTokens.primaryText)
-            .tint(NotchTokens.accent)
+            .tint(accent)
             .focused($isFocused)
             .onSubmit(actions.saveQuickAdd)
             .onExitCommand(perform: actions.cancelQuickAdd)
@@ -143,7 +144,7 @@ struct QuickAddView: View {
                     .lineLimit(1)
                 Text(AgendaFormat.when(of: draft, now: now, calendar: calendar))
                     .font(.system(size: 11, weight: .medium).monospacedDigit())
-                    .foregroundStyle(NotchTokens.accent)
+                    .foregroundStyle(accent)
                     .lineLimit(1)
                 calendarLine
                 if let note = draft.note {

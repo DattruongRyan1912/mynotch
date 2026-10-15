@@ -33,6 +33,19 @@ struct MeetingCardActions: View {
         return shown
     }
 
+    /// The colour of the join button's label: white, as it always was, unless the accent is so light that white could hardly be
+    /// read on it (yellow, the oranges and the greens), where black is used.
+    static func labelColour(on accent: Color) -> Color {
+        let rgb = NSColor(accent).usingColorSpace(.sRGB) ?? .black
+        func linear(_ component: CGFloat) -> Double {
+            let value = Double(component)
+            return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        let luminance = 0.2126 * linear(rgb.redComponent) + 0.7152 * linear(rgb.greenComponent) + 0.0722 * linear(rgb.blueComponent)
+        let whiteContrast = 1.05 / (luminance + 0.05)
+        return whiteContrast < 2.5 ? Color.black.opacity(0.85) : NotchTokens.primaryText
+    }
+
     /// What VoiceOver reads: the title alone would not say which meeting a button is for.
     static func accessibilityLabel(_ action: MeetingCardAction, for event: AgendaEvent) -> String {
         "\(action.title) cuộc họp \(event.title.isEmpty ? "(Không có tiêu đề)" : event.title)"
@@ -66,16 +79,17 @@ private struct JoinButton: View {
     let action: () -> Void
     let event: AgendaEvent
     let now: Date
+    @Environment(\.notchAccent) private var accent
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
             Label(MeetingCardAction.join.title, systemImage: "video.fill")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(NotchTokens.primaryText)
+                .foregroundStyle(MeetingCardActions.labelColour(on: accent))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(NotchTokens.accent, in: Capsule())
+                .background(accent, in: Capsule())
                 .brightness(isHovering ? 0.12 : 0)
                 .contentShape(Capsule())
         }
