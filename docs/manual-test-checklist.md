@@ -6,7 +6,7 @@
 
 Điền **Đạt / Không đạt / Không kiểm được (lý do)** vào cột Kết quả.
 
-Checklist này chỉ có phần nền tảng. Bản gộp theo module (gồm các mục mới của 2026-10-15: Notch và giao diện, Việc cần làm, Chia cửa sổ, và mục mới của Clipboard, Media, Dịch…) là `manual-test-checklist-all.html`. Hai mục 9 và 28 dưới đây đã được đồng bộ với mã hiện tại (tên chế độ màn hình và dáng của tab Battery).
+Checklist này chỉ có phần nền tảng. Bản gộp theo module (gồm các mục mới của 2026-10-15: Notch và giao diện, Việc cần làm, Chia cửa sổ, và mục mới của Clipboard, Media, Dịch…) là `manual-test-checklist-all.html`. Hai mục 9 và 28 dưới đây đã được đồng bộ với mã hiện tại (tên chế độ màn hình và dáng của tab Battery). Tên các trang Settings là tên ở thanh bên của app: Quyền, Chung, Giao diện, Trang trên notch, nhóm Modules và Giới thiệu (tiêu đề đầu trang vẫn còn tiếng Anh: General, Interface, About).
 
 Trước khi kiểm:
 - Thoát OneNotch và các app notch khác (hai app cùng chiếm vùng notch).
@@ -19,21 +19,21 @@ Trước khi kiểm:
 | 1 | Chạy app: không có icon Dock; có icon menu bar; menu có Open Settings…, Hide Notch, Pause All Modules, Quit MyNotch | | |
 | 2 | Menu bar → Hide Notch: notch biến mất, mục đổi thành Show Notch; bấm lại thì hiện. Pause All Modules: có dấu tích, tab Battery biến mất; bấm lại thì bỏ tích và Battery chạy lại | | |
 | 3 | Khi cửa sổ Settings đang focus: ⌘W đóng cửa sổ; mở lại bằng menu bar → Open Settings…; ⌘, (khi MyNotch đang là app active) mở Settings; ⌘Q thoát app | | |
-| 4 | Settings → General → Hiện icon trên menu bar: tắt thì icon biến mất; mở lại MyNotch từ Finder (cùng bản đang chạy) thì Settings hiện; bật lại thì icon quay về | | |
+| 4 | Settings → Chung → Hiện icon trên menu bar: tắt thì icon biến mất; mở lại MyNotch từ Finder (cùng bản đang chạy) thì Settings hiện; bật lại thì icon quay về | | |
 | 5 | Khởi động cùng máy: dùng bản **Release cài vào /Applications** theo README (bản Debug đổi chữ ký mỗi lần build). Bật → app có trong System Settings → General → Login Items và tự chạy sau khi đăng xuất/đăng nhập lại; nếu macOS cần duyệt thì Settings hiện nút "Mở Login Items" | | |
-| 6 | Thoát app rồi mở lại: mọi cài đặt đã đổi (Interface, Battery, phím tắt) vẫn giữ nguyên | | |
+| 6 | Thoát app rồi mở lại: mọi cài đặt đã đổi (Giao diện, Battery, phím tắt) vẫn giữ nguyên | | |
 
 ## Notch và chuột
 
 | # | Kịch bản | Kết quả | Ghi chú |
 |---|---|---|---|
 | 7 | Notch thật trên MacBook: notch đen trùng khít notch phần cứng, không lệch | | |
-| 8 | Màn ngoài: notch ảo ở giữa cạnh trên. Interface → Notch ảo: đổi Chiều rộng thì cập nhật ngay; tắt "Cao bằng menu bar" rồi kéo Chiều cao thì cập nhật ngay (slider bị khoá khi toggle đang bật) | | |
-| 9 | Interface → Màn hình: "Tất cả" → notch ở mọi màn; "Màn hình đang dùng" (trước tên "Màn hình có con trỏ") → notch theo màn bạn đang làm việc (chuyển sau khi con trỏ ở lại màn khác khoảng 0,3 giây); "Màn hình chính" → chỉ màn được đặt làm màn chính trong System Settings → Displays (nếu màn 4K là màn chính thì notch MacBook biến mất — đúng thiết kế) | | |
-| 10 | Rê chuột vào notch ~150ms thì mở; rời ra ~300ms thì đóng. Đổi "Trễ khi mở/đóng" trong Interface thì độ trễ đổi theo; đổi Chiều rộng khi mở rộng thì notch mở rộng theo | | |
+| 8 | Màn ngoài: notch ảo ở giữa cạnh trên. Giao diện → Notch ảo: đổi Chiều rộng thì cập nhật ngay; tắt "Cao bằng menu bar" rồi kéo Chiều cao thì cập nhật ngay (slider bị khoá khi toggle đang bật) | | |
+| 9 | Giao diện → Màn hình: "Tất cả" → notch ở mọi màn; "Màn hình đang dùng" (trước tên "Màn hình có con trỏ") → notch theo màn bạn đang làm việc (chuyển sau khi con trỏ ở lại màn khác khoảng 0,3 giây); "Màn hình chính" → chỉ màn được đặt làm màn chính trong System Settings → Displays (nếu màn 4K là màn chính thì notch MacBook biến mất — đúng thiết kế) | | |
+| 10 | Rê chuột vào notch ~150ms thì mở; rời ra ~300ms thì đóng. Đổi "Trễ khi mở/đóng" trong Giao diện thì độ trễ đổi theo; đổi Chiều rộng khi mở rộng thì notch mở rộng theo | | |
 | 11 | Rê chuột ở mép dưới màn 4K (đặt phía trên MacBook) **không** làm notch MacBook mở | | |
 | 12 | Click vào notch thì mở ngay; ⌃⌥N mở/đóng notch trên màn đang có con trỏ | | |
-| 13 | Settings → General → đổi phím tắt "Mở/đóng notch" bằng ô ghi phím: phím mới hoạt động, ⌃⌥N cũ thôi hoạt động | | |
+| 13 | Settings → Chung → đổi phím tắt "Mở/đóng notch" bằng ô ghi phím: phím mới hoạt động, ⌃⌥N cũ thôi hoạt động | | |
 | 14 | Khi notch đóng: click menu bar và cửa sổ ngay dưới vùng notch (ngoài vùng đệm 8pt quanh notch) vẫn hoạt động | | |
 | 15 | Từ notch đang mở, rê chuột thẳng xuống vùng trong suốt bên dưới: notch đóng, click ở đó tới được cửa sổ bên dưới | | |
 | 16 | Cửa sổ phóng to (zoom/Fill) trên màn MacBook: thanh tab/tiêu đề ngay dưới notch vẫn click được, trừ vùng đệm 8pt quanh notch (chấp nhận) | | |
@@ -63,5 +63,5 @@ Trước khi kiểm:
 | 30 | Settings → Battery → tắt "Thông báo khi cắm sạc": cắm sạc thì không còn activity tia sét | | |
 | 31 | Pin yếu (rút sạc, pin ≤ 50%): Settings → Battery tăng ngưỡng lên trên % hiện tại → activity pin yếu (đỏ) hiện; hạ ngưỡng xuống dưới % hiện tại → tắt ngay. Các dòng cài đặt không bị lồng hộp trong hộp | | |
 | 32 | Settings → Modules → Battery: tắt thì tab và activity biến mất; bật lại thì tab quay lại (activity sạc chỉ hiện ở lần cắm sạc tiếp theo; activity pin yếu chỉ hiện nếu pin vẫn dưới ngưỡng) | | |
-| 33 | Trang About: Phiên bản `0.1.0 (1)`, Bundle ID `io.lucasvu.mynotch`, mục Thư viện bên thứ ba có KeyboardShortcuts (MIT, link mở được) | | |
+| 33 | Trang Giới thiệu: Phiên bản `0.1.0 (1)`, Bundle ID `io.lucasvu.mynotch`, mục Thư viện bên thứ ba có KeyboardShortcuts (MIT, link mở được) | | |
 | 34 | Activity Monitor: CPU của MyNotch khi rê chuột liên tục 30 giây — đạt nếu trung bình dưới ~5% (ghi con số) | | |

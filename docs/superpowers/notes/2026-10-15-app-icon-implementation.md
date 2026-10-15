@@ -54,4 +54,4 @@ Màu nền của tài liệu (`fill`) là than chì `srgb:0.094,0.098,0.114`.
 
 ## 6. Cần kiểm thử tay
 
-Xem [Icon ứng dụng trong checklist gộp](../../manual-test-checklist-all.html#app-icon): Finder (cỡ khác nhau), Settings và Login Items, About, dạng tối, nhuộm màu và trong suốt.
+Xem [Icon ứng dụng trong checklist gộp](../../manual-test-checklist-all.html#app-icon): Finder (cỡ khác nhau), Settings và Login Items, trang Giới thiệu, dạng tối, nhuộm màu và trong suốt.
