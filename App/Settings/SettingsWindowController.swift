@@ -13,6 +13,9 @@ final class SettingsWindowController: NSObject {
     private let navigation = SettingsNavigation()
     private var window: NSWindow?
 
+    /// Whether the window can be seen (not closed, minimized or covered). Observable.
+    var isVisible: Bool { navigation.isWindowVisible }
+
     init(
         settings: SettingsStore, registry: ModuleRegistry, permissions: any PermissionCenter,
         overview: PermissionOverview, hotkeys: HotkeyRegistry
@@ -48,7 +51,12 @@ final class SettingsWindowController: NSObject {
         NSApp.activate()
         if window?.isMiniaturized == true { window?.deminiaturize(nil) }
         window?.makeKeyAndOrderFront(nil)
-        overview.setWindowVisible(true)
+        setWindowVisible(true)
+    }
+
+    private func setWindowVisible(_ visible: Bool) {
+        navigation.isWindowVisible = visible
+        overview.setWindowVisible(visible)
     }
 }
 
@@ -60,17 +68,17 @@ extension SettingsWindowController: NSWindowDelegate {
 
     /// The Permissions page polls only while the window can be seen: closed, minimized and covered all stop it.
     func windowDidChangeOcclusionState(_ notification: Notification) {
-        overview.setWindowVisible(window?.occlusionState.contains(.visible) == true)
+        setWindowVisible(window?.occlusionState.contains(.visible) == true)
     }
 
     func windowDidMiniaturize(_ notification: Notification) {
-        overview.setWindowVisible(false)
+        setWindowVisible(false)
     }
 
     /// Minimizing keeps the window, and so the Dock icon that brings it back; only closing returns to a menu bar app.
     /// Modules open their own titled windows too (language installer, markup editor); stay a regular app while any is visible.
     func windowWillClose(_ notification: Notification) {
-        overview.setWindowVisible(false)
+        setWindowVisible(false)
         let closing = notification.object as? NSWindow
         let otherTitledWindowVisible = NSApp.windows.contains {
             $0 !== closing && ($0.isVisible || $0.isMiniaturized) && $0.styleMask.contains(.titled)

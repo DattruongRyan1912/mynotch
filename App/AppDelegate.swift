@@ -33,6 +33,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var debugActivities: DebugActivityTrigger?
     #endif
     private var permissionPolling: Task<Void, Never>?
+    /// Keeps the optional permissions' statuses current while the Settings window or the notch is open.
+    private lazy var permissionRefresh = PermissionRefreshLoop(
+        scheduler: scheduler,
+        shouldRun: { [weak self] in self?.permissionRefreshWanted ?? false },
+        refresh: { [weak self] in self?.refreshPermissions() }
+    )
+    private let systemSettingsReturn = SystemSettingsReturn(ownBundleID: Bundle.main.bundleIdentifier ?? "io.lucasvu.mynotch")
     private var repliedToTerminate = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -61,8 +68,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         Task { await registry.bootstrap(); services.finishStartup() }
         observePermissionPolling()
+        observePermissionFreshness()
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshPermissions() }
+        }
+        // Permissions are granted in System Settings; coming back from it is the moment the statuses are most likely to differ.
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            let bundleID = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier
+            MainActor.assumeIsolated {
+                if self?.systemSettingsReturn.activated(bundleID) == true { self?.refreshPermissions() }
+            }
         }
     }
 
@@ -118,6 +133,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for await needed in Observations({ registry.needsPermissionPolling }) {
                 guard let self else { return }
                 setPermissionPolling(needed)
+            }
+        }
+    }
+
+    private var permissionRefreshWanted: Bool {
+        PermissionRefreshLoop.isWanted(
+            missingOptional: permissionOverview.missingOptionalCount,
+            settingsVisible: settingsWindow.isVisible, notchOpen: screens.isAnyNotchExpanded
+        )
+    }
+
+    /// Nothing waits on an optional permission, so `observePermissionPolling` never runs for one: the loop covers it while
+    /// the Settings window or the notch shows the status.
+    private func observePermissionFreshness() {
+        Task { [weak self] in
+            for await _ in Observations({ [weak self] in self?.permissionRefreshWanted ?? false }) {
+                self?.permissionRefresh.update()
             }
         }
     }

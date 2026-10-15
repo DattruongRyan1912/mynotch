@@ -1,5 +1,6 @@
 import AppKit
 import MyNotchCore
+import Observation
 
 /// Creates one notch per screen, keeps them in sync with displays, settings and fullscreen state.
 public final class ScreenManager {
@@ -29,6 +30,16 @@ public final class ScreenManager {
         },
         onActivate: { [weak self] display in self?.activeDisplay.activated(on: display) }
     )
+
+    /// Bumped when a display gains or loses its notch, so a reader of `isAnyNotchExpanded` also hears of a notch it has
+    /// not looked at yet.
+    private let controllerRevision = ControllerRevision()
+
+    /// Whether any display's notch is open (a tab or a toast shows). Observable, for what only matters while someone can see the notch.
+    public var isAnyNotchExpanded: Bool {
+        _ = controllerRevision.count
+        return controllers.values.contains { $0.model.state.isExpanded }
+    }
 
     /// User toggle from the menu bar ("Show/Hide Notch").
     public var isHiddenByUser = false {
@@ -91,6 +102,7 @@ public final class ScreenManager {
             if let controller = controllers[uuid] {
                 controller.update(displayID: displayID, screen: descriptor, config: config)
             } else {
+                controllerRevision.count += 1
                 controllers[uuid] = NotchWindowController(
                     displayID: displayID, screen: descriptor, config: config, scheduler: scheduler,
                     registry: registry, activities: activities, delays: { [settings] in Self.delays(settings) },
@@ -107,6 +119,7 @@ public final class ScreenManager {
         for (uuid, controller) in controllers where !seen.contains(uuid) {
             controller.close()
             controllers[uuid] = nil
+            controllerRevision.count += 1
         }
         activeDisplay.displaysChanged(screenFrames.map(\.displayID), pointerOn: DisplaySelection.display(at: NSEvent.mouseLocation, in: screenFrames))
         applyVisibility()
@@ -164,4 +177,9 @@ public final class ScreenManager {
     private static func delays(_ settings: SettingsStore) -> (open: Duration, close: Duration) {
         (.milliseconds(settings.value(InterfaceSettings.openDelayMs)), .milliseconds(settings.value(InterfaceSettings.closeDelayMs)))
     }
+}
+
+@Observable
+private final class ControllerRevision {
+    var count = 0
 }

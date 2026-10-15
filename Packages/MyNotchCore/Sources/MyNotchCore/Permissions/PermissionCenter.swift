@@ -86,6 +86,10 @@ public final class PermissionOverview {
     /// The same for required and optional ones: what "Cấp lần lượt" walks through.
     public var missingCount: Int { requirements.count { status(of: $0.permission).isMissing } }
 
+    /// Optional permissions of enabled modules that are denied or never asked. `PermissionRefreshLoop` keeps them current
+    /// while someone is looking, since no module waits on an optional permission and nothing else polls for it.
+    public var missingOptionalCount: Int { optionalRows.count { status(of: $0.permission).isMissing } }
+
     /// The status-bar menu entry, nil when nothing required is missing.
     public var nudgeTitle: String? {
         let count = missingRequiredCount

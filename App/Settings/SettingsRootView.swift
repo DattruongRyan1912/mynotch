@@ -11,6 +11,8 @@ enum SettingsPage: Hashable {
 @Observable
 final class SettingsNavigation {
     var selection: SettingsPage? = .general
+    /// Whether the window can be seen, set by `SettingsWindowController` for whatever only matters while it is.
+    var isWindowVisible = false
 }
 
 struct SettingsRootView: View {
