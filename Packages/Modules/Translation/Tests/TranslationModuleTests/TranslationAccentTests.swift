@@ -143,7 +143,7 @@ private let probeGreen = Color(.sRGB, red: 0, green: 1, blue: 0)
     // MARK: the label on an accent
 
     @Test func aLabelStaysReadableOnALightAccent() {
-        let white = NotchTokens.primaryText
+        let white = Color.white
         // The palette colours as macOS shows them on a dark surface (blue, purple, pink, red) keep the white they always had.
         for accent in [NotchAccent.Palette.blue, .purple, .pink, .red].map(\.rgb.color) {
             #expect(AccentLabel.colour(on: accent) == white)

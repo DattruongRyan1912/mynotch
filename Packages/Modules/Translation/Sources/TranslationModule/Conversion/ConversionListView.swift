@@ -111,6 +111,8 @@ struct ConversionListView: View {
             Image(systemName: copied == id ? "checkmark" : "doc.on.doc")
                 .font(.system(size: 11))
                 .frame(width: 22, height: 20)
+                // The chip is black on any look, so its icon is light on it.
+                .notchOnDarkBackground()
                 .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
         }

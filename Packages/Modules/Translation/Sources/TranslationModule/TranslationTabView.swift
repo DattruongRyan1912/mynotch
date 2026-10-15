@@ -20,6 +20,7 @@ struct TranslationTabView: View {
 
     @Environment(\.notch) private var notch
     @Environment(\.notchAccent) private var accent
+    @Environment(\.notchSurface) private var surface
     @State private var copied = false
     /// After a language pick the notch stays pinned until the pointer is back in it or `menuHold` passes, so the
     /// new translation can be seen even with the pointer left where the menu was.
@@ -38,8 +39,8 @@ struct TranslationTabView: View {
         }
         .font(.system(size: 13))
         .foregroundStyle(NotchTokens.primaryText)
-        // The notch is always black, whatever the system appearance.
-        .environment(\.colorScheme, .dark)
+        // The classic notch is black whatever the system appearance; on Liquid Glass the tab follows the glass.
+        .notchColorScheme()
         .onHover { inside in
             if inside { releaseHold() }
         }
@@ -126,7 +127,8 @@ struct TranslationTabView: View {
                 text: state.input,
                 focusRequest: state.focusRequest,
                 onEdit: translator.edit,
-                onSubmit: translator.submit
+                onSubmit: translator.submit,
+                onGlass: surface.isLiquidGlass
             )
             if state.input.isEmpty {
                 Text(state.isReadingSelection ? "Đang đọc đoạn chữ…" : "Nhập văn bản, Return để dịch")
@@ -141,7 +143,7 @@ struct TranslationTabView: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .background(NotchTokens.fill(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var outputBox: some View {
@@ -181,11 +183,11 @@ struct TranslationTabView: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+        .background(NotchTokens.fill(0.05), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var divider: some View {
-        Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+        Rectangle().fill(NotchTokens.fill(0.12)).frame(height: 1)
     }
 
     @ViewBuilder private var translationContent: some View {
@@ -300,6 +302,8 @@ struct TranslationTabView: View {
     private func iconLabel(_ systemImage: String) -> some View {
         Image(systemName: systemImage)
             .frame(width: 24, height: 22)
+            // The chip is black on any look, so its icon is light on it.
+            .notchOnDarkBackground()
             .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
     }
@@ -332,7 +336,7 @@ struct TranslationTabView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(Color.white.opacity(0.1), in: Capsule())
+            .background(NotchTokens.fill(0.1), in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

@@ -10,6 +10,28 @@ struct TranslationInputField: NSViewRepresentable {
     let onEdit: (String) -> Void
     /// Return, with the text the field shows.
     let onSubmit: (String) -> Void
+    /// Whether the notch is Liquid Glass, which sets how the field is drawn (see `Look`).
+    let onGlass: Bool
+
+    /// How AppKit draws the field. The classic notch is black whatever the system's appearance is, so there the text and the caret
+    /// are white and the scroller is dark; on Liquid Glass the field follows the system's appearance and its label colour, so the
+    /// text is dark on light glass and light on dark glass, like the text tokens.
+    struct Look: Equatable {
+        let textColor: NSColor
+        /// The scroller's appearance; nil takes the window's.
+        let appearance: NSAppearance.Name?
+
+        init(onGlass: Bool) {
+            textColor = onGlass ? .labelColor : .white
+            appearance = onGlass ? nil : .darkAqua
+        }
+
+        @MainActor func apply(to textView: NSTextView, in scrollView: NSScrollView) {
+            textView.textColor = textColor
+            textView.insertionPointColor = textColor
+            scrollView.appearance = appearance.flatMap(NSAppearance.init(named:))
+        }
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -29,8 +51,6 @@ struct TranslationInputField: NSViewRepresentable {
         textView.importsGraphics = false
         textView.allowsUndo = true
         textView.font = .systemFont(ofSize: 13)
-        textView.textColor = .white
-        textView.insertionPointColor = .white
         textView.setAccessibilityLabel("Văn bản cần dịch")
 
         let scrollView = NSScrollView()
@@ -39,7 +59,9 @@ struct TranslationInputField: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = false
-        scrollView.appearance = NSAppearance(named: .darkAqua)
+        let look = Look(onGlass: onGlass)
+        look.apply(to: textView, in: scrollView)
+        context.coordinator.look = look
         return scrollView
     }
 
@@ -47,6 +69,12 @@ struct TranslationInputField: NSViewRepresentable {
         let coordinator = context.coordinator
         coordinator.field = self
         guard let textView = scrollView.documentView as? InputTextView else { return }
+        // Only when the look changed: setting the colour again would touch text an input method is composing.
+        let look = Look(onGlass: onGlass)
+        if coordinator.look != look {
+            look.apply(to: textView, in: scrollView)
+            coordinator.look = look
+        }
         // Typing already updated the view; only text set elsewhere (selection, Services, swap) is copied in.
         coordinator.show(text, in: textView)
         if coordinator.focusRequest != focusRequest {
@@ -58,6 +86,7 @@ struct TranslationInputField: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var field: TranslationInputField
         var focusRequest: Int?
+        var look: Look?
         /// The field's own undo history, so clearing it touches nothing else in the panel.
         private let undoManager = UndoManager()
         /// Text set from outside while an input method was composing (Vietnamese Telex, Japanese).

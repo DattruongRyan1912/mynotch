@@ -37,6 +37,8 @@ struct SelectionChipView: View {
         SelectionChipLabel(content: content, maxHeight: maxHeight)
             .environment(\.notchAccent, interface.accent)
             .tint(interface.accent)
+            // The chip is black whatever the look, so the text tokens must be the light ones even where they follow the glass.
+            .notchOnDarkBackground()
     }
 }
 
