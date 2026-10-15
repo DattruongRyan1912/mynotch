@@ -42,6 +42,19 @@ import Testing
         #expect(size(of: vault(.unlock, look: .notch, board: touch), width: 540).height <= 150)
     }
 
+    @Test func theLockFormWithoutTouchIDSaysWhyAndStillFitsTheNotch() {
+        let fixture = ClipboardBoardLockModuleTests()
+        fixture.keychain.usable = false
+        let view = ClipboardBoardVaultView(
+            module: fixture.module, look: .notch, mode: .setUp, board: Self.board(), onDone: {}, onCancel: {}
+        )
+        #expect(size(of: view, width: 540).height <= 150)
+        #expect(!fixture.module.touchIDAvailable)
+        let touch = Self.board(lock: ClipboardBoardLock(method: .touchID, itemCount: 2, isUnlocked: false))
+        let prompt = ClipboardBoardVaultView(module: fixture.module, look: .notch, mode: .unlock, board: touch, onDone: {}, onCancel: {})
+        #expect(size(of: prompt, width: 540).height <= 150)
+    }
+
     @Test func aLockedBoardsPillShowsAClosedLockAndAnOpenOneAnOpenLock() throws {
         func ink(_ board: ClipboardBoard) throws -> Int {
             let renderer = ImageRenderer(content: ClipboardBoardPill(board: board, isSelected: false).background(Color.black).frame(width: 200, height: 30))
@@ -68,6 +81,8 @@ import Testing
         #expect(size(of: some, width: 440).height > size(of: none, width: 440).height)
         #expect(ClipboardBackupOptionsSheet.lockedIncludedCaption.contains("cần mật khẩu của chính nó"))
         #expect(ClipboardBackupOptionsSheet.lockedIncludedCaption.contains("không có cách lấy lại"))
+        // A file that gets out can be guessed at offline, which only a long password stands against.
+        #expect(ClipboardBackupOptionsSheet.lockedIncludedCaption.contains("ngoại tuyến"))
         #expect(ClipboardBackupOptionsSheet.lockedLeftOutCaption.contains("kể cả tên"))
     }
 

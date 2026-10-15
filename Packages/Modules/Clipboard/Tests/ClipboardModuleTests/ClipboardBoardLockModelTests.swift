@@ -30,10 +30,10 @@ import Testing
         }
     }
 
-    func model(method: ClipboardLockMethod? = nil, count: Int = 3) -> ClipboardBoardLockModel {
+    func model(method: ClipboardLockMethod? = nil, count: Int = 3, touchID: Bool = true) -> ClipboardBoardLockModel {
         let calls = calls
         let model = ClipboardBoardLockModel(
-            boardName: "Két", method: method, itemCount: count,
+            boardName: "Két", method: method, itemCount: count, touchIDAvailable: touchID,
             lock: { setup in
                 calls.locks.append(self.name(setup))
                 if let failure = calls.failure { throw failure }
@@ -99,6 +99,16 @@ import Testing
         let model = model()
         await model.lockWithTouchID()
         #expect(calls.locks == ["touchID"])
+    }
+
+    @Test func withoutTouchIDTheOptionIsHiddenWithTheReasonAndNeverAsked() async {
+        let model = model(touchID: false)
+        #expect(!model.showsTouchID)
+        #expect(model.touchIDNote == "Touch ID cần bản MyNotch có hồ sơ ký; hiện dùng mật khẩu.")
+        await model.lockWithTouchID()
+        #expect(calls.locks.isEmpty)
+        let available = self.model()
+        #expect(available.showsTouchID && available.touchIDNote == ClipboardBoardLockModel.touchIDNote)
     }
 
     @Test func aFailureIsShownAndKeepsWhatWasTyped() async {

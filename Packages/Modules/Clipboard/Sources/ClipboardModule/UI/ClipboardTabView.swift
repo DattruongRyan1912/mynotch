@@ -249,8 +249,7 @@ struct ClipboardTabView: View {
     }
 
     private func imageURL(of item: ClipboardItem) -> URL? {
-        guard case .image = item.content else { return nil }
-        return module.fileURLs(of: item).first
+        module.displayImageURL(of: item)
     }
 
     // MARK: Actions
@@ -302,6 +301,8 @@ struct ClipboardTabView: View {
                 try? await Task.sleep(for: .milliseconds(100))
             } while NSEvent.pressedMouseButtons & 1 != 0
             notch.setDragging(false)
+            // The file of a dragged picture of an open locked board goes a moment after the drop.
+            module.dragEnded()
         }
         return module.dragProvider(for: item)
     }

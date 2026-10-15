@@ -145,7 +145,7 @@ struct ClipboardBackupOptionsSheet: View {
     /// Under the box for boards that have a lock, which is not ticked: they are not in the file at all, name included.
     static let lockedLeftOutCaption = "Board đã khoá không nằm trong tệp, kể cả tên của nó."
     /// When it is: each goes in as the encrypted file it is, and only its own password opens it, wherever the file goes.
-    static let lockedIncludedCaption = "Mỗi board đã khoá vẫn được mã hoá trong tệp và cần mật khẩu của chính nó để mở: nếu quên mật khẩu thì không có cách lấy lại. Board dùng Touch ID chỉ mở được trên máy này nên không đưa vào tệp."
+    static let lockedIncludedCaption = "Mỗi board đã khoá vẫn được mã hoá trong tệp và cần mật khẩu của chính nó để mở: nếu quên mật khẩu thì không có cách lấy lại. Nếu tệp lọt ra ngoài, mật khẩu có thể bị dò ngoại tuyến, nên hãy dùng mật khẩu dài. Board dùng Touch ID chỉ mở được trên máy này nên không đưa vào tệp."
 
     @State private var options = ClipboardBackupOptions()
 

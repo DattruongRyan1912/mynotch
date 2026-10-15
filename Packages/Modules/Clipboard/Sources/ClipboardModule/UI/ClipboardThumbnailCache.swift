@@ -16,6 +16,8 @@ final class ClipboardThumbnailCache {
 
     /// The longest side of a thumbnail in pixels. One cache serves one size, since entries are keyed by file name.
     let maxPixelSize: Int
+    /// Where the bytes of a picture of an open locked board are, which have a URL (`ClipboardOpenImages.url(forFileName:)`) and no file.
+    var openImages: ClipboardOpenImages?
     private let cache = NSCache<NSString, NSImage>()
     /// The latest thumbnails, held strongly so the cards in view are never decoded twice, even right after a purge.
     private var recent: [(key: NSString, image: NSImage)] = []
@@ -34,7 +36,14 @@ final class ClipboardThumbnailCache {
     /// nil when the file is missing or not an image. Its size in points equals its pixel size.
     func thumbnail(for url: URL) async -> NSImage? {
         if let cached = cachedThumbnail(for: url) { return cached }
-        guard let cgImage = await Self.decode(url, maxPixelSize: maxPixelSize) else { return nil }
+        let decoded: CGImage?
+        if url.scheme == ClipboardOpenImages.scheme {
+            guard let data = openImages?.data(forFileName: url.lastPathComponent) else { return nil }
+            decoded = await Self.decode(data, maxPixelSize: maxPixelSize)
+        } else {
+            decoded = await Self.decode(url, maxPixelSize: maxPixelSize)
+        }
+        guard let cgImage = decoded else { return nil }
         // Another card may have decoded the same file meanwhile; both get the first image.
         if let cached = cachedThumbnail(for: url) { return cached }
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
@@ -65,6 +74,18 @@ final class ClipboardThumbnailCache {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else {
             return nil
         }
+        return thumbnail(of: source, maxPixelSize: maxPixelSize)
+    }
+
+    /// The same, from bytes held in memory.
+    @concurrent private nonisolated static func decode(_ data: Data, maxPixelSize: Int) async -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else {
+            return nil
+        }
+        return thumbnail(of: source, maxPixelSize: maxPixelSize)
+    }
+
+    private nonisolated static func thumbnail(of source: CGImageSource, maxPixelSize: Int) -> CGImage? {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,

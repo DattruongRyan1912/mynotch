@@ -9,14 +9,20 @@ protocol PasteboardAccess: AnyObject {
     /// Replaces the content and always adds `ClipboardClassifier.ownWriteType`, so the monitor skips the write.
     /// `plainTextOnly` drops the RTF of rich text; `sourceBundleID` tells other clipboard managers where the item came from.
     /// Returns false and leaves the user's clipboard untouched when the content cannot be written (missing image, no files).
+    /// A picture is written from `imageData` when there is some (a picture held in memory has no file), otherwise from `imageURL`.
     @discardableResult
-    func write(_ content: ClipboardContent, imageURL: URL?, plainTextOnly: Bool, sourceBundleID: String?) -> Bool
+    func write(_ content: ClipboardContent, imageURL: URL?, imageData: Data?, plainTextOnly: Bool, sourceBundleID: String?) -> Bool
 }
 
 extension PasteboardAccess {
     @discardableResult
+    func write(_ content: ClipboardContent, imageURL: URL?, plainTextOnly: Bool, sourceBundleID: String?) -> Bool {
+        write(content, imageURL: imageURL, imageData: nil, plainTextOnly: plainTextOnly, sourceBundleID: sourceBundleID)
+    }
+
+    @discardableResult
     func write(_ content: ClipboardContent, imageURL: URL?, plainTextOnly: Bool) -> Bool {
-        write(content, imageURL: imageURL, plainTextOnly: plainTextOnly, sourceBundleID: nil)
+        write(content, imageURL: imageURL, imageData: nil, plainTextOnly: plainTextOnly, sourceBundleID: nil)
     }
 }
 
@@ -51,9 +57,9 @@ final class SystemPasteboard: PasteboardAccess {
     }
 
     @discardableResult
-    func write(_ content: ClipboardContent, imageURL: URL?, plainTextOnly: Bool, sourceBundleID: String?) -> Bool {
+    func write(_ content: ClipboardContent, imageURL: URL?, imageData: Data?, plainTextOnly: Bool, sourceBundleID: String?) -> Bool {
         // Items are complete, markers included, before the clipboard is cleared, so a failure leaves it as it was.
-        guard let items = Self.items(for: content, imageURL: imageURL, plainTextOnly: plainTextOnly),
+        guard let items = Self.items(for: content, imageURL: imageURL, imageData: imageData, plainTextOnly: plainTextOnly),
               let first = items.first else { return false }
         first.setData(Data(), forType: Self.marker)
         if let sourceBundleID { first.setString(sourceBundleID, forType: Self.source) }
@@ -62,7 +68,7 @@ final class SystemPasteboard: PasteboardAccess {
     }
 
     /// One item per file so multi-file copies paste whole, one item for everything else; nil for an unreadable image.
-    private static func items(for content: ClipboardContent, imageURL: URL?, plainTextOnly: Bool) -> [NSPasteboardItem]? {
+    private static func items(for content: ClipboardContent, imageURL: URL?, imageData: Data?, plainTextOnly: Bool) -> [NSPasteboardItem]? {
         let item = NSPasteboardItem()
         switch content {
         case .text(let text):
@@ -76,7 +82,7 @@ final class SystemPasteboard: PasteboardAccess {
         case .color(let hex, let original):
             item.setString(original ?? hex, forType: .string)
         case .image:
-            guard let png = imageURL.flatMap({ try? Data(contentsOf: $0) }), !png.isEmpty else { return nil }
+            guard let png = imageData ?? imageURL.flatMap({ try? Data(contentsOf: $0) }), !png.isEmpty else { return nil }
             item.setData(png, forType: .png)
         case .files(let urls):
             // The same `public.file-url` items `NSURL` writes, built here so the first can carry the markers.

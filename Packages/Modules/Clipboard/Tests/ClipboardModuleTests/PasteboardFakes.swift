@@ -6,6 +6,8 @@ final class FakePasteboard: PasteboardAccess {
     struct Write: Equatable {
         let content: ClipboardContent
         let imageURL: URL?
+        /// The picture's bytes when they came from memory and not from a file.
+        var imageData: Data? = nil
         let plainTextOnly: Bool
         let sourceBundleID: String?
     }
@@ -28,9 +30,9 @@ final class FakePasteboard: PasteboardAccess {
         return current
     }
 
-    func write(_ content: ClipboardContent, imageURL: URL?, plainTextOnly: Bool, sourceBundleID: String?) -> Bool {
+    func write(_ content: ClipboardContent, imageURL: URL?, imageData: Data?, plainTextOnly: Bool, sourceBundleID: String?) -> Bool {
         guard writesSucceed else { return false }
-        writes.append(Write(content: content, imageURL: imageURL, plainTextOnly: plainTextOnly, sourceBundleID: sourceBundleID))
+        writes.append(Write(content: content, imageURL: imageURL, imageData: imageData, plainTextOnly: plainTextOnly, sourceBundleID: sourceBundleID))
         copy(PasteboardSnapshot(types: [ClipboardClassifier.ownWriteType, "public.utf8-plain-text"], string: content.plainText))
         return true
     }

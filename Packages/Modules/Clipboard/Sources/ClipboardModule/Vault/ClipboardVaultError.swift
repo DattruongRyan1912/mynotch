@@ -31,6 +31,12 @@ nonisolated enum ClipboardVaultError: Error, Equatable, LocalizedError, Sendable
     case keychain(Int32)
     case cannotWrite(String)
     case cannotRead(String)
+    /// Touch ID cannot be used here: the Keychain has no access group for this build, or this Mac cannot ask for it.
+    case touchIDUnavailable
+    /// Too many wrong passwords in a row: no more tries for this many seconds.
+    case tooManyAttempts(retryAfter: Int)
+    /// The board's sealed file would be bigger than the format allows, and could never be opened.
+    case tooLarge
 
     var errorDescription: String? {
         switch self {
@@ -51,6 +57,9 @@ nonisolated enum ClipboardVaultError: Error, Equatable, LocalizedError, Sendable
         case .keychain(let status) where status == -34018:
             "MyNotch chưa được phép dùng Keychain cho Touch ID (thiếu quyền keychain-access-groups). Hãy dùng mật khẩu."
         case .keychain: "Keychain từ chối thao tác. Hãy dùng mật khẩu thay cho Touch ID."
+        case .touchIDUnavailable: "Touch ID cần bản MyNotch có hồ sơ ký; hiện dùng mật khẩu."
+        case .tooManyAttempts(let seconds): "Đã nhập sai nhiều lần. Thử lại sau \(seconds) giây."
+        case .tooLarge: "Board quá lớn để khoá (tối đa 1 GB sau khi mã hoá). Hãy bớt mục hoặc ảnh rồi thử lại."
         case .cannotWrite: "Không ghi được dữ liệu đã mã hoá của board."
         case .cannotRead: "Không đọc được dữ liệu đã mã hoá của board."
         }
@@ -59,9 +68,9 @@ nonisolated enum ClipboardVaultError: Error, Equatable, LocalizedError, Sendable
 
 /// What a password for a locked board has to be.
 nonisolated enum ClipboardVaultPolicy {
-    static let minimumPasswordLength = 8
+    static let minimumPasswordLength = 10
 
-    /// At least eight characters (not bytes) that are not all blank.
+    /// At least ten characters (not bytes) that are not all blank.
     static func isAcceptable(_ password: String) -> Bool {
         password.count >= minimumPasswordLength && !password.allSatisfy(\.isWhitespace)
     }

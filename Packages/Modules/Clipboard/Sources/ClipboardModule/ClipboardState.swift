@@ -20,6 +20,8 @@ final class ClipboardState {
     var selectedID: UUID?
     /// The copy stack: copies collected while it is on, to be pasted one by one. Changed only by the module.
     var stack = CopyStack()
+    /// What to tell the user about a locked board that closed without its latest changes, until they dismiss it.
+    var vaultNotice: String?
     /// Pasteboard access is set to "always deny", so the tab explains how to allow it instead of showing an empty history.
     var pasteboardDenied = false
     /// A click pastes, but Accessibility is not allowed, so the tab and the library say how to allow it.
@@ -88,6 +90,7 @@ final class ClipboardState {
         stack = CopyStack()
         pasteboardDenied = false
         needsAccessibility = false
+        vaultNotice = nil
     }
 
     /// Drops a board filter or selection whose board or item is gone.

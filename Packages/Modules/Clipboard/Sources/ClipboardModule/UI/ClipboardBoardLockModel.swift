@@ -23,6 +23,10 @@ final class ClipboardBoardLockModel {
     /// The words under the forms, in one place so tests can hold them to the brief.
     static let noRecoveryWarning = "Không có cách khôi phục: nếu quên mật khẩu, nội dung của board này mất vĩnh viễn. Bạn vẫn xoá được board (dữ liệu đã mã hoá bị xoá theo)."
     static let touchIDNote = "Touch ID: khoá nằm trong Keychain của máy này, mở bằng Touch ID hoặc mật khẩu máy. Không đưa vào sao lưu được."
+    /// Where the build has no Keychain access group, Touch ID is not offered and this says why.
+    static let touchIDUnavailableNote = "Touch ID cần bản MyNotch có hồ sơ ký; hiện dùng mật khẩu."
+    /// Locking does not erase what was written before it.
+    static let priorCopiesNote = "Bản chép cũ của nội dung này có thể còn trong Time Machine hoặc ảnh chụp ổ đĩa tạo trước khi khoá."
     static let tooShort = "Mật khẩu cần ít nhất \(ClipboardVaultPolicy.minimumPasswordLength) ký tự."
     static let differ = "Hai mật khẩu chưa giống nhau."
 
@@ -31,6 +35,8 @@ final class ClipboardBoardLockModel {
     let method: ClipboardLockMethod?
     /// What the board holds, as the locked board shows it.
     let itemCount: Int
+    /// Whether this build can keep a key behind Touch ID (see `ClipboardModule.touchIDAvailable`).
+    let touchIDAvailable: Bool
 
     var password = "" {
         didSet { clearFailure() }
@@ -49,7 +55,7 @@ final class ClipboardBoardLockModel {
     @ObservationIgnored private let removeLock: () async throws -> Void
 
     init(
-        boardName: String, method: ClipboardLockMethod?, itemCount: Int,
+        boardName: String, method: ClipboardLockMethod?, itemCount: Int, touchIDAvailable: Bool,
         lock: @escaping (ClipboardLockSetup) async throws -> Void,
         unlock: @escaping (ClipboardUnlockCredential) async throws -> Void,
         deleteData: @escaping () -> Void,
@@ -58,6 +64,7 @@ final class ClipboardBoardLockModel {
         self.boardName = boardName
         self.method = method
         self.itemCount = itemCount
+        self.touchIDAvailable = touchIDAvailable
         self.lock = lock
         self.unlock = unlock
         self.deleteData = deleteData
@@ -65,6 +72,12 @@ final class ClipboardBoardLockModel {
     }
 
     var isWorking: Bool { status == .working }
+
+    /// The lock form offers Touch ID only where it can work.
+    var showsTouchID: Bool { touchIDAvailable }
+
+    /// What the form says of Touch ID: how it works, or why it is not offered.
+    var touchIDNote: String { touchIDAvailable ? Self.touchIDNote : Self.touchIDUnavailableNote }
 
     /// Why the password cannot be used yet, once there is something to complain about; nil while it is fine or still empty.
     var problem: String? {
@@ -93,7 +106,7 @@ final class ClipboardBoardLockModel {
     }
 
     func lockWithTouchID() async {
-        guard !isWorking else { return }
+        guard !isWorking, touchIDAvailable else { return }
         await run { try await self.lock(.touchID) }
     }
 
@@ -163,7 +176,7 @@ extension ClipboardModule {
     func lockModel(for board: ClipboardBoard) -> ClipboardBoardLockModel {
         let id = board.id
         return ClipboardBoardLockModel(
-            boardName: board.name, method: board.lock?.method, itemCount: board.shownItemCount,
+            boardName: board.name, method: board.lock?.method, itemCount: board.shownItemCount, touchIDAvailable: touchIDAvailable,
             lock: { [weak self] setup in
                 guard let self else { throw ClipboardVaultError.moduleStopped }
                 try await self.lockBoard(id, setup: setup)

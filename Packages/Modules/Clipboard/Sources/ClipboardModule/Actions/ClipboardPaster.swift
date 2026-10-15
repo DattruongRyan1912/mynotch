@@ -95,11 +95,11 @@ final class ClipboardPaster {
     /// one, which then says nothing.
     @discardableResult
     func perform(
-        _ item: ClipboardItem, imageURL: URL?, paste: Bool, plainTextOnly: Bool = false, delay: Duration? = nil,
+        _ item: ClipboardItem, imageURL: URL?, imageData: Data? = nil, paste: Bool, plainTextOnly: Bool = false, delay: Duration? = nil,
         beforePaste: (() -> Bool)? = nil, afterKeysUp: KeyRelease? = nil
     ) -> Outcome {
         let written = pasteboard.write(
-            item.content, imageURL: imageURL, plainTextOnly: plainTextOnly, sourceBundleID: item.sourceBundleID
+            item.content, imageURL: imageURL, imageData: imageData, plainTextOnly: plainTextOnly, sourceBundleID: item.sourceBundleID
         )
         guard written else { return .failed }
         // The pasteboard now holds this item, so an earlier ⌘V still waiting would paste it in the wrong place.

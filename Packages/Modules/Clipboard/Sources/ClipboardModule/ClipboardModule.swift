@@ -27,6 +27,12 @@ public final class ClipboardModule: FeatureModule {
     let state = ClipboardState()
     /// Kept by the module so image cards do not decode their thumbnails again each time the notch opens.
     let thumbnails = ClipboardThumbnailCache()
+    /// The pictures of the open locked boards, which are in memory and in no file; see `ClipboardModule+Vault`.
+    let openImages = ClipboardOpenImages()
+    /// Whether Touch ID can be offered, looked at once per run; nil until it is asked.
+    var touchIDProbe: Bool?
+    /// How long a drag's file stays after the drag is over, for the drop target to read it.
+    static let dragCleanupDelay: Duration = .seconds(2)
     /// Set while the library window is open, and nil otherwise so a closed library costs nothing.
     private(set) var library: ClipboardLibraryModel?
     /// Set while the floating panel is open, and nil otherwise so a closed panel costs nothing.
@@ -115,6 +121,7 @@ public final class ClipboardModule: FeatureModule {
     ) {
         self.mcpSocketPath = mcpSocketPath
         self.installMCPHelper = installMCPHelper
+        thumbnails.openImages = openImages
         self.keychain = keychain
         self.authenticator = authenticator
         self.keyDerivation = keyDerivation
@@ -157,7 +164,7 @@ public final class ClipboardModule: FeatureModule {
         if history.persistable != loaded { store.scheduleSave(history) }
         refreshPasteboardAccess()
         refreshAccessibility()
-        restoreStack(from: store, keys: keys, settings: context.settings)
+        restoreStack(from: store, keys: keys, settings: context.settings, excluding: Set(sealed.map(\.id)))
         scheduleClassification()
 
         let keystrokeGate = KeystrokeGate(keystrokes)
@@ -329,6 +336,7 @@ public final class ClipboardModule: FeatureModule {
             settings.set(preferences.sort, for: keys.librarySort)
             settings.set(preferences.cardSize, for: keys.libraryCardSize)
         }
+        model.thumbnails.openImages = openImages
         library = model
         libraryWindow.show(AnyView(ClipboardLibraryView(module: self, model: model)), onClose: { [weak self] in
             self?.libraryClosed(model)
@@ -356,6 +364,7 @@ public final class ClipboardModule: FeatureModule {
         model.isKeyboardBack = { [weak panelWindow] in panelWindow?.keyboardIsWithFrontApp() ?? false }
         model.onPinnedChange = { [weak self] pinned in self?.panelPinChanged(pinned) }
         model.onMove = { origin in settings.set(ClipboardPanelPosition(origin), for: keys.panelPosition) }
+        model.thumbnails.openImages = openImages
         panel = model
         // Only a pinned panel is where it was left; an unpinned one is always beside the pointer.
         let restoredOrigin = pinned ? settings.value(keys.panelPosition)?.point : nil
@@ -585,7 +594,10 @@ public final class ClipboardModule: FeatureModule {
         guard state.history.boards.first(where: { $0.id == boardID })?.lock?.isUnlocked == true else { return }
         noteVaultActivity()
         let ids = Set(pinned)
-        if !ids.isEmpty { updateStack { $0.removeEntries { ids.contains($0.item.id) } } }
+        if !ids.isEmpty {
+            updateStack { $0.removeEntries { ids.contains($0.item.id) } }
+            adoptPictures(ids, into: boardID)
+        }
     }
 
     func revealInFinder(_ item: ClipboardItem) {
@@ -602,7 +614,8 @@ public final class ClipboardModule: FeatureModule {
     /// The image's stored PNG or the copied files; empty for other kinds.
     func fileURLs(of item: ClipboardItem) -> [URL] {
         switch item.content {
-        case .image(let image): store?.imageURL(fileName: image.fileName).map { [$0] } ?? []
+        // A picture of an open locked board is in memory and no file: there is nothing to reveal or to hand over.
+        case .image(let image): openImages.contains(image.fileName) ? [] : store?.imageURL(fileName: image.fileName).map { [$0] } ?? []
         case .files(let urls): urls
         case .text, .richText, .link, .color: []
         }
@@ -617,6 +630,8 @@ public final class ClipboardModule: FeatureModule {
     /// What dragging a card out carries. A stored image is dragged as a copy, or not at all when copying fails: a drop
     /// must never move or rename the stored file.
     func dragProvider(for item: ClipboardItem) -> NSItemProvider {
+        // A picture of an open locked board becomes a file only if the drop target asks, and only for the drag.
+        if let provider = openImageDragProvider(for: item) { return provider }
         var urls = fileURLs(of: item)
         if case .image = item.content {
             urls = urls.prefix(1).compactMap { try? ClipboardDragProvider.copyImage(at: $0, copiedAt: item.copiedAt) }
@@ -730,7 +745,8 @@ public final class ClipboardModule: FeatureModule {
     /// Called by the monitor for each new copy.
     private func record(_ content: ClipboardContent, imageData: Data?, source: ClipboardMonitor.SourceApp, isSensitive: Bool) {
         guard let context, let keys, let store else { return }
-        if let imageData, case .image(let image) = content {
+        // The same picture as one in an open locked board is that board's: it is not written to disk.
+        if let imageData, case .image(let image) = content, !openImages.contains(image.fileName) {
             do {
                 try store.saveImage(imageData, fileName: image.fileName)
             } catch {
@@ -808,7 +824,7 @@ public final class ClipboardModule: FeatureModule {
         // Remembers a refusal, which comes back as a plain `.copied`.
         var keyboardRefused = false
         let outcome = paster.perform(
-            item, imageURL: imageURL(of: item), paste: paste, plainTextOnly: plainTextOnly,
+            item, imageURL: imageURL(of: item), imageData: openImages.data(for: item), paste: paste, plainTextOnly: plainTextOnly,
             delay: fromLibrary ? Self.libraryPasteDelay : nil,
             beforePaste: beforePaste.map { ask in
                 {
@@ -928,9 +944,11 @@ public final class ClipboardModule: FeatureModule {
 
     /// A kept stack comes back, without the images whose file is gone. Then the file is made to agree with the setting,
     /// so a stack file from a time the user kept stacks does not linger once they stopped.
-    private func restoreStack(from store: ClipboardStore, keys: ClipboardSettingKeys, settings: ModuleSettings) {
+    private func restoreStack(from store: ClipboardStore, keys: ClipboardSettingKeys, settings: ModuleSettings, excluding sealed: Set<UUID>) {
         if settings.value(keys.stackPersist), var restored = store.loadStack() {
             restored.removeEntries { !hasImageFile($0.item, in: store) }
+            // An item of a locked board that a crash left in the stack file does not come back with it.
+            restored.removeEntries { sealed.contains($0.item.id) || state.history.protectedItemIDs.contains($0.item.id) }
             state.stack = restored
         }
         writeStackFile()
@@ -944,13 +962,23 @@ public final class ClipboardModule: FeatureModule {
         store.saveStack(keep ? state.stack : nil)
     }
 
+    /// The picture's file, for the pasteboard; nil for a picture held in memory, which is written from its bytes.
     private func imageURL(of item: ClipboardItem) -> URL? {
+        guard case .image(let image) = item.content, !openImages.contains(image.fileName) else { return nil }
+        return store?.imageURL(fileName: image.fileName)
+    }
+
+    /// What a card, a row or a thumbnail is given to draw the picture from: its file, or for a picture of an open locked board a URL
+    /// that names no file and that the thumbnail cache reads from memory. nil for any other item.
+    func displayImageURL(of item: ClipboardItem) -> URL? {
         guard case .image(let image) = item.content else { return nil }
+        if openImages.contains(image.fileName) { return ClipboardOpenImages.url(forFileName: image.fileName) }
         return store?.imageURL(fileName: image.fileName)
     }
 
     func hasImageFile(_ item: ClipboardItem, in store: ClipboardStore) -> Bool {
         guard case .image(let image) = item.content else { return true }
+        if openImages.contains(image.fileName) { return true }
         guard let url = store.imageURL(fileName: image.fileName) else { return false }
         return FileManager.default.fileExists(atPath: url.path(percentEncoded: false))
     }

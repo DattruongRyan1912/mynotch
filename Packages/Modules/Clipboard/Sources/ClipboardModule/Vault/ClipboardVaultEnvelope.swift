@@ -8,7 +8,8 @@ nonisolated struct ClipboardVaultEnvelope: Codable, Equatable, Sendable {
 
     /// How the password becomes a key. Written with the file so a later version can ask for more rounds.
     struct Derivation: Codable, Equatable, Sendable {
-        var algorithm = "pbkdf2-hmac-sha256"
+        static let pbkdf2 = "pbkdf2-hmac-sha256"
+        var algorithm = Derivation.pbkdf2
         var iterations: Int
         var salt: Data
 
@@ -129,33 +130,11 @@ nonisolated struct ClipboardVaultFile: Equatable, Sendable {
     /// failed write leaves the old file whole, and no moment leaves it readable by others.
     func write(to url: URL) throws {
         let temporary = url.deletingLastPathComponent().appending(path: ".\(url.lastPathComponent).\(UUID().uuidString).tmp")
-        let descriptor = open(temporary.path(percentEncoded: false), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
-        guard descriptor >= 0 else { throw ClipboardVaultError.cannotWrite(String(cString: strerror(errno))) }
-        do {
-            try Self.writeAll(encoded(), to: descriptor)
-            guard fsync(descriptor) == 0 else { throw ClipboardVaultError.cannotWrite(String(cString: strerror(errno))) }
-            close(descriptor)
-            guard rename(temporary.path(percentEncoded: false), url.path(percentEncoded: false)) == 0 else {
-                throw ClipboardVaultError.cannotWrite(String(cString: strerror(errno)))
-            }
-        } catch {
-            close(descriptor)
+        try ClipboardPrivateFile.write(encoded(), to: temporary, flush: true)
+        guard rename(temporary.path(percentEncoded: false), url.path(percentEncoded: false)) == 0 else {
+            let reason = String(cString: strerror(errno))
             unlink(temporary.path(percentEncoded: false))
-            throw error
-        }
-    }
-
-    private static func writeAll(_ data: Data, to descriptor: Int32) throws {
-        try data.withUnsafeBytes { buffer in
-            var offset = 0
-            while offset < buffer.count {
-                let written = Darwin.write(descriptor, buffer.baseAddress! + offset, buffer.count - offset)
-                if written < 0 {
-                    if errno == EINTR { continue }
-                    throw ClipboardVaultError.cannotWrite(String(cString: strerror(errno)))
-                }
-                offset += written
-            }
+            throw ClipboardVaultError.cannotWrite(reason)
         }
     }
 

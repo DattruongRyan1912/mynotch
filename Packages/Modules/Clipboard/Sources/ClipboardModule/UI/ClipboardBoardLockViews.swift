@@ -157,18 +157,27 @@ struct ClipboardBoardVaultView: View {
                 Button("Khoá bằng mật khẩu") { Task { await model.lockWithPassword() } }
                     .disabled(!model.canLockWithPassword)
                     .controlSize(.small)
-                Button("Dùng Touch ID") { Task { await model.lockWithTouchID() } }
-                    .disabled(model.isWorking)
-                    .controlSize(.small)
-                    .help(ClipboardBoardLockModel.touchIDNote)
+                if model.showsTouchID {
+                    Button("Dùng Touch ID") { Task { await model.lockWithTouchID() } }
+                        .disabled(model.isWorking)
+                        .controlSize(.small)
+                        .help(ClipboardBoardLockModel.touchIDNote)
+                }
             }
             status
             Label(ClipboardBoardLockModel.noRecoveryWarning, systemImage: "exclamationmark.triangle.fill")
                 .font(.system(size: look == .notch ? 10 : 11))
                 .foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
+            // Why Touch ID is missing is said in the notch too, where the button would be; how it works is for the library.
+            if look != .notch || !model.showsTouchID {
+                Text(model.touchIDNote)
+                    .font(.system(size: look == .notch ? 10 : 11))
+                    .foregroundStyle(look.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if look != .notch {
-                Text(ClipboardBoardLockModel.touchIDNote)
+                Text(ClipboardBoardLockModel.priorCopiesNote)
                     .font(.caption)
                     .foregroundStyle(look.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -197,6 +206,13 @@ struct ClipboardBoardVaultView: View {
                     Button("Mở khoá bằng Touch ID") { Task { await model.unlockWithTouchID() } }
                         .disabled(model.isWorking)
                         .controlSize(.small)
+                    // A board whose key is only in the Keychain has no password to fall back to: it says why it may not open.
+                    if !model.touchIDAvailable {
+                        Text(model.touchIDNote)
+                            .font(.system(size: look == .notch ? 10 : 11))
+                            .foregroundStyle(look.secondaryText)
+                            .lineLimit(2)
+                    }
                 } else {
                     ClipboardPasswordField(
                         placeholder: "Mật khẩu", text: $model.password, look: look, takesFocus: true,

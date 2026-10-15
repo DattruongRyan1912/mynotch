@@ -9,8 +9,8 @@ nonisolated enum ClipboardVaultSealer {
         var key: SymmetricKey
         var envelope: ClipboardVaultEnvelope
         var items: [ClipboardItem]
-        /// The image files this opening made, which are removed again if the board is not opened after all.
-        var createdImages: [URL]
+        /// The PNG bytes of the board's pictures by file name. They go to memory and nowhere else.
+        var images: [String: Data]
     }
 
     enum KeySource: Sendable {
@@ -19,13 +19,9 @@ nonisolated enum ClipboardVaultSealer {
         case key(Data)
     }
 
-    /// Reads the images of `items` from `imagesDirectory`, and seals them all. Throws `.cannotRead` for an image that cannot be read
-    /// or is not the file its name says.
+    /// Locking an ordinary board: reads the images of `items` from `imagesDirectory`, and seals them all. Throws `.cannotRead` for an
+    /// image that cannot be read or is not the file its name says.
     @concurrent static func seal(items: [ClipboardItem], imagesDirectory: URL, key: SymmetricKey, boardID: UUID) async throws -> Data {
-        try sealNow(items: items, imagesDirectory: imagesDirectory, key: key, boardID: boardID)
-    }
-
-    static func sealNow(items: [ClipboardItem], imagesDirectory: URL, key: SymmetricKey, boardID: UUID) throws -> Data {
         var images: [String: Data] = [:]
         for item in items {
             guard case .image(let image) = item.content, images[image.fileName] == nil else { continue }
@@ -35,20 +31,33 @@ nonisolated enum ClipboardVaultSealer {
             }
             images[image.fileName] = bytes
         }
+        return try sealNow(items: items, images: images, key: key, boardID: boardID)
+    }
+
+    /// Seals `items` with the picture bytes in `images` (an open board's, from memory). `.tooLarge` when the file would be over what a
+    /// reader accepts: it could be sealed and never opened.
+    static func sealNow(
+        items: [ClipboardItem], images: [String: Data], key: SymmetricKey, boardID: UUID, maxBytes: Int = ClipboardVaultFile.maxFileBytes
+    ) throws -> Data {
+        let names = Set(items.compactMap { item -> String? in
+            if case .image(let image) = item.content { image.fileName } else { nil }
+        })
         let payload: Data
         do {
-            payload = try ClipboardVaultPayload.encode(ClipboardVaultPayload.Contents(items: items, images: images))
+            payload = try ClipboardVaultPayload.encode(ClipboardVaultPayload.Contents(items: items, images: images.filter { names.contains($0.key) }))
         } catch ClipboardVaultError.damaged {
-            // An image file that is not what its name says (damaged on disk).
+            // A picture that is missing, or is not what its name says (damaged).
             throw ClipboardVaultError.cannotRead("image")
         }
+        // The header, the nonce and the tag are small beside this; the margin keeps the file under the cap.
+        guard payload.count <= maxBytes - ClipboardVaultFile.maxHeaderBytes - 28 else { throw ClipboardVaultError.tooLarge }
         return try ClipboardVaultCrypto.seal(payload, using: key, boardID: boardID, itemCount: items.count)
     }
 
-    /// Opens the vault at `url`: the key (from the password, or as given), the seal, the items, and the image files, written to
-    /// `imagesDirectory` last, so a wrong password or a damaged file writes nothing.
+    /// Opens the vault at `url`: the key (from the password, or as given), the seal, the items and the pictures' bytes. Nothing is
+    /// written anywhere: the pictures are handed back to be kept in memory.
     @concurrent static func open(
-        at url: URL, boardID: UUID, source: KeySource, policy: ClipboardVaultCrypto.Derivation, imagesDirectory: URL
+        at url: URL, boardID: UUID, source: KeySource, policy: ClipboardVaultCrypto.Derivation
     ) async throws -> Opened {
         let file = try ClipboardVaultFile.read(at: url)
         let envelope = file.envelope
@@ -70,19 +79,7 @@ nonisolated enum ClipboardVaultSealer {
         let contents = try ClipboardVaultPayload.decode(plaintext)
         guard contents.items.count == envelope.itemCount else { throw ClipboardVaultError.damaged }
 
-        var created: [URL] = []
-        do {
-            for (name, bytes) in contents.images.sorted(by: { $0.key < $1.key }) {
-                let target = imagesDirectory.appending(path: name, directoryHint: .notDirectory)
-                let existed = FileManager.default.fileExists(atPath: target.path(percentEncoded: false))
-                try ClipboardStore.writeImage(bytes, named: name, in: imagesDirectory)
-                if !existed { created.append(target) }
-            }
-        } catch {
-            for url in created { try? FileManager.default.removeItem(at: url) }
-            throw ClipboardVaultError.cannotWrite(error.localizedDescription)
-        }
-        return Opened(key: key, envelope: envelope, items: contents.items, createdImages: created)
+        return Opened(key: key, envelope: envelope, items: contents.items, images: contents.images)
     }
 }
 

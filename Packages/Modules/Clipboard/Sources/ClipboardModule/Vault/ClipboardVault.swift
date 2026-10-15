@@ -19,9 +19,18 @@ final class ClipboardVault {
     /// Seals the changes of the open boards a moment after they are made; nil when none is pending.
     var resealTimer: ScheduledAction?
     var observers: [(center: NotificationCenter, token: any NSObjectProtocol)] = []
+    /// Wrong passwords in a row for each board, and until when it takes no more tries; in memory, and forgotten by a right one.
+    var failures: [UUID: (count: Int, until: Date?)] = [:]
+    /// Raised by every lock trigger, so an unlock that was under way when one came does not open the board after it.
+    var lockGeneration = 0
+    /// The files of drags of an open board's pictures.
+    let dragFiles: ClipboardDragFiles
+    /// Removes the drag files that are left after a drag, once it has been over for a moment.
+    var dragCleanup: ScheduledAction?
 
-    init(files: ClipboardVaultFiles) {
+    init(files: ClipboardVaultFiles, dragDirectory: URL) {
         self.files = files
+        dragFiles = ClipboardDragFiles(directory: dragDirectory)
     }
 
     func forget(_ boardID: UUID) {
@@ -31,6 +40,8 @@ final class ClipboardVault {
     }
 
     func cancelTimers() {
+        dragCleanup?.cancel()
+        dragCleanup = nil
         idleTimer?.cancel()
         idleTimer = nil
         resealTimer?.cancel()

@@ -297,7 +297,9 @@ import Testing
 
         try await module.unlockBoard(board, credential: .password(Self.password))
 
-        #expect(try Data(contentsOf: picture.file) == picture.bytes)
+        // In memory, not on the disk.
+        #expect(module.openImages.data(forFileName: picture.item.imageName!) == picture.bytes)
+        #expect(!exists(picture.file))
         #expect(history.items.contains { $0.id == picture.item.id })
         #expect(try self.board(board).itemIDs.count == 2)
     }
@@ -453,9 +455,11 @@ import Testing
         module.pin(picture.item, to: board)
         try await module.lockBoard(board, setup: .password(Self.password))
         try await module.unlockBoard(board, credential: .password(Self.password))
-        #expect(exists(picture.file))
+        #expect(!exists(picture.file))
+        #expect(module.openImages.contains(picture.item.imageName!))
 
         #expect(module.relockBoard(board))
+        #expect(!module.openImages.contains(picture.item.imageName!))
 
         #expect(try self.board(board).isLocked)
         #expect(history.items.isEmpty)
@@ -835,17 +839,6 @@ import Testing
         module.pin(try item("đang ở trên ngăn xếp"), to: board)
 
         #expect(state.stack.entries.isEmpty)
-    }
-
-    @Test func thePicturesAGiveBackAreWrittenForTheUserOnly() async throws {
-        await start()
-        let picture = try addImage("e")
-        let board = try makeBoard(holding: ["văn bản"])
-        module.pin(picture.item, to: board)
-        try await module.lockBoard(board, setup: .password(Self.password))
-        try await module.unlockBoard(board, credential: .password(Self.password))
-        let mode = try FileManager.default.attributesOfItem(atPath: picture.file.path(percentEncoded: false))[.posixPermissions] as? Int
-        #expect(mode == 0o600)
     }
 
     @Test func aBoardLeftOpenByACrashLeavesNoPictureAfterTheNextStart() async throws {

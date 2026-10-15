@@ -255,7 +255,6 @@ struct ClipboardPanelView: View {
     }
 
     private func imageURL(of item: ClipboardItem) -> URL? {
-        guard case .image = item.content else { return nil }
-        return module.fileURLs(of: item).first
+        module.displayImageURL(of: item)
     }
 }

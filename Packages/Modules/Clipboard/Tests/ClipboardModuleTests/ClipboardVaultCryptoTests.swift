@@ -252,13 +252,24 @@ import Testing
 
     // MARK: Password rules
 
-    @Test func aPasswordNeedsEightCharacters() {
-        #expect(ClipboardVaultPolicy.minimumPasswordLength == 8)
-        #expect(!ClipboardVaultPolicy.isAcceptable("1234567"))
-        #expect(ClipboardVaultPolicy.isAcceptable("12345678"))
-        // Characters, not bytes: eight Vietnamese letters are enough even though they take more bytes.
-        #expect(ClipboardVaultPolicy.isAcceptable("ưưưưưưưư"))
-        #expect(!ClipboardVaultPolicy.isAcceptable("ưưưưưưư"))
-        #expect(!ClipboardVaultPolicy.isAcceptable("        "))
+    @Test func aPasswordNeedsTenCharacters() {
+        #expect(ClipboardVaultPolicy.minimumPasswordLength == 10)
+        #expect(!ClipboardVaultPolicy.isAcceptable("123456789"))
+        #expect(ClipboardVaultPolicy.isAcceptable("1234567890"))
+        // Characters, not bytes: ten Vietnamese letters are enough even though they take more bytes.
+        #expect(ClipboardVaultPolicy.isAcceptable("ưưưưưưưưưư"))
+        #expect(!ClipboardVaultPolicy.isAcceptable("ưưưưưưưưư"))
+        #expect(!ClipboardVaultPolicy.isAcceptable("          "))
+    }
+
+    @Test func aKeyDerivationThatIsNotPBKDF2IsRefusedNotTreatedAsOne() throws {
+        let wrapping = try ClipboardVaultCrypto.wrapNewKey(password: "đúng mật khẩu", boardID: Self.boardID, using: Self.fast)
+        var derivation = wrapping.derivation
+        derivation.algorithm = "argon2id"
+        #expect(throws: ClipboardVaultError.damaged) {
+            try ClipboardVaultCrypto.unwrapKey(
+                password: "đúng mật khẩu", derivation: derivation, wrappedKey: wrapping.wrappedKey, boardID: Self.boardID, policy: Self.fast
+            )
+        }
     }
 }

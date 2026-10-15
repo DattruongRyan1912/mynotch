@@ -229,6 +229,7 @@ struct ClipboardLibraryContentView: View {
             } while NSEvent.pressedMouseButtons & 1 != 0 && !Task.isCancelled
             try? await Task.sleep(for: .milliseconds(300))
             if !Task.isCancelled { model.endDrag() }
+            module.dragEnded()
         }
         return module.dragProvider(for: item)
     }
@@ -243,8 +244,7 @@ struct ClipboardLibraryContentView: View {
     }
 
     private func imageURL(of item: ClipboardItem) -> URL? {
-        guard case .image = item.content else { return nil }
-        return module.fileURLs(of: item).first
+        module.displayImageURL(of: item)
     }
 
     // MARK: Notice

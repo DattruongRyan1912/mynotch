@@ -97,7 +97,9 @@ nonisolated enum ClipboardVaultCrypto {
     static func unwrapKey(
         password: String, derivation: ClipboardVaultEnvelope.Derivation, wrappedKey: Data, boardID: UUID, policy: Derivation
     ) throws -> SymmetricKey {
-        guard derivation.iterations >= policy.minimumIterations, derivation.iterations <= Derivation.maximumIterations,
+        // Only the algorithm this app writes: a file that names another is not silently read as PBKDF2.
+        guard derivation.algorithm == ClipboardVaultEnvelope.Derivation.pbkdf2,
+              derivation.iterations >= policy.minimumIterations, derivation.iterations <= Derivation.maximumIterations,
               derivation.salt.count >= saltLength / 2 else { throw ClipboardVaultError.damaged }
         let wrapper = try deriveKey(password: password, salt: derivation.salt, iterations: derivation.iterations)
         do {

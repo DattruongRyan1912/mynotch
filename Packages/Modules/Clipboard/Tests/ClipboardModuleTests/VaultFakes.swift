@@ -12,6 +12,14 @@ final class FakeBoardKeychain: BoardKeyKeychain {
     private(set) var storeCount = 0
     var storeError: ClipboardVaultError?
     var loadError: ClipboardVaultError?
+    /// What the read-only probe answers, as an app with or without a Keychain access group would.
+    var usable = true
+    private(set) var probeCount = 0
+
+    func isUsable() -> Bool {
+        probeCount += 1
+        return usable
+    }
 
     func store(_ key: Data, for boardID: UUID) throws {
         storeCount += 1
@@ -35,9 +43,15 @@ final class FakeBoardKeychain: BoardKeyKeychain {
 /// The user's answer to the Touch ID prompt, as a test sets it.
 final class FakeAuthenticator: UserAuthenticating {
     var outcome: ClipboardVaultError?
+    /// Whether this Mac can ask for Touch ID or the device password at all.
+    var available = true
     var reasons: [String] = []
     /// Awaited before the answer, so a test can keep the prompt open.
     var holdAnswer: (() async -> Void)?
+
+    func canAuthenticate() -> Bool {
+        available
+    }
 
     func authenticate(reason: String) async throws -> UserAuthentication {
         reasons.append(reason)
