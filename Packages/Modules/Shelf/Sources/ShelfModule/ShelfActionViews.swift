@@ -113,6 +113,9 @@ struct ShelfActionReportView: View {
                     .foregroundStyle(report.failures.isEmpty && !report.wasCancelled ? Color.green : Color.orange)
                 Text("\(report.action.title): \(report.summary)").font(.system(size: 12, weight: .medium)).lineLimit(1)
                 Spacer()
+                if !report.revealable.isEmpty {
+                    Button("Hiện trong Finder") { module.reveal(report.revealable) }.controlSize(.small)
+                }
                 if report.text != nil {
                     Button("Chép lại") { module.copyReportText() }.controlSize(.small)
                 }

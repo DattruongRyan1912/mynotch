@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
@@ -38,8 +39,12 @@ extension ShelfModule {
             quality: context.settings.value(keys.imageQuality), stripLocation: context.settings.value(keys.stripLocation),
             folders: OutputFolders(promisedDirectory: store.promisedDirectory)
         )
+        let promised = OutputFolders(promisedDirectory: store.promisedDirectory), results = resultsFolder
         state.actions.start(action, sources: sources, processor: processor, pasteboard: pasteboard) { [weak self, weak store] urls in
-            await self?.shelve(urls, in: store) ?? urls
+            guard let self else {
+                return await Self.makeReachable(urls.map { UnshelvedResult(url: $0, reason: .shelfStopped) }, folders: promised, into: results)
+            }
+            return await deliverResults(urls, to: store, promised: promised)
         }
     }
 
@@ -75,30 +80,60 @@ extension ShelfModule {
         return pasteboard.write(text)
     }
 
-    /// Gives the files a card each, the first of them first as a drop does, and returns the ones it did not take.
-    ///
-    /// Results never push other cards off: the shelf drops its oldest cards past its limit, and those can be the
-    /// only copy of a text or a promised file (which is deleted with its card). So only as many results are shelved
-    /// as there are free places; the rest are on disk next to their sources, and the report says where. The
-    /// bookmarks are made off the main actor and the shelf is written once for the whole batch. A run that outlived
-    /// its shelf (the module stopped, or stopped and started again) adds nothing to the new one.
-    private func shelve(_ urls: [URL], in store: ShelfStore?) async -> [URL] {
-        guard let store, state.store === store, let keys, let context else { return urls }
-        let limit = context.settings.value(keys.maxItems)
-        let wanted = Array(urls.prefix(max(0, limit - store.items.count)))
-        let cards = await Self.cards(for: wanted)
-        // The shelf may have changed while the bookmarks were made; check the room again.
-        guard state.store === store else { return urls }
-        let room = max(0, limit - store.items.count)
-        let shelved = Array(cards.prefix(room))
-        if !shelved.isEmpty { store.add(contentsOf: shelved.map(\.kind).reversed(), limit: limit) }
-        let taken = Set(shelved.map(\.url))
-        return urls.filter { !taken.contains($0) }
+    /// Shows the files in Finder, for the results that have no card.
+    func reveal(_ urls: [URL]) {
+        NSWorkspace.shared.activateFileViewerSelecting(urls)
     }
 
-    /// The card each file gets; a file whose bookmark cannot be made gets none.
+    /// What happens to the results of one source: they get cards as far as there is room, and the ones left without
+    /// are taken out of the shelf's promised storage if that is where they are, so no result is left where the next
+    /// launch deletes it. Returns the results without a card, with why.
+    func deliverResults(_ urls: [URL], to store: ShelfStore?, promised: OutputFolders) async -> [UnshelvedResult] {
+        let left = await shelve(urls, in: store)
+        return await Self.makeReachable(left, folders: promised, into: resultsFolder)
+    }
+
+    /// Gives the files a card each, the first of them first as a drop does, and returns the ones it left without,
+    /// with why.
+    ///
+    /// Results never evict: the shelf drops its oldest cards past its limit, and those can be the only copy of a text
+    /// or a promised file (which is deleted with its card). So only as many results are shelved as there are free
+    /// places; the rest stay on disk and the report says where. The bookmarks are made off the main actor and the
+    /// shelf is written once for the whole batch. A run that outlived its shelf (the module stopped, or stopped and
+    /// started again) adds nothing to the new one.
+    private func shelve(_ urls: [URL], in store: ShelfStore?) async -> [UnshelvedResult] {
+        func all(_ reason: UnshelvedResult.Reason) -> [UnshelvedResult] { urls.map { UnshelvedResult(url: $0, reason: reason) } }
+        guard let store, state.store === store, let keys, let context else { return all(.shelfStopped) }
+        let limit = context.settings.value(keys.maxItems)
+        let wanted = Array(urls.prefix(max(0, limit - store.items.count)))
+        let cards = await Self.cards(for: wanted, make: makeCard)
+        // The shelf may have changed while the bookmarks were made; check the room again.
+        guard state.store === store else { return all(.shelfStopped) }
+        let room = max(0, limit - store.items.count)
+        var shelved: [ShelfItem.Kind] = []
+        var left: [UnshelvedResult] = []
+        for (index, url) in urls.enumerated() {
+            if index < cards.count, cards[index].kind == nil {
+                left.append(UnshelvedResult(url: url, reason: .cardFailed))
+            } else if index < cards.count, shelved.count < room, let kind = cards[index].kind {
+                shelved.append(kind)
+            } else {
+                left.append(UnshelvedResult(url: url, reason: .shelfFull))
+            }
+        }
+        if !shelved.isEmpty { store.add(contentsOf: shelved.reversed(), limit: limit) }
+        return left
+    }
+
+    /// The card each file gets; nil for a file whose bookmark cannot be made.
     @concurrent
-    private static func cards(for urls: [URL]) async -> [(url: URL, kind: ShelfItem.Kind)] {
-        urls.compactMap { url in (try? ShelfItem.Kind.file(at: url)).map { (url, $0) } }
+    private static func cards(for urls: [URL], make: @Sendable (URL) throws -> ShelfItem.Kind) async -> [(url: URL, kind: ShelfItem.Kind?)] {
+        urls.map { url in (url, try? make(url)) }
+    }
+
+    /// Takes the results without a card out of the shelf's promised storage, which the next launch sweeps.
+    @concurrent
+    private static func makeReachable(_ results: [UnshelvedResult], folders: OutputFolders, into folder: URL) async -> [UnshelvedResult] {
+        ResultsFolder.rescue(results, folders: folders, into: folder)
     }
 }

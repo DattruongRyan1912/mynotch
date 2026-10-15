@@ -262,7 +262,7 @@ actor Gate {
         await run(.resize(.side800), urls.map(source), delivered: Delivered(room: 1))
         let report = try #require(report)
         #expect(report.created.count == 3)
-        #expect(report.notShelved.map(\.lastPathComponent) == ["ảnh-2-800.png", "ảnh-3-800.png"])
+        #expect(report.notShelved.map(\.url.lastPathComponent) == ["ảnh-2-800.png", "ảnh-3-800.png"])
     }
 
     @Test func cancellingShowsThatTheRunIsStoppingUntilItHas() async throws {
@@ -361,11 +361,11 @@ final class Delivered {
 
     init(room: Int = .max) { self.room = room }
 
-    func receive(_ urls: [URL]) async -> [URL] {
+    func receive(_ urls: [URL]) async -> [UnshelvedResult] {
         batches.append(urls)
         let taken = min(room, urls.count)
         room -= taken
-        return Array(urls.dropFirst(taken))
+        return urls.dropFirst(taken).map { UnshelvedResult(url: $0, reason: .shelfFull) }
     }
 
     /// The progress values a processor reported, from any thread.
@@ -386,10 +386,10 @@ final class Delivered {
 }
 
 
-/// Waits until `condition` holds and records a failure after ten seconds, so a fake that is never called fails the
-/// test instead of hanging it.
+/// Waits until `condition` holds and records a failure after thirty seconds, so a fake that is never called fails the
+/// test instead of hanging it. Thirty, since the suite runs in parallel on a machine that may be busy building.
 func eventually(_ condition: () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async {
-    let deadline = ContinuousClock.now + .seconds(10)
+    let deadline = ContinuousClock.now + .seconds(30)
     while !condition() {
         guard ContinuousClock.now < deadline else {
             Issue.record("Timed out waiting", sourceLocation: sourceLocation)

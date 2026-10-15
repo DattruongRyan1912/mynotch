@@ -17,7 +17,7 @@ nonisolated enum FileActionError: LocalizedError, Equatable, Sendable {
     case cutOutFailed
     case cannotWrite
     case zipFailed
-    case linkNotStored
+    case linksNotStored(count: Int)
     case noImages
     case tooManyPages(count: Int, limit: Int)
 
@@ -38,7 +38,7 @@ nonisolated enum FileActionError: LocalizedError, Equatable, Sendable {
         case .cutOutFailed: "Không tách được nền"
         case .cannotWrite: "Không ghi được kết quả cạnh file gốc"
         case .zipFailed: "Không nén được"
-        case .linkNotStored: "Liên kết tượng trưng không được lưu vào file zip"
+        case .linksNotStored(let count): "\(count) liên kết tượng trưng không được lưu vào file zip"
         case .noImages: "Không có ảnh nào để gộp"
         case .tooManyPages(let count, let limit): "PDF có \(count) trang, nhiều hơn \(limit) trang là mức có thể tách"
         }

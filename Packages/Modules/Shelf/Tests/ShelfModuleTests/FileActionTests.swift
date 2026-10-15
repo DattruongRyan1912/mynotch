@@ -97,10 +97,34 @@ import UniformTypeIdentifiers
         typealias Report = FileActionRunner.Report
         let folder = URL(filePath: "/tmp/Ảnh", directoryHint: .isDirectory)
         let made = (1...3).map { folder.appending(path: "a\($0).png") }
-        var report = Report(action: .resize(.half), created: made, notShelved: Array(made.dropFirst()))
+        var report = Report(action: .resize(.half), created: made, notShelved: made.dropFirst().map { UnshelvedResult(url: $0, reason: .shelfFull) })
         #expect(report.summary == "Đã tạo 3 file · 2 file chưa vào khay")
         #expect(report.shelfNote == "Khay đầy: 2 file nằm trong thư mục Ảnh")
+        #expect(report.revealable == Array(made.dropFirst()))
         report.notShelved = []
-        #expect(report.shelfNote == nil && report.summary == "Đã tạo 3 file")
+        #expect(report.shelfNote == nil && report.summary == "Đã tạo 3 file" && report.revealable.isEmpty)
+    }
+
+    @Test func eachReasonAResultHasNoCardGetsItsOwnTrueMessage() {
+        typealias Report = FileActionRunner.Report
+        let folder = URL(filePath: "/tmp/Ảnh", directoryHint: .isDirectory)
+        func result(_ name: String, _ reason: UnshelvedResult.Reason) -> UnshelvedResult { UnshelvedResult(url: folder.appending(path: name), reason: reason) }
+
+        // A failed bookmark is not a full shelf.
+        let failed = Report(action: .cutOut, notShelved: [result("a.png", .cardFailed)])
+        #expect(failed.shelfNote == "1 file không tạo được thẻ trên khay, nằm trong thư mục Ảnh")
+        #expect(failed.shelfNote?.contains("đầy") == false)
+
+        let stopped = Report(action: .cutOut, notShelved: [result("a.png", .shelfStopped), result("b.png", .shelfStopped)])
+        #expect(stopped.shelfNote == "Khay đã dừng khi đang chạy: 2 file nằm trong thư mục Ảnh")
+
+        // Lost at the next launch, so it says so, and the file is not offered to Finder.
+        let stranded = Report(action: .cutOut, notShelved: [result("a.png", .stranded)])
+        #expect(stranded.shelfNote == "1 file không chuyển ra được thư mục kết quả, nên còn trong bộ nhớ tạm của MyNotch và sẽ bị xoá khi mở lại app")
+        #expect(stranded.revealable.isEmpty)
+
+        let mixed = Report(action: .cutOut, notShelved: [result("a.png", .shelfFull), result("b.png", .cardFailed), result("c.png", .shelfFull)])
+        #expect(mixed.shelfNote == "Khay đầy: 2 file nằm trong thư mục Ảnh\n1 file không tạo được thẻ trên khay, nằm trong thư mục Ảnh")
+        #expect(mixed.revealable.count == 3)
     }
 }

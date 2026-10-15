@@ -94,6 +94,22 @@ import Testing
         #expect(try isEmpty(staging))
     }
 
+    @Test func aReadOnlyFolderInTheSourceDoesNotKeepTheStagingCopyAlive() throws {
+        let folder = try makeTempDirectory(), staging = try makeTempDirectory()
+        let source = folder.appending(path: "RO", directoryHint: .isDirectory)
+        let locked = source.appending(path: "ro", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        _ = try makeTempFile(named: "a.txt", in: locked)
+        // A link makes the folder take the staged route, which copies it.
+        try FileManager.default.createSymbolicLink(atPath: source.appending(path: "lk").path, withDestinationPath: "ro/a.txt")
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: locked.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path) }
+
+        let made = try ZipArchive.make(from: [source], folders: folders, stagingRoot: staging)
+        #expect(try files(made.file).contains("RO/ro/a.txt"))
+        #expect(try isEmpty(staging))
+    }
+
     // MARK: Cancelling
 
     @Test func aTaskCancelledBeforeItStartsWritesNothing() async throws {
@@ -123,6 +139,23 @@ import Testing
         let result = await task.value
         #expect(throws: CancellationError.self) { try result.get() }
         #expect(Set(try FileManager.default.contentsOfDirectory(atPath: folder.path)) == ["a.txt", "b.txt", "c.txt"])
+        #expect(try isEmpty(staging))
+    }
+
+    @Test func aCancelPressedDuringTheLastCopyRemovesTheZipAndReportsCancelled() async throws {
+        let folder = try makeTempDirectory(), staging = try makeTempDirectory()
+        let file = try makeTempFile(in: folder)
+        let task = Task.detached { [folders] in
+            Result {
+                try ZipArchive.make(from: [file], folders: folders, stagingRoot: staging) { step in
+                    // The zip has just been copied into place when the user cancels.
+                    if step == .placed { withUnsafeCurrentTask { $0?.cancel() } }
+                }
+            }
+        }
+        let result = await task.value
+        #expect(throws: CancellationError.self) { try result.get() }
+        #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path) == ["note.txt"])
         #expect(try isEmpty(staging))
     }
 

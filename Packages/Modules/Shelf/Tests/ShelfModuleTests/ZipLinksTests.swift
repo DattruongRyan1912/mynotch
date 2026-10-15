@@ -118,7 +118,7 @@ import Testing
         var steps: [ZipStep] = []
         _ = try ZipArchive.make(from: [source], folders: folders, stagingRoot: staging) { steps.append($0) }
         // Nothing was copied: a big folder is not duplicated just to be zipped.
-        #expect(steps == [.zipped])
+        #expect(steps == [.zipped, .placed])
     }
 
     @Test func linksThatCannotBeStoredAreReportedAndTheRestIsStillZipped() throws {

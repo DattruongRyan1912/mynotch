@@ -6,6 +6,8 @@ nonisolated enum ZipStep: Equatable, Sendable {
     case staged(Int)
     /// The system has made the zip; it is not delivered yet.
     case zipped
+    /// The zip has been copied next to its source.
+    case placed
 }
 
 /// Zips with the system's own archiver (`NSFileCoordinator` with `.forUploading`), so nothing is shelled out.
@@ -88,6 +90,12 @@ nonisolated enum ZipArchive {
                 let file = try OutputNaming.place(stem: name, suffix: nil, ext: "zip", in: folders.folder(for: first)) {
                     try manager.copyItem(at: archive, to: $0)
                 }
+                observe(.placed)
+                // A cancel that came during the copy: the zip is taken back, so the report says what happened.
+                if Task.isCancelled {
+                    try? manager.removeItem(at: file)
+                    throw CancellationError()
+                }
                 return Made(file: file, unstoredLinks: unstored)
             }
         }
@@ -140,10 +148,8 @@ nonisolated enum ZipArchive {
                         archiveRoot: archiveRoot, links: &links, copied: copied
                     )
                 }
-                // The folder's own mode and dates, set last so a read-only folder can still be filled.
-                if let attributes = try? manager.attributesOfItem(atPath: source.path) {
-                    try? manager.setAttributes(attributes.filter { [.posixPermissions, .modificationDate].contains($0.key) }, ofItemAtPath: target.path)
-                }
+                // The folder keeps the mode it was made with and not the source's: the system's zip stores no folder
+                // entries, so the source's mode would not reach the archive, and a read-only copy could not be removed.
             case .file:
                 try manager.copyItem(at: source, to: target)
                 copied()

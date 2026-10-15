@@ -1,4 +1,5 @@
 import AppKit
+import PDFKit
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -244,7 +245,10 @@ import UniformTypeIdentifiers
         // The three results are on disk next to their sources, and the shelf is as it was.
         #expect(report.created.count == 3 && report.created.allSatisfy(exists))
         #expect(Set(fixture.items.map(\.id)) == Set(texts.map(\.id) + files.map(\.id)))
-        #expect(report.notShelved == report.created)
+        #expect(report.notShelved.map(\.url) == report.created)
+        #expect(report.notShelved.allSatisfy { $0.reason == .shelfFull })
+        // They are next to their sources, a place of the user's own, so nothing is moved anywhere else.
+        #expect(!exists(fixture.resultsFolder))
     }
 
     @Test func resultsTakeTheFreePlacesAndTheRestStayOnDisk() async throws {
@@ -262,14 +266,13 @@ import UniformTypeIdentifiers
         #expect(report.created.map(\.lastPathComponent) == (1...5).map { "d-trang-\($0).png" })
         #expect(fileNames(fixture).prefix(3) == ["d-trang-1.png", "d-trang-2.png", "d-trang-3.png"])
         #expect(fixture.items.count == 10)
-        #expect(report.notShelved.map(\.lastPathComponent) == ["d-trang-4.png", "d-trang-5.png"])
+        #expect(report.notShelved.map(\.url.lastPathComponent) == ["d-trang-4.png", "d-trang-5.png"])
         #expect(Set(others.map(\.id)).isSubset(of: Set(fixture.items.map(\.id))))
         #expect(report.shelfNote == "Khay đầy: 2 file nằm trong thư mục \(folder.lastPathComponent)")
     }
 
-    @Test func aPromisedCopyIsNeverEvictedByResults() async throws {
-        let fixture = await started()
-        fixture.settings.set(10, for: fixture.keys.maxItems)
+    /// What Photos or Mail hands over: a file that exists only as a promise, which the shelf keeps a copy of.
+    func promisedPNG() throws -> NSItemProvider {
         let data = NSMutableData()
         let destination = try #require(CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil))
         CGImageDestinationAddImage(destination, SyntheticFiles.image(width: 2000, height: 1000), nil)
@@ -280,18 +283,122 @@ import UniformTypeIdentifiers
             completion(bytes, nil)
             return nil
         }
-        // The promised copy is the oldest card on a shelf that is then full.
+        return provider
+    }
+
+    func promisedPDF(pages: Int) throws -> NSItemProvider {
+        let document = PDFDocument()
+        for index in 0..<pages {
+            let image = NSImage(size: NSSize(width: 40, height: 40), flipped: false) { rect in
+                NSColor.white.setFill()
+                rect.fill()
+                return true
+            }
+            document.insert(try #require(PDFPage(image: image)), at: index)
+        }
+        let bytes = try #require(document.dataRepresentation())
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(forTypeIdentifier: UTType.pdf.identifier, visibility: .all) { completion in
+            completion(bytes, nil)
+            return nil
+        }
+        return provider
+    }
+
+    /// The promised file as the oldest card of a shelf of 10 that is full of notes.
+    func fullShelf(withPromised provider: NSItemProvider, notes: Int = 9, in fixture: ShelfFixture) async throws -> ShelfItem {
+        fixture.settings.set(10, for: fixture.keys.maxItems)
         _ = await fixture.module.add(providers: [provider])
-        _ = await fixture.module.add(providers: (1...9).map { NSItemProvider(object: "ghi chú \($0)" as NSString) })
-        let promised = try #require(fixture.items.last)
-        let copy = try #require(fixture.module.state.store?.url(of: promised))
-        #expect(fixture.items.count == 10)
+        _ = await fixture.module.add(providers: (1...notes).map { NSItemProvider(object: "ghi chú \($0)" as NSString) })
+        return try #require(fixture.items.last)
+    }
+
+    @Test func theResultOfAPromisedCopyThatGetsNoCardIsMovedWhereTheUserCanFindIt() async throws {
+        let fixture = await started()
+        let promised = try await fullShelf(withPromised: try promisedPNG(), in: fixture)
+        let store = try #require(fixture.module.state.store)
+        let copy = try #require(store.url(of: promised))
+        #expect(fixture.items.count == 10 && fixture.promisedEntries.count == 1)
 
         fixture.module.runAction(.resize(.side800), on: [promised])
         await finish(fixture)
-        #expect(fixture.items.contains(promised) && exists(copy))
-        #expect(finished(fixture)?.created.count == 1)
-        #expect(fixture.items.count == 10)
+        // The card and its copy are safe, as is every other card.
+        #expect(fixture.items.contains(promised) && exists(copy) && fixture.items.count == 10)
+        let report = try #require(finished(fixture))
+        let rescued = try #require(report.notShelved.first)
+        #expect(report.created.count == 1 && report.notShelved.count == 1 && rescued.reason == .shelfFull)
+        // The result is in the results folder, not under the shelf's promised storage, and its own folder is gone.
+        #expect(rescued.url.deletingLastPathComponent().resolvingSymlinksInPath() == fixture.resultsFolder.resolvingSymlinksInPath())
+        #expect(exists(rescued.url) && !exists(report.created[0]))
+        #expect(fixture.promisedEntries.count == 1)
+        #expect(report.shelfNote == "Khay đầy: 1 file nằm trong thư mục \(fixture.resultsFolder.lastPathComponent)")
+        #expect(report.revealable == [rescued.url])
+
+        // A relaunch deletes the copies no card points at; the result is not one of them.
+        _ = ShelfStore(directory: fixture.storage.directory, limit: 10)
+        #expect(exists(rescued.url) && exists(copy))
+        #expect(fixture.promisedEntries.count == 1)
+    }
+
+    @Test func aSplitOfAPromisedPDFShelvesWhatFitsAndMovesTheRestOut() async throws {
+        let fixture = await started()
+        // Seven cards of ten with the PDF: room for three of its five pages.
+        let promised = try await fullShelf(withPromised: try promisedPDF(pages: 5), notes: 6, in: fixture)
+        fixture.module.runAction(.pdfToImages, on: [promised])
+        await finish(fixture)
+        let report = try #require(finished(fixture))
+        #expect(report.created.count == 5 && fixture.items.count == 10)
+        #expect(report.notShelved.count == 2)
+        #expect(report.notShelved.map(\.url.lastPathComponent).map { $0.hasSuffix("-trang-4.png") || $0.hasSuffix("-trang-5.png") } == [true, true])
+        #expect(report.notShelved.allSatisfy { $0.url.deletingLastPathComponent().resolvingSymlinksInPath() == fixture.resultsFolder.resolvingSymlinksInPath() })
+
+        _ = ShelfStore(directory: fixture.storage.directory, limit: 10)
+        // Every page is still there after the sweep: three behind their cards, two in the results folder.
+        #expect(report.created.prefix(3).allSatisfy(exists))
+        #expect(report.notShelved.map(\.url).allSatisfy(exists))
+        #expect(fixture.promisedEntries.count == 4)
+    }
+
+    @Test func rescuedResultsWithTheSameNameDoNotReplaceEachOther() async throws {
+        let fixture = await started()
+        let first = try await fullShelf(withPromised: try promisedPNG(), in: fixture)
+        fixture.module.runAction(.resize(.side800), on: [first])
+        await finish(fixture)
+        let one = try #require(finished(fixture)?.notShelved.first)
+        fixture.module.dismissActionReport()
+        fixture.module.runAction(.resize(.side800), on: [first])
+        await finish(fixture)
+        let two = try #require(finished(fixture)?.notShelved.first)
+        #expect(one.url != two.url && exists(one.url) && exists(two.url))
+        #expect(two.url.lastPathComponent.contains(" 2."))
+    }
+
+    @Test func resultsThatCannotBeMovedOutAreToldTheyWillBeLost() async throws {
+        // The results folder cannot be made: a file stands where its parent should be.
+        let blocker = try makeTempFile(in: try makeTempDirectory())
+        let fixture = await started(ShelfFixture(resultsFolder: blocker.appending(path: "MyNotch")))
+        let promised = try await fullShelf(withPromised: try promisedPNG(), in: fixture)
+        fixture.module.runAction(.resize(.side800), on: [promised])
+        await finish(fixture)
+        let report = try #require(finished(fixture))
+        let stranded = try #require(report.notShelved.first)
+        #expect(stranded.reason == .stranded && exists(stranded.url))
+        #expect(report.shelfNote?.contains("sẽ bị xoá khi mở lại app") == true)
+        #expect(report.revealable.isEmpty)
+    }
+
+    @Test func aResultWhoseCardCannotBeMadeIsReportedAsThatAndNotAsAFullShelf() async throws {
+        let fixture = await started()
+        let folder = try makeTempDirectory()
+        let items = await shelve([try png("a.png", in: folder)], in: fixture)
+        fixture.module.makeCard = { _ in throw CocoaError(.fileReadUnknown) }
+        fixture.module.runAction(.resize(.side800), on: items)
+        await finish(fixture)
+        let report = try #require(finished(fixture))
+        #expect(report.created.count == 1 && report.created.allSatisfy(exists))
+        #expect(report.notShelved.map(\.reason) == [.cardFailed])
+        #expect(report.shelfNote == "1 file không tạo được thẻ trên khay, nằm trong thư mục \(folder.lastPathComponent)")
+        #expect(fixture.items.count == 1)
     }
 
     @Test func manyResultsAreSavedToTheShelfInOneWrite() async throws {
@@ -443,5 +550,28 @@ import UniformTypeIdentifiers
         await fixture.harness.registry.resumeAll()
         // The new shelf has what the old one saved, and the result is a file on disk but no card.
         #expect(fixture.items.count == 1)
+    }
+
+    @Test func aPromisedResultDeliveredAfterTheShelfStoppedIsMovedOutNotLeftToBeSwept() async throws {
+        let fixture = await started()
+        let store = try #require(fixture.module.state.store)
+        let promised = OutputFolders(promisedDirectory: store.promisedDirectory)
+        // The module stops and starts again while an action runs; the new shelf sweeps the promised storage as it loads.
+        await fixture.harness.registry.pauseAll()
+        await fixture.harness.registry.resumeAll()
+        // Then the run's last step writes its result beside the promised copy, in a folder of its own, and delivers it
+        // to the shelf it started with, which is gone.
+        let folder = store.promisedDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let result = try makeTempFile(named: "kết quả.png", in: folder)
+
+        let left = await fixture.module.deliverResults([result], to: store, promised: promised)
+        let rescued = try #require(left.first)
+        #expect(left.count == 1 && rescued.reason == .shelfStopped)
+        #expect(rescued.url.deletingLastPathComponent().resolvingSymlinksInPath() == fixture.resultsFolder.resolvingSymlinksInPath())
+        #expect(exists(rescued.url) && !exists(result))
+        // The next launch's sweep takes nothing of it.
+        _ = ShelfStore(directory: fixture.storage.directory, limit: 50)
+        #expect(exists(rescued.url))
     }
 }

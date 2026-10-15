@@ -45,9 +45,9 @@ final class FileActionRunner {
         var text: String?
         var textCopied = false
         var wasCancelled = false
-        /// Results that are on disk next to their sources but not on the shelf, because it had no room: results
-        /// never push other cards off.
-        var notShelved: [URL] = []
+        /// Results that are on disk but have no card on the shelf: it had no room (results never push other cards
+        /// off), the card could not be made, or the shelf stopped meanwhile.
+        var notShelved: [UnshelvedResult] = []
 
         /// One line for the top of the report.
         var summary: String {
@@ -60,11 +60,25 @@ final class FileActionRunner {
             return parts.joined(separator: " · ")
         }
 
-        /// Says where the results are that did not fit on the shelf.
+        /// Says where the results are that have no card, and why, one line for each reason.
         var shelfNote: String? {
-            guard let first = notShelved.first else { return nil }
-            return "Khay đầy: \(notShelved.count) file nằm trong thư mục \(first.deletingLastPathComponent().lastPathComponent)"
+            func folder(_ results: [UnshelvedResult]) -> String { results[0].url.deletingLastPathComponent().lastPathComponent }
+            var lines: [String] = []
+            let full = notShelved.filter { $0.reason == .shelfFull }
+            let failed = notShelved.filter { $0.reason == .cardFailed }
+            let stopped = notShelved.filter { $0.reason == .shelfStopped }
+            let stranded = notShelved.filter { $0.reason == .stranded }
+            if !full.isEmpty { lines.append("Khay đầy: \(full.count) file nằm trong thư mục \(folder(full))") }
+            if !failed.isEmpty { lines.append("\(failed.count) file không tạo được thẻ trên khay, nằm trong thư mục \(folder(failed))") }
+            if !stopped.isEmpty { lines.append("Khay đã dừng khi đang chạy: \(stopped.count) file nằm trong thư mục \(folder(stopped))") }
+            if !stranded.isEmpty {
+                lines.append("\(stranded.count) file không chuyển ra được thư mục kết quả, nên còn trong bộ nhớ tạm của MyNotch và sẽ bị xoá khi mở lại app")
+            }
+            return lines.isEmpty ? nil : lines.joined(separator: "\n")
         }
+
+        /// The results without a card that Finder can show: all but the ones that are about to be lost.
+        var revealable: [URL] { notShelved.filter { $0.reason != .stranded }.map(\.url) }
     }
 
     enum Phase: Equatable {
@@ -84,11 +98,11 @@ final class FileActionRunner {
     }
 
     /// Starts the run in the background and returns at once. Ignored while another run is going. `deliver` hears the
-    /// files made for each source as soon as they exist, on the main actor, and gives back the ones it did not
-    /// take (the shelf had no room); the report names them.
+    /// files made for each source as soon as they exist, on the main actor, and gives back the ones it left without
+    /// a card, with why; the report names them.
     func start(
         _ action: FileAction, sources: [ActionSource], processor: FileActionProcessor, pasteboard: any PasteboardWriting,
-        deliver: @escaping ([URL]) async -> [URL]
+        deliver: @escaping ([URL]) async -> [UnshelvedResult]
     ) {
         guard let token = begin(action, sources: sources) else { return }
         currentRun = Task { await perform(action, sources: sources, token: token, processor: processor, pasteboard: pasteboard, deliver: deliver) }
@@ -97,7 +111,7 @@ final class FileActionRunner {
     /// `start`, waiting for the end.
     func run(
         _ action: FileAction, sources: [ActionSource], processor: FileActionProcessor, pasteboard: any PasteboardWriting,
-        deliver: @escaping ([URL]) async -> [URL]
+        deliver: @escaping ([URL]) async -> [UnshelvedResult]
     ) async {
         guard let token = begin(action, sources: sources) else { return }
         await perform(action, sources: sources, token: token, processor: processor, pasteboard: pasteboard, deliver: deliver)
@@ -144,7 +158,7 @@ final class FileActionRunner {
 
     private func perform(
         _ action: FileAction, sources: [ActionSource], token: Int, processor: FileActionProcessor, pasteboard: any PasteboardWriting,
-        deliver: ([URL]) async -> [URL]
+        deliver: ([URL]) async -> [UnshelvedResult]
     ) async {
         var report = Report(action: action)
         var texts: [String] = []
@@ -193,7 +207,7 @@ final class FileActionRunner {
     /// Sources that are gone are reported by name and left out; when the action fails as a whole there is one error.
     private func combine(
         _ action: FileAction, _ sources: [ActionSource], _ processor: FileActionProcessor, into report: inout Report,
-        deliver: ([URL]) async -> [URL]
+        deliver: ([URL]) async -> [UnshelvedResult]
     ) async throws {
         let missing = sources.filter { $0.url == nil }
         report.failures = missing.map { Failure(name: $0.name, message: FileActionError.missing.localizedDescription) }

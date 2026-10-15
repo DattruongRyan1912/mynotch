@@ -47,15 +47,19 @@ struct ShelfFixture {
     let harness: RegistryHarness
     /// What the module would copy; never the system clipboard.
     let pasteboard: FakePasteboard
+    /// Where results go that have no card and no folder of their own, instead of ~/Downloads. Not created until used.
+    let resultsFolder: URL
 
     /// Each fixture has its own notification center, so a quit posted in one test reaches no other module. Text
     /// recognition, cut-outs and the clipboard are fakes, so no test runs Vision or writes a pasteboard.
     init(
         notifications: NotificationCenter = NotificationCenter(), pasteboard: FakePasteboard = FakePasteboard(),
-        recognizer: FakeRecognizer = FakeRecognizer(), cutter: FakeCutter = FakeCutter()
+        recognizer: FakeRecognizer = FakeRecognizer(), cutter: FakeCutter = FakeCutter(),
+        resultsFolder: URL = ScratchFolders.shared.reserve("Results")
     ) {
         self.pasteboard = pasteboard
-        module = ShelfModule(notifications: notifications, pasteboard: pasteboard, recognizer: recognizer, cutter: cutter)
+        self.resultsFolder = resultsFolder
+        module = ShelfModule(notifications: notifications, pasteboard: pasteboard, recognizer: recognizer, cutter: cutter, resultsFolder: resultsFolder)
         harness = RegistryHarness([module])
     }
 

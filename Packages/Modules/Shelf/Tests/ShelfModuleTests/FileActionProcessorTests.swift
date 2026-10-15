@@ -348,6 +348,21 @@ import UniformTypeIdentifiers
         #expect(records.contains { $0.isLink && $0.name.hasSuffix("/trong") })
     }
 
+    @Test func linksLeftOutOfAZipAreOneRowNotOnePerLink() async throws {
+        let folder = try makeTempDirectory()
+        let project = folder.appending(path: "Dự án", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        _ = try makeTempFile(named: "a.txt", in: project)
+        for name in ["một", "hai", "ba", "bốn"] {
+            try FileManager.default.createSymbolicLink(atPath: project.appending(path: name).path, withDestinationPath: "a.txt")
+        }
+        var worker = processor()
+        worker.storeLinks = { _, _ in throw ZipLinks.Failure.unsupported }
+        let combined = try await worker.combine(.zip, sources: [project])
+        #expect(combined.skipped == [SkippedFile(source: combined.files[0], error: .linksNotStored(count: 4))])
+        #expect(FileActionError.linksNotStored(count: 4).localizedDescription == "4 liên kết tượng trưng không được lưu vào file zip")
+    }
+
     @Test func aDanglingLinkCountsAsThereNotAsMissing() async throws {
         let folder = try makeTempDirectory()
         try FileManager.default.createSymbolicLink(atPath: folder.appending(path: "treo").path, withDestinationPath: "không-có")

@@ -40,23 +40,30 @@ public final class ShelfModule: FeatureModule {
     let pasteboard: any PasteboardWriting
     let recognizer: any TextRecognizing
     let cutter: any ForegroundCutting
+    /// Where results go that have no card and no folder of their own (see `ResultsFolder`).
+    let resultsFolder: URL
+    /// Makes the card of a result; a seam for tests of a bookmark that fails.
+    var makeCard: @Sendable (URL) throws -> ShelfItem.Kind = { try ShelfItem.Kind.file(at: $0) }
 
     public init() {
         notifications = .default
         pasteboard = SystemPasteboard()
         recognizer = VisionTextRecognizer()
         cutter = VisionForegroundCutter()
+        resultsFolder = ResultsFolder.standard
     }
 
-    /// Tests pass fakes, so they never run Vision or write a pasteboard.
+    /// Tests pass fakes, so they never run Vision, write a pasteboard or make a folder in Downloads.
     init(
         notifications: NotificationCenter, pasteboard: any PasteboardWriting = SystemPasteboard(),
-        recognizer: any TextRecognizing = VisionTextRecognizer(), cutter: any ForegroundCutting = VisionForegroundCutter()
+        recognizer: any TextRecognizing = VisionTextRecognizer(), cutter: any ForegroundCutting = VisionForegroundCutter(),
+        resultsFolder: URL = ResultsFolder.standard
     ) {
         self.notifications = notifications
         self.pasteboard = pasteboard
         self.recognizer = recognizer
         self.cutter = cutter
+        self.resultsFolder = resultsFolder
     }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {

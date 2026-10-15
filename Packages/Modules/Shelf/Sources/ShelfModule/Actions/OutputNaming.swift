@@ -46,10 +46,15 @@ nonisolated struct OutputFolders: Sendable {
     /// A promised copy lives in a folder that is deleted with its item, which would take a result with it, so a
     /// result for one gets a promised folder of its own (ask again for each result).
     func folder(for source: URL) -> URL {
-        let parent = source.deletingLastPathComponent()
-        guard let promisedDirectory,
-              parent.deletingLastPathComponent().resolvingSymlinksInPath().path == promisedDirectory.resolvingSymlinksInPath().path
-        else { return parent }
+        guard let promisedDirectory, holdsPromised(source) else { return source.deletingLastPathComponent() }
         return promisedDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    }
+
+    /// Whether the file is in a folder of the shelf's promised storage, which the shelf sweeps once no card points
+    /// at it.
+    func holdsPromised(_ file: URL) -> Bool {
+        guard let promisedDirectory else { return false }
+        return file.deletingLastPathComponent().deletingLastPathComponent().resolvingSymlinksInPath().path
+            == promisedDirectory.resolvingSymlinksInPath().path
     }
 }

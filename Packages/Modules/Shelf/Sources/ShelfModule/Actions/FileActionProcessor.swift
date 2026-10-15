@@ -14,6 +14,8 @@ nonisolated struct FileActionProcessor: Sendable {
     var folders = OutputFolders(promisedDirectory: nil)
     /// Where a zip copies files to before it zips them.
     var stagingRoot = FileManager.default.temporaryDirectory
+    /// Adds links to a finished zip; a seam for tests of what happens when the archive cannot take them.
+    var storeLinks: @Sendable ([ZipLink], URL) throws -> Void = { try ZipLinks.append($0, to: $1) }
 
     /// What an action made of one source: the files it wrote, or the text it read.
     struct Output: Sendable {
@@ -51,9 +53,10 @@ nonisolated struct FileActionProcessor: Sendable {
         case .zip:
             let present = sources.filter(ZipArchive.exists)
             guard !present.isEmpty else { throw FileActionError.missing }
-            let made = try ZipArchive.make(from: present, folders: folders, stagingRoot: stagingRoot)
+            let made = try ZipArchive.make(from: present, folders: folders, stagingRoot: stagingRoot, storeLinks: storeLinks)
+            // One row for all the links left out: a tree can hold thousands.
             let skipped = sources.filter { !present.contains($0) }.map { SkippedFile(source: $0, error: .missing) }
-                + made.unstoredLinks.map { SkippedFile(source: $0, error: .linkNotStored) }
+                + (made.unstoredLinks.isEmpty ? [] : [SkippedFile(source: made.file, error: .linksNotStored(count: made.unstoredLinks.count))])
             return Combined(files: [made.file], skipped: skipped)
         case .imagesToPDF:
             let merged = try PDFActions.makePDF(from: sources, quality: quality, folders: folders)
