@@ -50,10 +50,11 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
     /// No glass at all: the classic look.
     static let none = NotchGlassPlan()
 
-    /// How close two glass shapes of the family have to be for them to melt into each other. Below the gap between a bubble and
-    /// what is beside it, and below the nearest the notch's top ear comes to its first bubble (about 2.5 pt on the smallest
-    /// notch), so at rest the shapes stay apart and they blend only while one moves to or from the other.
-    static let containerSpacing: CGFloat = 2
+    /// How close two glass shapes of the family have to be for them to melt into each other. A bit below the gap between a
+    /// bubble and what is beside it (6 pt), and below the nearest the notch's top ear comes to its first bubble (5 pt on the
+    /// smallest notch, 6.6 on the 14" MacBook's), so at rest the shapes stay apart and they blend only while one moves to or from
+    /// the other.
+    static let containerSpacing: CGFloat = 4
 
     /// Whether the notch and its bubbles are wrapped in one `GlassEffectContainer`.
     let usesContainer: Bool
