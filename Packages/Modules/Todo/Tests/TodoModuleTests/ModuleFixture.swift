@@ -11,6 +11,7 @@ struct ModuleFixture {
     let source: FakeTodoDataSource
     let dayCenter = NotificationCenter()
     let wakeCenter = NotificationCenter()
+    let activeCenter = NotificationCenter()
     let module: TodoModule
     let harness: RegistryHarness
 
@@ -20,7 +21,8 @@ struct ModuleFixture {
         self.clock = clock
         source = FakeTodoDataSource(reminders: reminders, now: clock.now)
         module = TodoModule(
-            dataSource: source, now: { clock.now }, calendar: calendar, dayChangeCenter: dayCenter, wakeCenter: wakeCenter
+            dataSource: source, now: { clock.now }, calendar: calendar, dayChangeCenter: dayCenter, wakeCenter: wakeCenter,
+            activeCenter: activeCenter
         )
         harness = RegistryHarness([module])
         harness.permissions.statuses[.reminders] = .granted

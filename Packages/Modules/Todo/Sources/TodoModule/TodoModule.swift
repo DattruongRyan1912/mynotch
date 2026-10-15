@@ -21,7 +21,9 @@ public final class TodoModule: FeatureModule {
         displayName: "Việc cần làm",
         systemImage: "checklist",
         defaultEnabled: true,
-        permissions: [.reminders],
+        // Optional, so the tab exists from the first run and asks from there: a required permission would keep the module
+        // (and its tab) from starting until it was granted in Settings.
+        optionalPermissions: [.reminders],
         permissionReasons: [.reminders: "Đọc, thêm và đánh dấu xong các việc trong Lời nhắc."],
         order: 650
     )
@@ -44,6 +46,7 @@ public final class TodoModule: FeatureModule {
     private let calendar: Calendar
     private let dayChangeCenter: NotificationCenter
     private let wakeCenter: NotificationCenter
+    private let activeCenter: NotificationCenter
     private var context: ModuleContext?
     /// The settings the latest refresh used; a settings write that leaves them as they are needs no refresh.
     private var usedSettings: TodoSettings?
@@ -83,13 +86,15 @@ public final class TodoModule: FeatureModule {
         now: @escaping () -> Date = { .now },
         calendar: Calendar = .autoupdatingCurrent,
         dayChangeCenter: NotificationCenter = .default,
-        wakeCenter: NotificationCenter = NSWorkspace.shared.notificationCenter
+        wakeCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
+        activeCenter: NotificationCenter = .default
     ) {
         self.dataSource = dataSource
         clock = now
         self.calendar = calendar
         self.dayChangeCenter = dayChangeCenter
         self.wakeCenter = wakeCenter
+        self.activeCenter = activeCenter
         readAt = now()
         state = TodoState(now: readAt, calendar: calendar)
     }
@@ -108,6 +113,7 @@ public final class TodoModule: FeatureModule {
         refreshOn(dataSource.changes, debounced: false)
         refreshOn(Self.signals(named: .NSCalendarDayChanged, in: dayChangeCenter), debounced: true)
         refreshOn(Self.signals(named: NSWorkspace.didWakeNotification, in: wakeCenter), debounced: true)
+        checkOn(Self.signals(named: NSApplication.didBecomeActiveNotification, in: activeCenter))
         let moduleSettings = context.settings
         context.run { [weak self] in
             for await _ in Observations({ TodoSettings(moduleSettings) }) { self?.settingsChanged() }
@@ -280,9 +286,14 @@ public final class TodoModule: FeatureModule {
         await refresh()
     }
 
-    /// Nothing tells the module when access changes in System Settings or a midnight passed while it was asleep, so the tab
-    /// checks when it opens.
+    /// Nothing tells the module when access changes in System Settings or a midnight passed while it was asleep, so it
+    /// checks when the tab opens and when the app becomes active (coming back from System Settings).
     func tabAppeared() {
+        refreshIfStale()
+    }
+
+    /// Reads again only if the list shows the wrong thing for the access there is now, or for the day it is now.
+    private func refreshIfStale() {
         guard let context, state.phase != .loading else { return }
         let granted = context.permissions.status(of: .reminders) == .granted
         guard (state.phase == .ready) != granted || !calendar.isDate(state.now, inSameDayAs: clock()) else { return }
@@ -355,6 +366,12 @@ public final class TodoModule: FeatureModule {
     private func refreshOn(_ stream: AsyncStream<Void>, debounced: Bool) {
         context?.run { [weak self] in
             for await _ in stream { self?.requestRefresh(debounced: debounced) }
+        }
+    }
+
+    private func checkOn(_ stream: AsyncStream<Void>) {
+        context?.run { [weak self] in
+            for await _ in stream { self?.refreshIfStale() }
         }
     }
 

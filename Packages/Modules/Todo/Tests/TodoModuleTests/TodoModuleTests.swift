@@ -23,10 +23,11 @@ import Testing
         #expect(descriptor.order == 650)
     }
 
-    @Test func needsRemindersAccessAndSaysWhy() {
+    @Test func asksForRemindersAccessAsAnOptionalPermissionAndSaysWhy() {
         let descriptor = f.module.descriptor
-        #expect(descriptor.permissions == [.reminders])
-        #expect(descriptor.optionalPermissions.isEmpty)
+        // Optional: the module starts without it, so its tab can show the hint and the button.
+        #expect(descriptor.permissions.isEmpty)
+        #expect(descriptor.optionalPermissions == [.reminders])
         #expect(descriptor.permissionReasons == [.reminders: "Đọc, thêm và đánh dấu xong các việc trong Lời nhắc."])
     }
 
@@ -59,26 +60,80 @@ import Testing
 
     // MARK: Permission
 
-    @Test func waitsForAccessWithoutAskingForIt() async {
+    @Test func theTabExistsFromTheFirstRunAndShowsTheHintWithoutAskingForAccess() async throws {
         f.harness.permissions.statuses[.reminders] = .notDetermined
-        await f.harness.registry.bootstrap()
-        #expect(f.harness.registry.state(of: "todo") == .needsPermission(.reminders))
+        await f.start()
+        #expect(f.harness.registry.state(of: "todo") == .running)
+        #expect(try #require(f.harness.registry.tabs.first).id == "todo")
+        #expect(f.state.phase == .needsAccess)
+        #expect(f.state.items.isEmpty)
         #expect(f.harness.permissions.requested.isEmpty)
+        #expect(f.harness.permissions.openedSettings.isEmpty)
         #expect(f.source.fetchCount == 0)
-        #expect(f.harness.registry.tabs.isEmpty)
     }
 
-    @Test func startsOnceAccessIsGrantedInSystemSettings() async {
+    @Test func notDeterminedThenHintThenGrantedFromTheButtonLoadsTheList() async {
         f.harness.permissions.statuses[.reminders] = .notDetermined
-        await f.harness.registry.bootstrap()
+        await f.start()
+        #expect(f.state.phase == .needsAccess)
+        #expect(f.harness.permissions.requested.isEmpty)
+
+        // The user clicks the button: the one place that asks, and the list comes with the answer, with no restart.
+        f.module.actions.requestAccess()
+        await settle { f.state.phase == .ready }
+
+        #expect(f.harness.permissions.requested == [.reminders])
+        #expect(f.state.phase == .ready)
+        #expect(f.itemIDs == ["overdue", "meeting", "lunch", "report", "shower", "idea"])
+        #expect(f.harness.registry.state(of: "todo") == .running)
+    }
+
+    @Test func accessGrantedInSystemSettingsLoadsTheListWhenTheTabOpens() async {
+        f.harness.permissions.statuses[.reminders] = .notDetermined
+        await f.start()
+        #expect(f.state.phase == .needsAccess)
 
         f.harness.permissions.statuses[.reminders] = .granted
-        await f.harness.registry.refreshPermissions()
-        await settle { f.module.appliedRefreshes >= 1 }
+        await f.refreshed { f.module.tabAppeared() }
 
-        #expect(f.harness.registry.state(of: "todo") == .running)
         #expect(f.state.phase == .ready)
+        #expect(f.itemIDs.contains("report"))
         #expect(f.harness.permissions.requested.isEmpty)
+    }
+
+    @Test func accessGrantedInSystemSettingsLoadsTheListWhenTheAppBecomesActive() async {
+        f.harness.permissions.statuses[.reminders] = .denied
+        await f.start()
+        #expect(f.state.phase == .needsAccess)
+
+        f.harness.permissions.statuses[.reminders] = .granted
+        await f.refreshed { f.activeCenter.post(name: NSApplication.didBecomeActiveNotification, object: nil) }
+
+        #expect(f.state.phase == .ready)
+        #expect(f.itemIDs.contains("report"))
+        #expect(f.harness.permissions.requested.isEmpty)
+    }
+
+    @Test func becomingActiveWithNothingChangedReadsNothing() async {
+        await f.start()
+        let applied = f.module.appliedRefreshes
+        let fetches = f.source.fetchCount
+        f.activeCenter.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+        await letAnythingPending()
+        #expect(f.module.appliedRefreshes == applied)
+        #expect(f.source.fetchCount == fetches)
+    }
+
+    @Test func aDeniedUserSeesTheHintAndIsSentToSystemSettingsOnlyByTheButton() async {
+        f.harness.permissions.statuses[.reminders] = .denied
+        f.harness.permissions.requestResult = .denied
+        await f.start()
+        #expect(f.harness.permissions.openedSettings.isEmpty)
+
+        await f.module.requestAccess()
+
+        #expect(f.state.phase == .needsAccess)
+        #expect(f.harness.permissions.openedSettings == [.reminders])
     }
 
     @Test func startingNeverPrompts() async {
