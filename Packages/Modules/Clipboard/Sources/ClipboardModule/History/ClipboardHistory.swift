@@ -20,9 +20,12 @@ nonisolated struct ClipboardHistory: Codable, Equatable, Sendable {
     }
 
     /// A repeated copy keeps its id (so pins survive) but takes the newest content, date and source:
-    /// rich text and plain text share a hash, so the latest formatting wins.
+    /// rich text and plain text share a hash, so the latest formatting wins. `isSensitive` is whether the app that copied
+    /// it marked it as a secret; once a text has been one it stays one, since the same words are the same secret.
     @discardableResult
-    mutating func add(_ content: ClipboardContent, hash: String, source: (bundleID: String?, name: String?), at date: Date) -> AddResult {
+    mutating func add(
+        _ content: ClipboardContent, hash: String, source: (bundleID: String?, name: String?), at date: Date, isSensitive: Bool = false
+    ) -> AddResult {
         if let index = items.firstIndex(where: { $0.contentHash == hash }) {
             var item = items.remove(at: index)
             item.content = content
@@ -31,12 +34,14 @@ nonisolated struct ClipboardHistory: Codable, Equatable, Sendable {
             item.sourceAppName = source.name
             // The same hash is the same text, so the answer stays; only an item from before detection has none yet.
             item.codeDetection = item.codeDetection ?? ClipboardCodeDetector.detect(content)
+            if isSensitive { item.sensitive = true }
             items.insert(item, at: 0)
             return .moved(item.id)
         }
         let item = ClipboardItem(
             id: UUID(), content: content, contentHash: hash, copiedAt: date,
-            sourceBundleID: source.bundleID, sourceAppName: source.name, codeDetection: ClipboardCodeDetector.detect(content)
+            sourceBundleID: source.bundleID, sourceAppName: source.name, codeDetection: ClipboardCodeDetector.detect(content),
+            sensitive: isSensitive ? true : nil
         )
         items.insert(item, at: 0)
         return .inserted(item.id)
@@ -118,9 +123,12 @@ nonisolated struct ClipboardHistory: Codable, Equatable, Sendable {
         return removed
     }
 
+    /// A new board goes last in the row.
     @discardableResult
-    mutating func createBoard(name: String, systemImage: String = "tray.full") -> UUID {
-        let board = ClipboardBoard(id: UUID(), name: name, systemImage: systemImage, itemIDs: [])
+    mutating func createBoard(
+        name: String, systemImage: String = ClipboardBoardIcon.defaultName, color: ClipboardBoardColor = .accent
+    ) -> UUID {
+        let board = ClipboardBoard(id: UUID(), name: name, systemImage: systemImage, color: color, itemIDs: [])
         boards.append(board)
         return board.id
     }
@@ -128,6 +136,30 @@ nonisolated struct ClipboardHistory: Codable, Equatable, Sendable {
     mutating func renameBoard(id: UUID, name: String) {
         guard let index = boardIndex(id) else { return }
         boards[index].name = name
+    }
+
+    mutating func setBoardIcon(id: UUID, systemImage: String) {
+        guard let index = boardIndex(id) else { return }
+        boards[index].systemImage = systemImage
+    }
+
+    mutating func setBoardColor(id: UUID, color: ClipboardBoardColor) {
+        guard let index = boardIndex(id) else { return }
+        boards[index].color = color
+    }
+
+    /// Puts the board at `index` of the row (the others keep their order); an index beyond either end is the end.
+    mutating func moveBoard(id: UUID, to index: Int) {
+        guard let from = boardIndex(id) else { return }
+        let target = min(max(index, 0), boards.count - 1)
+        guard target != from else { return }
+        boards.insert(boards.remove(at: from), at: target)
+    }
+
+    /// One step (or more) along the row, for the menu and VoiceOver, which have no drag.
+    mutating func moveBoard(id: UUID, by offset: Int) {
+        guard let from = boardIndex(id) else { return }
+        moveBoard(id: id, to: from + offset)
     }
 
     /// The board's items stay in history, unpinned unless another board holds them.

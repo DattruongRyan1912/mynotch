@@ -17,7 +17,8 @@ final class ClipboardStore {
     }()
 
     private let directory: URL
-    private let imagesDirectory: URL
+    /// Where the PNG files are.
+    let imagesDirectory: URL
     private let scheduler: any Scheduler
     private let logger: Logger
     /// Dates the names of moved-aside files; injected so tests can put two failures in the same second.
@@ -118,9 +119,19 @@ final class ClipboardStore {
     /// File names are content hashes, so an existing file already holds these bytes.
     /// Throws `CocoaError(.fileWriteInvalidFileName)` for a name `imageURL` rejects.
     func saveImage(_ pngData: Data, fileName: String) throws {
-        guard let url = imageURL(fileName: fileName) else { throw CocoaError(.fileWriteInvalidFileName) }
-        guard !fileExists(url) else { return }
+        try Self.writeImage(pngData, named: fileName, in: imagesDirectory)
+    }
+
+    /// The same, for a restore that runs off the main actor and so has no store at hand, only the folder.
+    nonisolated static func writeImage(_ pngData: Data, named fileName: String, in directory: URL) throws {
+        guard isImageFileName(fileName) else { throw CocoaError(.fileWriteInvalidFileName) }
+        let url = directory.appending(path: fileName, directoryHint: .notDirectory)
+        guard !FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else { return }
         try pngData.write(to: url, options: .atomic)
+    }
+
+    private nonisolated static func isImageFileName(_ fileName: String) -> Bool {
+        fileName.wholeMatch(of: /[0-9a-f]{64}\.png/) != nil
     }
 
     /// Call with the items a history change removed, since only they know their image files.
@@ -134,7 +145,7 @@ final class ClipboardStore {
     /// nil unless `fileName` has the stored form "<SHA-256 hex>.png": names come from `history.json`,
     /// which may have been edited, and must never reach outside `images/`.
     func imageURL(fileName: String) -> URL? {
-        guard fileName.wholeMatch(of: /[0-9a-f]{64}\.png/) != nil else { return nil }
+        guard Self.isImageFileName(fileName) else { return nil }
         return imagesDirectory.appending(path: fileName, directoryHint: .notDirectory)
     }
 

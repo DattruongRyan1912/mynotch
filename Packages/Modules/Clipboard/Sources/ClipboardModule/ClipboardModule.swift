@@ -39,7 +39,7 @@ public final class ClipboardModule: FeatureModule {
     private let isTrusted: () -> Bool
     private let pasteboardAccessBehavior: () -> NSPasteboard.AccessBehavior
     private let modifiers: any ModifierState
-    private let now: () -> Date
+    let now: () -> Date
     /// nil in tests that never show it; the app passes the real window.
     private let libraryWindow: (any ClipboardLibraryWindowing)?
     /// nil in tests that never show it; the app passes the real panel.
@@ -231,7 +231,19 @@ public final class ClipboardModule: FeatureModule {
             keys: ClipboardSettingKeys(environment.settings),
             usage: environment.isRunning ? .live(state) : .disk(directory),
             clear: { [weak self] range in await self?.clearHistory(range, directory: directory).value },
-            pasteboardAccessBehavior: pasteboardAccessBehavior
+            pasteboardAccessBehavior: pasteboardAccessBehavior,
+            canBackUp: environment.isRunning,
+            // The module outlives its running, so a backup asked for after a stop says why it cannot be done.
+            backupActions: ClipboardBackupActions(
+                export: { [weak self] options, url, progress in
+                    guard let self else { throw ClipboardBackupError.moduleStopped }
+                    return try await self.exportBackup(options, to: url, progress: progress)
+                },
+                restore: { [weak self] url, progress in
+                    guard let self else { throw ClipboardBackupError.moduleStopped }
+                    return try await self.restoreBackup(from: url, progress: progress)
+                }
+            )
         ))
     }
 
@@ -375,7 +387,9 @@ public final class ClipboardModule: FeatureModule {
         guard case .content(let content, _) = classifier.classify(snapshot) else { return false }
         var addedID: UUID?
         update { history in
-            addedID = history.add(content, hash: ClipboardContent.hash(of: content), source: (nil, nil), at: now()).id
+            addedID = history.add(
+                content, hash: ClipboardContent.hash(of: content), source: (nil, nil), at: now(), isSensitive: item.isSensitive
+            ).id
             return []
         }
         guard let added = state.history.items.first(where: { $0.id == addedID }) else { return false }
@@ -444,6 +458,38 @@ public final class ClipboardModule: FeatureModule {
     func deleteBoard(_ id: UUID) {
         update { history in
             history.deleteBoard(id: id)
+            return []
+        }
+    }
+
+    /// Ignores a name that is not a symbol name, which only a bug could send.
+    func setBoardIcon(_ id: UUID, to systemImage: String) {
+        guard ClipboardBoardIcon.isValidName(systemImage) else { return }
+        update { history in
+            history.setBoardIcon(id: id, systemImage: systemImage)
+            return []
+        }
+    }
+
+    func setBoardColor(_ id: UUID, to color: ClipboardBoardColor) {
+        update { history in
+            history.setBoardColor(id: id, color: color)
+            return []
+        }
+    }
+
+    /// Puts the board at `index` of the row, where the notch's and the library's boards show it.
+    func moveBoard(_ id: UUID, to index: Int) {
+        update { history in
+            history.moveBoard(id: id, to: index)
+            return []
+        }
+    }
+
+    /// A step along the row, for the menus and VoiceOver.
+    func moveBoard(_ id: UUID, by offset: Int) {
+        update { history in
+            history.moveBoard(id: id, by: offset)
             return []
         }
     }
@@ -624,7 +670,7 @@ public final class ClipboardModule: FeatureModule {
         }
         var addedID: UUID?
         update { history in
-            addedID = history.add(content, hash: ClipboardContent.hash(of: content), source: source, at: now()).id
+            addedID = history.add(content, hash: ClipboardContent.hash(of: content), source: source, at: now(), isSensitive: isSensitive).id
             return []
         }
         // A secret never goes on the stack, even when the history is set to keep it.
@@ -859,7 +905,7 @@ public final class ClipboardModule: FeatureModule {
 
     /// Applies a change, enforces the limits, deletes the images of removed items and schedules a save.
     /// `change` returns the items it removed. Does nothing while stopped.
-    private func update(_ change: (inout ClipboardHistory) -> [ClipboardItem]) {
+    func update(_ change: (inout ClipboardHistory) -> [ClipboardItem]) {
         guard let store else { return }
         var history = state.history
         let removed = change(&history) + prune(&history)
@@ -870,7 +916,7 @@ public final class ClipboardModule: FeatureModule {
     }
 
     /// Removes items beyond the limits in Settings; returns them so their images can be deleted.
-    private func prune(_ history: inout ClipboardHistory) -> [ClipboardItem] {
+    func prune(_ history: inout ClipboardHistory) -> [ClipboardItem] {
         guard let context, let keys else { return [] }
         let settings = context.settings
         return history.prune(

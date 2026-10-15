@@ -20,11 +20,28 @@ struct ClipboardSettingsView: View {
     let usage: ClipboardUsageSource
     let clear: (ClipboardClearRange) async -> Void
     let pasteboardAccessBehavior: () -> NSPasteboard.AccessBehavior
+    /// Whether the module runs, which backup and restore need.
+    let canBackUp: Bool
 
     @State private var diskUsage: ClipboardStorageUsage?
     /// Bumped after clearing, so the disk usage is read again.
     @State private var usageRevision = 0
     @State private var pendingClear: ClipboardClearRange?
+    /// Kept by the view, not by whoever builds it, so a backup under way outlives a rebuild of the page.
+    @State private var backup: ClipboardBackupModel
+
+    init(
+        settings: ModuleSettings, keys: ClipboardSettingKeys, usage: ClipboardUsageSource, clear: @escaping (ClipboardClearRange) async -> Void,
+        pasteboardAccessBehavior: @escaping () -> NSPasteboard.AccessBehavior, canBackUp: Bool, backupActions: ClipboardBackupActions
+    ) {
+        self.settings = settings
+        self.keys = keys
+        self.usage = usage
+        self.clear = clear
+        self.pasteboardAccessBehavior = pasteboardAccessBehavior
+        self.canBackUp = canBackUp
+        _backup = State(initialValue: ClipboardBackupModel(actions: backupActions))
+    }
 
     var body: some View {
         Group {
@@ -55,6 +72,7 @@ struct ClipboardSettingsView: View {
             copyStack
             excludedApps
             storage
+            ClipboardBackupRows(backup: backup, isAvailable: canBackUp)
             TimelineView(.periodic(from: .now, by: 2)) { _ in
                 pasteboardAccess(pasteboardAccessBehavior())
             }

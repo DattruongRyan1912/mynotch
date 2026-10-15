@@ -148,7 +148,7 @@ struct ClipboardLibraryBoardTile: View {
         HStack(spacing: 10) {
             Image(systemName: board.systemImage)
                 .font(.system(size: 18))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(board.color.color(accent: Color.accentColor))
             VStack(alignment: .leading, spacing: 2) {
                 Text(board.name)
                     .font(.system(size: 13, weight: .semibold))

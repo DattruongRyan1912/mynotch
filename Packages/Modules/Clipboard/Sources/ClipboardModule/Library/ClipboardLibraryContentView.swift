@@ -16,6 +16,8 @@ struct ClipboardLibraryContentView: View {
     @State private var keyboardRequest = 0
     @State private var dropTarget: UUID?
     @State private var dragWatch: Task<Void, Never>?
+    /// The board whose icon and colour are being chosen, in a popover from its tile.
+    @State private var styling: UUID?
 
     private var columnCount: Int {
         model.cardSize.columnCount(forWidth: Double(width - 2 * Self.padding), spacing: Self.spacing)
@@ -57,7 +59,7 @@ struct ClipboardLibraryContentView: View {
                 .font(.headline)
             ScrollView(.horizontal) {
                 HStack(spacing: Self.spacing) {
-                    ForEach(model.history.boards) { board in
+                    ForEach(Array(model.history.boards.enumerated()), id: \.element.id) { index, board in
                         Button {
                             model.selection = .board(board.id)
                         } label: {
@@ -69,10 +71,27 @@ struct ClipboardLibraryContentView: View {
                         .onDrop(of: [.item], isTargeted: ClipboardLibraryDrop.targeting(board.id, in: $dropTarget)) { _, _ in
                             model.drop(onBoard: board.id)
                         }
+                        .popover(isPresented: Binding(get: { styling == board.id }, set: { if !$0, styling == board.id { styling = nil } })) {
+                            ClipboardBoardStylePicker(
+                                board: board, accent: .accentColor,
+                                onIcon: { module.setBoardIcon(board.id, to: $0) }, onColor: { module.setBoardColor(board.id, to: $0) }
+                            )
+                        }
                         .contextMenu {
                             Button("Đổi tên…", systemImage: "pencil") { requestName(.rename(board.id)) }
+                            Button("Đổi biểu tượng và màu…", systemImage: "paintpalette") { styling = board.id }
+                            Button("Chuyển sang trái", systemImage: "arrow.left") { module.moveBoard(board.id, by: -1) }
+                                .disabled(index == 0)
+                            Button("Chuyển sang phải", systemImage: "arrow.right") { module.moveBoard(board.id, by: 1) }
+                                .disabled(index == model.history.boards.count - 1)
+                            Divider()
                             Button("Xoá board “\(board.name)”", systemImage: "trash", role: .destructive) { module.deleteBoard(board.id) }
                         }
+                        .accessibilityAction(named: "Chuyển sang trái") { if index > 0 { module.moveBoard(board.id, by: -1) } }
+                        .accessibilityAction(named: "Chuyển sang phải") {
+                            if index < model.history.boards.count - 1 { module.moveBoard(board.id, by: 1) }
+                        }
+                        .accessibilityAction(named: "Đổi biểu tượng và màu") { styling = board.id }
                     }
                     Button {
                         requestName(.create(pinning: []))

@@ -61,6 +61,10 @@ struct ClipboardTabView: View {
         .onChange(of: state.stack.isOn) {
             if state.stack.isOn { finishEditing(commit: false) }
         }
+        // The board whose look is being chosen can be deleted from elsewhere (the library), which leaves nothing to choose for.
+        .onChange(of: state.history.boards.map(\.id)) { _, ids in
+            if case .style(let id) = boardEditing, !ids.contains(id) { finishEditing(commit: false) }
+        }
         // While the tab is shown: when it appears, then every 2 s, so the hint goes by itself once Accessibility is allowed.
         .task {
             while !Task.isCancelled {
@@ -83,7 +87,9 @@ struct ClipboardTabView: View {
         HStack(spacing: 6) {
             ClipboardBoardBar(
                 boards: state.history.boards, selection: queryBinding(\.boardID), editing: boardEditing, name: $boardName,
-                onEdit: startEditing, onFinish: finishEditing, onDelete: { module.deleteBoard($0) }
+                onEdit: startEditing, onFinish: finishEditing, onDelete: { module.deleteBoard($0) },
+                onMove: { module.moveBoard($0, to: $1) }, onStep: { module.moveBoard($0, by: $1) },
+                onIcon: { module.setBoardIcon($0, to: $1) }, onColor: { module.setBoardColor($0, to: $1) }
             )
             // The `@` filters the search text holds, as chips that remove them.
             if !state.chips.isEmpty {
@@ -285,6 +291,9 @@ struct ClipboardTabView: View {
             if let item = state.history.items.first(where: { $0.id == itemID }) { module.pin(item, to: boardID) }
         case .rename(let id):
             module.renameBoard(id, to: boardName)
+        case .style:
+            // Each choice was applied as it was made.
+            break
         }
     }
 }
