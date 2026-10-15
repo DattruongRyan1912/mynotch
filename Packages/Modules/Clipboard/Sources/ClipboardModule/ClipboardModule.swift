@@ -66,11 +66,11 @@ public final class ClipboardModule: FeatureModule {
     /// its own, so each closes only its own.
     private let libraryPreviewWindow: (any ClipboardPreviewWindowing)?
     private let panelPreviewWindow: (any ClipboardPreviewWindowing)?
-    private(set) var context: ModuleContext?
-    private(set) var keys: ClipboardSettingKeys?
     private let tabPreviewWindow: (any ClipboardPreviewWindowing)?
     /// The notch tab's large preview; it follows `state`, so it exists as long as the module does.
     let tabPreview: ClipboardTabPreviewModel
+    private(set) var context: ModuleContext?
+    private(set) var keys: ClipboardSettingKeys?
     private var monitor: ClipboardMonitor?
     private var paster: ClipboardPaster?
     /// Closed on stop, so a ⌘V still waiting for the paste delay is never sent into whatever app is in front by then.
@@ -124,9 +124,9 @@ public final class ClipboardModule: FeatureModule {
         panelWindow: (any ClipboardPanelWindowing)? = nil,
         libraryPreview: (any ClipboardPreviewWindowing)? = nil,
         panelPreview: (any ClipboardPreviewWindowing)? = nil,
+        tabPreview: (any ClipboardPreviewWindowing)? = nil,
         mcpSocketPath: @escaping (URL) -> String = ClipboardModule.defaultMCPSocketPath,
         installMCPHelper: @escaping (URL) throws -> Void = ClipboardMCPHelperFile.installFromBundle,
-        tabPreview: (any ClipboardPreviewWindowing)? = nil,
         keychain: any BoardKeyKeychain = SystemBoardKeyKeychain(),
         authenticator: any UserAuthenticating = SystemUserAuthenticator(),
         keyDerivation: ClipboardVaultCrypto.Derivation = .standard,
@@ -150,13 +150,13 @@ public final class ClipboardModule: FeatureModule {
         self.panelWindow = panelWindow
         libraryPreviewWindow = libraryPreview
         panelPreviewWindow = panelPreview
-    }
-
         tabPreviewWindow = tabPreview
         self.tabPreview = ClipboardTabPreviewModel(state: state)
         self.tabPreview.onActivate = { [weak self] item in self?.activate(item) }
         let tabModel = self.tabPreview
         attachPreview(to: tabModel, window: tabPreview) { tabModel.hostWindow() }
+    }
+
     public func start(_ context: ModuleContext) async throws(ModuleError) {
         await finishDiskWork()
         do {
@@ -258,10 +258,10 @@ public final class ClipboardModule: FeatureModule {
         stopVault()
         closeLibrary()
         closePanel()
-        keystrokeGate?.isOpen = false
-        keystrokeGate = nil
         tabPreview.closePreview()
         tabPreviewWindow?.close()
+        keystrokeGate?.isOpen = false
+        keystrokeGate = nil
         classificationStep?.cancel()
         classificationStep = nil
         classification?.cancel()
