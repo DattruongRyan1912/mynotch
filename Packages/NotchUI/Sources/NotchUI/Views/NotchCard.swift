@@ -1,15 +1,22 @@
 import SwiftUI
 
+extension EnvironmentValues {
+    /// Whether what is drawn here sits straight on the desktop (the strip's shapes with the debug panel `tiles`), not on the notch's
+    /// glass or inside a tile: glass is only ever drawn there, never inside other glass. Set by what puts a shape on the desktop;
+    /// everything else, a module's cards included, is inside glass and gets the wash.
+    @Entry var notchOnDesktop = false
+}
+
 /// How a card, a field, a chip or the selected tab is drawn, as a value, so a test reads what the view draws. It depends on the
-/// surface and on the debug switches, and only on glass: the classic notch always gets the wash it has always had.
+/// surface, on where the card is and on the debug switches, and only on glass: the classic notch always gets the wash it has always had.
 nonisolated struct NotchCardPlan: Equatable, Sendable {
     enum Fill: Equatable, Sendable {
-        /// `NotchTokens.fill(opacity)` behind the shape: today's wash, on the classic notch and with `cards=fill`.
+        /// `NotchTokens.fill(opacity)` behind the shape: today's wash, on the classic notch and on every card inside glass.
         case wash(Double)
-        /// What marks the selection with no glass: the accent at `NotchTokens.selectionOpacity`, and on glass also a rim of the
-        /// label colour (the selected tab's capsule as it is today).
+        /// What marks the selection inside glass or on the classic notch: the accent at `NotchTokens.selectionOpacity`, and on glass
+        /// also a rim of the label colour (the selected tab's capsule as it is today).
         case selectedWash(rim: Bool)
-        /// A glass shape of its own.
+        /// A glass shape of its own: only straight on the desktop.
         case glass(Glass)
         /// A solid white tile, for the selection with `selected=white`: `notchCard` draws its content in black.
         case onTile
@@ -17,19 +24,23 @@ nonisolated struct NotchCardPlan: Equatable, Sendable {
 
     let fill: Fill
 
-    /// How much of the accent tints a selected chip's or tab's glass: more than the notch's own hint, since it has to mark a state.
+    /// How much of the accent tints a selected chip's glass on the desktop: more than the notch's own hint, since it has to mark a state.
     static let selectedTintOpacity = 0.5
 
     /// The card for `surface` under `switches`. `fill` is the wash's opacity (a module keeps its own, 0.08 being the usual);
-    /// `selected` is a chip or tab that is on; `interactive` is for glass that is a control.
+    /// `selected` is a chip or tab that is on; `interactive` is for glass that is a control; `onDesktop` says the card sits straight
+    /// on the desktop, which is the only place it is glass (and only with the panel `tiles`).
     static func resolve(
         surface: NotchSurface, switches: NotchGlassSwitches, accent: Color, fill: Double = 0.08, selected: Bool = false,
-        interactive: Bool = false
+        interactive: Bool = false, onDesktop: Bool = false
     ) -> NotchCardPlan {
-        guard surface.isLiquidGlass, switches.cards == .glass else {
-            return NotchCardPlan(fill: selected ? .selectedWash(rim: surface.isLiquidGlass) : .wash(fill))
+        guard surface.isLiquidGlass else {
+            return NotchCardPlan(fill: selected ? .selectedWash(rim: false) : .wash(fill))
         }
         if selected, switches.selected == .white { return NotchCardPlan(fill: .onTile) }
+        guard onDesktop, switches.panel == .tiles else {
+            return NotchCardPlan(fill: selected ? .selectedWash(rim: true) : .wash(fill))
+        }
         var glass = switches.variant.glass
         if selected { glass = glass.tint(accent.opacity(selectedTintOpacity)) }
         return NotchCardPlan(fill: .glass(interactive ? glass.interactive() : glass))
@@ -45,12 +56,13 @@ nonisolated struct NotchCardPlan: Equatable, Sendable {
 extension View {
     /// Draws the view on a card in `shape`: a wash of the text colour at `fill` behind it, which is exactly
     /// `.background(NotchTokens.fill(fill), in: shape)`, so adopting it changes nothing on the classic notch or in the classic
-    /// look. With Liquid Glass and the debug switch `debug.glass.cards=glass` the card is a glass shape of its own, of the same
-    /// variant as the notch, that floats on the notch's glass (the content of the open notch has an inner container for this).
+    /// look. Glass is never nested in glass: inside the notch's glass or in a tile the card is the wash, and only a card that
+    /// sits straight on the desktop, which is what the debug panel `tiles` makes of the sample strip, is a glass shape of its own,
+    /// of the same variant as the notch.
     ///
-    /// `selected` marks a chip or tab that is on: the accent wash on the classic notch, glass tinted with the accent or a solid
-    /// white tile (`debug.glass.selected`) with glass cards; on the white tile the content is drawn in black. `interactive` is
-    /// for a card that is a control, so its glass reacts to the pointer.
+    /// `selected` marks a chip or tab that is on: the accent wash (with a rim on glass), or with `debug.glass.selected=white` a
+    /// solid white tile on which the content is drawn in black, or, on the desktop, glass tinted with the accent. `interactive` is for
+    /// a card that is a control, so its glass, when it has one, reacts to the pointer.
     ///
     /// For concentric corners give a card on the open notch the notch's bottom radius less the padding between the two
     /// (24 - 14 = 10), and a shape inside a card the card's radius less its own padding (`NotchCardPlan.concentricRadius`).
@@ -67,10 +79,12 @@ private struct NotchCardModifier<S: Shape>: ViewModifier {
     @Environment(\.notchSurface) private var surface
     @Environment(\.notchAccent) private var accent
     @Environment(\.notchGlassSwitches) private var switches
+    @Environment(\.notchOnDesktop) private var onDesktop
 
     func body(content: Content) -> some View {
         let plan = NotchCardPlan.resolve(
-            surface: surface, switches: switches, accent: accent, fill: fill, selected: selected, interactive: interactive
+            surface: surface, switches: switches, accent: accent, fill: fill, selected: selected, interactive: interactive,
+            onDesktop: onDesktop
         )
         switch plan.fill {
         case .wash(let opacity):
@@ -81,30 +95,9 @@ private struct NotchCardModifier<S: Shape>: ViewModifier {
                     .overlay { if rim { shape.stroke(.primary.opacity(NotchTokens.glassSelectionRim), lineWidth: 2).clipShape(shape) } }
             }
         case .glass(let glass):
-            content.glassEffect(glass, in: shape)
+            content.background(Color.black.opacity(switches.dim), in: shape).glassEffect(glass, in: shape)
         case .onTile:
             content.foregroundStyle(Color.black).background(Color.white, in: shape)
-        }
-    }
-}
-
-/// Holds the cards, chips and fields of the open notch in a container of their own when they are glass, apart from the notch's
-/// container, with `spacing` as their blend distance; nothing at all when `spacing` is nil, so the tree is then what it was.
-/// Its content is as big as the space it is given, like the notch's family, so the container does not shrink it.
-struct NotchCardGroup<Content: View>: View {
-    let spacing: CGFloat?
-    let content: Content
-
-    init(spacing: CGFloat?, @ViewBuilder content: () -> Content) {
-        self.spacing = spacing
-        self.content = content()
-    }
-
-    var body: some View {
-        if let spacing {
-            GlassEffectContainer(spacing: spacing) { content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top) }
-        } else {
-            content
         }
     }
 }

@@ -5,7 +5,7 @@ import SwiftUI
 import Testing
 @testable import NotchUI
 
-/// The card modifier (`notchCard`), the sample strip and the dimming layer of U3c. What a card is made of is a value
+/// The card modifier (`notchCard`), the sample strip, the tiles and the dimming layer of U3c. What a card is made of is a value
 /// (`NotchCardPlan`); the classic wash is compared pixel for pixel with the expression it replaces, on views with no glass in
 /// them (glass is not drawn offscreen, and a render of it is not stable); where the sample strip is comes from layout.
 @Suite struct NotchCardTests {
@@ -13,26 +13,25 @@ import Testing
     let glass = NotchSurface.liquidGlass(tinted: false)
 
     func resolve(
-        _ surface: NotchSurface, _ switches: NotchGlassSwitches, fill: Double = 0.08, selected: Bool = false, interactive: Bool = false
+        _ surface: NotchSurface, _ switches: NotchGlassSwitches, fill: Double = 0.08, selected: Bool = false, interactive: Bool = false,
+        onDesktop: Bool = false
     ) -> NotchCardPlan {
-        NotchCardPlan.resolve(surface: surface, switches: switches, accent: accent, fill: fill, selected: selected, interactive: interactive)
+        NotchCardPlan.resolve(
+            surface: surface, switches: switches, accent: accent, fill: fill, selected: selected, interactive: interactive, onDesktop: onDesktop
+        )
     }
 
     /// Every combination of the switches, for the tests that say "whatever they are".
     var everySwitch: [NotchGlassSwitches] {
         var all: [NotchGlassSwitches] = []
         for variant in NotchGlassVariant.allCases {
-            for host in NotchGlassHost.allCases {
+            for panel in NotchGlassPanel.allCases {
                 for scheme in NotchGlassScheme.allCases {
-                    for cards in NotchGlassCards.allCases {
-                        for selected in NotchGlassSelected.allCases {
-                            for sample in [false, true] {
-                                all.append(
-                                    NotchGlassSwitches(
-                                        variant: variant, host: host, dim: 0.3, scheme: scheme, sample: sample, cards: cards, selected: selected
-                                    )
-                                )
-                            }
+                    for selected in NotchGlassSelected.allCases {
+                        for sample in [false, true] {
+                            all.append(
+                                NotchGlassSwitches(variant: variant, panel: panel, dim: 0.3, scheme: scheme, sample: sample, selected: selected)
+                            )
                         }
                     }
                 }
@@ -43,56 +42,82 @@ import Testing
 
     // MARK: what a card is made of
 
-    @Test func onTheClassicNotchACardIsTheWashWhateverTheSwitchesSay() {
+    @Test func onTheClassicNotchACardIsTheWashWhateverTheSwitchesSayAndWhereverItIs() {
         for surface in [NotchSurface.solid, .material] {
             for switches in everySwitch {
-                #expect(resolve(surface, switches) == NotchCardPlan(fill: .wash(0.08)))
-                #expect(resolve(surface, switches, fill: 0.14, interactive: true) == NotchCardPlan(fill: .wash(0.14)))
-                #expect(resolve(surface, switches, selected: true) == NotchCardPlan(fill: .selectedWash(rim: false)))
+                for onDesktop in [false, true] {
+                    #expect(resolve(surface, switches, onDesktop: onDesktop) == NotchCardPlan(fill: .wash(0.08)))
+                    #expect(resolve(surface, switches, fill: 0.14, interactive: true, onDesktop: onDesktop) == NotchCardPlan(fill: .wash(0.14)))
+                    #expect(resolve(surface, switches, selected: true, onDesktop: onDesktop) == NotchCardPlan(fill: .selectedWash(rim: false)))
+                }
             }
         }
     }
 
-    @Test func onGlassWithFillCardsACardIsTheWashAndASelectedOneIsTheCapsuleWithItsRim() {
-        for switches in everySwitch where switches.cards == .fill {
+    @Test func glassIsNeverNestedInGlassACardInsideTheNotchsGlassOrATileIsAWashOrAWhiteTile() {
+        for switches in everySwitch {
+            for selected in [false, true] {
+                for interactive in [false, true] {
+                    let card = resolve(glass, switches, selected: selected, interactive: interactive, onDesktop: false)
+                    if case .glass = card.fill { Issue.record("glass in glass for \(switches), selected \(selected)") }
+                }
+            }
             #expect(resolve(glass, switches) == NotchCardPlan(fill: .wash(0.08)))
             #expect(resolve(glass, switches, fill: 0.05) == NotchCardPlan(fill: .wash(0.05)))
-            #expect(resolve(glass, switches, selected: true) == NotchCardPlan(fill: .selectedWash(rim: true)))
+            #expect(
+                resolve(glass, switches, selected: true)
+                    == NotchCardPlan(fill: switches.selected == .white ? .onTile : .selectedWash(rim: true))
+            )
         }
     }
 
-    @Test func onGlassWithGlassCardsACardIsGlassOfTheNotchsVariant() {
-        let regular = NotchGlassSwitches(variant: .regular, cards: .glass)
-        let clear = NotchGlassSwitches(variant: .clear, cards: .glass)
-        #expect(resolve(glass, regular) == NotchCardPlan(fill: .glass(Glass.regular)))
-        #expect(resolve(glass, clear) == NotchCardPlan(fill: .glass(Glass.clear)))
-        #expect(resolve(glass, clear) != NotchCardPlan(fill: .glass(Glass.regular)))
+    @Test func onTheDesktopACardIsGlassOnlyWithTilesAndOfTheNotchsVariant() {
+        let regular = NotchGlassSwitches(variant: .regular, panel: .tiles)
+        let clear = NotchGlassSwitches(variant: .clear, panel: .tiles)
+        #expect(resolve(glass, regular, onDesktop: true) == NotchCardPlan(fill: .glass(Glass.regular)))
+        #expect(resolve(glass, clear, onDesktop: true) == NotchCardPlan(fill: .glass(Glass.clear)))
+        #expect(resolve(glass, clear, onDesktop: true) != NotchCardPlan(fill: .glass(Glass.regular)))
         // Whatever tint the notch has, a plain card has none of its own.
-        #expect(resolve(.liquidGlass(tinted: true), clear) == NotchCardPlan(fill: .glass(Glass.clear)))
+        #expect(resolve(.liquidGlass(tinted: true), clear, onDesktop: true) == NotchCardPlan(fill: .glass(Glass.clear)))
+        // With the slab nothing is on the desktop, and the wash it was.
+        for variant in NotchGlassVariant.allCases {
+            #expect(resolve(glass, NotchGlassSwitches(variant: variant, panel: .slab), onDesktop: true) == NotchCardPlan(fill: .wash(0.08)))
+        }
     }
 
     @Test func aGlassCardThatIsAControlIsInteractive() {
-        let clear = NotchGlassSwitches(variant: .clear, cards: .glass)
-        #expect(resolve(glass, clear, interactive: true) == NotchCardPlan(fill: .glass(Glass.clear.interactive())))
-        #expect(resolve(glass, clear, interactive: true) != resolve(glass, clear))
-        #expect(resolve(glass, NotchGlassSwitches(cards: .glass), interactive: true) == NotchCardPlan(fill: .glass(Glass.regular.interactive())))
+        let clear = NotchGlassSwitches(variant: .clear, panel: .tiles)
+        #expect(resolve(glass, clear, interactive: true, onDesktop: true) == NotchCardPlan(fill: .glass(Glass.clear.interactive())))
+        #expect(resolve(glass, clear, interactive: true, onDesktop: true) != resolve(glass, clear, onDesktop: true))
+        #expect(
+            resolve(glass, NotchGlassSwitches(panel: .tiles), interactive: true, onDesktop: true)
+                == NotchCardPlan(fill: .glass(Glass.regular.interactive()))
+        )
     }
 
-    @Test func aSelectedCardIsGlassTintedWithTheAccentOrAWhiteTileWithADarkGlyph() {
+    @Test func aSelectedChipOnTheDesktopIsGlassTintedWithTheAccentOrAWhiteTileWithADarkGlyph() {
         let tint = accent.opacity(NotchCardPlan.selectedTintOpacity)
         for variant in NotchGlassVariant.allCases {
-            let tinted = NotchGlassSwitches(variant: variant, cards: .glass, selected: .tint)
-            #expect(resolve(glass, tinted, selected: true) == NotchCardPlan(fill: .glass(variant.glass.tint(tint))))
-            #expect(resolve(glass, tinted, selected: true, interactive: true) == NotchCardPlan(fill: .glass(variant.glass.tint(tint).interactive())))
+            let tinted = NotchGlassSwitches(variant: variant, panel: .tiles, selected: .tint)
+            #expect(resolve(glass, tinted, selected: true, onDesktop: true) == NotchCardPlan(fill: .glass(variant.glass.tint(tint))))
+            #expect(
+                resolve(glass, tinted, selected: true, interactive: true, onDesktop: true)
+                    == NotchCardPlan(fill: .glass(variant.glass.tint(tint).interactive()))
+            )
 
-            let white = NotchGlassSwitches(variant: variant, cards: .glass, selected: .white)
-            #expect(resolve(glass, white, selected: true) == NotchCardPlan(fill: .onTile))
-            #expect(resolve(glass, white, selected: true, interactive: true) == NotchCardPlan(fill: .onTile))
+            let white = NotchGlassSwitches(variant: variant, panel: .tiles, selected: .white)
+            #expect(resolve(glass, white, selected: true, onDesktop: true) == NotchCardPlan(fill: .onTile))
+            #expect(resolve(glass, white, selected: true, interactive: true, onDesktop: true) == NotchCardPlan(fill: .onTile))
             // The switch is only for what is selected.
-            #expect(resolve(glass, white) == NotchCardPlan(fill: .glass(variant.glass)))
+            #expect(resolve(glass, white, onDesktop: true) == NotchCardPlan(fill: .glass(variant.glass)))
         }
         #expect(NotchCardPlan.selectedTintOpacity > NotchTokens.glassTintOpacity, "it marks a state, so it is stronger than the notch's hint")
         #expect(NotchCardPlan.selectedTintOpacity < 1)
+    }
+
+    @Test func theWhiteSelectionAppliesOnTheSlabToo() {
+        #expect(resolve(glass, NotchGlassSwitches(panel: .slab, selected: .white), selected: true) == NotchCardPlan(fill: .onTile))
+        #expect(resolve(glass, NotchGlassSwitches(panel: .slab, selected: .tint), selected: true) == NotchCardPlan(fill: .selectedWash(rim: true)))
     }
 
     // MARK: concentric corners
@@ -148,9 +173,12 @@ import Testing
         try NotchLookState.$current.withValue(NotchLookState()) {
             let shape = Capsule()
             let today = try pixels(box { $0.background(NotchTokens.fill(0.08), in: shape) })
-            let everything = NotchGlassSwitches(variant: .clear, host: .appkit, dim: 0.4, scheme: .dark, sample: true, cards: .glass, selected: .white)
+            let everything = NotchGlassSwitches(variant: .clear, panel: .tiles, dim: 0.4, scheme: .dark, sample: true, selected: .white)
             for surface in [NotchSurface.solid, .material] {
-                let card = try pixels(box { $0.notchCard(in: shape).environment(\.notchSurface, surface).environment(\.notchGlassSwitches, everything) })
+                let card = try pixels(box {
+                    $0.notchCard(in: shape).environment(\.notchSurface, surface).environment(\.notchGlassSwitches, everything)
+                        .environment(\.notchOnDesktop, true)
+                })
                 #expect(card == today, "\(surface)")
             }
         }
@@ -188,55 +216,71 @@ import Testing
     }
 }
 
-// MARK: the sample strip
-
-private final class ProbeModule: FeatureModule {
-    let descriptor = ModuleDescriptor(id: "probe", displayName: "Probe", systemImage: "circle", defaultEnabled: true, order: 0)
-    let frame: ProbeFrame
-    init(_ frame: ProbeFrame) { self.frame = frame }
-    func start(_ context: ModuleContext) async throws(ModuleError) {}
-    func stop() async {}
-    func makeTab() -> NotchTab? {
-        NotchTab(id: "probe", title: "Probe", systemImage: "circle", preferredHeight: 190, content: AnyView(TabProbe(frame: frame)))
-    }
-    func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? { nil }
-}
+// MARK: the open notch, hosted
 
 private final class ProbeFrame {
     var value: CGRect?
     /// The colour scheme the tab's content was last drawn in.
     var scheme: ColorScheme?
+    /// How many times the tab's content appeared: it must not appear again when the notch goes to a toast and back.
+    var appeared = 0
 }
 
-/// A tab's content that reports where it is and which colour scheme it is drawn in.
+/// A tab's content that reports where it is, which colour scheme it is drawn in and that it appeared.
 private struct TabProbe: View {
     let frame: ProbeFrame
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let _ = (frame.scheme = scheme)
-        Color.clear.onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { [frame] in frame.value = $0 }
+        Color.clear
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { [frame] in frame.value = $0 }
+            .onAppear { [frame] in frame.appeared += 1 }
     }
 }
 
-/// An open notch of the real root view hosted in a window that is never shown, with a tab whose content reports its frame.
+private final class ProbeModule: FeatureModule {
+    let descriptor: ModuleDescriptor
+    let frame: ProbeFrame?
+    init(_ id: ModuleID, order: Int, frame: ProbeFrame?) {
+        descriptor = ModuleDescriptor(id: id, displayName: id.rawValue, systemImage: "circle", defaultEnabled: true, order: order)
+        self.frame = frame
+    }
+    func start(_ context: ModuleContext) async throws(ModuleError) {}
+    func stop() async {}
+    func makeTab() -> NotchTab? {
+        NotchTab(
+            id: descriptor.id, title: descriptor.displayName, systemImage: "circle", preferredHeight: 190,
+            content: frame.map { AnyView(TabProbe(frame: $0)) } ?? AnyView(Color.clear)
+        )
+    }
+    func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? { nil }
+}
+
+/// An open notch of the real root view hosted in a window that is never shown, with a tab ("probe") whose content reports its
+/// frame, and as many more tabs as asked for.
 private struct OpenNotch {
     let hosting: NSHostingView<NotchRootView>
     let window: NSWindow
     let frame: ProbeFrame
     let geometry: NotchGeometry
+    let model: NotchViewModel
 
     /// Builds it and lays it out. `switches` nil leaves the root view's own default, which is what the tests that build one with no
     /// switches see.
-    static func make(look: NotchLook, tinted: Bool = false, _ switches: NotchGlassSwitches?) async throws -> OpenNotch {
+    static func make(look: NotchLook, tinted: Bool = false, tabs: Int = 1, _ switches: NotchGlassSwitches?) async throws -> OpenNotch {
         let geometry = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig())
         let frame = ProbeFrame()
-        let harness = RegistryHarness([ProbeModule(frame)])
+        let modules = [ProbeModule("probe", order: 0, frame: frame)]
+            + (1..<max(tabs, 1)).map { ProbeModule(ModuleID(stringLiteral: "other\($0)"), order: $0, frame: nil) }
+        let harness = RegistryHarness(modules)
         await harness.registry.bootstrap()
         harness.settings.set(look, for: InterfaceSettings.look)
         harness.settings.set(tinted, for: InterfaceSettings.glassTint)
         let theme = NotchTheme(settings: harness.settings, systemAccent: { NotchAccent.Palette.blue.rgb }, notifications: NotificationCenter())
-        let model = NotchViewModel(scheduler: harness.scheduler, availableTabs: { [registry = harness.registry] in registry.tabs.map(\.id) }, delays: { (.zero, .zero) })
+        let model = NotchViewModel(
+            scheduler: harness.scheduler, availableTabs: { [registry = harness.registry] in registry.tabs.map(\.id) }, delays: { (.zero, .zero) }
+        )
         model.open(tab: "probe")
         try #require(model.displayState == .open("probe"))
         let root = switches.map {
@@ -252,18 +296,22 @@ private struct OpenNotch {
             try await Task.sleep(for: .milliseconds(10))
         }
         hosting.layoutSubtreeIfNeeded()
-        return OpenNotch(hosting: hosting, window: window, frame: frame, geometry: geometry)
-    }
-
-    /// Every `NotchGlassEffectView` under the root view.
-    var glassViews: [NotchGlassEffectView] {
-        func collect(_ view: NSView) -> [NotchGlassEffectView] {
-            (view as? NotchGlassEffectView).map { [$0] } ?? view.subviews.flatMap(collect)
-        }
-        return collect(hosting)
+        return OpenNotch(hosting: hosting, window: window, frame: frame, geometry: geometry, model: model)
     }
 
     func close() { window.contentView = nil }
+
+    /// Lets the run loop turn so SwiftUI applies what changed, then lays the view out.
+    func settle() async throws {
+        try await Task.sleep(for: .milliseconds(150))
+        hosting.layoutSubtreeIfNeeded()
+    }
+
+    /// The same point on the screen of `NotchGeometryTests.macBook14`, which is what the pointer tracking works in.
+    func screenPoint(_ point: CGPoint) -> CGPoint {
+        let panel = geometry.panelFrame(in: NotchGeometryTests.macBook14.frame)
+        return CGPoint(x: panel.minX + point.x, y: panel.maxY - point.y)
+    }
 }
 
 /// Where the open notch puts a tab's content, with the sample strip and the glass switches. Layout only: nothing is read from
@@ -271,8 +319,8 @@ private struct OpenNotch {
 @Suite struct NotchSampleStripTests {
     let geometry = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig())
 
-    func tabFrame(look: NotchLook, tinted: Bool = false, _ switches: NotchGlassSwitches?) async throws -> CGRect {
-        let notch = try await OpenNotch.make(look: look, tinted: tinted, switches)
+    func tabFrame(look: NotchLook, tinted: Bool = false, tabs: Int = 1, _ switches: NotchGlassSwitches?) async throws -> CGRect {
+        let notch = try await OpenNotch.make(look: look, tinted: tinted, tabs: tabs, switches)
         defer { notch.close() }
         return try #require(notch.frame.value)
     }
@@ -299,76 +347,140 @@ private struct OpenNotch {
         #expect(NotchSampleStrip.slot == NotchSampleStrip.height + NotchSampleStrip.bottomGap)
     }
 
-    @Test func theOtherSwitchesDoNotMoveTheTabOnEitherLook() async throws {
-        let moved = NotchGlassSwitches(variant: .clear, host: .appkit, dim: 0.4, scheme: .dark, sample: false, cards: .glass, selected: .white)
+    @Test func theSwitchesOfTheSlabDoNotMoveTheTabOnEitherLook() async throws {
+        let moved = NotchGlassSwitches(variant: .clear, panel: .slab, dim: 0.4, scheme: .dark, sample: false, selected: .white)
         for look in [NotchLook.classic, .liquidGlass] {
             #expect(try await tabFrame(look: look, moved) == tabFrame(look: look, .default), "\(look)")
         }
     }
 
-    @Test func theInnerContainerAndTheAppKitHostDoNotMoveOrResizeTheTabEither() async throws {
-        let plain = try await tabFrame(look: .liquidGlass, NotchGlassSwitches(sample: true))
-        #expect(try await tabFrame(look: .liquidGlass, NotchGlassSwitches(sample: true, cards: .glass)) == plain, "inner container")
-        #expect(try await tabFrame(look: .liquidGlass, NotchGlassSwitches(host: .appkit, sample: true)) == plain, "AppKit host")
-        #expect(try await tabFrame(look: .liquidGlass, NotchGlassSwitches(variant: .clear, host: .appkit, dim: 0.2, scheme: .dark, sample: true, cards: .glass, selected: .white)) == plain)
+    @Test func theTilesPanelChangesNothingOnTheClassicNotch() async throws {
+        let tiles = NotchGlassSwitches(variant: .clear, panel: .tiles, dim: 0.4, scheme: .dark, sample: false, selected: .white)
+        for tabs in [1, 2] {
+            #expect(try await tabFrame(look: .classic, tabs: tabs, tiles) == tabFrame(look: .classic, tabs: tabs, .default), "\(tabs) tabs")
+        }
     }
 }
 
-/// The AppKit host: an `NSGlassEffectView` behind the SwiftUI content, which is ours (`NotchGlassEffectView`), so its place and
-/// settings can be read from the view hierarchy without drawing anything.
-@Suite struct NotchAppKitGlassTests {
-    fileprivate func glassViews(look: NotchLook = .liquidGlass, tinted: Bool = false, _ switches: NotchGlassSwitches?) async throws -> ([NotchGlassEffectView], OpenNotch) {
-        let notch = try await OpenNotch.make(look: look, tinted: tinted, switches)
-        return (notch.glassViews, notch)
+/// The tiles: where the open notch puts its tab bar and content when its panel has no glass of its own.
+@Suite struct NotchTilesLayoutTests {
+    let geometry = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig())
+    let tiles = NotchGlassSwitches(panel: .tiles)
+
+    func tabFrame(_ switches: NotchGlassSwitches?, tabs: Int, look: NotchLook = .liquidGlass) async throws -> CGRect {
+        let notch = try await OpenNotch.make(look: look, tabs: tabs, switches)
+        defer { notch.close() }
+        return try #require(notch.frame.value)
     }
 
-    @Test func theAppKitHostPutsOneGlassViewBehindTheOpenNotchWithTheVariantAndTheBottomRadius() async throws {
-        for (variant, style) in [(NotchGlassVariant.regular, NSGlassEffectView.Style.regular), (.clear, .clear)] {
-            let (views, notch) = try await glassViews(NotchGlassSwitches(variant: variant, host: .appkit))
-            defer { notch.close() }
-            let view = try #require(views.first)
-            #expect(views.count == 1)
-            #expect(view.style == style, "\(variant)")
-            #expect(view.cornerRadius == 24, "the open notch's bottom radius")
-            #expect(view.tintColor == nil)
-            #expect(view.contentView != nil)
-            #expect(view.hitTest(NSPoint(x: 10, y: 10)) == nil, "every click goes through to the notch")
+    @Test func theContentSitsInATileInsetByTheTabBarsCapsuleTheGapAndThePadding() async throws {
+        let gap = NotchGlassPlan.tileGap, pad = NotchGlassPlan.tilePadding
+        let capsule = 24 + 2 * NotchGlassPlan.tabBarInset.height
+        let slab = try await tabFrame(nil, tabs: 2)
+        let tiled = try await tabFrame(tiles, tabs: 2)
+        // The slab: the tab bar's 24 pt and 6 below it, then the tab. Tiles: the capsule, the gap, then the tile's padding.
+        #expect(abs(slab.minY - (geometry.notchSize.height + 24 + 6)) < 0.01, "\(slab)")
+        #expect(abs(tiled.minY - (geometry.notchSize.height + capsule + gap + pad)) < 0.01, "\(tiled)")
+        #expect(abs(tiled.minX - (slab.minX + pad)) < 0.01 && abs(tiled.width - (slab.width - 2 * pad)) < 0.01)
+        #expect(abs(tiled.maxY - (slab.maxY - pad)) < 0.01, "the notch is the size it was")
+    }
+
+    @Test func withOneTabThereIsNoCapsuleAndTheTileIsStillAroundTheContent() async throws {
+        let pad = NotchGlassPlan.tilePadding
+        let slab = try await tabFrame(nil, tabs: 1)
+        let tiled = try await tabFrame(tiles, tabs: 1)
+        #expect(abs(tiled.minY - (slab.minY + pad)) < 0.01 && abs(tiled.maxY - (slab.maxY - pad)) < 0.01)
+        #expect(abs(tiled.width - (slab.width - 2 * pad)) < 0.01)
+    }
+
+    @Test func theTilesAreTheSameForEveryVariantAndNothingElseMovesThem() async throws {
+        let reference = try await tabFrame(tiles, tabs: 2)
+        for switches in [
+            NotchGlassSwitches(variant: .clear, panel: .tiles), NotchGlassSwitches(panel: .tiles, dim: 0.3),
+            NotchGlassSwitches(panel: .tiles, scheme: .dark), NotchGlassSwitches(panel: .tiles, selected: .white),
+        ] {
+            #expect(try await tabFrame(switches, tabs: 2) == reference, "\(switches)")
         }
     }
 
-    @Test func itIsInsetByTheEarsAndRunsUpPastThePanelsTopByTheBottomRadiusAndHasTheNotchsSize() async throws {
-        let (views, notch) = try await glassViews(NotchGlassSwitches(host: .appkit))
+    // MARK: the gaps are part of the notch
+
+    /// A point in the gap between the tab bar's capsule and the content's tile, in the open notch with tiles.
+    fileprivate func gapPoint(_ notch: OpenNotch) throws -> CGPoint {
+        let content = try #require(notch.frame.value)
+        return CGPoint(x: content.midX, y: content.minY - NotchGlassPlan.tilePadding - NotchGlassPlan.tileGap / 2)
+    }
+
+    @Test func aPointInTheGapIsInsideTheNotchForTheHoverTrackerAndTheClickOutsideCheck() async throws {
+        let notch = try await OpenNotch.make(look: .liquidGlass, tabs: 2, tiles)
         defer { notch.close() }
-        let view = try #require(views.first)
-        let size = notch.geometry.shapeSize(for: .open("probe"), contentHeight: 190)
-        let radii = notch.geometry.cornerRadii(for: .open("probe"))
-        let frame = view.convert(view.bounds, to: notch.hosting)
-        #expect(abs(frame.midX - notch.geometry.panelSize.width / 2) < 0.5, "centred on the notch: \(frame)")
-        #expect(abs(frame.width - (size.width - 2 * radii.top)) < 0.5, "the body, without the ears: \(frame)")
-        #expect(abs(frame.height - (size.height + radii.bottom)) < 0.5, "from above the panel to the notch's bottom: \(frame)")
-        let spans = [frame.minY, frame.maxY].sorted()
-        #expect(abs(spans[0] + radii.bottom) < 0.5 && abs(spans[1] - size.height) < 0.5, "\(frame)")
+        let gap = try gapPoint(notch)
+        let screen = notch.screenPoint(gap)
+        // The pointer tracking works on the notch's rect, not on what is drawn, so the gap is inside it: hover keeps the notch open
+        // and a press there is not a click outside.
+        let state = notch.model.displayState
+        #expect(state == .open("probe"))
+        #expect(
+            notch.geometry.pointerZone(at: screen, state: state, contentHeight: NotchTab.defaultHeight, in: NotchGeometryTests.macBook14.frame)
+                == .notch
+        )
+        #expect(
+            notch.geometry.pointerZone(at: CGPoint(x: screen.x, y: screen.y), state: state, contentHeight: 190, in: NotchGeometryTests.macBook14.frame)
+                == .notch
+        )
+        // And a point beside the notch is outside, so the test can tell.
+        let beside = CGPoint(x: 5, y: gap.y)
+        #expect(
+            notch.geometry.pointerZone(at: notch.screenPoint(beside), state: state, contentHeight: 190, in: NotchGeometryTests.macBook14.frame)
+                == .outside
+        )
     }
 
-    @Test func theTintOfTheAccentGoesToTheViewOnlyWhenAsked() async throws {
-        let (tinted, notchA) = try await glassViews(tinted: true, NotchGlassSwitches(host: .appkit))
-        defer { notchA.close() }
-        #expect(tinted.first?.tintColor != nil)
-        let (plain, notchB) = try await glassViews(tinted: false, NotchGlassSwitches(host: .appkit))
-        defer { notchB.close() }
-        #expect(plain.first?.tintColor == nil)
+    /// The alpha of the pixel at `point` (from the panel's top left) of what the hosting view draws by itself. A window that is not
+    /// opaque lets a click fall through to the app behind where it is fully transparent, so this is what a click in a gap depends
+    /// on. (The hosting view's own `hitTest` hands itself back for every point of its bounds, so it cannot tell.) Glass is not drawn
+    /// offscreen, so what shows is what SwiftUI itself draws: the veil.
+    fileprivate func alpha(_ notch: OpenNotch, at point: CGPoint) throws -> Double {
+        let bounds = notch.hosting.bounds
+        let rep = try #require(notch.hosting.bitmapImageRepForCachingDisplay(in: bounds))
+        notch.hosting.cacheDisplay(in: bounds, to: rep)
+        let scale = Double(rep.pixelsWide) / bounds.width
+        let color = try #require(rep.colorAt(x: Int(point.x * scale), y: Int(point.y * scale)))
+        return Double(color.alphaComponent)
     }
 
-    @Test func noGlassViewExistsWithTheSwiftUIHostOrOnTheClassicNotchWhateverTheSwitchesSay() async throws {
-        let (swiftUI, notchA) = try await glassViews(NotchGlassSwitches(variant: .clear, host: .swiftui))
-        defer { notchA.close() }
-        #expect(swiftUI.isEmpty)
-        let (byDefault, notchB) = try await glassViews(nil)
-        defer { notchB.close() }
-        #expect(byDefault.isEmpty)
-        let (classic, notchC) = try await glassViews(look: .classic, NotchGlassSwitches(variant: .clear, host: .appkit, dim: 0.4, scheme: .dark, sample: true, cards: .glass))
-        defer { notchC.close() }
-        #expect(classic.isEmpty, "a key left in the defaults does not touch the classic notch")
+    @Test func aPointInTheGapIsNotFullyTransparentSoAClickThereStaysInTheWindowAndBesideTheNotchItIs() async throws {
+        let notch = try await OpenNotch.make(look: .liquidGlass, tabs: 2, tiles)
+        defer { notch.close() }
+        let gap = try gapPoint(notch)
+        let inGap = try alpha(notch, at: gap)
+        // (That it is too faint to see is the plan's test: `hitOpacity` is under three levels of 255.)
+        #expect(inGap > 0, "the veil is there, in the gap too: \(inGap)")
+        #expect(try alpha(notch, at: CGPoint(x: 5, y: gap.y)) == 0, "outside the notch's shape the panel is transparent, which is what the test can tell")
+    }
+
+    @Test func theGapsOfTheClassicNotchAreBlackWhateverKeyIsSet() async throws {
+        let classic = try await OpenNotch.make(look: .classic, tabs: 2, tiles)
+        defer { classic.close() }
+        #expect(try alpha(classic, at: gapPoint(classic)) > 0.99)
+    }
+
+    // MARK: the views keep their identity
+
+    @Test func theTabIsNotRebuiltWhenTheNotchGoesToAToastAndBackWithTilesOrWithTheSlab() async throws {
+        for switches in [NotchGlassSwitches(panel: .slab), tiles] {
+            let notch = try await OpenNotch.make(look: .liquidGlass, tabs: 2, switches)
+            defer { notch.close() }
+            #expect(notch.frame.appeared == 1, "\(switches.panel): it appeared once")
+            // The toast covers the tab, which stays alive under it, hidden; the notch's glass comes back for it and goes again.
+            notch.model.showToast(AnyView(Color.clear), duration: .seconds(60))
+            try await notch.settle()
+            #expect(notch.model.displayState == .toast)
+            notch.model.open(tab: "probe")
+            try await notch.settle()
+            #expect(notch.model.displayState == .open("probe"))
+            #expect(notch.frame.appeared == 1, "\(switches.panel): the toast and back did not rebuild the tab (\(notch.frame.appeared))")
+        }
     }
 }
 
@@ -384,7 +496,7 @@ private struct OpenNotch {
         #expect(try await scheme(look: .liquidGlass, nil) == .light)
         #expect(try await scheme(look: .liquidGlass, NotchGlassSwitches(scheme: .system)) == .light)
         #expect(try await scheme(look: .liquidGlass, NotchGlassSwitches(scheme: .dark)) == .dark)
-        #expect(try await scheme(look: .liquidGlass, NotchGlassSwitches(variant: .clear, host: .appkit, scheme: .dark, cards: .glass)) == .dark)
+        #expect(try await scheme(look: .liquidGlass, NotchGlassSwitches(variant: .clear, panel: .tiles, scheme: .dark)) == .dark)
     }
 
     @Test func theClassicNotchsContentIsNotForcedWhateverTheSwitchSays() async throws {
@@ -393,8 +505,8 @@ private struct OpenNotch {
     }
 }
 
-/// The selected tab with `debug.glass.cards=glass`, `selected=white`: a solid white tile, which no window server draws, so it can
-/// be read offscreen (the tinted glass one cannot), with a dark glyph. Everything else about the tab bar is as it was.
+/// The selected tab with `debug.glass.selected=white`: a solid white tile, which no window server draws, so it can be read offscreen
+/// (the tinted glass chip cannot), with a dark glyph. Everything else about the tab bar is as it was.
 @Suite struct NotchTabSelectionTests {
     let tabs = [
         NotchTab(id: "a", title: "A", systemImage: "circle.fill", content: AnyView(EmptyView())),
@@ -424,19 +536,21 @@ private struct OpenNotch {
         return result
     }
 
-    @Test func withAWhiteSelectionTheSelectedTabIsAWhiteTileWithADarkGlyph() throws {
-        let white = try counts(surface: .liquidGlass(tinted: false), switches: NotchGlassSwitches(cards: .glass, selected: .white))
-        #expect(white.whiteRight > 300, "a white capsule: \(white)")
-        #expect(white.darkRight > 20, "with a dark glyph on it: \(white)")
-        #expect(white.whiteLeft == 0, "the tab that is not selected has no tile: \(white)")
+    @Test func withAWhiteSelectionTheSelectedTabIsAWhiteTileWithADarkGlyphOnEitherPanel() throws {
+        for panel in NotchGlassPanel.allCases {
+            let white = try counts(surface: .liquidGlass(tinted: false), switches: NotchGlassSwitches(panel: panel, selected: .white))
+            #expect(white.whiteRight > 300, "a white capsule on the \(panel): \(white)")
+            #expect(white.darkRight > 20, "with a dark glyph on it: \(white)")
+            #expect(white.whiteLeft == 0, "the tab that is not selected has no tile: \(white)")
+        }
     }
 
     @Test func otherwiseTheTabBarDrawsNoWhiteTileNorADarkGlyph() throws {
         for (surface, switches) in [
             (NotchSurface.liquidGlass(tinted: false), NotchGlassSwitches?.none),
-            (.liquidGlass(tinted: false), .some(NotchGlassSwitches(cards: .fill, selected: .white))),
-            (.solid, .some(NotchGlassSwitches(cards: .glass, selected: .white))),
-            (.material, .some(NotchGlassSwitches(cards: .glass, selected: .white))),
+            (.liquidGlass(tinted: false), .some(NotchGlassSwitches(panel: .tiles, selected: .tint))),
+            (.solid, .some(NotchGlassSwitches(panel: .tiles, selected: .white))),
+            (.material, .some(NotchGlassSwitches(panel: .tiles, selected: .white))),
         ] {
             let counted = try counts(surface: surface, switches: switches)
             // The classic notch's selected glyph is itself white (about 130 pixels); a tile is more than twice that.

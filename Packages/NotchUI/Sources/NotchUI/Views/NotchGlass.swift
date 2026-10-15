@@ -19,8 +19,13 @@ extension EnvironmentValues {
 /// appears or disappears is a shape that comes out of its neighbours or melts back into them.
 nonisolated enum NotchGlassID: Hashable, Sendable {
     /// The notch is one shape in every state: closed, collapsed with a strip or the list, open, a toast. So opening it is the
-    /// same glass growing, not one glass replaced by another.
+    /// same glass growing, not one glass replaced by another. (With the debug panel `tiles` it is the one shape of every state
+    /// but the open one, which is made of `tabBar` and `content` instead.)
     case notch
+    /// The tab bar's capsule of the open notch, with the debug panel `tiles`.
+    case tabBar
+    /// The tile that holds the open tab's content, with the debug panel `tiles`.
+    case content
     /// A bubble is named after its activity (`ActivitySlot.id`), and the "+N" bubble keeps its name while its number changes.
     case bubble(String)
 }
@@ -38,8 +43,9 @@ nonisolated extension NotchSurface {
 
 /// What glass the notch asks for, as a value: whether the notch and its bubbles share a container, and for each shape its name
 /// in the morph namespace and its `Glass`. The root view and the bubbles draw from it, so a test that reads it reads what is
-/// drawn. It does not depend on the notch's state: the notch is one shape whose glass is the same closed, collapsed, open or
-/// showing a toast, so nothing about it is rebuilt while it morphs.
+/// drawn. With the usual panel (`slab`) it does not depend on the notch's state: the notch is one shape whose glass is the same
+/// closed, collapsed, open or showing a toast, so nothing about it is rebuilt while it morphs. With the debug panel `tiles` the
+/// open notch is made of other shapes instead (`tiles`), and only then.
 nonisolated struct NotchGlassPlan: Equatable, Sendable {
     /// One glass shape: its name in the namespace and what it is made of.
     struct Shape: Equatable, Sendable {
@@ -47,11 +53,16 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
         let glass: Glass
     }
 
-    /// The notch's surface when an `NSGlassEffectView` draws it (the AppKit host) instead of `glassEffect`.
-    struct AppKitSurface: Equatable, Sendable {
-        let variant: NotchGlassVariant
-        /// The accent at low strength when the user asks for the tint.
-        let tint: Color?
+    /// The open notch with the debug panel `tiles`: the tab bar's capsule and the tile that holds the tab's content. Their glass is
+    /// `Glass.identity`, which draws nothing, while the notch is not open (a toast over a tab keeps the tab's views alive and
+    /// hidden), so the views and what they hold keep their identity as the notch opens and closes.
+    struct Tiles: Equatable, Sendable {
+        let tabBar: Shape
+        let content: Shape
+        /// The open notch draws these: its own shape has no glass, and the strip's shapes sit on the desktop as glass of their own.
+        let isOpen: Bool
+        /// Opacity of the black layer in each of them, above the glass and below what they hold.
+        let dim: Double
     }
 
     /// No glass at all: the classic look.
@@ -63,69 +74,73 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
     /// the other.
     static let containerSpacing: CGFloat = 4
 
-    /// How close two cards, chips or fields in the inner container (below) have to be to melt into each other: a little, so the
-    /// ones that sit 6 or 8 pt apart in a module's grid stay apart.
-    static let innerContainerSpacing: CGFloat = 2
+    /// The gap between two tiles of the open notch (the tab bar's capsule, the strip's shapes, the content's tile): wider than
+    /// `containerSpacing`, so they do not melt into each other, and it is where the desktop shows.
+    static let tileGap: CGFloat = 8
 
+    /// What a tile holds is this far from its edge.
+    static let tilePadding: CGFloat = 8
+
+    /// The tab bar's capsule is this far from the tab bar's icons, sideways and up and down.
+    static let tabBarInset = CGSize(width: 8, height: 3)
+
+    /// With the panel `tiles` the open notch has no fill, but a window that is transparent where it is not drawn lets a click in a
+    /// gap fall through to the app behind. A black layer this faint over the whole notch (under 3 levels of 255, which no one can
+    /// see) keeps the gaps part of the window.
+    static let hitOpacity = 0.01
+
+    let panel: NotchGlassPanel
     /// Whether the notch and its bubbles are wrapped in one `GlassEffectContainer`.
     let usesContainer: Bool
-    /// The notch's own shape when `glassEffect` draws it; nil in the AppKit host, which draws it itself (`appKitNotch`).
+    /// The notch's own shape: nil in the classic look, and with the panel `tiles` while the notch is open, which has no glass of its own.
     let notch: Shape?
     /// The bubbles' shapes, in the order of the bubbles.
     let bubbles: [Shape]
-    /// The notch's surface in the AppKit host; nil when `glassEffect` draws it.
-    let appKitNotch: AppKitSurface?
-    /// How much black goes between the glass and the content, inside the notch's shape.
-    let dim: Double
+    /// The open notch's tiles; nil unless the panel is `tiles`.
+    let tiles: Tiles?
+    /// The black layer the notch's backdrop draws over its glass, inside its whole shape: the dim, or, with tiles when open, the
+    /// faint veil that keeps the gaps part of the window (the dim is then in each tile).
+    let backdropOpacity: Double
     /// The colour scheme forced on the content (the notch's and the bubbles'), not on the glass; nil leaves the window's own.
     let contentScheme: ColorScheme?
-    /// The spacing of the inner `GlassEffectContainer` that holds the cards, chips and fields of the open notch, apart from the
-    /// notch's container; nil when they are not glass. See `cardContainerSpacing(surface:switches:)`.
-    let cardContainerSpacing: CGFloat?
 
     var containerSpacing: CGFloat? { usesContainer ? Self.containerSpacing : nil }
-    var shapes: [Shape] { (notch.map { [$0] } ?? []) + bubbles }
+    var shapes: [Shape] { (notch.map { [$0] } ?? []) + bubbles + (tiles.map { [$0.tabBar, $0.content] } ?? []) }
+
+    /// Whether the strip's shapes are glass on the desktop right now: the open notch with tiles.
+    var cardsAreOnTheDesktop: Bool { tiles?.isOpen == true }
 
     private init() {
-        (usesContainer, notch, bubbles, appKitNotch, dim, contentScheme, cardContainerSpacing) = (false, nil, [], nil, 0, nil, nil)
+        (panel, usesContainer, notch, bubbles, tiles, backdropOpacity, contentScheme) = (.slab, false, nil, [], nil, 0, nil)
     }
 
-    /// The inner container's spacing for cards of `surface` under `switches`: one when the cards are glass on a glass notch.
-    ///
-    /// Why an inner container. A glass shape inside the content of another glass view (a card in the notch) gets a backdrop of
-    /// its own in the layer tree, apart from the notch's, with or without a container around it (a throwaway probe of the layer
-    /// tree showed it; nothing here can see what the window server then draws). What the container changes is the grouping: two
-    /// cards side by side with no container are one backdrop each (three with the notch's), and in one container they share one
-    /// (two with the notch's), and their blend distance is ours to set, below the gap a module leaves between cards. So the content
-    /// of the open notch gets one container of its own, not the notch's.
-    static func cardContainerSpacing(surface: NotchSurface, switches: NotchGlassSwitches) -> CGFloat? {
-        surface.isLiquidGlass && switches.cards == .glass ? innerContainerSpacing : nil
-    }
-
-    /// The plan for `surface` with a bubble for each of `bubbleIDs` (the `ActivitySlot.id`s). The notch's glass is not
-    /// interactive: it is a surface that holds controls, not a control. A bubble is a button, so its glass is. `switches` are the
-    /// debug switches, which only matter on glass: today's behaviour when they are left out.
-    init(surface: NotchSurface, bubbleIDs: [String], accent: Color, switches: NotchGlassSwitches = .default) {
+    /// The plan for `surface` with a bubble for each of `bubbleIDs` (the `ActivitySlot.id`s), for the notch open or not. The notch's
+    /// glass is not interactive: it is a surface that holds controls, not a control. A bubble is a button, so its glass is.
+    /// `switches` are the debug switches, which only matter on glass: today's behaviour when they are left out.
+    init(surface: NotchSurface, bubbleIDs: [String], accent: Color, switches: NotchGlassSwitches = .default, isOpen: Bool = false) {
         guard let notchGlass = surface.glass(accent: accent, interactive: false, variant: switches.variant),
               let bubbleGlass = surface.glass(accent: accent, interactive: true, variant: switches.variant)
         else {
             self = .none
             return
         }
+        panel = switches.panel
         usesContainer = true
-        switch switches.host {
-        case .swiftui:
-            notch = Shape(id: .notch, glass: notchGlass)
-            appKitNotch = nil
-        case .appkit:
-            notch = nil
-            let tint: Color? = if case .liquidGlass(tinted: true) = surface { accent.opacity(NotchTokens.glassTintOpacity) } else { nil }
-            appKitNotch = AppKitSurface(variant: switches.variant, tint: tint)
-        }
         bubbles = bubbleIDs.map { Shape(id: .bubble($0), glass: bubbleGlass) }
-        dim = switches.dim
         contentScheme = switches.scheme == .dark ? .dark : nil
-        cardContainerSpacing = Self.cardContainerSpacing(surface: surface, switches: switches)
+        if switches.panel == .tiles {
+            let open = isOpen
+            notch = open ? nil : Shape(id: .notch, glass: notchGlass)
+            tiles = Tiles(
+                tabBar: Shape(id: .tabBar, glass: open ? notchGlass : .identity),
+                content: Shape(id: .content, glass: open ? notchGlass : .identity), isOpen: open, dim: open ? switches.dim : 0
+            )
+            backdropOpacity = open ? Self.hitOpacity : switches.dim
+        } else {
+            notch = Shape(id: .notch, glass: notchGlass)
+            tiles = nil
+            backdropOpacity = switches.dim
+        }
     }
 
     /// The shape of the bubble of activity `id`, if the plan has one.
@@ -148,6 +163,26 @@ extension View {
         } else {
             self
         }
+    }
+
+    /// The notch's own glass drawn behind the view, as a layer of its own, for the debug panel `tiles`: the glass comes and goes
+    /// with the open notch, and the view above it, with the whole notch's content, has to keep its identity when it does. Glass
+    /// that is a modifier of the view would swap the view for another one each time. `enabled` is constant for a notch (the panel is
+    /// `tiles`); the glass inside, when it is `nil`, is nothing. The view itself, with nothing added, when not enabled.
+    @ViewBuilder func notchGlassLayer<S: Shape>(
+        _ planned: NotchGlassPlan.Shape?, in shape: S, namespace: Namespace.ID?, enabled: Bool
+    ) -> some View {
+        if enabled {
+            background { Color.clear.notchGlass(planned, in: shape, namespace: namespace) }
+        } else {
+            self
+        }
+    }
+
+    /// One tile of the open notch: the view on glass in `shape`, with a black layer at the tile's dim between the two. The modifiers
+    /// are the same whether the tile has glass or `Glass.identity` (nothing), so the view keeps its identity.
+    func notchTile<S: Shape>(_ planned: NotchGlassPlan.Shape, dim: Double, in shape: S, namespace: Namespace.ID?) -> some View {
+        background(Color.black.opacity(dim), in: shape).notchGlass(planned, in: shape, namespace: namespace)
     }
 
     /// Forces `scheme` on the view's content when there is one; the view itself otherwise, so the default tree is unchanged.

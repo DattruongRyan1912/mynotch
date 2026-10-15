@@ -4,7 +4,8 @@ import SwiftUI
 /// blur (the open notch only, when the user asks) it is a blur of what is behind the window under a veil of black, except the
 /// strip the notch's own body takes at the top, which stays solid so there is no seam where it meets the cutout. As Liquid
 /// Glass it is nothing: `View.notchGlass` draws the glass behind the whole notch once the shape has its size. (Or a black layer
-/// at `dim` over it, a debug switch: clear glass needs dimming over bright content.)
+/// at `dim` over it, a debug switch: clear glass needs dimming over bright content; and with the debug panel `tiles` the open notch
+/// has only the faint veil of `NotchGlassPlan.hitOpacity`.)
 struct NotchBackdrop: View {
     let surface: NotchSurface
     let bodyHeight: CGFloat

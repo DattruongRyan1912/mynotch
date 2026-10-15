@@ -16,14 +16,6 @@ nonisolated enum NotchGlassVariant: String, CaseIterable, Sendable {
     }
 }
 
-/// What draws the notch's glass surface.
-nonisolated enum NotchGlassHost: String, CaseIterable, Sendable {
-    /// `glassEffect` on the notch's shape, in the family that morphs (today).
-    case swiftui
-    /// An `NSGlassEffectView` behind the SwiftUI content.
-    case appkit
-}
-
 /// The colour scheme the notch's content is drawn in on glass.
 nonisolated enum NotchGlassScheme: String, CaseIterable, Sendable {
     /// Whatever the window has (today).
@@ -32,17 +24,19 @@ nonisolated enum NotchGlassScheme: String, CaseIterable, Sendable {
     case dark
 }
 
-/// How a card, a field, a chip and the selected tab are drawn.
-nonisolated enum NotchGlassCards: String, CaseIterable, Sendable {
-    /// A wash of the text colour (`NotchTokens.fill`), as today.
-    case fill
-    /// A glass shape of its own.
-    case glass
+/// What the open notch is made of.
+nonisolated enum NotchGlassPanel: String, CaseIterable, Sendable {
+    /// One piece of glass behind everything, as today.
+    case slab
+    /// No glass on the panel itself: the tab bar sits in one glass capsule, the module's content in one glass tile, and the strip's
+    /// shapes straight on the desktop as glass of their own, with the desktop showing in the gaps between them (as Control Center's
+    /// tiles sit on the wallpaper). Only while the notch is open: the collapsed notch, a toast and the bubbles are glass as before.
+    case tiles
 }
 
-/// How the selected chip and the selected tab look when they are glass.
+/// How the selected chip and the selected tab look on Liquid Glass.
 nonisolated enum NotchGlassSelected: String, CaseIterable, Sendable {
-    /// Glass tinted with the accent.
+    /// The accent: a chip on the desktop is glass tinted with it, a tab on glass is the accent wash with its rim (as today).
     case tint
     /// A solid white tile with a dark glyph, like an "on" tile of Control Center.
     case white
@@ -56,48 +50,44 @@ nonisolated enum NotchGlassSelected: String, CaseIterable, Sendable {
 /// classic notch. `sample` follows its key in either look: the strip on the classic black notch is a baseline to compare with.
 ///
 ///     debug.glass.variant   regular | clear
-///     debug.glass.host      swiftui | appkit
+///     debug.glass.panel     slab | tiles
 ///     debug.glass.dim       0 ... 0.4
 ///     debug.glass.scheme    system | dark
 ///     debug.glass.sample    0 | 1
-///     debug.glass.cards     fill | glass
 ///     debug.glass.selected  tint | white
 nonisolated struct NotchGlassSwitches: Equatable, Sendable {
     enum Key {
         static let variant = "debug.glass.variant"
-        static let host = "debug.glass.host"
+        static let panel = "debug.glass.panel"
         static let dim = "debug.glass.dim"
         static let scheme = "debug.glass.scheme"
         static let sample = "debug.glass.sample"
-        static let cards = "debug.glass.cards"
         static let selected = "debug.glass.selected"
-        static let all = [variant, host, dim, scheme, sample, cards, selected]
+        static let all = [variant, panel, dim, scheme, sample, selected]
     }
 
     /// The most the black layer can take: clear glass needs some dimming over bright content, but past this it is no longer glass.
     static let dimRange: ClosedRange<Double> = 0...0.4
 
     var variant = NotchGlassVariant.regular
-    var host = NotchGlassHost.swiftui
+    var panel = NotchGlassPanel.slab
     var dim = 0.0
     var scheme = NotchGlassScheme.system
     var sample = false
-    var cards = NotchGlassCards.fill
     var selected = NotchGlassSelected.tint
 
     /// Today's behaviour in every switch.
     static let `default` = NotchGlassSwitches()
 
     init(
-        variant: NotchGlassVariant = .regular, host: NotchGlassHost = .swiftui, dim: Double = 0, scheme: NotchGlassScheme = .system,
-        sample: Bool = false, cards: NotchGlassCards = .fill, selected: NotchGlassSelected = .tint
+        variant: NotchGlassVariant = .regular, panel: NotchGlassPanel = .slab, dim: Double = 0, scheme: NotchGlassScheme = .system,
+        sample: Bool = false, selected: NotchGlassSelected = .tint
     ) {
         self.variant = variant
-        self.host = host
+        self.panel = panel
         self.dim = Self.clamped(dim)
         self.scheme = scheme
         self.sample = sample
-        self.cards = cards
         self.selected = selected
     }
 
@@ -110,11 +100,10 @@ nonisolated struct NotchGlassSwitches: Equatable, Sendable {
         }
         self.init(
             variant: name(Key.variant, as: NotchGlassVariant.self) ?? .regular,
-            host: name(Key.host, as: NotchGlassHost.self) ?? .swiftui,
+            panel: name(Key.panel, as: NotchGlassPanel.self) ?? .slab,
             dim: Self.number(defaults.object(forKey: Key.dim)) ?? 0,
             scheme: name(Key.scheme, as: NotchGlassScheme.self) ?? .system,
             sample: Self.flag(defaults.object(forKey: Key.sample)),
-            cards: name(Key.cards, as: NotchGlassCards.self) ?? .fill,
             selected: name(Key.selected, as: NotchGlassSelected.self) ?? .tint
         )
     }

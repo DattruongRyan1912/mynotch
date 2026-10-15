@@ -79,6 +79,17 @@ struct NotchRootView: View {
         return registry.tabs.first { $0.id == target }?.onDrop?(providers) ?? false
     }
 
+    /// What glass the notch asks for in its state now: the bubbles beside the collapsed notch, and with the debug panel `tiles` the
+    /// open notch's tiles.
+    private var glassPlan: NotchGlassPlan {
+        let surface = surface
+        // The bubbles are only drawn, and so only planned, beside the collapsed notch.
+        let slots = surface.isLiquidGlass && state == .compact ? ActivitySlot.bubbles(of: activities, capacity: geometry.bubbleCapacity) : []
+        return NotchGlassPlan(
+            surface: surface, bubbleIDs: slots.map(\.id), accent: theme?.accent ?? NotchTokens.accent, switches: switches, isOpen: isOpen
+        )
+    }
+
     var body: some View {
         let accessories = accessories
         let bottom = bottomHeight(accessories)
@@ -92,12 +103,10 @@ struct NotchRootView: View {
         let shape = NotchShape(topRadius: radii.top, bottomRadius: radii.bottom)
         let accent = theme?.accent ?? NotchTokens.accent
         let surface = surface
-        // The bubbles are only drawn, and so only planned, beside the collapsed notch.
-        let slots = surface.isLiquidGlass && state == .compact ? ActivitySlot.bubbles(of: activities, capacity: geometry.bubbleCapacity) : []
-        let plan = NotchGlassPlan(surface: surface, bubbleIDs: slots.map(\.id), accent: accent, switches: switches)
+        let plan = glassPlan
         NotchGlassFamily(plan) {
             ZStack(alignment: .top) {
-                NotchBackdrop(surface: surface, bodyHeight: geometry.notchSize.height, dim: plan.dim)
+                NotchBackdrop(surface: surface, bodyHeight: geometry.notchSize.height, dim: plan.backdropOpacity)
                     .overlay(alignment: .top) {
                         content(accessories)
                             .padding(.horizontal, radii.top)
@@ -106,10 +115,11 @@ struct NotchRootView: View {
                     }
                     .clipShape(shape)
                     .frame(width: size.width, height: size.height)
-                    // The AppKit host's glass, if that is the one asked for; behind the shape, with its size and spring.
-                    .notchAppKitGlass(plan.appKitNotch, topRadius: radii.top, bottomRadius: radii.bottom)
                     // Above the animation below, so the glass takes its shape and size from the same spring as the notch.
-                    .notchGlass(plan.notch, in: shape, namespace: glassNamespace)
+                    .notchGlass(plan.panel == .tiles ? nil : plan.notch, in: shape, namespace: glassNamespace)
+                    // With the debug panel `tiles` the notch's glass is a layer behind the view instead: it goes while the notch is
+                    // open, and the view, with the tab in it, must not be replaced when it does.
+                    .notchGlassLayer(plan.notch, in: shape, namespace: glassNamespace, enabled: plan.panel == .tiles)
                     .contentShape(shape)
                     // Once open, taps belong to the tab content; the root tap only opens the notch.
                     .gesture(TapGesture().onEnded { model.click() }, including: isOpen ? .subviews : .all)
@@ -205,38 +215,69 @@ struct NotchRootView: View {
     }
 
     private var tabPage: some View {
-        // The cards of the tab bar, the sample strip and the tab are one inner family when they are glass (see `NotchGlassPlan`);
-        // otherwise the group adds nothing.
-        NotchCardGroup(spacing: NotchGlassPlan.cardContainerSpacing(surface: surface, switches: switches)) {
-            VStack(spacing: 0) {
-                if registry.tabs.count >= 2 {
-                    TabBar(tabs: registry.tabs, selected: shownTab?.id) { model.open(tab: $0) }
-                        .padding(.bottom, 6)
-                }
-                // Below the tab bar and above the tab, taking room from the tab: the notch does not grow for it.
-                if switches.sample {
-                    NotchSampleStrip(cardRadius: sampleCardRadius)
-                }
-                if let shownTab {
-                    shownTab.content
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        // Esc while the tab has focus; the panel's cancelOperation covers the rest.
-                        .onExitCommand { model.close() }
-                        .notchLogLifecycle("tab \(shownTab.id.rawValue)")
-                        .id(shownTab.id)
-                        .transition(.opacity.animation(NotchTokens.swap))
-                } else {
-                    Text("Chưa có module nào đang chạy")
-                        .foregroundStyle(surface.secondaryStyle)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+        let plan = glassPlan
+        return VStack(spacing: 0) {
+            if registry.tabs.count >= 2 {
+                tabBar(plan)
             }
+            // Below the tab bar and above the tab, taking room from the tab: the notch does not grow for it.
+            if switches.sample {
+                NotchSampleStrip(cardRadius: concentricTileRadius)
+            }
+            tabContent(plan)
         }
     }
 
-    /// The sample card's radius: the open notch's bottom radius less the padding between the card and the notch's edge, so the
-    /// card's corner is concentric with the notch's (24 - 14 = 10).
-    private var sampleCardRadius: CGFloat {
+    /// The tab bar: with the debug panel `tiles` in a glass capsule of its own, with the desktop showing around it; else on the
+    /// notch's glass as it always was.
+    @ViewBuilder private func tabBar(_ plan: NotchGlassPlan) -> some View {
+        let bar = TabBar(tabs: registry.tabs, selected: shownTab?.id) { model.open(tab: $0) }
+        if let tiles = plan.tiles {
+            bar
+                .padding(.horizontal, NotchGlassPlan.tabBarInset.width)
+                .padding(.vertical, NotchGlassPlan.tabBarInset.height)
+                .notchTile(tiles.tabBar, dim: tiles.dim, in: Capsule(), namespace: glassNamespace)
+                .padding(.bottom, NotchGlassPlan.tileGap)
+        } else {
+            bar.padding(.bottom, 6)
+        }
+    }
+
+    /// The open tab: with the debug panel `tiles` in one glass tile with a concentric corner radius, which the tab swaps its content
+    /// inside (and so does the empty notch's line of text, which would be unreadable straight on the desktop); else straight on the
+    /// notch's glass as it always was.
+    @ViewBuilder private func tabContent(_ plan: NotchGlassPlan) -> some View {
+        if let tiles = plan.tiles {
+            openContent
+                .padding(NotchGlassPlan.tilePadding)
+                .notchTile(
+                    tiles.content, dim: tiles.dim, in: RoundedRectangle(cornerRadius: concentricTileRadius, style: .continuous),
+                    namespace: glassNamespace
+                )
+        } else {
+            openContent
+        }
+    }
+
+    @ViewBuilder private var openContent: some View {
+        if let shownTab {
+            shownTab.content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Esc while the tab has focus; the panel's cancelOperation covers the rest.
+                .onExitCommand { model.close() }
+                .notchLogLifecycle("tab \(shownTab.id.rawValue)")
+                .id(shownTab.id)
+                .transition(.opacity.animation(NotchTokens.swap))
+        } else {
+            Text("Chưa có module nào đang chạy")
+                .foregroundStyle(surface.secondaryStyle)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// The corner radius of a tile, the sample card included: the open notch's bottom radius less the padding between the tile and
+    /// the notch's edge, so the tile's corner is concentric with the notch's (24 - 14 = 10).
+    private var concentricTileRadius: CGFloat {
         NotchCardPlan.concentricRadius(outer: geometry.cornerRadii(for: .open(nil)).bottom, inset: NotchTokens.padding)
     }
 
