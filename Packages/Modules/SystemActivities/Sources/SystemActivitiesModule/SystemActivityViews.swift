@@ -1,10 +1,12 @@
 import MyNotchCore
+import NotchUI
 import SwiftUI
 
 extension SystemActivityContent {
     /// Both sides are kept within 64 pt.
     func liveActivity(duration: Duration) -> LiveActivity {
-        let tint: Color = priority >= .high ? .red : .white
+        // Red for what needs attention; nil is the notch's own text colour, which the views read when they draw, so it follows the look.
+        let tint: Color? = priority >= .high ? .red : nil
         return LiveActivity(
             id: id, priority: priority, expiresAfter: expires ? duration : nil,
             leading: AnyView(SystemActivityGlyph(glyph: glyph, tint: tint)),
@@ -14,7 +16,7 @@ extension SystemActivityContent {
 
 struct SystemActivityGlyph: View {
     let glyph: SystemActivityContent.Glyph
-    let tint: Color
+    let tint: Color?
 
     var body: some View {
         Group {
@@ -24,21 +26,21 @@ struct SystemActivityGlyph: View {
             }
         }
         .font(.system(size: 14, weight: .semibold))
-        .foregroundStyle(tint)
+        .foregroundStyle(tint ?? NotchTokens.primaryText)
         .frame(maxWidth: 64)
     }
 }
 
 struct SystemActivityTrailing: View {
     let trailing: SystemActivityContent.Trailing
-    let tint: Color
+    let tint: Color?
 
     var body: some View {
         switch trailing {
         case .text(let text):
             Text(text)
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(tint)
+                .foregroundStyle(tint ?? NotchTokens.primaryText)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .minimumScaleFactor(0.8)
@@ -51,13 +53,14 @@ struct SystemActivityTrailing: View {
 
 private struct LevelBar: View {
     let level: Float
-    let tint: Color
+    let tint: Color?
 
     var body: some View {
+        let ink = tint ?? NotchTokens.primaryText
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
-                Capsule().fill(tint.opacity(0.25))
-                Capsule().fill(tint).frame(width: proxy.size.width * CGFloat(min(max(level, 0), 1)))
+                Capsule().fill(ink.opacity(0.25))
+                Capsule().fill(ink).frame(width: proxy.size.width * CGFloat(min(max(level, 0), 1)))
             }
         }
     }

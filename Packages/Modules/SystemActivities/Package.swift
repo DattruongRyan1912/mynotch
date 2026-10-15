@@ -7,11 +7,12 @@ let package = Package(
     products: [.library(name: "SystemActivitiesModule", targets: ["SystemActivitiesModule"])],
     dependencies: [
         .package(path: "../../MyNotchCore"),
+        .package(path: "../../NotchUI"),
     ],
     targets: [
         .target(
             name: "SystemActivitiesModule",
-            dependencies: ["MyNotchCore"],
+            dependencies: ["MyNotchCore", "NotchUI"],
             swiftSettings: [.defaultIsolation(MainActor.self)]
         ),
         .testTarget(
