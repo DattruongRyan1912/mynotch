@@ -1,4 +1,5 @@
 import AppKit
+import NotchUI
 import SwiftUI
 import Testing
 @testable import WindowLayoutModule
@@ -79,6 +80,25 @@ import Testing
             // The accent is the one with the least green; the others are pale.
             #expect(greens.indices.min { greens[$0] < greens[$1] } == lit, "zone \(lit): \(greens)")
         }
+    }
+
+    /// The row drawn in an environment whose accent is `accent`, as the notch gives it to its content.
+    func render(_ model: SnapTilesModel, accent: Color) throws -> NSBitmapImageRep {
+        let renderer = ImageRenderer(content: SnapTilesView(model: model).frame(width: size.width, height: SnapTiles.height).environment(\.notchAccent, accent))
+        renderer.scale = 1
+        return NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
+    }
+
+    @Test func theLitZoneAndTheLitTileTakeTheEnvironmentsAccent() throws {
+        let green = Color(.sRGB, red: 0, green: 1, blue: 0)
+        let hovered = SnapTarget(layout: .quarters, zone: 0)
+        let bitmap = try render(model(SnapLayout.allCases, hovered: hovered), accent: green)
+        let tile = SnapTiles.frames(count: 6, in: CGRect(origin: .zero, size: size))[3]
+        let zone = try #require(colour(bitmap, tile: tile, at: CGPoint(x: 0.25, y: 0.25))?.usingColorSpace(.sRGB))
+        #expect(zone.greenComponent > 0.9 && zone.redComponent < 0.1 && zone.blueComponent < 0.1, "\(zone)")
+        // Low in the tile, under its title, where nothing but the tile's own fill is: the accent, faint.
+        let fill = try #require(bitmap.colorAt(x: Int(tile.midX), y: 78)?.usingColorSpace(.sRGB))
+        #expect(fill.greenComponent > 0.9 && fill.redComponent < 0.1 && fill.blueComponent < 0.1 && fill.alphaComponent > 0.2, "\(fill)")
     }
 
     @Test func aTileThatIsNotHoveredLightsNothing() throws {

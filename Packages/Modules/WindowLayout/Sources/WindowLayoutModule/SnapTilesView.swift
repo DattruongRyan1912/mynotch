@@ -28,6 +28,7 @@ struct SnapTilesView: View {
 private struct SnapTileView: View {
     let layout: SnapLayout
     let hoveredZone: Int?
+    @Environment(\.notchAccent) private var accent
 
     var body: some View {
         VStack(spacing: 4) {
@@ -45,7 +46,7 @@ private struct SnapTileView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(hoveredZone == nil ? Color.white.opacity(0.08) : NotchTokens.accent.opacity(0.28))
+                .fill(hoveredZone == nil ? Color.white.opacity(0.08) : accent.opacity(0.28))
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(layout.title)
@@ -59,7 +60,7 @@ private struct SnapTileView: View {
                 ForEach(layout.zones.indices, id: \.self) { index in
                     let unit = layout.zones[index].unit
                     RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(hoveredZone == index ? NotchTokens.accent : Color.white.opacity(0.28))
+                        .fill(hoveredZone == index ? accent : Color.white.opacity(0.28))
                         .frame(width: unit.width * proxy.size.width - 3, height: unit.height * proxy.size.height - 3)
                         .offset(x: unit.minX * proxy.size.width + 1.5, y: unit.minY * proxy.size.height + 1.5)
                 }

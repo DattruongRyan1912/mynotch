@@ -9,13 +9,20 @@ import Testing
 
 /// The module in a real registry with a fake notch interface, fake mouse and keyboard, fake Accessibility windows and a
 /// fake preview: nothing real is watched, shown or moved.
+/// Stands in for the trackpad: a test never feels anything.
+final class HapticRecorder: HapticPerformer {
+    private(set) var performed: [Haptic] = []
+    func perform(_ haptic: Haptic) { performed.append(haptic) }
+}
+
 @MainActor
 final class ModuleFixture {
     let events = FakeDragEvents()
     let window = FakeWindow(frame: CGRect(x: 600, y: 300, width: 800, height: 600))
     let probe: FakeWindowProbe
     let preview = FakePreview()
-    let interface = NotchInterface()
+    let haptics = HapticRecorder()
+    let interface: NotchInterface
     let module: WindowLayoutModule
     let harness: RegistryHarness
     private var time: TimeInterval = 0
@@ -24,6 +31,7 @@ final class ModuleFixture {
         let probe = FakeWindowProbe(window)
         let preview = preview
         self.probe = probe
+        interface = NotchInterface(performer: haptics)
         module = WindowLayoutModule(
             events: events, probe: probe,
             screens: { SnapScreens(screens: [SnapScreen(id: 1, visibleFrame: SessionFixture.macBookVisible)], primaryHeight: 982) },
@@ -161,6 +169,40 @@ final class ModuleFixture {
         fixture.events.send(.up(fixture.firstTile()))
         fixture.harness.scheduler.advance(by: .milliseconds(200))
         #expect(fixture.window.setFrames.count == 1)
+    }
+
+    // MARK: the tap on the trackpad
+
+    @Test func aWindowSnappedIntoATileTapsTheTrackpadWithAnAlignment() async {
+        let fixture = ModuleFixture()
+        await fixture.enable()
+        fixture.dragOverFirstTile()
+        fixture.events.send(.up(fixture.firstTile()))
+        #expect(fixture.haptics.performed.isEmpty, "not before the window has moved")
+        fixture.harness.scheduler.advance(by: .milliseconds(200))
+        #expect(fixture.window.setFrames.count == 1)
+        #expect(fixture.haptics.performed == [.alignment])
+    }
+
+    @Test func theHapticsSettingIsRespected() async {
+        let fixture = ModuleFixture()
+        await fixture.enable()
+        fixture.interface.hapticsEnabled = false
+        fixture.dragOverFirstTile()
+        fixture.events.send(.up(fixture.firstTile()))
+        fixture.harness.scheduler.advance(by: .milliseconds(200))
+        #expect(fixture.window.setFrames.count == 1, "the window is moved all the same")
+        #expect(fixture.haptics.performed.isEmpty)
+    }
+
+    @Test func aDragThatSnapsNothingNeverTapsTheTrackpad() async {
+        let fixture = ModuleFixture()
+        await fixture.enable()
+        fixture.dragOverFirstTile()
+        await fixture.disable()
+        fixture.events.send(.up(fixture.firstTile()))
+        fixture.harness.scheduler.advance(by: .milliseconds(200))
+        #expect(fixture.haptics.performed.isEmpty)
     }
 
     @Test func theNotchesComeFromTheInterfaceAtTheTimeOfTheDrag() async {

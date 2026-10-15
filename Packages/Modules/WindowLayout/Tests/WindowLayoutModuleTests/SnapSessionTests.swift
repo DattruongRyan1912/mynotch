@@ -39,6 +39,8 @@ final class SessionFixture {
     var isTrusted = true
     private(set) var shown = 0
     private(set) var hidden = 0
+    /// How many taps on the trackpad the session asked for.
+    private(set) var felt = 0
     private(set) var session: SnapSession!
     private var time: TimeInterval = 0
 
@@ -51,7 +53,8 @@ final class SessionFixture {
                 screens: { [unowned self] in screens },
                 options: { [unowned self] in options },
                 showTiles: { [unowned self] _ in shown += 1 },
-                hideTiles: { [unowned self] in hidden += 1 }
+                hideTiles: { [unowned self] in hidden += 1 },
+                feel: { [unowned self] in felt += 1 }
             ),
             probe: probe, events: events, makePreview: { [preview] in preview }, scheduler: scheduler
         )
@@ -287,6 +290,60 @@ final class SessionFixture {
         #expect(fixture.window.setFrames.count == 1)
     }
 
+    // MARK: the tap on the trackpad
+
+    @Test func aWindowThatSnappedIntoATileIsFeltOnceAndOnlyWhenItHasMoved() {
+        fixture.openTiles()
+        fixture.drag(to: fixture.tilePoint(0))
+        #expect(fixture.felt == 0, "hovering a tile is not a snap")
+        fixture.release(at: fixture.tilePoint(0))
+        #expect(fixture.felt == 0, "the window has not moved yet")
+        fixture.settle()
+        #expect(fixture.window.setFrames.count == 1)
+        #expect(fixture.felt == 1)
+        fixture.settle()
+        #expect(fixture.felt == 1, "once for the one snap")
+    }
+
+    @Test func aWindowTheAppRefusedToMoveIsNotFelt() {
+        fixture.window.accepts = false
+        fixture.openTiles()
+        fixture.drag(to: fixture.tilePoint(0))
+        fixture.release(at: fixture.tilePoint(0))
+        fixture.settle()
+        #expect(fixture.window.setFrames.count == 1)
+        #expect(fixture.felt == 0, "nothing snapped")
+    }
+
+    @Test func aDropThatMovesNothingFeelsNothing() {
+        let inGap = CGPoint(x: SnapTiles.frames(count: 6, in: SessionFixture.macBookContent)[1].maxX + 4, y: fixture.tilePoint(1).y)
+        for point in [inGap, SessionFixture.nearMacBook, CGPoint(x: 900, y: 500)] {
+            let fixture = SessionFixture()
+            fixture.openTiles()
+            fixture.drag(to: fixture.tilePoint(1))
+            fixture.release(at: point)
+            fixture.settle()
+            #expect(fixture.felt == 0, "released at \(point)")
+        }
+    }
+
+    @Test func aCancelledDragAndAStoppedModuleFeelNothing() {
+        fixture.openTiles()
+        fixture.drag(to: fixture.tilePoint(0))
+        fixture.session.handle(.escape)
+        fixture.release(at: fixture.tilePoint(0))
+        fixture.settle()
+        #expect(fixture.felt == 0, "Escape cancelled it")
+
+        let other = SessionFixture()
+        other.openTiles()
+        other.drag(to: other.tilePoint(0))
+        other.release(at: other.tilePoint(0))
+        other.session.stop()
+        other.settle()
+        #expect(other.felt == 0, "the move was cancelled with the module")
+    }
+
     @Test func theWindowMovedIsTheOneThatWasDragged() {
         fixture.openTiles()
         fixture.drag(to: fixture.tilePoint(0))
@@ -412,7 +469,7 @@ final class SessionFixture {
         let session = SnapSession(
             environment: SnapSession.Environment(
                 isTrusted: { true }, notches: { [] }, screens: { fixture.screens }, options: { fixture.options },
-                showTiles: { _ in }, hideTiles: {}
+                showTiles: { _ in }, hideTiles: {}, feel: {}
             ),
             probe: fixture.probe, events: fixture.events, makePreview: { built += 1; return fixture.preview }, scheduler: fixture.scheduler
         )

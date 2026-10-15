@@ -61,7 +61,8 @@ public final class WindowLayoutModule: FeatureModule {
                 screens: screens,
                 options: { keys.options(settings) },
                 showTiles: { presenter.showToast($0, duration: Self.tilesLifetime) },
-                hideTiles: { presenter.close() }
+                hideTiles: { presenter.close() },
+                feel: { interface.feel(.alignment) }
             ),
             probe: probe, events: events, makePreview: makePreview, scheduler: context.scheduler
         )

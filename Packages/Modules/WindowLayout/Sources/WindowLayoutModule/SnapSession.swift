@@ -70,6 +70,9 @@ final class SnapSession {
         /// Opens the notch with these tiles in it.
         let showTiles: (AnyView) -> Void
         let hideTiles: () -> Void
+        /// A window took the place of a tile: the light tap on the trackpad that goes with it, which the interface gives
+        /// unless the user turned taps off.
+        let feel: () -> Void
     }
 
     /// The tiles are open on `notch`, with these layouts.
@@ -230,10 +233,12 @@ final class SnapSession {
         let screens = environment.screens()
         guard let area = screens.screens.first(where: { $0.id == notch.id })?.visibleFrame else { return }
         let frame = target.frame(in: area, gap: gap.points)
-        window.place(SnapPlacement(
+        let snapped = window.place(SnapPlacement(
             frame: SnapSpace.accessibilityFrame(of: frame, primaryHeight: screens.primaryHeight),
             area: SnapSpace.accessibilityFrame(of: area, primaryHeight: screens.primaryHeight),
             anchor: target.layout.zones[target.zone].anchor
         ))
+        // An app that refused to move got nothing to feel.
+        if snapped { environment.feel() }
     }
 }
