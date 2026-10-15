@@ -104,6 +104,8 @@ struct BatteryLockScreenView: View {
                     .monospacedDigit()
             }
             .foregroundStyle(NotchTokens.primaryText)
+            // The lock screen draws this on a black surface of its own, whatever the look.
+            .notchOnDarkBackground()
         }
     }
 

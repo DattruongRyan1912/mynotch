@@ -1,3 +1,4 @@
+import AppKit
 import NotchUI
 import SwiftUI
 
@@ -14,15 +15,24 @@ struct BatteryGauge: View {
 
     /// Measured from the number itself, so the "does it fit" rule holds for two and for three digits.
     @State private var labelWidth: CGFloat = 80
+    @Environment(\.notchSurface) private var surface
 
-    private static let outline = Color.white.opacity(0.35)
+    /// The outline and the terminal. Read in the body, not kept once, so it follows the look.
+    private var outline: Color { NotchTokens.fill(0.35) }
+
     private static let terminalGap: CGFloat = 2
+
+    /// The number when it sits inside the fill: black on the coloured fills and on the classic notch's white one. On Liquid Glass
+    /// the plain fill is the primary colour (black on light glass), so the number takes the opposite, the window's background.
+    static func insideLabel(for tone: BatteryFillTone, onGlass: Bool) -> Color {
+        tone == .normal && onGlass ? Color(nsColor: .windowBackgroundColor) : Color.black
+    }
 
     var body: some View {
         HStack(spacing: Self.terminalGap) {
             bodyShape
             RoundedRectangle(cornerRadius: 2)
-                .fill(Self.outline)
+                .fill(outline)
                 .frame(width: Metrics.nubSize.width, height: Metrics.nubSize.height)
         }
         .frame(height: Metrics.height)
@@ -45,7 +55,7 @@ struct BatteryGauge: View {
             let layout = Metrics(percent: percent, bodyWidth: proxy.size.width)
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: Metrics.fillRadius)
-                    .fill(Color.white.opacity(0.08))
+                    .fill(NotchTokens.fill(0.08))
                 fill(layout)
                 label(layout)
             }
@@ -55,7 +65,7 @@ struct BatteryGauge: View {
         }
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.cornerRadius)
-                .strokeBorder(Self.outline, lineWidth: Metrics.outlineWidth)
+                .strokeBorder(outline, lineWidth: Metrics.outlineWidth)
         }
     }
 
@@ -73,7 +83,7 @@ struct BatteryGauge: View {
         Text("\(percent)%")
             .font(.system(size: 30, weight: .semibold, design: .rounded))
             .monospacedDigit()
-            .foregroundStyle(layout.labelFitsInside(labelWidth: labelWidth) ? Color.black : NotchTokens.primaryText)
+            .foregroundStyle(layout.labelFitsInside(labelWidth: labelWidth) ? Self.insideLabel(for: tone, onGlass: surface.isLiquidGlass) : NotchTokens.primaryText)
             .fixedSize()
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { labelWidth = $0 }
             .offset(x: layout.labelOffset(labelWidth: labelWidth))
