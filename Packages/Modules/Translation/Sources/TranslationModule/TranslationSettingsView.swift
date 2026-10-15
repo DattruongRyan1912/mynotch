@@ -7,6 +7,10 @@ struct TranslationSettingsView: View {
     @Binding var autoTranslateOnOpen: Bool
     @Binding var useChromiumAccessibility: Bool
     @Binding var showReplaceButton: Bool
+    @Binding var smartSelection: Bool
+    @Binding var showSelectionChip: Bool
+    @Binding var showSelectionActivity: Bool
+    @Binding var selectionDenyList: [String]
     @Binding var convertCurrency: Bool
     @Binding var currencyTarget: String
     @Binding var firstZone: String
@@ -19,6 +23,7 @@ struct TranslationSettingsView: View {
     let languages: SupportedLanguages
     let status: (LanguagePair) async -> PairStatus
     let install: (LanguagePair) -> Void
+    var applications = RunningApplications.system
 
     @State private var available: [Locale.Language] = []
     @State private var statuses: [LanguagePair: PairStatus] = [:]
@@ -41,6 +46,10 @@ struct TranslationSettingsView: View {
                 Text("Đọc vùng chọn trong Chrome và app Electron")
                 Text("Chrome có thể chuyển sang chế độ hỗ trợ trình đọc màn hình.")
             }
+            SmartSelectionSettingsView(
+                smartSelection: $smartSelection, showChip: $showSelectionChip, showActivity: $showSelectionActivity,
+                denyList: $selectionDenyList, applications: applications
+            )
             Toggle(isOn: $showReplaceButton) {
                 Text("Hiện nút thay vào chỗ đang chọn")
                 Text("Dưới bản dịch của đoạn chữ đọc bằng phím tắt. Cần quyền Accessibility.")

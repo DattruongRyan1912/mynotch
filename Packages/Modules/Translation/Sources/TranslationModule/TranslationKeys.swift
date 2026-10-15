@@ -37,6 +37,14 @@ struct TranslationKeys {
     /// Base address and model of the OpenAI-compatible server.
     let openAIBaseURL: SettingKey<String>
     let openAIModel: SettingKey<String>
+    /// "Bôi đen là hiểu": a selection in any app is understood without a keystroke, and shown beside it. Needs Accessibility.
+    let smartSelection: SettingKey<Bool>
+    /// The small button beside the selection that shows what was understood.
+    let selectionChip: SettingKey<Bool>
+    /// What was understood is also shown as a short live activity beside the collapsed notch.
+    let selectionActivity: SettingKey<Bool>
+    /// Bundle IDs of the apps whose selections are never read.
+    let selectionDenyList: SettingKey<[String]>
 
     init(_ settings: ModuleSettings) {
         preferredPair = settings.key("preferredPair", default: PreferredPair(first: "vi", second: "en"))
@@ -52,5 +60,9 @@ struct TranslationKeys {
         microsoftRegion = settings.key("microsoftRegion", default: "")
         openAIBaseURL = settings.key("openAIBaseURL", default: "https://api.openai.com/v1")
         openAIModel = settings.key("openAIModel", default: "gpt-4o-mini")
+        smartSelection = settings.key("smartSelection", default: true)
+        selectionChip = settings.key("selectionChip", default: true)
+        selectionActivity = settings.key("selectionActivity", default: false)
+        selectionDenyList = settings.key("selectionDenyList", default: [])
     }
 }

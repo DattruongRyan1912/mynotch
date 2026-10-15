@@ -54,12 +54,12 @@ nonisolated struct LanguageDetector: Sendable {
     }
 
     /// Regional variants ("en", "en-GB") count as the same language; Chinese scripts do not.
-    private static func isSameLanguage(_ lhs: Locale.Language, _ rhs: Locale.Language) -> Bool {
+    static func isSameLanguage(_ lhs: Locale.Language, _ rhs: Locale.Language) -> Bool {
         lhs == rhs || writtenLanguage(of: lhs).map { $0 == writtenLanguage(of: rhs) } ?? false
     }
 
     /// Natural Language names Chinese by script ("zh-Hans", "zh-Hant") and every other language by its code.
-    private static func writtenLanguage(of language: Locale.Language) -> NLLanguage? {
+    static func writtenLanguage(of language: Locale.Language) -> NLLanguage? {
         guard let code = language.languageCode?.identifier else { return nil }
         guard code == "zh" else { return NLLanguage(rawValue: code) }
         return language.script?.identifier == "Hant" ? .traditionalChinese : .simplifiedChinese

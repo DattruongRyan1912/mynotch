@@ -27,6 +27,12 @@ struct ModuleFixture {
     let keyStore = FakeKeyStore()
     let transport = FakeTransport()
     let engineLog = FakeTranslationLog()
+    /// What the watcher listens to and what it shows: no real monitor, window or screen takes part.
+    let input = FakeSelectionInput()
+    let chipWindow = FakeChipWindow()
+    let displays = FakeDisplays()
+    /// Apple's engine for the previews, which is not the one the tab translates with.
+    let previewEngine = FakeEngine()
     /// 15 January 2026, noon UTC: winter in the northern hemisphere and 19:00 in Hanoi.
     let clock = TestClock("2026-01-15T12:00:00Z")
     /// Reads quantities like the real one, and records when and where.
@@ -59,6 +65,9 @@ struct ModuleFixture {
             dictionary: dictionary,
             opener: opener,
             engines: EngineSetup(keys: keyStore, transport: transport, log: engineLog),
+            smartSelection: SmartSelectionSetup(
+                accessibility: accessibility, input: input, window: chipWindow, preview: previewEngine, screens: { [displays] in displays.areas }
+            ),
             shortcut: nil
         )
         harness = RegistryHarness([module])
@@ -109,7 +118,7 @@ struct ModuleFixture {
         #expect(descriptor.permissions.isEmpty)
         #expect(descriptor.optionalPermissions == [.accessibility])
         #expect(descriptor.permissionReasons == [
-            .accessibility: "Đọc văn bản bạn đang chọn ở app khác để dịch, và thay nó bằng bản dịch.",
+            .accessibility: "Đọc văn bản bạn đang chọn ở app khác để dịch hoặc quy đổi, và thay nó bằng bản dịch.",
         ])
     }
 

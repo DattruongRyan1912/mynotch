@@ -17,10 +17,32 @@ final class FakeAccessibility: AccessibilityClient {
 
     func focusedApplication() -> FocusedApplication? { application }
 
+    /// What every read finds once `selections` is used up.
+    var standing: String?
+    /// The focused field is a password field: like the real client, nothing is read from it, its length and place included.
+    var isSecureField = false
+    /// What the selected range says about its length, in UTF-16 units; nil when the app does not say.
+    var length: Int?
+    /// Where the selection is, in Accessibility coordinates; nil when the app does not say.
+    var bounds: CGRect?
+    private(set) var lengthReads = 0
+    private(set) var boundsReads = 0
+
     func readSelection(in application: FocusedApplication) -> SelectionRead {
+        guard !isSecureField else { return .empty }
         defer { reads += 1 }
         if unresponsiveReads.contains(reads) { return .unresponsive }
-        return (reads < selections.count ? selections[reads] : nil).map(SelectionRead.text) ?? .empty
+        return (reads < selections.count ? selections[reads] : standing).map(SelectionRead.text) ?? .empty
+    }
+
+    func selectionLength(in application: FocusedApplication) -> Int? {
+        lengthReads += 1
+        return isSecureField ? nil : length
+    }
+
+    func selectionBounds(in application: FocusedApplication) -> CGRect? {
+        boundsReads += 1
+        return isSecureField ? nil : bounds
     }
 
     func isEnabled(_ attribute: String, in application: FocusedApplication) -> Bool { attributes.contains(attribute) }

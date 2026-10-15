@@ -9,17 +9,19 @@ import SwiftUI
 /// converted above its translation, or instead of one when it is nothing else. A word or short phrase also gets its
 /// entry from the Mac's dictionary. Apple translates unless the user chose an engine that needs their own key (Google,
 /// Microsoft, an OpenAI-compatible server); its key stays in the Keychain, and when it fails the tab says so and offers
-/// Apple's translation instead of switching by itself.
+/// Apple's translation instead of switching by itself. With "Bôi đen là hiểu" on, a selection in any app is understood
+/// without a keystroke: its conversion or a preview of its translation (Apple's on-device engine only) shows in a small chip
+/// beside it, and the chip's "Mở" opens the full result in this tab.
 public final class TranslationModule: FeatureModule {
     public let descriptor = ModuleDescriptor(
         id: "translation",
         displayName: "Dịch",
         systemImage: "translate",
         defaultEnabled: true,
-        // Only the shortcut and the replacement need it, to read the selection and write over it; Services, typing and
-        // speaking work without.
+        // Only the shortcut, the replacement and "Bôi đen là hiểu" need it, to read the selection and write over it;
+        // Services, typing and speaking work without.
         optionalPermissions: [.accessibility],
-        permissionReasons: [.accessibility: "Đọc văn bản bạn đang chọn ở app khác để dịch, và thay nó bằng bản dịch."],
+        permissionReasons: [.accessibility: "Đọc văn bản bạn đang chọn ở app khác để dịch hoặc quy đổi, và thay nó bằng bản dịch."],
         order: 400
     )
 
@@ -38,6 +40,9 @@ public final class TranslationModule: FeatureModule {
     private let dictionary: any DictionaryLooking
     private let opener: any URLOpening
     private let engineSetup: EngineSetup
+    private let smartSelectionSetup: SmartSelectionSetup
+    /// "Bôi đen là hiểu", while the module runs.
+    private(set) var smartSelection: SmartSelection?
     /// The Settings rows of the engines. The page asks for its views again whenever it redraws, and what the model knows
     /// (the saved keys, a check under way) must not start over each time, so there is one.
     private(set) var engineSettings: EngineSettingsModel?
@@ -67,6 +72,7 @@ public final class TranslationModule: FeatureModule {
             dictionary: SystemDictionary(),
             opener: WorkspaceURLOpener(),
             engines: EngineSetup(),
+            smartSelection: SmartSelectionSetup(accessibility: accessibility),
             shortcut: Self.defaultShortcut
         )
     }
@@ -85,6 +91,7 @@ public final class TranslationModule: FeatureModule {
         dictionary: any DictionaryLooking,
         opener: any URLOpening,
         engines: EngineSetup,
+        smartSelection: SmartSelectionSetup,
         shortcut: KeyboardShortcuts.Shortcut?
     ) {
         self.engine = engine
@@ -98,6 +105,7 @@ public final class TranslationModule: FeatureModule {
         self.dictionary = dictionary
         self.opener = opener
         self.engineSetup = engines
+        self.smartSelectionSetup = smartSelection
         self.shortcut = shortcut
     }
 
@@ -116,6 +124,12 @@ public final class TranslationModule: FeatureModule {
             state: state, engines: EngineSet(apple: engine, remote: remote.engine(for:)), dictionary: DictionaryFinder(dictionary),
             converter: converter, scheduler: context.scheduler, settings: context.settings, pasteboard: pasteboard
         )
+        let smart = SmartSelection(
+            context: context, setup: smartSelectionSetup, reader: selection,
+            decider: SelectionDecider(converter: converter, preview: smartSelectionSetup.preview, languages: languages, settings: context.settings),
+            open: { [weak self] in self?.openSelection($0) }
+        )
+        smartSelection = smart
         context.hotkeys.register("translateSelection", title: "Dịch đoạn chữ đang chọn", initial: shortcut) { [weak self] in
             self?.selectionShortcutPressed()
         }
@@ -139,9 +153,12 @@ public final class TranslationModule: FeatureModule {
                 self?.state.offersReplace = offers
             }
         }
+        smart.start()
     }
 
     public func stop() async {
+        smartSelection?.stop()
+        smartSelection = nil
         selectionRead?.cancel()
         selectionRead = nil
         speech.stop()
@@ -204,6 +221,10 @@ public final class TranslationModule: FeatureModule {
             autoTranslateOnOpen: settings.binding(keys.autoTranslateOnOpen),
             useChromiumAccessibility: settings.binding(keys.useChromiumAccessibility),
             showReplaceButton: settings.binding(keys.showReplaceButton),
+            smartSelection: settings.binding(keys.smartSelection),
+            showSelectionChip: settings.binding(keys.selectionChip),
+            showSelectionActivity: settings.binding(keys.selectionActivity),
+            selectionDenyList: settings.binding(keys.selectionDenyList),
             convertCurrency: settings.binding(keys.convertCurrency),
             currencyTarget: settings.binding(keys.currencyTarget),
             firstZone: settings.binding(keys.firstZone),
@@ -263,6 +284,22 @@ public final class TranslationModule: FeatureModule {
         state.isReadingSelection = false
         forgetSelection()
         receive(text)
+        showTab(context)
+    }
+
+    /// The chip's "Mở": the tab opens on a selection that was understood without a keystroke. It is translated at once whatever
+    /// the auto-translate setting says, since the user asked to see it, and by the engine chosen in Settings, which is the
+    /// first time anything but Apple's on-device engine sees it. The selection's app is kept, so the result can be spoken
+    /// and written back over it like one read by the shortcut.
+    func openSelection(_ source: SelectionSource) {
+        guard let context, let translator else { return }
+        selectionRead?.cancel()
+        selectionRead = nil
+        state.isReadingSelection = false
+        forgetSelection()
+        translator.receive(source.text, translate: true)
+        state.selectionSource = source
+        refreshAccessibility()
         showTab(context)
     }
 
