@@ -22,6 +22,8 @@ struct MediaSettingsKeys {
     let youtubeCaptions: SettingKey<Bool>
     /// The current and the next lyric line in a strip under the closed notch. Off by default: it makes the notch taller.
     let lyricsUnderNotch: SettingKey<Bool>
+    /// The buttons beside play and pause in the Media tab.
+    let controlButtons: SettingKey<MediaControlLayout>
 
     init(_ settings: ModuleSettings) {
         showActivity = settings.key("showActivity", default: true)
@@ -31,6 +33,7 @@ struct MediaSettingsKeys {
         lyrics = settings.key("lyrics", default: false)
         youtubeCaptions = settings.key("youtubeCaptions", default: false)
         lyricsUnderNotch = settings.key("lyricsUnderNotch", default: false)
+        controlButtons = settings.key("controlButtons", default: .standard)
     }
 }
 
@@ -38,6 +41,8 @@ struct MediaSettingsKeys {
 struct MediaActions {
     var send: (MediaCommand) -> Void
     var seek: (Double) -> Void
+    /// A button beside play and pause was pressed.
+    var press: (MediaControlButton) -> Void = { _ in }
 }
 
 /// A next or previous that went to the extension and waits for its answer.
@@ -69,6 +74,8 @@ public final class MediaModule: FeatureModule {
     private let makeSource: ((any Scheduler) -> any NowPlayingSource)?
     private let spectrum: any SpectrumSource
     private let lyricsClient: any HTTPClient
+    /// The system output volume the row's slider shows and sets.
+    let volume: VolumeModel
     /// The user's Apple Music sign-in, which Settings shows and lyrics lookups use.
     let appleAccount: AppleMusicAccount
     let appleClient: AppleMusicLyricsClient
@@ -146,19 +153,21 @@ public final class MediaModule: FeatureModule {
                 spectrum: spectrum,
                 lyricsClient: URLSessionHTTPClient(),
                 tokens: KeychainTokenStore(),
-                signIn: AppleMusicLoginWindow()
+                signIn: AppleMusicLoginWindow(),
+                volume: CoreAudioVolume()
             )
         } else {
             self.init(
                 makeSource: nil, spectrum: spectrum, lyricsClient: URLSessionHTTPClient(),
-                tokens: KeychainTokenStore(), signIn: AppleMusicLoginWindow()
+                tokens: KeychainTokenStore(), signIn: AppleMusicLoginWindow(), volume: CoreAudioVolume()
             )
         }
     }
 
     /// For tests: lines come from `source` instead of perl, levels from `spectrum` instead of a system audio tap,
     /// lyrics from `lyricsClient` instead of lrclib.net and Apple, the sign-in from `tokens` instead of the Keychain,
-    /// the sign-in window is `signIn`. No defaults for those, so no test reaches the network or the Keychain by accident.
+    /// the sign-in window is `signIn`, the output volume is `volume`. No defaults for those but the volume, which is a device
+    /// without one, so no test reaches the network, the Keychain or the speakers by accident.
     convenience init(
         source: any NowPlayingSource,
         spectrum: any SpectrumSource,
@@ -168,12 +177,13 @@ public final class MediaModule: FeatureModule {
         lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed,
         youtubeSocketPath: String? = nil,
         youtubeSetup: YouTubeBridgeSetup? = nil,
-        youtubeLog: YouTubeBridgeLog = .silent
+        youtubeLog: YouTubeBridgeLog = .silent,
+        volume: any VolumeDevice = NoVolumeDevice()
     ) {
         self.init(
             makeSource: { _ in source }, spectrum: spectrum, lyricsClient: lyricsClient,
-            tokens: tokens, signIn: signIn, lookUpApp: lookUpApp, youtubeSocketPath: youtubeSocketPath, youtubeSetup: youtubeSetup,
-            youtubeLog: youtubeLog
+            tokens: tokens, signIn: signIn, volume: volume, lookUpApp: lookUpApp, youtubeSocketPath: youtubeSocketPath,
+            youtubeSetup: youtubeSetup, youtubeLog: youtubeLog
         )
     }
 
@@ -183,11 +193,13 @@ public final class MediaModule: FeatureModule {
         lyricsClient: any HTTPClient,
         tokens: any TokenStore,
         signIn: any AppleMusicSignIn,
+        volume: any VolumeDevice,
         lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed,
         youtubeSocketPath: String? = nil,
         youtubeSetup: YouTubeBridgeSetup? = nil,
         youtubeLog: YouTubeBridgeLog = .system
     ) {
+        self.volume = VolumeModel(device: volume)
         self.youtubeSocketPath = youtubeSocketPath
         self.youtubeSetup = youtubeSetup
         self.youtubeLog = youtubeLog
@@ -239,7 +251,7 @@ public final class MediaModule: FeatureModule {
                 (
                     settings.value(keys.showActivity), settings.value(keys.pauseGraceSeconds),
                     settings.value(keys.hiddenApps), settings.value(keys.realSpectrum), settings.value(keys.lyrics),
-                    settings.value(keys.youtubeCaptions), settings.value(keys.lyricsUnderNotch)
+                    settings.value(keys.youtubeCaptions), settings.value(keys.lyricsUnderNotch), settings.value(keys.controlButtons)
                 )
             }
             for await _ in changes { self?.settingsChanged() }
@@ -254,6 +266,7 @@ public final class MediaModule: FeatureModule {
         }
         let source = makeSource(context.scheduler)
         self.source = source
+        store.setCanLike(source.canLike)
         source.start(
             onLine: { [weak self] line in self?.receive(line) },
             onFailure: { [weak self] reason in self?.sourceFailed(reason) }
@@ -263,6 +276,8 @@ public final class MediaModule: FeatureModule {
     public func stop() async {
         source?.stop()
         source = nil
+        store.setCanLike(false)
+        volume.stopWatching()
         spectrumFeed?.shutDown()
         spectrumFeed = nil
         lyricsTask?.cancel()
@@ -291,7 +306,7 @@ public final class MediaModule: FeatureModule {
     public func makeTab() -> NotchTab? {
         NotchTab(
             id: descriptor.id, title: "Media", systemImage: "music.note", preferredHeight: MediaTabView.preferredHeight,
-            content: AnyView(MediaTabView(store: store, actions: actions))
+            content: AnyView(MediaTabView(store: store, actions: actions, volume: volume))
         )
     }
 
@@ -305,6 +320,7 @@ public final class MediaModule: FeatureModule {
             lyrics: environment.settings.binding(keys.lyrics),
             youtubeCaptions: environment.settings.binding(keys.youtubeCaptions),
             lyricsUnderNotch: environment.settings.binding(keys.lyricsUnderNotch),
+            controlButtons: environment.settings.binding(keys.controlButtons),
             youtubeBridge: youtubeBridgeModel(for: environment),
             store: store,
             appleAccount: appleAccount,
@@ -344,7 +360,8 @@ public final class MediaModule: FeatureModule {
     var actions: MediaActions {
         MediaActions(
             send: { [weak self] command in self?.send(command) },
-            seek: { [weak self] seconds in self?.seek(toSeconds: seconds) }
+            seek: { [weak self] seconds in self?.seek(toSeconds: seconds) },
+            press: { [weak self] button in self?.press(button) }
         )
     }
 
@@ -422,6 +439,23 @@ public final class MediaModule: FeatureModule {
         source?.seek(toSeconds: seconds)
     }
 
+    /// A button beside play and pause: what it does depends on what the player reports (see `MediaControlButton`), and a
+    /// button that cannot be used does nothing. Next and previous go through `send`, so they take the same route as the hotkeys.
+    func press(_ button: MediaControlButton, at now: Date = Date()) {
+        // The volume slider is the row's own: it has no effect on the player and is never open from here.
+        let context = store.controlContext(hasVolume: volume.isAvailable, volumeIsOpen: false)
+        switch button.effect(in: context, at: now) {
+        case .command(let command): send(command)
+        case .seek(let seconds): seek(toSeconds: seconds)
+        case .shuffle(let mode): source?.setShuffle(mode)
+        case .repeatMode(let mode): source?.setRepeat(mode)
+        case .toggleLyrics:
+            store.toggleLyricsHidden()
+            refreshActivity()
+        case nil: break
+        }
+    }
+
     private func registerHotkeys(_ hotkeys: ModuleHotkeys) {
         // No defaults: the keyboard's media keys already do this; these are for users who want other keys.
         hotkeys.register("mediaPlayPause", title: "Phát/dừng nhạc") { [weak self] in self?.send(.togglePlayPause) }
@@ -462,6 +496,7 @@ public final class MediaModule: FeatureModule {
         lyricsEnabled = settings.value(keys.lyrics)
         lyricsUnderNotch = settings.value(keys.lyricsUnderNotch)
         youtubeCaptionsEnabled = settings.value(keys.youtubeCaptions)
+        store.setControlLayout(settings.value(keys.controlButtons))
         store.setLyricsOn(lyricsEnabled || youtubeCaptionsEnabled)
         updateYouTubeBridge()
     }
@@ -711,7 +746,7 @@ public final class MediaModule: FeatureModule {
     private func updateStripHold() -> Bool {
         stripHold.update(
             LyricStripHold.Inputs(
-                enabled: lyricsUnderNotch, playing: store.state.isPlaying,
+                enabled: lyricsUnderNotch && !store.lyricsHidden, playing: store.state.isPlaying,
                 hasLyrics: store.syncedLyrics?.isEmpty == false, lyricsPending: lyricsArePending
             ),
             at: Date()

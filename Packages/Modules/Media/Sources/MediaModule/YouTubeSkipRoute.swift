@@ -59,7 +59,7 @@ nonisolated extension MediaCommand {
         switch self {
         case .nextTrack: .next
         case .previousTrack: .previous
-        case .play, .pause, .togglePlayPause: nil
+        case .play, .pause, .togglePlayPause, .likeTrack: nil
         }
     }
 }

@@ -94,7 +94,12 @@ nonisolated struct NowPlayingReducer: Sendable {
             isPlaying: isPlaying,
             uniqueIdentifier: payload["uniqueIdentifier"]?.identifier,
             contentItemIdentifier: payload["contentItemIdentifier"]?.identifier,
-            isAdvertisement: payload["isAdvertisement"]?.bool ?? false
+            isAdvertisement: payload["isAdvertisement"]?.bool ?? false,
+            shuffleMode: payload["shuffleMode"]?.number.map(ShuffleMode.init(reported:)),
+            repeatMode: payload["repeatMode"]?.number.map(RepeatMode.init(reported:)),
+            isLiked: payload["isLiked"]?.flag ?? false,
+            supportsIsLiked: payload["supportsIsLiked"]?.flag ?? false,
+            prohibitsSkip: payload["prohibitsSkip"]?.flag ?? false
         )
     }
 
@@ -141,6 +146,9 @@ nonisolated enum JSONValue: Decodable, Equatable, Sendable {
 
     var bool: Bool? { if case .bool(let value) = self { value } else { nil } }
     var string: String? { if case .string(let value) = self { value } else { nil } }
+
+    /// A yes or no that MediaRemote may report as a JSON boolean or as 0 and 1.
+    var flag: Bool? { bool ?? number.map { $0 != 0 } }
 
     var number: Double? {
         switch self {

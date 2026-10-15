@@ -1,7 +1,7 @@
 import NotchUI
 import SwiftUI
 
-/// The "Media" tab: cover, track, a seekable progress bar and the transport buttons, and under them the lyric line,
+/// The "Media" tab: cover, track, a seekable progress bar and the row of buttons, and under them the lyric line,
 /// centred across the tab.
 struct MediaTabView: View {
     static let artworkSize: CGFloat = 96
@@ -14,6 +14,7 @@ struct MediaTabView: View {
 
     let store: NowPlayingStore
     let actions: MediaActions
+    let volume: VolumeModel
 
     var body: some View {
         Group {
@@ -58,94 +59,13 @@ struct MediaTabView: View {
                 Spacer(minLength: 4)
                 PlaybackProgressView(store: store, seek: actions.seek)
                 Spacer(minLength: 2)
-                TransportControls(isPlaying: store.state.isPlaying, send: actions.send)
-                    .frame(maxWidth: .infinity)
-                    // An overlay, so the buttons stay centred under the progress bar.
-                    .overlay(alignment: .trailing) { NowPlayingBars(store: store) }
+                MediaControlsRow(store: store, actions: actions, volume: volume)
             }
             // The cover's height. Not stretched to the space available, which would pull the column out of line
             // with the cover.
             .frame(minHeight: Self.artworkSize)
             .fixedSize(horizontal: false, vertical: true)
         }
-    }
-}
-
-/// Buttons in the order they appear; data so tests can check what each one sends.
-enum TransportControl: CaseIterable {
-    case previous, playPause, next
-
-    var command: MediaCommand {
-        switch self {
-        case .previous: .previousTrack
-        case .playPause: .togglePlayPause
-        case .next: .nextTrack
-        }
-    }
-
-    func symbol(isPlaying: Bool) -> String {
-        switch self {
-        case .previous: "backward.fill"
-        case .playPause: isPlaying ? "pause.fill" : "play.fill"
-        case .next: "forward.fill"
-        }
-    }
-
-    func label(isPlaying: Bool) -> String {
-        switch self {
-        case .previous: "Bài trước"
-        case .playPause: isPlaying ? "Tạm dừng" : "Phát"
-        case .next: "Bài sau"
-        }
-    }
-
-    var symbolSize: CGFloat { self == .playPause ? 20 : 14 }
-}
-
-struct TransportControls: View {
-    let isPlaying: Bool
-    let send: (MediaCommand) -> Void
-
-    var body: some View {
-        HStack(spacing: 14) {
-            ForEach(TransportControl.allCases, id: \.self) { control in
-                TransportButton(control: control, isPlaying: isPlaying) { send(control.command) }
-            }
-        }
-    }
-}
-
-private struct TransportButton: View {
-    let control: TransportControl
-    let isPlaying: Bool
-    let action: () -> Void
-    @State private var isHovering = false
-
-    var body: some View {
-        let label = control.label(isPlaying: isPlaying)
-        Button(action: action) {
-            Image(systemName: control.symbol(isPlaying: isPlaying))
-                .font(.system(size: control.symbolSize, weight: .semibold))
-                .foregroundStyle(NotchTokens.primaryText)
-                .contentTransition(.symbolEffect(.replace))
-                .frame(width: 28, height: 28)
-                .background(Circle().fill(Color.white.opacity(isHovering ? 0.14 : 0)))
-                .contentShape(Circle())
-        }
-        .buttonStyle(PressableButtonStyle())
-        .onHover { isHovering = $0 }
-        .animation(.easeOut(duration: 0.15), value: isHovering)
-        .help(label)
-        .accessibilityLabel(label)
-    }
-}
-
-private struct PressableButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.86 : 1)
-            .opacity(configuration.isPressed ? 0.7 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 

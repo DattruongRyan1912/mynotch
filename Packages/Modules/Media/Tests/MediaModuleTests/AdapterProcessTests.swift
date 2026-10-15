@@ -358,6 +358,35 @@ import Testing
         #expect(adapter.seekArguments(toSeconds: -.infinity) == nil)
     }
 
+    @Test func buildsTheShuffleRepeatAndLikeCommandLines() {
+        let adapter = AdapterProcess(executable: URL(filePath: "/usr/bin/perl"), baseArguments: ["adapter.pl", "Framework"], scheduler: scheduler)
+        let base = ["adapter.pl", "Framework"]
+        // The ids of the README's `shuffle MODE` and `repeat MODE` tables.
+        #expect(adapter.shuffleArguments(.off) == base + ["shuffle", "1"])
+        #expect(adapter.shuffleArguments(.albums) == base + ["shuffle", "2"])
+        #expect(adapter.shuffleArguments(.tracks) == base + ["shuffle", "3"])
+        #expect(adapter.repeatArguments(.off) == base + ["repeat", "1"])
+        #expect(adapter.repeatArguments(.track) == base + ["repeat", "2"])
+        #expect(adapter.repeatArguments(.playlist) == base + ["repeat", "3"])
+        // MRCommand 0x6A, which the vendored adapter's `send` does not accept yet.
+        #expect(adapter.arguments(for: .likeTrack) == base + ["send", "106"])
+        #expect(!adapter.canLike)
+    }
+
+    @Test func shuffleRepeatAndSendRunOneAtATimeInOrder() async throws {
+        let adapter = try slowCommands()
+        adapter.setShuffle(.tracks)
+        adapter.setRepeat(.playlist)
+        adapter.send(.nextTrack)
+        adapter.setRepeat(.off)
+
+        let expected = commandLog("shuffle 3", "repeat 3", "send 4", "repeat 1")
+        #expect(await eventually { contents("commands") == expected })
+        try await settle()
+        #expect(contents("commands") == expected, "a repeat is not a seek, so none of them replaces another")
+        #expect(recorder.logs.isEmpty)
+    }
+
     @Test func seekPositionsBeyondTheMicrosecondRangeAreIgnored() {
         let adapter = AdapterProcess(executable: URL(filePath: "/usr/bin/perl"), baseArguments: [], scheduler: scheduler)
         #expect(adapter.seekArguments(toSeconds: 9_000_000_000_000) == ["seek", "9000000000000000000"])

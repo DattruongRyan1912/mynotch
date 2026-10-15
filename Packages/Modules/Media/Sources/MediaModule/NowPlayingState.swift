@@ -16,6 +16,14 @@ nonisolated struct NowPlayingState: Equatable, Sendable {
     var uniqueIdentifier: String?
     var contentItemIdentifier: String?
     var isAdvertisement = false
+    /// nil while the player reports none, which is how the row knows it has nothing to shuffle or repeat.
+    var shuffleMode: ShuffleMode?
+    var repeatMode: RepeatMode?
+    var isLiked = false
+    /// The player has a like for the track, which `isLiked` then says is set.
+    var supportsIsLiked = false
+    /// The player does not take next and previous now (an advert, the end of a queue).
+    var prohibitsSkip = false
 
     static let empty = NowPlayingState()
 

@@ -97,6 +97,13 @@ final class AdapterProcess: NowPlayingSource {
 
     func arguments(for command: MediaCommand) -> [String] { baseArguments + ["send", String(command.rawValue)] }
 
+    func shuffleArguments(_ mode: ShuffleMode) -> [String] { baseArguments + ["shuffle", String(mode.rawValue)] }
+
+    func repeatArguments(_ mode: RepeatMode) -> [String] { baseArguments + ["repeat", String(mode.rawValue)] }
+
+    /// The adapter's `send` rejects every id above 13 as invalid, and so the like (see `NowPlayingSource.canLike`).
+    let canLike = false
+
     /// The adapter takes a non-negative whole number of microseconds; nil when the position has none
     /// (not finite, or too far for `Int64`, where converting would trap).
     func seekArguments(toSeconds seconds: Double) -> [String]? {
@@ -144,6 +151,14 @@ final class AdapterProcess: NowPlayingSource {
 
     func send(_ command: MediaCommand) {
         enqueue(arguments(for: command), isSeek: false)
+    }
+
+    func setShuffle(_ mode: ShuffleMode) {
+        enqueue(shuffleArguments(mode), isSeek: false)
+    }
+
+    func setRepeat(_ mode: RepeatMode) {
+        enqueue(repeatArguments(mode), isSeek: false)
     }
 
     func seek(toSeconds seconds: Double) {

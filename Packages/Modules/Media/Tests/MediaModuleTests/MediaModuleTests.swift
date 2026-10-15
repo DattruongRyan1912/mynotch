@@ -216,7 +216,9 @@ import Testing
     @Test func tabButtonsSendTheirCommands() async {
         await harness.registry.bootstrap()
         let actions = module.actions
-        for control in TransportControl.allCases { actions.send(control.command) }
+        actions.press(.previous)
+        actions.send(.togglePlayPause)
+        actions.press(.next)
         #expect(source.sent == [.previousTrack, .togglePlayPause, .nextTrack])
 
         let progress = PlaybackProgress(elapsed: 30, duration: 200)

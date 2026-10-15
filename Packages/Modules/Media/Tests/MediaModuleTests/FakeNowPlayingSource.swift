@@ -7,6 +7,10 @@ final class FakeNowPlayingSource: NowPlayingSource {
     private(set) var stopCount = 0
     private(set) var sent: [MediaCommand] = []
     private(set) var seeks: [Double] = []
+    private(set) var shuffles: [ShuffleMode] = []
+    private(set) var repeats: [RepeatMode] = []
+    /// Whether this source can send a like; the real adapter cannot yet.
+    var canLike = true
     private var onLine: (@MainActor (String) -> Void)?
     private var onFailure: (@MainActor (String) -> Void)?
 
@@ -26,6 +30,8 @@ final class FakeNowPlayingSource: NowPlayingSource {
 
     func send(_ command: MediaCommand) { sent.append(command) }
     func seek(toSeconds seconds: Double) { seeks.append(seconds) }
+    func setShuffle(_ mode: ShuffleMode) { shuffles.append(mode) }
+    func setRepeat(_ mode: RepeatMode) { repeats.append(mode) }
 
     func emit(_ line: String) { onLine?(line) }
 
@@ -51,7 +57,8 @@ enum AdapterLines {
         duration: Double = 200,
         artworkBase64: String? = nil,
         isAdvertisement: Bool = false,
-        uniqueIdentifier: Int? = nil
+        uniqueIdentifier: Int? = nil,
+        extra: [String: Any] = [:]
     ) -> String {
         var payload: [String: Any] = [
             "bundleIdentifier": bundle, "title": title, "artist": artist, "playing": playing,
@@ -62,6 +69,7 @@ enum AdapterLines {
         payload["album"] = album
         payload["uniqueIdentifier"] = uniqueIdentifier
         if isAdvertisement { payload["isAdvertisement"] = true }
+        payload.merge(extra) { _, new in new }
         if let artworkBase64 {
             payload["artworkData"] = artworkBase64
             payload["artworkMimeType"] = "image/png"

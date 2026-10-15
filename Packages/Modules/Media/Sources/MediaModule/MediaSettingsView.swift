@@ -18,6 +18,7 @@ struct MediaSettingsView: View {
     @Binding var lyrics: Bool
     @Binding var youtubeCaptions: Bool
     @Binding var lyricsUnderNotch: Bool
+    @Binding var controlButtons: MediaControlLayout
     let youtubeBridge: YouTubeBridgeModel
     /// Only for the permission hint; the module keeps the store for its whole life, running or not.
     let store: NowPlayingStore
@@ -59,7 +60,37 @@ struct MediaSettingsView: View {
                 Text(Self.lyricsUnderNotchTitle)
                 Text(Self.lyricsUnderNotchExplanation)
             }
+            MediaControlRows(layout: $controlButtons)
         }
+    }
+}
+
+/// Which buttons the Media tab has on each side of play and pause: two slots on each side. A button chosen for one slot
+/// leaves the slot that had it.
+struct MediaControlRows: View {
+    static let title = "Nút điều khiển"
+    static let explanation = "Các nút bên trái và bên phải nút phát/dừng trong tab Media. Nút nào không dùng được với trình phát hiện tại sẽ mờ đi."
+    /// The slots left to right, as the row shows them.
+    static let slotTitles = ["Ngoài cùng bên trái", "Cạnh nút phát, bên trái", "Cạnh nút phát, bên phải", "Ngoài cùng bên phải"]
+
+    @Binding var layout: MediaControlLayout
+
+    var body: some View {
+        LabeledContent {
+            EmptyView()
+        } label: {
+            Text(Self.title)
+            Text(Self.explanation)
+        }
+        ForEach(Self.slotTitles.indices, id: \.self) { slot in
+            Picker(Self.slotTitles[slot], selection: choice(for: slot)) {
+                ForEach(MediaControlButton.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+        }
+    }
+
+    private func choice(for slot: Int) -> Binding<MediaControlButton> {
+        Binding(get: { layout.slots[slot] }, set: { layout = layout.setting($0, at: slot) })
     }
 }
 

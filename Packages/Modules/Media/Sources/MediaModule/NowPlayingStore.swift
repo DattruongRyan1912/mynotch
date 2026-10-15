@@ -36,6 +36,14 @@ final class NowPlayingStore {
     /// A lyrics source (lrclib and Apple, or YouTube captions) is turned on. The lyric row then keeps its place under
     /// the controls while there is nothing to show in it yet, so the player does not move as lyrics come and go.
     private(set) var lyricsAreOn = false
+    /// The user hid the lyrics with the row's button: neither the row nor the strip under the notch shows them, until it is
+    /// pressed again. For as long as the app runs; it is no setting.
+    private(set) var lyricsHidden = false
+
+    /// The buttons beside play and pause; the setting's value, set by the module.
+    private(set) var controlLayout = MediaControlLayout.standard
+    /// The source can send a like; set by the module from the source it runs.
+    private(set) var canLike = false
 
     @ObservationIgnored private var reducer = NowPlayingReducer()
     @ObservationIgnored private let lookUpApp: @MainActor (String) -> PlayerApp?
@@ -110,10 +118,33 @@ final class NowPlayingStore {
         if isOn != lyricsAreOn { lyricsAreOn = isOn }
     }
 
-    /// What the lyric row under the controls holds now.
+    func toggleLyricsHidden() {
+        lyricsHidden.toggle()
+    }
+
+    func setControlLayout(_ layout: MediaControlLayout) {
+        if layout != controlLayout { controlLayout = layout }
+    }
+
+    func setCanLike(_ canLike: Bool) {
+        if canLike != self.canLike { self.canLike = canLike }
+    }
+
+    /// What the buttons look at: the track, the lyrics and the source, and what only the row knows of the volume.
+    func controlContext(hasVolume: Bool, volumeIsOpen: Bool) -> MediaControlContext {
+        MediaControlContext(
+            state: state, lyricsAreOn: lyricsAreOn, lyricsHidden: lyricsHidden, canLike: canLike,
+            hasVolume: hasVolume, volumeIsOpen: volumeIsOpen
+        )
+    }
+
+    /// What the lyric row under the controls holds now. Hidden lyrics leave the row empty but in its place, so the player does
+    /// not move under the pointer when the button is pressed.
     var lyricRow: LyricRow {
-        if syncedLyrics != nil { return .synced }
-        if lyricsAreUnsynced { return .unsynced }
+        if !lyricsHidden {
+            if syncedLyrics != nil { return .synced }
+            if lyricsAreUnsynced { return .unsynced }
+        }
         return lyricsAreOn ? .reserved : .absent
     }
 

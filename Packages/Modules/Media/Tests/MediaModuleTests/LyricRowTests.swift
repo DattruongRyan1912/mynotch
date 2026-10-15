@@ -57,12 +57,14 @@ import Testing
     /// What the tab bar takes when there are two or more tabs (the usual case); `NotchTab.preferredHeight` includes it.
     static let tabBarHeight: CGFloat = 30
 
-    func idealHeight(lyricsOn: Bool, unsynced: Bool = false) throws -> CGFloat {
+    func idealHeight(lyricsOn: Bool, unsynced: Bool = false, hidden: Bool = false, layout: MediaControlLayout = .standard) throws -> CGFloat {
         let store = NowPlayingStore(lookUpApp: { _ in nil })
         store.apply(line: AdapterLines.track(), receivedAt: Date())
         store.setLyricsOn(lyricsOn)
+        store.setControlLayout(layout)
         if unsynced { store.showUnsyncedLyrics() }
-        let tab = MediaTabView(store: store, actions: MediaActions(send: { _ in }, seek: { _ in }))
+        if hidden { store.toggleLyricsHidden() }
+        let tab = MediaTabView(store: store, actions: MediaActions(send: { _ in }, seek: { _ in }), volume: VolumeModel(device: NoVolumeDevice()))
             .frame(width: Self.narrowestContentWidth)
         return NSHostingView(rootView: tab).fittingSize.height
     }
@@ -85,5 +87,27 @@ import Testing
         #expect(without == MediaTabView.artworkSize)
         #expect(with - without == MediaTabView.lyricGap + CurrentLyricView.height)
         #expect(try idealHeight(lyricsOn: true, unsynced: true) == with)
+    }
+
+    @Test func hidingTheLyricsKeepsTheRowsPlaceSoThePlayerStaysWhereItIs() throws {
+        #expect(try idealHeight(lyricsOn: true, hidden: true) == idealHeight(lyricsOn: true))
+        #expect(try idealHeight(lyricsOn: true, unsynced: true, hidden: true) == idealHeight(lyricsOn: true))
+    }
+
+    @Test func fiveButtonsLeaveTheTabsHeightAndTheLayoutWhereItWas() throws {
+        let all = MediaControlLayout(slots: [.shuffle, .previous, .next, .repeatMode])
+        #expect(try idealHeight(lyricsOn: true, layout: all) == idealHeight(lyricsOn: true))
+        #expect(try idealHeight(lyricsOn: false, layout: all) == MediaTabView.artworkSize)
+    }
+
+    @Test func theRowOfFiveButtonsFitsBesideTheCoverInTheNarrowestNotchWithRoomForTheBars() {
+        let store = NowPlayingStore(lookUpApp: { _ in nil })
+        store.apply(line: AdapterLines.track(), receivedAt: Date())
+        store.setControlLayout(MediaControlLayout(slots: [.shuffle, .previous, .next, .repeatMode]))
+        let row = MediaControlsRow(store: store, actions: MediaActions(send: { _ in }, seek: { _ in }), volume: VolumeModel(device: NoVolumeDevice()))
+        let width = NSHostingView(rootView: row).fittingSize.width
+        let columnWidth = Self.narrowestContentWidth - MediaTabView.artworkSize - 14
+        #expect(width > 0)
+        #expect(width <= columnWidth - 2 * 40, "\(width) of \(columnWidth)")
     }
 }
