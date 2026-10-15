@@ -120,7 +120,7 @@ import Testing
         let geometry = geometry(macBook)
         #expect(geometry.shapeSize(for: .compact) == CGSize(width: 325, height: 32))
         #expect(geometry.shapeSize(for: .compact, bottomHeight: 0) == geometry.shapeSize(for: .compact))
-        #expect(geometry.panelSize == CGSize(width: 900, height: 432))
+        #expect(geometry.panelSize == CGSize(width: 900, height: 272))
     }
 
     /// A bubble appears from a fraction of its size on the notch's spring (which overshoots a little) and leaves the

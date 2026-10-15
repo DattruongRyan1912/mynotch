@@ -19,6 +19,7 @@ public final class ModuleRegistry {
     @ObservationIgnored private let scheduler: any Scheduler
     @ObservationIgnored private let storageRoot: StorageRoot
     @ObservationIgnored private let services: ServiceRegistry
+    @ObservationIgnored private let onOversizedTab: ((_ module: ModuleID, _ asked: CGFloat) -> Void)?
     /// One per module for the registry's lifetime, shared by its context and its Settings rows.
     @ObservationIgnored private let moduleSettings: [ModuleID: ModuleSettings]
     @ObservationIgnored private var contexts: [ModuleID: ModuleContext] = [:]
@@ -38,7 +39,8 @@ public final class ModuleRegistry {
         presenter: any NotchPresenter,
         scheduler: any Scheduler,
         storageRoot: StorageRoot,
-        services: ServiceRegistry
+        services: ServiceRegistry,
+        onOversizedTab: ((_ module: ModuleID, _ asked: CGFloat) -> Void)? = nil
     ) {
         let sorted = modules.sorted { $0.descriptor.order < $1.descriptor.order }
         precondition(Set(sorted.map(\.descriptor.id)).count == sorted.count, "Duplicate ModuleID")
@@ -52,6 +54,7 @@ public final class ModuleRegistry {
         self.scheduler = scheduler
         self.storageRoot = storageRoot
         self.services = services
+        self.onOversizedTab = onOversizedTab
         moduleSettings = Dictionary(uniqueKeysWithValues: sorted.map {
             ($0.descriptor.id, ModuleSettings(store: settings, module: $0.descriptor.id))
         })
@@ -229,7 +232,7 @@ public final class ModuleRegistry {
         do {
             try await module.start(context)
             states[id] = .running
-            tabCache[id] = module.makeTab().map(Self.checked)
+            tabCache[id] = module.makeTab().map(checked)
         } catch {
             tearDown(id)
             states[id] = ModuleState(error)
@@ -262,11 +265,19 @@ public final class ModuleRegistry {
         tabCache[id] = nil
     }
 
-    /// Every running module's tab passes here, so a tab that outgrows `NotchTab.heightRange` stops a debug build (and the
-    /// module's own tests, which start it) instead of being cut on a user's screen.
-    private static func checked(_ tab: NotchTab) -> NotchTab {
-        assert(!tab.asksTooMuch, "Tab \(tab.id.rawValue) asks for \(tab.preferredHeight ?? 0) pt; a tab may ask for at most \(NotchTab.heightRange.upperBound) pt")
-        return tab
+    /// Every running module's tab passes here. One that asks for more than `NotchTab.heightRange` allows is a bug in its
+    /// module, not something the user did, so it is reported (to `onOversizedTab`, else as a fault in the log) and held to
+    /// the most the notch gives a tab. It never stops the app, in a debug build or any other.
+    private func checked(_ tab: NotchTab) -> NotchTab {
+        guard tab.asksTooMuch else { return tab }
+        (onOversizedTab ?? Self.reportOversizedTab)(tab.id, tab.preferredHeight ?? NotchTab.defaultHeight)
+        return tab.heldToHeightRange
+    }
+
+    /// The default reaction: a fault in the log naming the module, whose id is a fixed string of its code.
+    static func reportOversizedTab(_ module: ModuleID, _ asked: CGFloat) {
+        let message = "Tab of module \(module.rawValue) asks for \(Int(asked)) pt; the most a tab gets is \(Int(NotchTab.heightRange.upperBound)) pt"
+        Log.logger(category: "modules").fault("\(message, privacy: .public)")
     }
 
     private func rebuildTabs() {

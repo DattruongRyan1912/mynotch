@@ -94,6 +94,22 @@ public final class DefaultCollisionLog {
     public init() {}
 }
 
+/// The tabs a harness's registry found asking for more height than a tab may, instead of the log line the app gets.
+public final class OversizedTabLog {
+    public struct Report: Equatable {
+        public let module: ModuleID
+        public let asked: CGFloat
+
+        public init(module: ModuleID, asked: CGFloat) {
+            self.module = module
+            self.asked = asked
+        }
+    }
+
+    public internal(set) var reports: [Report] = []
+    public init() {}
+}
+
 /// Wires a `ModuleRegistry` with in-memory collaborators.
 public struct RegistryHarness {
     public let settings = SettingsStore(defaults: makeIsolatedDefaults())
@@ -106,6 +122,8 @@ public struct RegistryHarness {
     /// Every registration whose default combination was already another one's, so a module's test can check that its own
     /// shortcuts do not clash.
     public let defaultCollisions = DefaultCollisionLog()
+    /// Every tab that asked for more than `NotchTab.heightRange` allows, so a module's test can check that its own does not.
+    public let oversizedTabs = OversizedTabLog()
     public let services: ServiceRegistry
     /// Unique per harness under the temporary directory and removed when the test process exits; nothing exists on
     /// disk until a module calls `ensureDirectories()`.
@@ -119,6 +137,7 @@ public struct RegistryHarness {
 
     public init(_ modules: [any FeatureModule]) {
         let collisions = defaultCollisions
+        let oversized = oversizedTabs
         hotkeys = HotkeyRegistry(backend: hotkeyBackend) { new, existing in
             collisions.reports.append(DefaultCollisionLog.Report(new: new.id, existing: existing.id))
         }
@@ -127,7 +146,8 @@ public struct RegistryHarness {
         registry = ModuleRegistry(
             modules: modules, settings: settings, activities: activities, lockScreen: lockScreen,
             permissions: permissions, hotkeys: hotkeys, presenter: presenter,
-            scheduler: scheduler, storageRoot: storageRoot, services: services
+            scheduler: scheduler, storageRoot: storageRoot, services: services,
+            onOversizedTab: { module, asked in oversized.reports.append(OversizedTabLog.Report(module: module, asked: asked)) }
         )
     }
 }

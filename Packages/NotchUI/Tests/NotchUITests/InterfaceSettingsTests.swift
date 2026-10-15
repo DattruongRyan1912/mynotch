@@ -21,8 +21,6 @@ import Testing
         let settings = SettingsStore(defaults: makeIsolatedDefaults())
         #expect(settings.value(InterfaceSettings.displayMode) == .all)
         #expect(settings.value(InterfaceSettings.openWidth) == 600)
-        #expect(settings.value(InterfaceSettings.maxOpenHeight) == Double(NotchGeometry.defaultMaxContentHeight))
-        #expect(settings.value(InterfaceSettings.maxOpenHeight) == 300)
         #expect(settings.value(InterfaceSettings.virtualNotchWidth) == 185)
         #expect(settings.value(InterfaceSettings.virtualNotchMatchesMenuBar))
     }
@@ -60,55 +58,44 @@ import Testing
         }
     }
 
-    @Test func theMaxHeightIsHeldTo240Through400() {
-        let settings = SettingsStore(defaults: makeIsolatedDefaults())
-        for (set, read) in [(CGFloat(240), CGFloat(240)), (400, 400), (300, 300), (50, 240), (200, 240), (239, 240), (401, 400), (9000, 400)] {
-            settings.set(Double(set), for: InterfaceSettings.maxOpenHeight)
-            #expect(settings.value(InterfaceSettings.maxOpenHeight) == Double(read), "\(set)")
-        }
-    }
-
-    @Test func aSizeStoredOutsideTheRangeIsReadWithinIt() {
+    @Test func aWidthStoredOutsideTheRangeIsReadWithinIt() {
         let defaults = makeIsolatedDefaults()
         defaults.set(Data("1200".utf8), forKey: InterfaceSettings.openWidth.name)
-        defaults.set(Data("12".utf8), forKey: InterfaceSettings.maxOpenHeight.name)
-        let settings = SettingsStore(defaults: defaults)
-        #expect(settings.value(InterfaceSettings.openWidth) == 900)
-        #expect(settings.value(InterfaceSettings.maxOpenHeight) == 240)
+        #expect(SettingsStore(defaults: defaults).value(InterfaceSettings.openWidth) == 900)
     }
 
-    @Test func theSettingsAreHeldToTheLimitsTheGeometryAndThePageUse() {
+    @Test func theWidthIsHeldToTheLimitsTheGeometryAndThePageUse() {
         let settings = SettingsStore(defaults: makeIsolatedDefaults())
         let widths = NotchGeometry.openWidthLimits
-        let heights = NotchGeometry.contentHeightLimits
         settings.set(Double(widths.lowerBound) - 1, for: InterfaceSettings.openWidth)
         #expect(settings.value(InterfaceSettings.openWidth) == Double(widths.lowerBound))
         settings.set(Double(widths.upperBound) + 1, for: InterfaceSettings.openWidth)
         #expect(settings.value(InterfaceSettings.openWidth) == Double(widths.upperBound))
-        settings.set(Double(heights.lowerBound) - 1, for: InterfaceSettings.maxOpenHeight)
-        #expect(settings.value(InterfaceSettings.maxOpenHeight) == Double(heights.lowerBound))
-        settings.set(Double(heights.upperBound) + 1, for: InterfaceSettings.maxOpenHeight)
-        #expect(settings.value(InterfaceSettings.maxOpenHeight) == Double(heights.upperBound))
-        #expect(settings.value(InterfaceSettings.maxOpenHeight) >= Double(NotchTab.heightRange.upperBound))
     }
 
-    @Test func theSizesAreKeptForTheNextLaunchAndResetGoesBackToTheDefaults() {
+    @Test func theWidthIsKeptForTheNextLaunchAndResetGoesBackToTheDefault() {
         let defaults = makeIsolatedDefaults()
-        let first = SettingsStore(defaults: defaults)
-        first.set(840, for: InterfaceSettings.openWidth)
-        first.set(360, for: InterfaceSettings.maxOpenHeight)
+        SettingsStore(defaults: defaults).set(840, for: InterfaceSettings.openWidth)
         let second = SettingsStore(defaults: defaults)
         #expect(second.value(InterfaceSettings.openWidth) == 840)
-        #expect(second.value(InterfaceSettings.maxOpenHeight) == 360)
         second.reset(InterfaceSettings.openWidth)
-        second.reset(InterfaceSettings.maxOpenHeight)
         #expect(second.value(InterfaceSettings.openWidth) == 600)
-        #expect(second.value(InterfaceSettings.maxOpenHeight) == 300)
+    }
+
+    @Test func aMaxHeightStoredByAnEarlierVersionIsIgnored() {
+        // The height of the open notch is no setting any more; what an earlier build stored is left where it is and unread.
+        let defaults = makeIsolatedDefaults()
+        defaults.set(Data("250".utf8), forKey: "interface.maxOpenHeight")
+        let settings = SettingsStore(defaults: defaults)
+        let config = NotchLayoutConfig(settings: settings)
+        #expect(config == NotchLayoutConfig(settings: SettingsStore(defaults: makeIsolatedDefaults())))
+        let geometry = NotchGeometry(screen: NotchGeometryTests.macBook14, config: config)
+        let expected: CGFloat = 32 + 240
+        #expect(geometry.shapeSize(for: .open(nil), contentHeight: 240).height == expected)
     }
 
     @Test func theSettingsKeysAreTheOnesTheAppStoresThemUnder() {
         #expect(InterfaceSettings.openWidth.name == "interface.openWidth")
-        #expect(InterfaceSettings.maxOpenHeight.name == "interface.maxOpenHeight")
         #expect(InterfaceSettings.displayMode.name == "interface.displayMode")
     }
 
@@ -128,27 +115,23 @@ import Testing
         #expect(await eventually { seen.configs.last?.openWidth == 600 })
         settings.set(800, for: InterfaceSettings.openWidth)
         #expect(await eventually { seen.configs.last?.openWidth == 800 })
-        settings.set(250, for: InterfaceSettings.maxOpenHeight)
-        #expect(await eventually { seen.configs.last?.maxContentHeight == 250 })
         settings.set(false, for: InterfaceSettings.virtualNotchMatchesMenuBar)
         settings.set(36, for: InterfaceSettings.virtualNotchHeight)
         #expect(await eventually { seen.configs.last?.virtualNotchHeight == 36 })
         settings.set(210, for: InterfaceSettings.virtualNotchWidth)
         #expect(await eventually { seen.configs.last?.virtualNotchWidth == 210 })
         #expect(seen.configs.last?.openWidth == 800)
-        #expect(seen.configs.last?.maxContentHeight == 250)
     }
 
     @Test func theGeometryOfADisplayFollowsTheSettingsAtOnce() {
         let settings = SettingsStore(defaults: makeIsolatedDefaults())
         let screen = NotchGeometryTests.macBook14
         settings.set(880, for: InterfaceSettings.openWidth)
-        settings.set(400, for: InterfaceSettings.maxOpenHeight)
         let geometry = NotchGeometry(screen: screen, config: NotchLayoutConfig(settings: settings))
-        #expect(geometry.shapeSize(for: .open(nil), contentHeight: 380) == CGSize(width: 880, height: 32 + 380))
-        settings.set(260, for: InterfaceSettings.maxOpenHeight)
-        let shorter = NotchGeometry(screen: screen, config: NotchLayoutConfig(settings: settings))
-        #expect(shorter.shapeSize(for: .open(nil), contentHeight: 380) == CGSize(width: 880, height: 32 + 260))
-        #expect(shorter != geometry)
+        #expect(geometry.shapeSize(for: .open(nil), contentHeight: 190) == CGSize(width: 880, height: 32 + 190))
+        settings.set(520, for: InterfaceSettings.openWidth)
+        let narrower = NotchGeometry(screen: screen, config: NotchLayoutConfig(settings: settings))
+        #expect(narrower.shapeSize(for: .open(nil), contentHeight: 190) == CGSize(width: 520, height: 32 + 190))
+        #expect(narrower != geometry)
     }
 }

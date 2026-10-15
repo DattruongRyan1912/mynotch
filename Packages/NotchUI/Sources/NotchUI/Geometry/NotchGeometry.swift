@@ -8,20 +8,18 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     /// Narrowest and widest the open notch can be; the Interface setting moves between them.
     public static let openWidthLimits: ClosedRange<CGFloat> = 480...900
     public static let maxOpenWidth: CGFloat = openWidthLimits.upperBound
-    /// Least and most the "max height" setting allows for the content of the open notch. The least is the most a tab may
-    /// ask for (`NotchTab.heightRange`), so no setting can cut a tab; the panel holds the most, below the notch, so no
-    /// setting needs a window of another size.
-    public static let contentHeightLimits: ClosedRange<CGFloat> = NotchTab.heightRange.upperBound...400
-    /// The max height until the user chooses one: what the notch has always let a tab have.
-    public static let defaultMaxContentHeight: CGFloat = 300
+    /// The most height the open notch gives the content of a tab, which is the most a tab may ask for
+    /// (`NotchTab.heightRange`, which `ModuleRegistry` holds every tab to), so no tab is cut. The panel holds it below the
+    /// notch.
+    public static let maxContentHeight: CGFloat = NotchTab.heightRange.upperBound
     public static let hitPadding: CGFloat = 8
     /// Padding of the hit area while a drag with data is in progress, so the panel accepts the drop.
     public static let dragHitPadding: CGFloat = 40
-    /// Tallest strip under the collapsed notch. The panel never resizes and holds `contentHeightLimits.upperBound`
+    /// Tallest strip under the collapsed notch. The panel never resizes and holds `maxContentHeight`
     /// below the notch, so a strip this tall always fits inside it.
     public static let maxBottomHeight: CGFloat = 80
     /// Most the collapsed notch can grow downward for anything (a strip or the list), well inside what the panel holds below it.
-    static let maxExtraHeight: CGFloat = contentHeightLimits.upperBound
+    static let maxExtraHeight: CGFloat = maxContentHeight
 
     public let kind: NotchKind
     /// Size of the physical (or virtual) notch body.
@@ -31,14 +29,11 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     public let config: NotchLayoutConfig
     /// Width of the open notch: the setting held to `openWidthLimits` and to the screen, so it never spills off a small display.
     public let openWidth: CGFloat
-    /// Most the content of the open notch can be tall: the setting held to `contentHeightLimits`.
-    public let maxContentHeight: CGFloat
 
     public init(screen: ScreenDescriptor, config: NotchLayoutConfig) {
         self.config = config
         let limits = Self.openWidthLimits
         openWidth = min(max(config.openWidth, limits.lowerBound), min(limits.upperBound, max(screen.frame.width, limits.lowerBound)))
-        maxContentHeight = min(max(config.maxContentHeight, Self.contentHeightLimits.lowerBound), Self.contentHeightLimits.upperBound)
         if screen.safeAreaTop > 0, let left = screen.auxiliaryTopLeftWidth, let right = screen.auxiliaryTopRightWidth,
            screen.frame.width - left - right > 0 {
             kind = .hardware
@@ -78,7 +73,7 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
                 height: notchSize.height + self.extraHeight(for: state, requested: bottomHeight)
             )
         case .open, .toast:
-            let content = min(max(contentHeight, NotchTab.heightRange.lowerBound), maxContentHeight)
+            let content = min(max(contentHeight, NotchTab.heightRange.lowerBound), Self.maxContentHeight)
             return CGSize(width: openWidth, height: notchSize.height + content)
         }
     }
@@ -91,7 +86,7 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
 
     /// Fixed panel size: the largest the notch can ever get, whatever the size settings are.
     public var panelSize: CGSize {
-        CGSize(width: Self.maxOpenWidth, height: notchSize.height + Self.contentHeightLimits.upperBound)
+        CGSize(width: Self.maxOpenWidth, height: notchSize.height + Self.maxContentHeight)
     }
 
     /// Panel frame anchored to the top centre of `screenFrame` (AppKit coordinates).

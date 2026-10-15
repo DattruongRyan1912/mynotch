@@ -28,16 +28,21 @@ private final class TabModule: FeatureModule {
         #expect(harness.registry.contentHeight(for: .closed, tabUnderToast: nil) == NotchTab.defaultHeight)
     }
 
-    @Test func aTabThatAsksForTheMostItMayGetsItWholeAtAnyMaxHeight() async {
+    @Test func aTabThatAsksForTheMostItMayGetsItWhole() async {
         let harness = RegistryHarness([TabModule("most", height: NotchTab.heightRange.upperBound)])
         await harness.registry.bootstrap()
         let asked = harness.registry.contentHeight(for: .open("most"), tabUnderToast: nil)
         #expect(asked == NotchTab.heightRange.upperBound)
         let notch: CGFloat = 32
-        for limit in [CGFloat(0), 240, 300, 400, 5000] {
-            let geometry = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig(maxContentHeight: limit))
-            #expect(geometry.shapeSize(for: .open("most"), contentHeight: asked).height == notch + asked, "\(limit)")
-        }
+        let geometry = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig())
+        #expect(geometry.shapeSize(for: .open("most"), contentHeight: asked).height == notch + asked)
+    }
+
+    @Test func aTabThatAsksForMoreIsHeldToTheMostATabGetsAndTheModuleIsReported() async {
+        let harness = RegistryHarness([TabModule("huge", height: 380)])
+        await harness.registry.bootstrap()
+        #expect(harness.registry.contentHeight(for: .open("huge"), tabUnderToast: nil) == NotchTab.heightRange.upperBound)
+        #expect(harness.oversizedTabs.reports == [.init(module: "huge", asked: 380)])
     }
 
     @Test func aToastKeepsTheHeightOfTheTabItCovers() async {

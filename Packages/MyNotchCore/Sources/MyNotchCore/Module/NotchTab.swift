@@ -4,16 +4,16 @@ import UniformTypeIdentifiers
 /// Content a running module shows when the notch is open.
 public struct NotchTab: Identifiable {
     nonisolated public static let defaultHeight: CGFloat = 190
-    /// The least height the open notch gives a tab and the most a tab may ask for. The user's "max height" setting can be
-    /// as low as the upper bound, so a tab that asks for more is cut at the bottom there: keep within it, or scroll.
-    /// The upper bound is the tallest ask of the tabs there are (230 pt) with a little room.
+    /// The least height the open notch gives a tab and the most. A tab that asks for more is cut at the bottom, so it
+    /// keeps within it or scrolls; `ModuleRegistry` logs a fault for one that does not and holds it to the upper bound,
+    /// which is the tallest ask of the tabs there are (230 pt) with a little room.
     nonisolated public static let heightRange: ClosedRange<CGFloat> = 120...240
 
     public let id: ModuleID
     public let title: String
     public let systemImage: String
     /// Height of the area below the notch, including the notch's inner padding (14pt) and, when two or more tabs exist, the tab bar (30pt).
-    /// At most `heightRange.upperBound`: `ModuleRegistry` asserts it in debug builds.
+    /// At most `heightRange.upperBound`.
     public let preferredHeight: CGFloat?
     /// Set by tabs with text fields or keyboard navigation. The notch panel then takes keyboard focus
     /// while the tab is shown, without activating MyNotch, so the app in front stays active.
@@ -45,9 +45,18 @@ public struct NotchTab: Identifiable {
         self.content = content
     }
 
-    /// Whether the tab asks for more than `heightRange` allows, which the user's max height can then cut.
+    /// Whether the tab asks for more than `heightRange` allows, which the notch would cut.
     public var asksTooMuch: Bool {
         (preferredHeight ?? Self.defaultHeight) > Self.heightRange.upperBound
+    }
+
+    /// The same tab asking for no more than `heightRange` allows; a tab within it is returned as it is.
+    public var heldToHeightRange: NotchTab {
+        guard asksTooMuch else { return self }
+        return NotchTab(
+            id: id, title: title, systemImage: systemImage, preferredHeight: Self.heightRange.upperBound,
+            acceptsKeyboard: acceptsKeyboard, dropTypes: dropTypes, onDrop: onDrop, content: content
+        )
     }
 }
 

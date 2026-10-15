@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import SwiftUI
 import Testing
+import UniformTypeIdentifiers
 @testable import MyNotchCore
 import MyNotchTestSupport
 
@@ -18,6 +19,22 @@ import MyNotchTestSupport
         for ask in [240.5, 241, 300, 500] as [CGFloat] {
             #expect(tab(ask).asksTooMuch, "\(ask)")
         }
+    }
+
+    @Test func aTabThatAsksForTooMuchIsHeldToTheRangeAndNothingElseChanges() {
+        let tab = NotchTab(
+            id: "x", title: "X", systemImage: "star", preferredHeight: 400, acceptsKeyboard: true, dropTypes: [.png],
+            onDrop: { _ in true }, content: AnyView(EmptyView())
+        )
+        let held = tab.heldToHeightRange
+        #expect(held.preferredHeight == 240)
+        #expect(!held.asksTooMuch)
+        #expect(held.id == "x" && held.title == "X" && held.systemImage == "star" && held.acceptsKeyboard)
+        #expect(held.dropTypes == [.png])
+        #expect(held.onDrop?([]) == true)
+        // One that is within the range is the very same tab.
+        let fine = NotchTab(id: "y", title: "Y", systemImage: "circle", preferredHeight: 200, content: AnyView(EmptyView()))
+        #expect(fine.heldToHeightRange.preferredHeight == 200)
     }
 
     @Test func tabsDoNotTakeTheKeyboardUnlessTheyAskForIt() {

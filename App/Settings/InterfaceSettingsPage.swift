@@ -25,9 +25,6 @@ struct InterfaceSettingsPage: View {
             }
             Section("Khi mở rộng") {
                 slider("Chiều rộng", InterfaceSettings.openWidth, NotchGeometry.openWidthLimits, unit: "pt")
-                slider("Chiều cao tối đa", InterfaceSettings.maxOpenHeight, NotchGeometry.contentHeightLimits, unit: "pt")
-                Text("Notch cao theo nội dung từng trang, không quá mức này. Mức thấp nhất là \(Int(NotchTab.heightRange.upperBound)) pt, đủ cho mọi trang, nên không trang nào bị cắt.")
-                    .font(.caption).foregroundStyle(.secondary)
                 Stepper("Trễ khi mở: \(settings.value(InterfaceSettings.openDelayMs)) ms",
                         value: settings.binding(InterfaceSettings.openDelayMs), in: 0...1000, step: 50)
                 Stepper("Trễ khi đóng: \(settings.value(InterfaceSettings.closeDelayMs)) ms",
