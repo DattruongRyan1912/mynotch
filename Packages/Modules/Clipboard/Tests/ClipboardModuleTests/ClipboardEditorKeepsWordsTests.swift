@@ -248,6 +248,48 @@ extension ClipboardEditorModuleTests {
         #expect(!reload().items.contains { $0.content.plainText?.contains("đang gõ dở") == true })
     }
 
+    @Test func afterTheBoardIsUnlockedEditingTheItemOpensALiveEditorWithItsWords() async throws {
+        await start()
+        let board = try await openBoard(holding: [Self.secretText])
+        let id = try item(Self.secretText).id
+        let dropped = try openEditor(on: Self.secretText)
+        dropped.text += "-đang gõ dở"
+        #expect(module.relockBoard(board))
+        #expect(dropped.isDroppedOnLock && editorWindow.isOpen(id))
+        try await module.unlockBoard(board, credential: .password(Self.password))
+
+        #expect(module.edit(try item(Self.secretText)))
+
+        // Not the empty window with the lock caption: the old one is closed and a new editor shows the item's words.
+        let fresh = try #require(editorWindow.models[id])
+        #expect(fresh !== dropped)
+        #expect(editorWindow.showCount == 2)
+        #expect(editorWindow.isOpen(id))
+        #expect(fresh.text == Self.secretText && fresh.originalText == Self.secretText)
+        #expect(!fresh.isDroppedOnLock && !fresh.hasChanges)
+        #expect(fresh.isProtected)
+        #expect(module.editors.open.count == 1 && module.editors.open[id] === fresh)
+        #expect(state.historyObserverCount == 1)
+        // It works: a replace goes into the item, which is back in its board.
+        fresh.text = Self.secretText + "-ĐÃ-SỬA"
+        fresh.save(.replace)
+        #expect(try item(Self.secretText + "-ĐÃ-SỬA").id == id)
+        #expect(!editorWindow.isOpen(id))
+    }
+
+    @Test func anEditorThatIsLiveIsStillOnlyBroughtForwardWhenEditedAgain() async throws {
+        await start()
+        copy("Xin chào")
+        let model = try openEditor(on: "Xin chào")
+        model.text = "Xin chào các bạn"
+
+        #expect(module.edit(try item("Xin chào")))
+
+        #expect(editorWindow.showCount == 1 && editorWindow.frontCount == 1)
+        #expect(editorWindow.models[model.itemID] === model)
+        #expect(model.text == "Xin chào các bạn")
+    }
+
     @Test func aWipeIsNotTypingSoLockingOneBoardDoesNotKeepAnotherOpenLonger() async throws {
         await start()
         let first = try await openBoard(holding: ["bí mật của hai"])

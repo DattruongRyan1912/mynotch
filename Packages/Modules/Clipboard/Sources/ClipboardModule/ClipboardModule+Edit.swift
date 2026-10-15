@@ -16,18 +16,24 @@ final class ClipboardEditors {
 /// Editing the words of a text or a link in the library: opening the editor, and saving what it made into the history. Saving never
 /// writes the pasteboard.
 extension ClipboardModule {
-    /// Opens the editor on `item`, or brings its window forward when it is open already. False when the item cannot be edited (not a
+    /// Opens the editor on `item`, or brings its window forward when it is open already (an editor that only shows the notice of a lock
+    /// is closed and replaced by a new one). False when the item cannot be edited (not a
     /// text or a link, in a closed board, gone) or the module is stopped. The words are the ones in the history now, not those of a
     /// card that may be older.
     @discardableResult
     func edit(_ item: ClipboardItem) -> Bool {
         guard store != nil, let current = state.history.items.first(where: { $0.id == item.id }),
               state.history.canEdit(current.id), let text = ClipboardEditing.text(of: current) else { return false }
-        if editors.open[current.id] != nil {
-            editors.windowing.bringToFront(itemID: current.id)
-            return true
-        }
         let id = current.id
+        if let open = editors.open[id] {
+            if !open.isDroppedOnLock {
+                editors.windowing.bringToFront(itemID: id)
+                return true
+            }
+            // The item is back (its board was unlocked) and the editor still on show only says its words were dropped: it goes, and
+            // a fresh one opens on the words that are there now.
+            editors.windowing.close(itemID: id)
+        }
         let model = ClipboardEditorModel(
             item: current, text: text, isProtected: state.history.protectedItemIDs.contains(id),
             save: { [weak self] mode, text in self?.saveEdit(of: id, text: text, mode: mode) ?? .stopped },
