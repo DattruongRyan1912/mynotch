@@ -24,7 +24,7 @@ struct AgentSessionRow: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(isHovering ? 0.08 : 0)))
+        .background(RoundedRectangle(cornerRadius: 6).fill(NotchTokens.fill(isHovering ? 0.08 : 0)))
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovering)

@@ -8,7 +8,7 @@ struct AgentUsageFooter: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Divider().overlay(Color.white.opacity(0.12))
+            Divider().overlay(NotchTokens.fill(0.12))
             if !usage.isEmpty {
                 HStack(spacing: 14) {
                     ForEach(usage) { UsageSummary(line: $0) }
@@ -67,7 +67,7 @@ private struct LimitBarView: View {
         HStack(spacing: 4) {
             Text(bar.label)
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.18))
+                Capsule().fill(NotchTokens.fill(0.18))
                 Capsule().fill(tint).frame(width: Self.barWidth * CGFloat(bar.percent) / 100)
             }
             .frame(width: Self.barWidth, height: 4)

@@ -23,7 +23,7 @@ struct AIAgentsTabView: View {
                 if let request = permissions.pending.first {
                     PermissionCard(request: request, others: permissions.pending.count - 1, queue: permissions, placement: .tab, decide: actions.decide)
                         .padding(.horizontal, PermissionCard.tabInset)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
+                        .background(RoundedRectangle(cornerRadius: 8).fill(NotchTokens.fill(0.08)))
                 }
                 if let message = hint.message {
                     HintBanner(message: message, dismiss: hint.dismiss)
@@ -88,7 +88,7 @@ private struct HintBanner: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(NotchTokens.fill(0.08)))
         .accessibilityElement(children: .combine)
     }
 }
