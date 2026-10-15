@@ -11,6 +11,10 @@ final class NotchWindowController {
     var sharingType: NSWindow.SharingType { panel.sharingType }
     /// The panel's own appearance: nil, the system's, in every look. Forcing it dark made the glass read as dark frosted glass.
     var appearance: NSAppearance? { panel.appearance }
+    /// The glass appearance the panel has been given, nil by default (the debug switch `debug.glass.active`); see `ActiveGlassAppearance`.
+    var activeGlass: ActiveGlassAppearance? { panel.activeGlass }
+    /// Whether the panel is key, which the active glass appearance never changes.
+    var panelIsKey: Bool { panel.isKeyWindow }
     /// This notch's display and geometry, as modules get them through `NotchInterface`.
     var display: NotchDisplay { NotchDisplay(id: displayID, screenFrame: screenFrame, geometry: geometry) }
     private var screenFrame: CGRect
@@ -254,6 +258,7 @@ final class NotchWindowController {
         occlusionObserver.map(NotificationCenter.default.removeObserver)
         occlusionObserver = nil
         panel.allowsKeyStatus = false
+        panel.activeGlass = nil
         orderOut("controller closed")
         panel.close()
         keyboardHandBack.close()
@@ -262,6 +267,22 @@ final class NotchWindowController {
     private func orderFront(_ reason: String) {
         NotchLog.record("orderFront reason=\(reason) \(panel.logSummary)")
         panel.orderFrontRegardless()
+        panel.refreshActiveGlass()
+    }
+
+    /// Whether the panel is to draw its glass as an active window's: the debug switch, and the Liquid Glass look, so the classic
+    /// notch is never touched. Reading the look here makes the observation loop run when it changes.
+    private var wantsActiveGlass: Bool {
+        glassSwitches.active && theme?.look == .liquidGlass
+    }
+
+    /// Gives the panel the active glass appearance, or takes it back; only ever the appearance, never key status. Nothing at all when
+    /// the running macOS has not got the AppKit method the appearance is made of.
+    private func applyActiveGlass(_ wanted: Bool) {
+        let appearance = wanted ? ActiveGlassAppearance.detect() : nil
+        guard appearance != panel.activeGlass else { return }
+        NotchLog.record("activeGlass \(wanted ? "on" : "off") available=\(appearance != nil) isKey=\(panel.isKeyWindow)")
+        panel.activeGlass = appearance
     }
 
     private func orderOut(_ reason: String) {
@@ -329,6 +350,8 @@ final class NotchWindowController {
         var isDragging: Bool
         /// Read through the setting, so a change of the setting runs the loop too.
         var sharingType: NSWindow.SharingType
+        /// Whether the panel draws its glass as an active window's: the debug switch, on Liquid Glass only. Read through the look.
+        var drawsActiveGlass: Bool
     }
 
     private func observe() {
@@ -354,7 +377,8 @@ final class NotchWindowController {
                         state: state, tabUnderToast: covered, tabs: registry.tabs, onPurpose: model.isOpenedOnPurpose
                     ),
                     isDragging: model.isDragging,
-                    sharingType: self?.captureHiding().sharingType(for: state) ?? .readOnly
+                    sharingType: self?.captureHiding().sharingType(for: state) ?? .readOnly,
+                    drawsActiveGlass: self?.wantsActiveGlass ?? false
                 )
             }) {
                 guard let self else { return }
@@ -378,6 +402,7 @@ final class NotchWindowController {
                 // A finished drag (drop, or the pointer left) must not leave its types behind for later refreshes.
                 if !observed.isDragging { self.dragTypes = [] }
                 self.applySharingType(observed.sharingType)
+                self.applyActiveGlass(observed.drawsActiveGlass)
                 self.refreshHitTesting()
                 self.updateKeyboard(wants: observed.wantsKeyboard, focuses: observed.focusesKeyboard)
             }

@@ -3,7 +3,13 @@ import SwiftUI
 
 /// Borderless, non-activating panel that floats above the menu bar on every Space.
 final class NotchPanel: NSPanel {
-    init(frame: CGRect) {
+    /// Where the notifications that make AppKit take the key appearance back are heard (see `activeGlass`); AppKit posts them to the
+    /// default center, and a test gives the panel a center of its own, so that the notifications it posts are not heard by a panel of
+    /// another test running beside it.
+    private let notifications: NotificationCenter
+
+    init(frame: CGRect, notifications: NotificationCenter = .default) {
+        self.notifications = notifications
         super.init(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         isOpaque = false
         backgroundColor = .clear
@@ -32,12 +38,60 @@ final class NotchPanel: NSPanel {
     /// Called after key status moved to another window, e.g. the user clicked into another app.
     var onResignKey: (() -> Void)?
 
+    /// When set, the panel's glass is drawn as an active window's, whether or not the panel is key (the debug switch
+    /// `debug.glass.active`), and nil, the usual, hooks nothing. It never touches key status. Setting it gives the panel the
+    /// appearance and keeps it there; setting it back to nil takes it away unless the panel is key.
+    var activeGlass: ActiveGlassAppearance? {
+        didSet {
+            guard activeGlass != oldValue else { return }
+            observers.forEach(notifications.removeObserver)
+            observers = []
+            if let activeGlass {
+                observers = Self.resets.map { name in
+                    notifications.addObserver(forName: name.0, object: name.1 ? self : nil, queue: .main) { [weak self] _ in
+                        MainActor.assumeIsolated { self?.refreshActiveGlass(afterAppKitHasFinished: true) }
+                    }
+                }
+                activeGlass.acquire(on: self)
+            } else {
+                oldValue?.release(on: self)
+            }
+        }
+    }
+
+    private var observers: [any NSObjectProtocol] = []
+
+    /// What makes AppKit take the key appearance back: the panel resigning key, the app activating or deactivating (Settings does),
+    /// the panel changing screen or what hides it. The flag says whether it is this panel's own notification.
+    private static let resets: [(Notification.Name, Bool)] = [
+        (NSWindow.didResignKeyNotification, true), (NSWindow.didChangeScreenNotification, true),
+        (NSWindow.didChangeOcclusionStateNotification, true), (NSApplication.didBecomeActiveNotification, false),
+        (NSApplication.didResignActiveNotification, false),
+    ]
+
+    isolated deinit {
+        observers.forEach(notifications.removeObserver)
+    }
+
+    /// Gives the panel the key appearance again, if it is to have it: now, and, since AppKit may take it back just after the change
+    /// that triggered this, once more when the run loop turns. Does nothing with `activeGlass` nil.
+    func refreshActiveGlass(afterAppKitHasFinished later: Bool = false) {
+        guard let activeGlass else { return }
+        activeGlass.acquire(on: self)
+        guard later else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let current = self.activeGlass else { return }
+            current.acquire(on: self)
+        }
+    }
+
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
     }
 
     override func resignKey() {
         super.resignKey()
+        refreshActiveGlass(afterAppKitHasFinished: true)
         onResignKey?()
     }
 }

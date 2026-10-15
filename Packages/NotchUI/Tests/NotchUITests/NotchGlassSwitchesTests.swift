@@ -32,11 +32,13 @@ import Testing
         #expect(switches.scheme == .system)
         #expect(switches.sample == false)
         #expect(switches.selected == .tint)
+        #expect(switches.active == false)
     }
 
     @Test func theKeysAreTheOnesTheBriefNames() {
         #expect(NotchGlassSwitches.Key.all == [
             "debug.glass.variant", "debug.glass.panel", "debug.glass.dim", "debug.glass.scheme", "debug.glass.sample", "debug.glass.selected",
+            "debug.glass.active",
         ])
     }
 
@@ -48,9 +50,11 @@ import Testing
     @Test func everyNameIsReadFromItsKey() {
         let switches = read([
             "debug.glass.variant": "clear", "debug.glass.panel": "tiles", "debug.glass.dim": 0.15, "debug.glass.scheme": "dark",
-            "debug.glass.sample": 1, "debug.glass.selected": "white",
+            "debug.glass.sample": 1, "debug.glass.selected": "white", "debug.glass.active": 1,
         ])
-        #expect(switches == NotchGlassSwitches(variant: .clear, panel: .tiles, dim: 0.15, scheme: .dark, sample: true, selected: .white))
+        #expect(
+            switches == NotchGlassSwitches(variant: .clear, panel: .tiles, dim: 0.15, scheme: .dark, sample: true, selected: .white, active: true)
+        )
         // And each one alone leaves the others as they were.
         #expect(read(["debug.glass.variant": "clear"]) == NotchGlassSwitches(variant: .clear))
         #expect(read(["debug.glass.panel": "tiles"]) == NotchGlassSwitches(panel: .tiles))
@@ -59,6 +63,7 @@ import Testing
         #expect(read(["debug.glass.selected": "white"]) == NotchGlassSwitches(selected: .white))
         #expect(read(["debug.glass.sample": 1]) == NotchGlassSwitches(sample: true))
         #expect(read(["debug.glass.dim": 0.2]) == NotchGlassSwitches(dim: 0.2))
+        #expect(read(["debug.glass.active": 1]) == NotchGlassSwitches(active: true))
     }
 
     @Test func theNamesDoNotCareAboutCaseOrSpaces() {
@@ -70,7 +75,7 @@ import Testing
     @Test func aMissingUnknownOrWronglyTypedValueIsTodaysBehaviour() {
         let wrong: [String: Any] = [
             "debug.glass.variant": "frosted", "debug.glass.panel": "grid", "debug.glass.dim": "a lot", "debug.glass.scheme": "light",
-            "debug.glass.sample": "maybe", "debug.glass.selected": "red",
+            "debug.glass.sample": "maybe", "debug.glass.selected": "red", "debug.glass.active": "maybe",
         ]
         #expect(read(wrong) == .default)
         // Numbers where names go, and names where a number goes.
@@ -126,6 +131,23 @@ import Testing
         }
         for off: Any in [0, false, "0", "false", "no", "", 2, -1, "2", "on"] {
             #expect(!read(["debug.glass.sample": off]).sample, "\(off)")
+        }
+    }
+
+    @Test func activeIsOnForOneTrueOrYesAndOffForEverythingElse() {
+        for on: Any in [1, true, "1", "true", "TRUE", "yes"] {
+            #expect(read(["debug.glass.active": on]).active, "\(on)")
+        }
+        for off: Any in [0, false, "0", "false", "no", "", 2, -1, "2", "on", ["1"]] {
+            #expect(!read(["debug.glass.active": off]).active, "\(off)")
+        }
+    }
+
+    @Test func activeIsAWindowSwitchAndChangesNothingInThePlan() {
+        for surface in [NotchSurface.solid, glass, tinted] {
+            for open in [false, true] {
+                #expect(plan(surface, NotchGlassSwitches(active: true), bubbles: ["a"], open: open) == plan(surface, .default, bubbles: ["a"], open: open))
+            }
         }
     }
 

@@ -46,8 +46,8 @@ nonisolated enum NotchGlassSelected: String, CaseIterable, Sendable {
 /// `UserDefaults.standard` keys read once, when the notch is built, with no settings UI; every default is today's behaviour, and
 /// a value that is missing, of another type or not one of the names falls back to it.
 ///
-/// Every switch but `sample` does nothing unless the notch is Liquid Glass, so a key left in the defaults cannot change the
-/// classic notch. `sample` follows its key in either look: the strip on the classic black notch is a baseline to compare with.
+/// Every switch but `sample` does nothing unless the notch is Liquid Glass (`active` included), so a key left in the defaults
+/// cannot change the classic notch. `sample` follows its key in either look: the strip on the classic black notch is a baseline to compare with.
 ///
 ///     debug.glass.variant   regular | clear
 ///     debug.glass.panel     slab | tiles
@@ -55,6 +55,7 @@ nonisolated enum NotchGlassSelected: String, CaseIterable, Sendable {
 ///     debug.glass.scheme    system | dark
 ///     debug.glass.sample    0 | 1
 ///     debug.glass.selected  tint | white
+///     debug.glass.active    0 | 1
 nonisolated struct NotchGlassSwitches: Equatable, Sendable {
     enum Key {
         static let variant = "debug.glass.variant"
@@ -63,7 +64,8 @@ nonisolated struct NotchGlassSwitches: Equatable, Sendable {
         static let scheme = "debug.glass.scheme"
         static let sample = "debug.glass.sample"
         static let selected = "debug.glass.selected"
-        static let all = [variant, panel, dim, scheme, sample, selected]
+        static let active = "debug.glass.active"
+        static let all = [variant, panel, dim, scheme, sample, selected, active]
     }
 
     /// The most the black layer can take: clear glass needs some dimming over bright content, but past this it is no longer glass.
@@ -75,13 +77,16 @@ nonisolated struct NotchGlassSwitches: Equatable, Sendable {
     var scheme = NotchGlassScheme.system
     var sample = false
     var selected = NotchGlassSelected.tint
+    /// Draw the notch panel's glass as an active window's, without making the panel key (`ActiveGlassAppearance`). A switch of the
+    /// window, not of the plan: it only means anything on Liquid Glass, where the window controller applies it.
+    var active = false
 
     /// Today's behaviour in every switch.
     static let `default` = NotchGlassSwitches()
 
     init(
         variant: NotchGlassVariant = .regular, panel: NotchGlassPanel = .slab, dim: Double = 0, scheme: NotchGlassScheme = .system,
-        sample: Bool = false, selected: NotchGlassSelected = .tint
+        sample: Bool = false, selected: NotchGlassSelected = .tint, active: Bool = false
     ) {
         self.variant = variant
         self.panel = panel
@@ -89,6 +94,7 @@ nonisolated struct NotchGlassSwitches: Equatable, Sendable {
         self.scheme = scheme
         self.sample = sample
         self.selected = selected
+        self.active = active
     }
 
     /// The switches `defaults` holds. A name is matched ignoring case and surrounding spaces; `dim` may be a number or a string
@@ -104,7 +110,8 @@ nonisolated struct NotchGlassSwitches: Equatable, Sendable {
             dim: Self.number(defaults.object(forKey: Key.dim)) ?? 0,
             scheme: name(Key.scheme, as: NotchGlassScheme.self) ?? .system,
             sample: Self.flag(defaults.object(forKey: Key.sample)),
-            selected: name(Key.selected, as: NotchGlassSelected.self) ?? .tint
+            selected: name(Key.selected, as: NotchGlassSelected.self) ?? .tint,
+            active: Self.flag(defaults.object(forKey: Key.active))
         )
     }
 
