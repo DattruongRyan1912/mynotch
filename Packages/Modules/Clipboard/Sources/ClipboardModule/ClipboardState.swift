@@ -72,6 +72,12 @@ final class ClipboardState {
         query.text = ClipboardSearchTerms.removing(token, from: query.text)
     }
 
+    /// Forgets the folded text of every item, which is how an item that has left the history (a board that locked) stops being in
+    /// memory as searchable text.
+    func forgetSearchText() {
+        searchIndex.removeAll()
+    }
+
     /// Back to the state of a module that never started.
     func reset() {
         searchIndex = ClipboardSearchIndex()

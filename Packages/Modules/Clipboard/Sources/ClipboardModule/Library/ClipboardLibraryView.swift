@@ -8,15 +8,17 @@ struct ClipboardLibraryView: View {
     @State private var visibility = NavigationSplitViewVisibility.all
     @State private var naming: ClipboardLibraryBoardNaming?
     @State private var boardName = ""
+    /// The form that locks a board, or the confirmation of taking its lock off or deleting it, in a sheet.
+    @State private var vaultPrompt: ClipboardVaultPrompt?
     /// Bumped by ⌘F to give the search field the keyboard.
     @State private var searchFocusRequest = 0
 
     var body: some View {
         NavigationSplitView(columnVisibility: $visibility) {
-            ClipboardLibrarySidebar(module: module, model: model, requestName: startNaming)
+            ClipboardLibrarySidebar(module: module, model: model, requestName: startNaming, requestVault: { vaultPrompt = $0 })
                 .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 320)
         } detail: {
-            ClipboardLibraryContentView(module: module, model: model, requestName: startNaming)
+            ClipboardLibraryContentView(module: module, model: model, requestName: startNaming, requestVault: { vaultPrompt = $0 })
                 .safeAreaInset(edge: .top, spacing: 0) { topStrips }
                 // Under the toolbar, where the search field is.
                 .overlay(alignment: .topTrailing) { suggestionList }
@@ -41,6 +43,16 @@ struct ClipboardLibraryView: View {
             TextField("Tên board", text: $boardName)
             Button(namingButton, action: commitNaming)
             Button("Huỷ", role: .cancel) { naming = nil }
+        }
+        .sheet(item: $vaultPrompt) { prompt in
+            if let board = model.history.boards.first(where: { $0.id == prompt.boardID }) {
+                ClipboardBoardVaultView(
+                    module: module, look: .library, mode: mode(of: prompt), board: board,
+                    onDone: { vaultPrompt = nil }, onCancel: { vaultPrompt = nil }
+                )
+                .padding(20)
+                .frame(width: 520)
+            }
         }
         .alert("Xoá cả mục đã ghim?", isPresented: Binding(get: { model.pendingDeletion != nil }, set: { _ in })) {
             Button("Xoá", role: .destructive) { model.confirmDelete() }
@@ -181,6 +193,14 @@ struct ClipboardLibraryView: View {
                 onCommand: { model.handleSearchKey($0) }
             )
             .frame(width: 200)
+        }
+    }
+
+    private func mode(of prompt: ClipboardVaultPrompt) -> ClipboardBoardVaultView.Mode {
+        switch prompt {
+        case .lock: .setUp
+        case .removeLock: .removeLock
+        case .deleteData: .deleteData
         }
     }
 

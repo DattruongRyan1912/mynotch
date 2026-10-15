@@ -9,6 +9,8 @@ struct ClipboardBackupActions {
     /// How many text items a backup of the scope would hold that were saved before MyNotch tracked which copies are secrets,
     /// so the sheet can say it cannot tell whether they are.
     var legacyTextCount: (ClipboardBackupOptions.Scope) -> Int
+    /// How many boards have a lock, which the options sheet offers to include.
+    var lockedBoardCount: () -> Int = { 0 }
 }
 
 /// What the Settings rows show of a backup or restore, and the one task behind it. One thing at a time: a second start while
@@ -52,6 +54,10 @@ final class ClipboardBackupModel {
 
     func legacyTextCount(for scope: ClipboardBackupOptions.Scope) -> Int {
         actions?.legacyTextCount(scope) ?? 0
+    }
+
+    func lockedBoardCount() -> Int {
+        actions?.lockedBoardCount() ?? 0
     }
 
     func startExport(_ options: ClipboardBackupOptions, to url: URL) {

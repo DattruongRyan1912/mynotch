@@ -127,6 +127,12 @@ final class ClipboardLibraryModel {
         ClipboardSearchTerms(parsing: searchText, apps: counts.apps).chips
     }
 
+    /// The board on show when it is locked: the content asks to open it instead of listing cards.
+    var lockedSelectedBoard: ClipboardBoard? {
+        guard case .board(let id) = selection else { return nil }
+        return history.boards.first { $0.id == id && $0.isLocked }
+    }
+
     /// The boards row above the history: only for the whole history, and not while searching.
     var showsBoardTiles: Bool {
         selection == .all && searchText.allSatisfy(\.isWhitespace)
@@ -341,6 +347,11 @@ final class ClipboardLibraryModel {
     @discardableResult
     private func pin(_ ids: [UUID], to boardID: UUID) -> Bool {
         guard !ids.isEmpty, let board = history.boards.first(where: { $0.id == boardID }) else { return false }
+        // A board that is locked takes nothing until it is opened.
+        guard !board.isLocked else {
+            post("Hãy mở khoá “\(board.name)” trước khi thêm mục", systemImage: "lock.fill")
+            return false
+        }
         actions.pin(ids: ids, to: boardID)
         post("Đã thêm \(ids.count) mục vào “\(board.name)”", systemImage: "pin.fill")
         return true

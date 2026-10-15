@@ -47,6 +47,10 @@ struct ClipboardBoardBar: View {
     let onStep: (UUID, Int) -> Void
     let onIcon: (UUID, String) -> Void
     let onColor: (UUID, ClipboardBoardColor) -> Void
+    /// What the lock menu items ask for; the tab shows the form or prompt.
+    var onVault: (ClipboardVaultPrompt) -> Void = { _ in }
+    /// "Khoá lại ngay" on an open board.
+    var onRelock: (UUID) -> Void = { _ in }
 
     @Environment(\.notch) private var notch
     @State private var widths: [UUID: CGFloat] = [:]
@@ -120,7 +124,22 @@ struct ClipboardBoardBar: View {
                 Button("Chuyển sang phải", systemImage: "arrow.right") { onStep(board.id, 1) }
                     .disabled(index == boards.count - 1)
                 Divider()
-                Button("Xoá board “\(board.name)”", systemImage: "trash", role: .destructive) { onDelete(board.id) }
+                if board.isLocked {
+                    Button("Mở khoá…", systemImage: "lock.open") { selection = board.id }
+                } else if board.isProtected {
+                    Button("Khoá lại ngay", systemImage: "lock") { onRelock(board.id) }
+                    Button("Gỡ khoá…", systemImage: "lock.slash") { onVault(.removeLock(board.id)) }
+                } else {
+                    Button("Khoá board…", systemImage: "lock") { onVault(.lock(board.id)) }
+                }
+                Divider()
+                if board.isProtected {
+                    Button("Xoá board “\(board.name)” và dữ liệu đã mã hoá…", systemImage: "trash", role: .destructive) {
+                        onVault(.deleteData(board.id))
+                    }
+                } else {
+                    Button("Xoá board “\(board.name)”", systemImage: "trash", role: .destructive) { onDelete(board.id) }
+                }
             }
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(selection == board.id ? [.isButton, .isSelected] : .isButton)

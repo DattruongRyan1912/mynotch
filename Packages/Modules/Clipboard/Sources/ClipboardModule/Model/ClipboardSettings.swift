@@ -27,6 +27,7 @@ nonisolated enum ClickAction: String, Codable, Sendable, CaseIterable {
 struct ClipboardSettingKeys {
     static let historyLimitRange = 50...5000
     static let imageStorageLimitMBRange = 50...2000
+    static let boardLockIdleMinutesRange = 1...240
 
     let paused: SettingKey<Bool>
     let historyLimit: SettingKey<Int>
@@ -54,6 +55,11 @@ struct ClipboardSettingKeys {
     let stackPersist: SettingKey<Bool>
     /// Whether AI agents may search the history through the MCP helper. Off by default: it hands out what the user copied.
     let mcpEnabled: SettingKey<Bool>
+    /// Minutes without using an open locked board before it closes again.
+    let boardLockIdleMinutes: SettingKey<Int>
+    /// Whether open locked boards also close when the notch does. Off by default: a paste closes the notch, which would close the
+    /// board after every item taken from it.
+    let boardLockOnNotchClose: SettingKey<Bool>
 
     init(_ settings: ModuleSettings) {
         paused = settings.key("paused", default: false)
@@ -74,5 +80,7 @@ struct ClipboardSettingKeys {
         stackOrder = settings.key("stackOrder", default: .firstIn)
         stackPersist = settings.key("stackPersist", default: false)
         mcpEnabled = settings.key("mcpEnabled", default: false)
+        boardLockIdleMinutes = settings.key("boardLockIdleMinutes", default: 5, clampedTo: Self.boardLockIdleMinutesRange)
+        boardLockOnNotchClose = settings.key("boardLockOnNotchClose", default: false)
     }
 }

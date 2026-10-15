@@ -13,15 +13,34 @@ nonisolated struct ClipboardRestorePlan: Sendable {
         var itemHashes: [String]
     }
 
+    /// A board that has a lock, which comes back sealed as the file holds it: the vault file is stored on restore, nothing of it is read.
+    struct LockedBoard: Sendable, Equatable {
+        var id: UUID
+        var name: String
+        var systemImage: String
+        var color: ClipboardBoardColor
+        var itemCount: Int
+    }
+
     /// New items in the file's order, with new ids.
     var items: [ClipboardItem]
     var boards: [Board]
+    /// Locked boards whose vault file is in the archive and is one (of that board, opened by a password).
+    var lockedBoards: [LockedBoard] = []
     /// Readable items the history already had, or an earlier item of the file had.
     var duplicates: Int
     var unreadable: Int
     /// For each new image item, the entry of the archive that holds its PNG, by the file name it will be stored under. The
     /// images are not stored while the plan is made (see `ClipboardBackupReader.writeImages`).
     var imageEntries: [String: String] = [:]
+}
+
+/// What storing the vault files of a plan did.
+nonisolated struct ClipboardVaultWrite: Sendable {
+    /// The files this step made, which are the ones to remove again if the restore is not completed.
+    var created: [URL] = []
+    /// Boards whose file could not be stored: the archive no longer holds what the plan saw, or a vault file is there already.
+    var failed: Set<UUID> = []
 }
 
 /// What storing the images of a plan did.
@@ -88,6 +107,42 @@ nonisolated enum ClipboardBackupReader {
                 let existed = FileManager.default.fileExists(atPath: target.path(percentEncoded: false))
                 try ClipboardStore.writeImage(data, named: fileName, in: imagesDirectory)
                 if !existed { written.created.append(target) }
+            }
+            return written
+        } catch {
+            for file in written.created { try? FileManager.default.removeItem(at: file) }
+            throw backupError(error, reading: false)
+        }
+    }
+
+    /// Stores the vault file of each locked board of `plan` that is in `boardIDs`, read again from the archive and checked once more
+    /// (a vault of that board, opened by a password). A file already there is never replaced. When the step ends in an error or is
+    /// cancelled the files it made are removed again.
+    @concurrent static func writeVaults(
+        of plan: ClipboardRestorePlan, boardIDs: Set<UUID>, from url: URL, to files: ClipboardVaultFiles,
+        limits: ZipLimits = ClipboardBackupFormat.limits
+    ) async throws -> ClipboardVaultWrite {
+        var written = ClipboardVaultWrite()
+        do {
+            let boards = plan.lockedBoards.filter { boardIDs.contains($0.id) }
+            guard !boards.isEmpty else { return written }
+            let archive = try ZipReader(url: url, limits: limits)
+            try files.prepare()
+            for board in boards {
+                try Task.checkCancellation()
+                let data: Data?
+                do {
+                    data = try archive.data(named: ClipboardBackupFormat.vaultName(for: board.id))
+                } catch is ZipError {
+                    data = nil
+                }
+                guard let data, let file = try? ClipboardVaultFile.decode(data), file.envelope.boardID == board.id,
+                      file.envelope.method == .password, !files.exists(for: board.id) else {
+                    written.failed.insert(board.id)
+                    continue
+                }
+                try file.write(to: files.url(for: board.id))
+                written.created.append(files.url(for: board.id))
             }
             return written
         } catch {
@@ -165,9 +220,46 @@ nonisolated enum ClipboardBackupReader {
                 itemHashes: board.items.compactMap { hashByID[$0] }
             )
         }
+        let locked = try lockedBoards(of: manifest, in: archive)
+        plan.lockedBoards = locked.boards
+        plan.unreadable += locked.unreadable
         report(force: true)
         progress(1)
         return plan
+    }
+
+    /// The locked boards of the manifest whose vault file is in the archive and is a vault of that board with a password to open it.
+    /// A board is left out and counted when its name is blank, its id was listed before, its file is missing, is not a vault, belongs to
+    /// another board, or opens with Touch ID (whose key is not in the file).
+    private static func lockedBoards(of manifest: ClipboardBackupManifest, in archive: ZipReader) throws -> (boards: [ClipboardRestorePlan.LockedBoard], unreadable: Int) {
+        var boards: [ClipboardRestorePlan.LockedBoard] = []
+        var unreadable = 0
+        var seen = Set<UUID>()
+        for entry in manifest.lockedBoards ?? [] {
+            try Task.checkCancellation()
+            let name = entry.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, seen.insert(entry.id).inserted else {
+                unreadable += 1
+                continue
+            }
+            let data: Data?
+            do {
+                data = try archive.data(named: ClipboardBackupFormat.vaultName(for: entry.id))
+            } catch is ZipError {
+                data = nil
+            }
+            guard let data, let file = try? ClipboardVaultFile.decode(data), file.envelope.boardID == entry.id,
+                  file.envelope.method == .password else {
+                unreadable += 1
+                continue
+            }
+            boards.append(ClipboardRestorePlan.LockedBoard(
+                id: entry.id, name: name,
+                systemImage: entry.icon.flatMap { ClipboardBoardIcon.isValidName($0) ? $0 : nil } ?? ClipboardBoardIcon.defaultName,
+                color: entry.color.flatMap { ClipboardBoardColor(rawValue: $0) } ?? .accent, itemCount: file.envelope.itemCount
+            ))
+        }
+        return (boards, unreadable)
     }
 
     /// The version is looked at before the rest, so a file from a later MyNotch says so even when its shape changed.
@@ -192,7 +284,9 @@ nonisolated enum ClipboardBackupReader {
     /// Refuses a manifest that lists more than the format allows, before any of it is used.
     private static func checkCaps(of manifest: ClipboardBackupManifest) throws {
         guard manifest.items.count <= ClipboardBackupFormat.maxItems else { throw ClipboardBackupError.tooManyItems }
-        guard manifest.boards.count <= ClipboardBackupFormat.maxBoards else { throw ClipboardBackupError.tooManyBoards }
+        guard manifest.boards.count + (manifest.lockedBoards?.count ?? 0) <= ClipboardBackupFormat.maxBoards else {
+            throw ClipboardBackupError.tooManyBoards
+        }
         var pins = 0
         for board in manifest.boards {
             guard board.items.count <= ClipboardBackupFormat.maxPinsPerBoard else { throw ClipboardBackupError.tooManyPins }
@@ -200,7 +294,7 @@ nonisolated enum ClipboardBackupReader {
         }
         guard pins <= ClipboardBackupFormat.maxPinsTotal else { throw ClipboardBackupError.tooManyPins }
         let limit = ClipboardBackupFormat.maxNameLength
-        guard manifest.boards.allSatisfy({ $0.name.count <= limit }),
+        guard manifest.boards.allSatisfy({ $0.name.count <= limit }), (manifest.lockedBoards ?? []).allSatisfy({ $0.name.count <= limit }),
               manifest.items.allSatisfy({ ($0.sourceAppName?.count ?? 0) <= limit && ($0.sourceBundleID?.count ?? 0) <= limit })
         else { throw ClipboardBackupError.tooLongText }
     }

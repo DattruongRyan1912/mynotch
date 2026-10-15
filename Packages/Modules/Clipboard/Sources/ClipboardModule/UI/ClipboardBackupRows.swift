@@ -25,6 +25,7 @@ struct ClipboardBackupRows: View {
         .sheet(isPresented: $showsOptions) {
             ClipboardBackupOptionsSheet(
                 legacyTextCount: { backup.legacyTextCount(for: $0) },
+                lockedBoardCount: backup.lockedBoardCount(),
                 onChoose: { options in
                     showsOptions = false
                     // The save panel waits until the sheet is gone.
@@ -128,6 +129,8 @@ struct ClipboardBackupRows: View {
 struct ClipboardBackupOptionsSheet: View {
     /// How many texts of a scope were saved before MyNotch tracked secrets (see `ClipboardBackupWriter.legacyTextCount`).
     let legacyTextCount: (ClipboardBackupOptions.Scope) -> Int
+    /// How many boards have a lock, which the box offers to include; 0 hides it.
+    var lockedBoardCount = 0
     let onChoose: (ClipboardBackupOptions) -> Void
     let onCancel: () -> Void
 
@@ -138,6 +141,11 @@ struct ClipboardBackupOptionsSheet: View {
     static func legacyWarning(_ count: Int) -> String {
         "\(count) mục văn bản được lưu trước khi MyNotch biết đánh dấu mục nhạy cảm, nên không nhận ra được và vẫn nằm trong tệp, kể cả khi đã bỏ qua mục nhạy cảm. Mật khẩu có thể nằm trong số đó."
     }
+
+    /// Under the box for boards that have a lock, which is not ticked: they are not in the file at all, name included.
+    static let lockedLeftOutCaption = "Board đã khoá không nằm trong tệp, kể cả tên của nó."
+    /// When it is: each goes in as the encrypted file it is, and only its own password opens it, wherever the file goes.
+    static let lockedIncludedCaption = "Mỗi board đã khoá vẫn được mã hoá trong tệp và cần mật khẩu của chính nó để mở: nếu quên mật khẩu thì không có cách lấy lại. Board dùng Touch ID chỉ mở được trên máy này nên không đưa vào tệp."
 
     @State private var options = ClipboardBackupOptions()
 
@@ -172,6 +180,14 @@ struct ClipboardBackupOptionsSheet: View {
                         Button("Chỉ xuất mục đã ghim và board") { options.scope = .pinnedOnly }
                             .controlSize(.small)
                     }
+                }
+            }
+            if lockedBoardCount > 0 {
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("Gồm cả \(lockedBoardCount) board đã khoá", isOn: $options.includeLockedBoards)
+                    Text(options.includeLockedBoards ? Self.lockedIncludedCaption : Self.lockedLeftOutCaption)
+                        .font(.caption)
+                        .foregroundStyle(options.includeLockedBoards ? .orange : .secondary)
                 }
             }
             Text("Mục file chỉ lưu đường dẫn nên có thể không khôi phục được trên máy khác. Tệp được lưu chỉ cho riêng bạn đọc, nhưng không được mã hoá.")
@@ -258,6 +274,7 @@ struct ClipboardRestorePlanSheet: View {
         if summary.duplicates > 0 { parts.append("\(summary.duplicates) mục trùng lặp sẽ bị bỏ qua") }
         if summary.unreadable > 0 { parts.append("\(summary.unreadable) mục không đọc được") }
         if summary.boardsToCreate > 0 { parts.append("\(summary.boardsToCreate) board mới sẽ được tạo") }
+        if summary.lockedBoards > 0 { parts.append("\(summary.lockedBoards) board đã khoá sẽ được khôi phục (mở bằng mật khẩu của nó)") }
         return parts.joined(separator: ", ") + "."
     }
 

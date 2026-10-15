@@ -45,6 +45,12 @@ final class ClipboardThumbnailCache {
         return image
     }
 
+    /// Forgets every thumbnail, such as when the board they came from locks: a picture of a locked item must not outlive its lock.
+    func removeAll() {
+        cache.removeAllObjects()
+        recent = []
+    }
+
     /// Stands in for the system emptying the cache, for tests.
     func simulateMemoryPressurePurge() {
         cache.removeAllObjects()

@@ -14,6 +14,7 @@ struct ClipboardLibrarySidebar: View {
     let module: ClipboardModule
     @Bindable var model: ClipboardLibraryModel
     let requestName: (ClipboardLibraryBoardNaming) -> Void
+    var requestVault: (ClipboardVaultPrompt) -> Void = { _ in }
 
     @State private var dropTarget: UUID?
     /// The board whose icon and colour are being chosen, in a popover from its row.
@@ -80,7 +81,15 @@ struct ClipboardLibrarySidebar: View {
     private func boardRow(_ board: ClipboardBoard, at index: Int) -> some View {
         let count = model.history.boards.count
         return Label {
-            Text(board.name)
+            HStack(spacing: 4) {
+                Text(board.name)
+                if let lock = board.lock {
+                    Image(systemName: lock.isUnlocked ? "lock.open.fill" : "lock.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(lock.isUnlocked ? "đã mở khoá" : "đã khoá")
+                }
+            }
         } icon: {
             // The default colour is the sidebar's own, which also turns white on a selected row.
             if board.color == .accent {
@@ -106,7 +115,15 @@ struct ClipboardLibrarySidebar: View {
             Button("Chuyển xuống", systemImage: "arrow.down") { module.moveBoard(board.id, by: 1) }
                 .disabled(index == count - 1)
             Divider()
-            Button("Xoá board “\(board.name)”", systemImage: "trash", role: .destructive) { module.deleteBoard(board.id) }
+            ClipboardBoardLockMenu(board: board, onSelect: { model.selection = .board(board.id) }, onVault: requestVault, onRelock: { module.relockBoard($0) })
+            Divider()
+            if board.isProtected {
+                Button("Xoá board “\(board.name)” và dữ liệu đã mã hoá…", systemImage: "trash", role: .destructive) {
+                    requestVault(.deleteData(board.id))
+                }
+            } else {
+                Button("Xoá board “\(board.name)”", systemImage: "trash", role: .destructive) { module.deleteBoard(board.id) }
+            }
         }
         .accessibilityAction(named: "Chuyển lên") { if index > 0 { module.moveBoard(board.id, by: -1) } }
         .accessibilityAction(named: "Chuyển xuống") { if index < count - 1 { module.moveBoard(board.id, by: 1) } }

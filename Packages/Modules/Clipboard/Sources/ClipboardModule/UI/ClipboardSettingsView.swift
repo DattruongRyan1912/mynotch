@@ -73,6 +73,7 @@ struct ClipboardSettingsView: View {
             Toggle("Đóng notch sau khi chép hoặc dán", isOn: settings.binding(keys.closeAfterAction))
             Toggle("Hiện thông báo khi chép", isOn: settings.binding(keys.showCopiedActivity))
             copyStack
+            boardLocks
             excludedApps
             storage
             ClipboardBackupRows(backup: backup, isAvailable: canBackUp)
@@ -92,6 +93,23 @@ struct ClipboardSettingsView: View {
         }
         Toggle("Giữ ngăn xếp khi mở lại MyNotch", isOn: settings.binding(keys.stackPersist))
         Text("Ngăn xếp có thể chứa dữ liệu riêng tư, nên mặc định mất khi thoát. Mục mà trình quản lý mật khẩu đánh dấu là bí mật không bao giờ vào ngăn xếp.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    // MARK: Locked boards
+
+    /// What the notch and the library say of a locked board's idle time and of closing the notch.
+    static let boardLockNote = "Board đã khoá luôn khoá lại khi máy ngủ, khi khoá màn hình và khi MyNotch thoát. Quên mật khẩu thì không có cách khôi phục; chỉ xoá được board."
+
+    @ViewBuilder
+    private var boardLocks: some View {
+        Stepper(
+            "Tự khoá lại board sau \(settings.value(keys.boardLockIdleMinutes)) phút không dùng",
+            value: settings.binding(keys.boardLockIdleMinutes), in: ClipboardSettingKeys.boardLockIdleMinutesRange
+        )
+        Toggle("Khoá lại board khi đóng notch", isOn: settings.binding(keys.boardLockOnNotchClose))
+        Text(Self.boardLockNote)
             .font(.caption)
             .foregroundStyle(.secondary)
     }

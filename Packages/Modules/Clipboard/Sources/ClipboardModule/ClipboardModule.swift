@@ -39,6 +39,12 @@ public final class ClipboardModule: FeatureModule {
     let installMCPHelper: (URL) throws -> Void
     /// Set while the feature is on and the module runs; see `ClipboardModule+MCP`.
     var mcpServer: ClipboardMCPServer?
+    /// Set while running: the open locked boards and what closes them; see `ClipboardModule+Vault`.
+    var vault: ClipboardVault?
+    let keychain: any BoardKeyKeychain
+    let authenticator: any UserAuthenticating
+    let keyDerivation: ClipboardVaultCrypto.Derivation
+    let lockTriggers: ClipboardLockTriggers
     private let pasteboard: any PasteboardAccess
     private let keystrokes: any KeystrokeSending
     private let frontmostApp: () -> ClipboardMonitor.SourceApp
@@ -101,10 +107,18 @@ public final class ClipboardModule: FeatureModule {
         libraryWindow: (any ClipboardLibraryWindowing)? = nil,
         panelWindow: (any ClipboardPanelWindowing)? = nil,
         mcpSocketPath: @escaping (URL) -> String = ClipboardModule.defaultMCPSocketPath,
-        installMCPHelper: @escaping (URL) throws -> Void = ClipboardMCPHelperFile.installFromBundle
+        installMCPHelper: @escaping (URL) throws -> Void = ClipboardMCPHelperFile.installFromBundle,
+        keychain: any BoardKeyKeychain = SystemBoardKeyKeychain(),
+        authenticator: any UserAuthenticating = SystemUserAuthenticator(),
+        keyDerivation: ClipboardVaultCrypto.Derivation = .standard,
+        lockTriggers: ClipboardLockTriggers = .system
     ) {
         self.mcpSocketPath = mcpSocketPath
         self.installMCPHelper = installMCPHelper
+        self.keychain = keychain
+        self.authenticator = authenticator
+        self.keyDerivation = keyDerivation
+        self.lockTriggers = lockTriggers
         self.pasteboard = pasteboard
         self.keystrokes = keystrokes
         self.frontmostApp = frontmostApp
@@ -132,13 +146,15 @@ public final class ClipboardModule: FeatureModule {
 
         let loaded = store.load()
         var history = loaded
+        // Boards that have a vault are locked, whatever the history file still holds of them.
+        let sealed = startVault(context, history: &history)
         // Images are deleted before the save that drops their items, so a crash in between leaves items without images.
         _ = history.remove(ids: Set(loaded.items.filter { !hasImageFile($0, in: store) }.map(\.id)))
         history.removeDanglingPins()
-        let removed = prune(&history)
+        let removed = prune(&history) + sealed
         state.history = history
         store.deleteImages(for: removed)
-        if history != loaded { store.scheduleSave(history) }
+        if history.persistable != loaded { store.scheduleSave(history) }
         refreshPasteboardAccess()
         refreshAccessibility()
         restoreStack(from: store, keys: keys, settings: context.settings)
@@ -211,6 +227,8 @@ public final class ClipboardModule: FeatureModule {
     /// Writes any unsaved change before returning, so quitting right after a copy keeps it.
     public func stop() async {
         stopMCP()
+        // Every open board is sealed and closed first, so nothing of one outlives the module in memory or on disk.
+        stopVault()
         closeLibrary()
         closePanel()
         keystrokeGate?.isOpen = false
@@ -273,8 +291,9 @@ public final class ClipboardModule: FeatureModule {
                     return try await self.planRestore(from: url, progress: progress)
                 },
                 legacyTextCount: { [weak self] scope in
-                    self.map { ClipboardBackupWriter.legacyTextCount(in: $0.state.history, scope: scope) } ?? 0
-                }
+                    self.map { ClipboardBackupWriter.legacyTextCount(in: $0.backupHistory, scope: scope) } ?? 0
+                },
+                lockedBoardCount: { [weak self] in self?.protectedBoardIDs.count ?? 0 }
             )
         ))
     }
@@ -417,11 +436,15 @@ public final class ClipboardModule: FeatureModule {
         let classifier = ClipboardClassifier(ignoreSensitive: false, colorsWithoutHash: context.settings.value(keys.colorsWithoutHash))
         let snapshot = PasteboardSnapshot(types: [NSPasteboard.PasteboardType.string.rawValue], string: result)
         guard case .content(let content, _) = classifier.classify(snapshot) else { return false }
+        // The result of changing a secret of a locked board is as much a secret: it goes into the same board, and so is sealed with it.
+        let lockedBoards = state.history.boards(containing: item.id).filter(\.isProtected).map(\.id)
         var addedID: UUID?
         update { history in
-            addedID = history.add(
+            let added = history.add(
                 content, hash: ClipboardContent.hash(of: content), source: (nil, nil), at: now(), isSensitive: item.isSensitive
             ).id
+            addedID = added
+            for board in lockedBoards { history.pin(itemID: added, to: board) }
             return []
         }
         guard let added = state.history.items.first(where: { $0.id == addedID }) else { return false }
@@ -488,6 +511,11 @@ public final class ClipboardModule: FeatureModule {
     }
 
     func deleteBoard(_ id: UUID) {
+        // A board that has a lock takes its items, its vault file and its key with it.
+        if let board = state.history.boards.first(where: { $0.id == id }), board.isProtected {
+            deleteProtectedBoard(board)
+            return
+        }
         update { history in
             history.deleteBoard(id: id)
             return []
@@ -531,6 +559,7 @@ public final class ClipboardModule: FeatureModule {
             history.pin(itemID: item.id, to: boardID)
             return []
         }
+        noteActivity(onBoard: boardID, pinned: [item.id])
     }
 
     /// `ids` in the order the library shows them, which the board then lists too (the newest pin goes first).
@@ -539,6 +568,7 @@ public final class ClipboardModule: FeatureModule {
             for id in ids.reversed() { history.pin(itemID: id, to: boardID) }
             return []
         }
+        noteActivity(onBoard: boardID, pinned: ids)
     }
 
     func unpin(_ item: ClipboardItem, from boardID: UUID) {
@@ -546,6 +576,16 @@ public final class ClipboardModule: FeatureModule {
             history.unpin(itemID: item.id, from: boardID)
             return []
         }
+        noteActivity(onBoard: boardID)
+    }
+
+    /// Working with an open locked board keeps it open: the idle time starts again. What was just pinned to it is a secret now: it
+    /// leaves the copy stack, whose file would otherwise keep it in the clear.
+    private func noteActivity(onBoard boardID: UUID, pinned: [UUID] = []) {
+        guard state.history.boards.first(where: { $0.id == boardID })?.lock?.isUnlocked == true else { return }
+        noteVaultActivity()
+        let ids = Set(pinned)
+        if !ids.isEmpty { updateStack { $0.removeEntries { ids.contains($0.item.id) } } }
     }
 
     func revealInFinder(_ item: ClipboardItem) {
@@ -705,8 +745,9 @@ public final class ClipboardModule: FeatureModule {
             addedID = history.add(content, hash: ClipboardContent.hash(of: content), source: source, at: now(), isSensitive: isSensitive).id
             return []
         }
-        // A secret never goes on the stack, even when the history is set to keep it.
-        if state.stack.isOn, !isSensitive, let added = state.history.items.first(where: { $0.id == addedID }) {
+        // A secret never goes on the stack, even when the history is set to keep it, and neither does an item of a locked board.
+        if state.stack.isOn, !isSensitive, let added = state.history.items.first(where: { $0.id == addedID }),
+           !state.history.protectedItemIDs.contains(added.id) {
             updateStack { $0.collect(added) }
         }
         if context.settings.value(keys.showCopiedActivity) {
@@ -803,6 +844,8 @@ public final class ClipboardModule: FeatureModule {
             return outcome
         }
         if fromLibrary { libraryWindow?.yieldKeyboardFocus() }
+        // Using an item of an open locked board keeps the board open.
+        if state.history.protectedItemIDs.contains(item.id) { noteVaultActivity() }
         if touchesHistory {
             update { history in
                 history.touch(id: item.id, at: now())
@@ -841,7 +884,7 @@ public final class ClipboardModule: FeatureModule {
 
     /// Applies a change to the stack, then brings the live activity and the file on disk up to date. Does nothing while
     /// stopped or when the change leaves the stack as it was.
-    private func updateStack(_ change: (inout CopyStack) -> Void) {
+    func updateStack(_ change: (inout CopyStack) -> Void) {
         guard let context, let keys, store != nil else { return }
         var stack = state.stack
         change(&stack)
@@ -906,7 +949,7 @@ public final class ClipboardModule: FeatureModule {
         return store?.imageURL(fileName: image.fileName)
     }
 
-    private func hasImageFile(_ item: ClipboardItem, in store: ClipboardStore) -> Bool {
+    func hasImageFile(_ item: ClipboardItem, in store: ClipboardStore) -> Bool {
         guard case .image(let image) = item.content else { return true }
         guard let url = store.imageURL(fileName: image.fileName) else { return false }
         return FileManager.default.fileExists(atPath: url.path(percentEncoded: false))
@@ -945,6 +988,7 @@ public final class ClipboardModule: FeatureModule {
         state.history = history
         store.deleteImages(for: removed)
         store.scheduleSave(history)
+        vaultHistoryChanged()
     }
 
     /// The limits in Settings as they are now; nil while stopped.

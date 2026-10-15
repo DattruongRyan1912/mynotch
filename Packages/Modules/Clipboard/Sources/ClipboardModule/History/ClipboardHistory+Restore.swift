@@ -34,7 +34,8 @@ nonisolated extension ClipboardHistory {
         let idByHash = Dictionary(items.map { ($0.contentHash, $0.id) }, uniquingKeysWith: { first, _ in first })
         for spec in plan.boards {
             let index: Int
-            if let existing = boards.firstIndex(where: { $0.name.caseInsensitiveCompare(spec.name) == .orderedSame }) {
+            // A board that has a lock is never matched: its pins would end up in the clear, in a board that cannot hold them.
+            if let existing = boards.firstIndex(where: { !$0.isProtected && $0.name.caseInsensitiveCompare(spec.name) == .orderedSame }) {
                 index = existing
             } else {
                 boards.append(ClipboardBoard(id: UUID(), name: spec.name, systemImage: spec.systemImage, color: spec.color, itemIDs: []))
@@ -52,8 +53,23 @@ nonisolated extension ClipboardHistory {
         return result
     }
 
+    /// Adds the locked boards of a backup, sealed: each is a board of its own, last in the row, with the look the file gave it. One whose id
+    /// is here already is left alone. Returns how many were added.
+    @discardableResult
+    mutating func restoreLockedBoards(_ specs: [ClipboardRestorePlan.LockedBoard]) -> Int {
+        var added = 0
+        for spec in specs where !boards.contains(where: { $0.id == spec.id }) {
+            boards.append(ClipboardBoard(
+                id: spec.id, name: spec.name, systemImage: spec.systemImage, color: spec.color, itemIDs: [],
+                lock: ClipboardBoardLock(method: .password, itemCount: spec.itemCount, isUnlocked: false)
+            ))
+            added += 1
+        }
+        return added
+    }
+
     /// `incoming` in the order given, placed among `items` by date.
-    private mutating func mergeNewestFirst(_ incoming: [ClipboardItem]) {
+    mutating func mergeNewestFirst(_ incoming: [ClipboardItem]) {
         guard !incoming.isEmpty else { return }
         let sorted = incoming.enumerated().sorted { first, second in
             first.element.copiedAt != second.element.copiedAt ? first.element.copiedAt > second.element.copiedAt : first.offset < second.offset

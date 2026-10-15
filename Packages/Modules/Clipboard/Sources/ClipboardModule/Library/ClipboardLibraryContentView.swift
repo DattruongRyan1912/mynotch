@@ -10,6 +10,7 @@ struct ClipboardLibraryContentView: View {
     let module: ClipboardModule
     @Bindable var model: ClipboardLibraryModel
     let requestName: (ClipboardLibraryBoardNaming) -> Void
+    var requestVault: (ClipboardVaultPrompt) -> Void = { _ in }
 
     @State private var width: CGFloat = 0
     /// Bumped to give the cards the keyboard back, e.g. after clicking one while the search field had it.
@@ -84,7 +85,15 @@ struct ClipboardLibraryContentView: View {
                             Button("Chuyển sang phải", systemImage: "arrow.right") { module.moveBoard(board.id, by: 1) }
                                 .disabled(index == model.history.boards.count - 1)
                             Divider()
-                            Button("Xoá board “\(board.name)”", systemImage: "trash", role: .destructive) { module.deleteBoard(board.id) }
+                            ClipboardBoardLockMenu(board: board, onSelect: { model.selection = .board(board.id) }, onVault: requestVault, onRelock: { module.relockBoard($0) })
+                            Divider()
+                            if board.isProtected {
+                                Button("Xoá board “\(board.name)” và dữ liệu đã mã hoá…", systemImage: "trash", role: .destructive) {
+                                    requestVault(.deleteData(board.id))
+                                }
+                            } else {
+                                Button("Xoá board “\(board.name)”", systemImage: "trash", role: .destructive) { module.deleteBoard(board.id) }
+                            }
                         }
                         .accessibilityAction(named: "Chuyển sang trái") { if index > 0 { module.moveBoard(board.id, by: -1) } }
                         .accessibilityAction(named: "Chuyển sang phải") {
@@ -108,7 +117,13 @@ struct ClipboardLibraryContentView: View {
     // MARK: History
 
     @ViewBuilder private var history: some View {
-        if let message = model.emptyMessage {
+        if let board = model.lockedSelectedBoard {
+            // The prompt that opens it stands where its cards would be.
+            ClipboardBoardVaultView(module: module, look: .library, mode: .unlock, board: board, onDone: {}, onCancel: { model.selection = .all })
+                .id(board.id)
+                .padding(.vertical, 40)
+                .frame(maxWidth: 520, alignment: .leading)
+        } else if let message = model.emptyMessage {
             empty(message)
         } else {
             VStack(alignment: .leading, spacing: 10) {

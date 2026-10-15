@@ -32,7 +32,7 @@ nonisolated enum ClipboardLibraryContent {
 
     static func counts(of history: ClipboardHistory) -> ClipboardLibraryCounts {
         var counts = ClipboardLibraryCounts(all: history.items.count)
-        counts.boards = Dictionary(history.boards.map { ($0.id, $0.itemIDs.count) }, uniquingKeysWith: { first, _ in first })
+        counts.boards = Dictionary(history.boards.map { ($0.id, $0.shownItemCount) }, uniquingKeysWith: { first, _ in first })
         var groups: [String: (bundleID: String?, name: String, count: Int)] = [:]
         for item in history.items {
             counts.kinds[item.content.kind, default: 0] += 1

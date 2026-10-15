@@ -1,5 +1,16 @@
 import Foundation
 
+/// A locked board that goes into a backup as its vault file, still sealed.
+nonisolated struct ClipboardLockedBoardExport: Sendable {
+    var id: UUID
+    var name: String
+    var systemImage: String
+    var color: ClipboardBoardColor
+    var itemCount: Int
+    /// The vault file on disk, read when the entry is written.
+    var file: URL
+}
+
 /// Writes the history as a `.mynotchclip` file. Runs off the main actor, takes one item at a time (so a large history is
 /// never in memory whole), and writes next to the destination under a temporary name that becomes the destination only when
 /// everything is written: a cancelled or failed export leaves nothing, and an older file stays as it was.
@@ -21,14 +32,16 @@ nonisolated enum ClipboardBackupWriter {
     /// (the format's own, unless a test says otherwise); what would not fit is left out and counted. `progress` is called
     /// with 0 to 1, in order, from the background.
     @concurrent static func write(
-        history: ClipboardHistory, options: ClipboardBackupOptions, imageURLs: [String: URL], to destination: URL,
-        now: Date = .now, limits: ZipLimits = ClipboardBackupFormat.limits, progress: @escaping @Sendable (Double) -> Void = { _ in }
+        history: ClipboardHistory, options: ClipboardBackupOptions, imageURLs: [String: URL], lockedBoards: [ClipboardLockedBoardExport] = [],
+        to destination: URL, now: Date = .now, limits: ZipLimits = ClipboardBackupFormat.limits,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> ClipboardBackupExportSummary {
         let folder = destination.deletingLastPathComponent()
         let temporary = folder.appending(path: ".\(destination.lastPathComponent).partial-\(UUID().uuidString)")
         do {
             let summary = try build(
-                history: history, options: options, imageURLs: imageURLs, to: temporary, now: now, limits: limits, progress: progress
+                history: history, options: options, imageURLs: imageURLs, lockedBoards: lockedBoards, to: temporary, now: now,
+                limits: limits, progress: progress
             )
             try publish(temporary, as: destination)
             progress(1)
@@ -61,8 +74,8 @@ nonisolated enum ClipboardBackupWriter {
     // MARK: Building
 
     private static func build(
-        history: ClipboardHistory, options: ClipboardBackupOptions, imageURLs: [String: URL], to url: URL, now: Date, limits: ZipLimits,
-        progress: @Sendable (Double) -> Void
+        history: ClipboardHistory, options: ClipboardBackupOptions, imageURLs: [String: URL], lockedBoards: [ClipboardLockedBoardExport],
+        to url: URL, now: Date, limits: ZipLimits, progress: @Sendable (Double) -> Void
     ) throws -> ClipboardBackupExportSummary {
         var summary = ClipboardBackupExportSummary()
         let pinned = Set(history.boards.flatMap(\.itemIDs))
@@ -83,13 +96,21 @@ nonisolated enum ClipboardBackupWriter {
 
         // The manifest counts toward the total a reader accepts. Describing every candidate is the most it can grow to, so the
         // payloads get what is left of the total and the finished file can never be over it.
+        let lockedSpecs = lockedBoards.map { board in
+            ClipboardBackupManifest.LockedBoard(
+                id: board.id, name: Self.clamped(board.name), icon: board.systemImage,
+                color: board.color == .accent ? nil : board.color.rawValue, itemCount: board.itemCount
+            )
+        }
         let widest = try encodeManifest(
-            entries.map(\.1), boards: boards.map(\.1), options: options, now: now
+            entries.map(\.1), boards: boards.map(\.1), lockedBoards: lockedSpecs, options: options, now: now
         )
         guard widest.count <= ClipboardBackupFormat.maxItemBytes, widest.count <= limits.total else { throw ClipboardBackupError.tooLarge }
         var spaceLeft = limits.total - widest.count
 
-        let totalWeight = max(candidates.reduce(0) { $0 + estimatedBytes(of: $1) + itemWeight }, 1)
+        let totalWeight = max(
+            candidates.reduce(0) { $0 + estimatedBytes(of: $1) + itemWeight } + lockedBoards.reduce(0) { $0 + (fileSize(of: $1.file) ?? 0) + itemWeight }, 1
+        )
         var doneWeight = 0
         var lastReported = -1.0
         func report(force: Bool = false) {
@@ -121,22 +142,45 @@ nonisolated enum ClipboardBackupWriter {
         summary.itemCount = included.count
         summary.boardCount = boards.count
 
+        // Locked boards go in as the sealed files they are: nothing about them is read, so nothing of them is in the clear.
+        var includedLocked: [ClipboardBackupManifest.LockedBoard] = []
+        for (board, spec) in zip(lockedBoards, lockedSpecs) {
+            try Task.checkCancellation()
+            defer {
+                doneWeight += (fileSize(of: board.file) ?? 0) + itemWeight
+                report()
+            }
+            guard let size = fileSize(of: board.file), size <= limits.perEntry, size <= spaceLeft,
+                  let data = try? Data(contentsOf: board.file), data.count == size else {
+                summary.skippedLockedBoards += 1
+                continue
+            }
+            // Sealed bytes do not compress.
+            try archive.add(name: ClipboardBackupFormat.vaultName(for: board.id), data: data, compress: false)
+            spaceLeft -= size
+            includedLocked.append(spec)
+            summary.lockedBoardCount += 1
+        }
+
         let finished = boards.map { _, board in
             ClipboardBackupManifest.Board(name: board.name, icon: board.icon, color: board.color, items: board.items.filter(includedIDs.contains))
         }
         try archive.add(
-            name: ClipboardBackupFormat.manifestName, data: try encodeManifest(included, boards: finished, options: options, now: now)
+            name: ClipboardBackupFormat.manifestName,
+            data: try encodeManifest(included, boards: finished, lockedBoards: includedLocked, options: options, now: now)
         )
         try archive.finish()
         return summary
     }
 
     private static func encodeManifest(
-        _ items: [ClipboardBackupManifest.Item], boards: [ClipboardBackupManifest.Board], options: ClipboardBackupOptions, now: Date
+        _ items: [ClipboardBackupManifest.Item], boards: [ClipboardBackupManifest.Board],
+        lockedBoards: [ClipboardBackupManifest.LockedBoard], options: ClipboardBackupOptions, now: Date
     ) throws -> Data {
         try ClipboardBackupFormat.makeEncoder().encode(ClipboardBackupManifest(
             format: ClipboardBackupFormat.formatName, version: ClipboardBackupFormat.currentVersion, createdAt: now,
-            scope: options.scope.rawValue, includesSensitive: !options.skipSensitive, items: items, boards: boards
+            scope: options.scope.rawValue, includesSensitive: !options.skipSensitive, items: items, boards: boards,
+            lockedBoards: lockedBoards.isEmpty ? nil : lockedBoards
         ))
     }
 

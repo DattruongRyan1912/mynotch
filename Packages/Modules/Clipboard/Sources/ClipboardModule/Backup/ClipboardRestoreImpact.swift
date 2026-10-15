@@ -17,6 +17,8 @@ nonisolated struct ClipboardRestorePlanSummary: Sendable, Equatable {
     /// Items of the file that could not be read.
     var unreadable = 0
     var boardsToCreate = 0
+    /// Locked boards of the file that are not here yet; each comes back sealed, to be opened with its own password.
+    var lockedBoards = 0
     /// New items the limits in Settings would drop at once (older than the retention, or beyond the history limit).
     var outsideLimits = 0
     /// Items that are in the history now, unpinned, that the limits would drop to make room for the new ones, and how many of
@@ -62,7 +64,8 @@ nonisolated enum ClipboardRestoreImpact {
         let evicted = removed.filter { !added.contains($0.id) && !takenAnyway.contains($0.id) }
         return ClipboardRestorePlanSummary(
             added: result.addedIDs.count, duplicates: plan.duplicates + result.duplicates, unreadable: plan.unreadable,
-            boardsToCreate: result.boardsCreated, outsideLimits: removed.count { added.contains($0.id) },
+            boardsToCreate: result.boardsCreated, lockedBoards: plan.lockedBoards.count { board in !history.boards.contains { $0.id == board.id } },
+            outsideLimits: removed.count { added.contains($0.id) },
             evictedExisting: evicted.count, evictedExistingImages: evicted.count { if case .image = $0.content { true } else { false } }
         )
     }

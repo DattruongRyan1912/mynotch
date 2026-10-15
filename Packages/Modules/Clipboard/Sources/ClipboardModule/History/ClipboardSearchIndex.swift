@@ -39,6 +39,12 @@ nonisolated final class ClipboardSearchIndex {
         }
     }
 
+    /// Forgets every item's folded text, in place, so whoever shares this index (the agents' controller) forgets it too. The next
+    /// search folds again what it needs.
+    func removeAll() {
+        entries = [:]
+    }
+
     /// Items matching every word of `query.text`, ignoring case and diacritics so "dong ho" finds "Đồng hồ", and every
     /// `@` token in it (see `ClipboardSearchTerms`). Newest first, or in the board's pin order when a board is selected.
     /// `apps` are the apps of the history, which the caller usually has already; nil works them out when the text has an "@".

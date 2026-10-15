@@ -28,6 +28,11 @@ nonisolated enum ClipboardBackupFormat {
         "items/\(id.uuidString).\(fileExtension)"
     }
 
+    /// The entry holding a locked board's vault file, built from its id and never from text in the file.
+    static func vaultName(for boardID: UUID) -> String {
+        "vaults/\(boardID.uuidString).\(ClipboardVaultFile.fileExtension)"
+    }
+
     static func makeEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -53,6 +58,9 @@ nonisolated struct ClipboardBackupOptions: Sendable, Equatable {
     var scope: Scope = .allHistory
     /// Items an app marked as secrets stay out of the file unless the user asks for them.
     var skipSensitive = true
+    /// Boards that have a lock are left out, name and all, unless the user asks for them. Then each goes in as its vault file, still
+    /// sealed, and needs its password to open. (A Touch ID board cannot: its key is in this Mac's Keychain.)
+    var includeLockedBoards = false
 }
 
 nonisolated enum ClipboardBackupError: Error, Equatable, LocalizedError {
@@ -119,14 +127,26 @@ nonisolated struct ClipboardBackupExportSummary: Sendable, Equatable {
     var skippedUnreadable = 0
     /// Items that hold files, which are saved as paths and may not be found on another Mac.
     var fileItemCount = 0
+    /// Boards with a lock that went in as their sealed vault file.
+    var lockedBoardCount = 0
+    /// Boards with a lock that stayed out: all of them unless the user asked, and a Touch ID board always.
+    var skippedLockedBoards = 0
+    /// Of those, the ones whose key is in this Mac's Keychain, which cannot be opened anywhere else.
+    var skippedTouchIDBoards = 0
 
     var text: String {
         var text = "Đã sao lưu \(itemCount) mục và \(boardCount) board"
-        let skipped = [
+        var skipped = [
             skippedSensitive > 0 ? "bỏ qua \(skippedSensitive) mục nhạy cảm" : nil,
             skippedTooLarge > 0 ? "\(skippedTooLarge) mục quá lớn" : nil,
             skippedUnreadable > 0 ? "\(skippedUnreadable) mục không đọc được" : nil,
         ].compactMap { $0 }
+        if skippedLockedBoards > 0 {
+            var note = "bỏ qua \(skippedLockedBoards) board đã khoá"
+            if skippedTouchIDBoards > 0 { note += " (board dùng Touch ID chỉ mở được trên máy này nên không đưa vào tệp)" }
+            skipped.append(note)
+        }
+        if lockedBoardCount > 0 { skipped.append("gồm \(lockedBoardCount) board đã khoá, vẫn được mã hoá: cần mật khẩu của từng board để mở") }
         if !skipped.isEmpty { text += " (" + skipped.joined(separator: ", ") + ")" }
         text += "."
         if fileItemCount > 0 {
@@ -143,6 +163,8 @@ nonisolated struct ClipboardBackupRestoreSummary: Sendable, Equatable {
     /// Items of the file that could not be read.
     var unreadable = 0
     var boardsCreated = 0
+    /// Boards with a lock that came back sealed, to be opened with their own password.
+    var lockedBoardsRestored = 0
     /// Added, then removed at once by the history limits in Settings.
     var prunedByLimits = 0
     /// Items that were in the history, removed to make room under the limits.
@@ -153,6 +175,7 @@ nonisolated struct ClipboardBackupRestoreSummary: Sendable, Equatable {
         if duplicates > 0 { parts.append("bỏ qua \(duplicates) trùng lặp") }
         if unreadable > 0 { parts.append("\(unreadable) mục không đọc được") }
         if boardsCreated > 0 { parts.append("tạo \(boardsCreated) board mới") }
+        if lockedBoardsRestored > 0 { parts.append("khôi phục \(lockedBoardsRestored) board đã khoá (mở bằng mật khẩu của nó)") }
         var text = parts.joined(separator: ", ")
         if prunedByLimits > 0 {
             text += ". \(prunedByLimits) mục vượt giới hạn hoặc thời gian giữ trong Cài đặt nên đã bị dọn"
@@ -228,6 +251,18 @@ nonisolated struct ClipboardBackupManifest: Codable, Sendable {
     var createdAt: Date?
     var scope: String?
     var includesSensitive: Bool?
+    /// A board with a lock, as its sealed vault file in `vaults/<id>.vault`. Left out when there are none, so a file without them is
+    /// the file an earlier version wrote, and an earlier version reading one with them ignores the key.
+    struct LockedBoard: Codable, Sendable {
+        var id: UUID
+        var name: String
+        var icon: String?
+        var color: String?
+        /// As the vault file says; shown while it is locked.
+        var itemCount: Int
+    }
+
     var items: [Item]
     var boards: [Board]
+    var lockedBoards: [LockedBoard]?
 }

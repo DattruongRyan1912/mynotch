@@ -73,6 +73,8 @@ struct ClipboardCardMenu: View {
                     get: { pinnedIn.contains(board.id) },
                     set: { $0 ? module.pin(item, to: board.id) : module.unpin(item, from: board.id) }
                 ))
+                // A locked board takes nothing until it is opened.
+                .disabled(board.isLocked)
             }
             if !state.history.boards.isEmpty { Divider() }
             Button("Board mới…", systemImage: "plus", action: onNewBoard)

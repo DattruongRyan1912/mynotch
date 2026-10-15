@@ -64,10 +64,11 @@ final class ClipboardStore {
         return history
     }
 
-    /// Restarts the one-second delay on every call, so changes in a burst are written once with the latest value.
+    /// Restarts the one-second delay on every call, so changes in a burst are written once with the latest value. What is written
+    /// never holds the items of a board that has a lock, whoever asks (they live sealed in the board's vault file).
     func scheduleSave(_ history: ClipboardHistory) {
         version += 1
-        unsaved = (history, version)
+        unsaved = (history.persistable, version)
         needsWrite = true
         saveTimer?.cancel()
         saveTimer = scheduler.schedule(after: Self.saveDelay) { [weak self] in self?.startWrite() }
@@ -128,6 +129,8 @@ final class ClipboardStore {
         let url = directory.appending(path: fileName, directoryHint: .notDirectory)
         guard !FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else { return }
         try pngData.write(to: url, options: .atomic)
+        // Pictures a locked board gives back are written here too: they are for the user to read, and nobody else.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path(percentEncoded: false))
     }
 
     private nonisolated static func isImageFileName(_ fileName: String) -> Bool {

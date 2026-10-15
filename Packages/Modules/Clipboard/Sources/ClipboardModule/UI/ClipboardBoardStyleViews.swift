@@ -35,6 +35,11 @@ struct ClipboardBoardPill: View {
             Image(systemName: board.systemImage)
                 .foregroundStyle(board.color.color(accent: accent))
             Text(board.name)
+            if let lock = board.lock {
+                Image(systemName: lock.isUnlocked ? "lock.open.fill" : "lock.fill")
+                    .font(.system(size: 9))
+                    .accessibilityLabel(lock.isUnlocked ? "đã mở khoá" : "đã khoá")
+            }
         }
         .font(.system(size: 11, weight: .medium))
         .lineLimit(1)

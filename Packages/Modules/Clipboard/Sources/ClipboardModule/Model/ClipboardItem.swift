@@ -36,6 +36,8 @@ nonisolated struct ClipboardBoard: Identifiable, Sendable, Hashable {
     var color: ClipboardBoardColor = .accent
     /// Newest pin first.
     var itemIDs: [UUID]
+    /// nil for an ordinary board. Never stored in `boards.json`: a board is locked when it has a vault file (see `ClipboardVaultFile`).
+    var lock: ClipboardBoardLock?
 }
 
 /// In an extension so the memberwise initializer stays available. The colour is left out of the file while it is the

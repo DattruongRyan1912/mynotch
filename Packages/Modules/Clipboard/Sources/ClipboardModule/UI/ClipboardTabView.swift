@@ -15,12 +15,23 @@ struct ClipboardTabView: View {
     @State private var boardName = ""
     /// Bumped to give the search field the keyboard back once a board name is done.
     @State private var searchFocusRequest = 0
+    /// The form that locks a board, or the confirmation of taking its lock off or deleting it, shown over the cards.
+    @State private var vaultPrompt: ClipboardVaultPrompt?
 
     private var state: ClipboardState { module.state }
 
     /// Menus and the board name field live outside the notch's reach: a click there counts as outside, and the pointer
     /// may leave the notch, so the notch stays pinned while either is shown.
-    private var needsPin: Bool { isMenuOpen || boardEditing != nil }
+    private var needsPin: Bool { isMenuOpen || boardEditing != nil || showsVault }
+
+    /// The board on show when it is locked: its place is taken by the prompt that opens it.
+    private var lockedBoard: ClipboardBoard? {
+        guard let id = state.query.boardID else { return nil }
+        return state.history.boards.first { $0.id == id && $0.isLocked }
+    }
+
+    /// The prompt or form, which has a field to type into and so keeps the notch open.
+    private var showsVault: Bool { vaultPrompt != nil || lockedBoard != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -56,7 +67,12 @@ struct ClipboardTabView: View {
         }
         .onDisappear {
             if needsPin { notch.setPinned(false) }
+            // Open locked boards close when the notch does, if Settings says so.
+            module.notchDidClose()
         }
+        .onChange(of: showsVault) { notch.setPinned(needsPin) }
+        // Looking at an open locked board keeps it open.
+        .onChange(of: state.query.boardID) { module.noteVaultActivity() }
         // The stack's shortcut can start a stack while a board name is being typed, which takes the field away.
         .onChange(of: state.stack.isOn) {
             if state.stack.isOn { finishEditing(commit: false) }
@@ -64,6 +80,7 @@ struct ClipboardTabView: View {
         // The board whose look is being chosen can be deleted from elsewhere (the library), which leaves nothing to choose for.
         .onChange(of: state.history.boards.map(\.id)) { _, ids in
             if case .style(let id) = boardEditing, !ids.contains(id) { finishEditing(commit: false) }
+            if let prompt = vaultPrompt, !ids.contains(prompt.boardID) { vaultPrompt = nil }
         }
         // While the tab is shown: when it appears, then every 2 s, so the hint goes by itself once Accessibility is allowed.
         .task {
@@ -78,7 +95,7 @@ struct ClipboardTabView: View {
     @ViewBuilder private var history: some View {
         HStack(spacing: 8) {
             ClipboardSearchField(
-                text: queryBinding(\.text), takesFocus: boardEditing == nil, focusRequest: searchFocusRequest, onCommand: perform
+                text: queryBinding(\.text), takesFocus: boardEditing == nil && !showsVault, focusRequest: searchFocusRequest, onCommand: perform
             )
             .frame(minWidth: 140)
             ClipboardKindChips(selection: queryBinding(\.kind))
@@ -89,7 +106,8 @@ struct ClipboardTabView: View {
                 boards: state.history.boards, selection: queryBinding(\.boardID), editing: boardEditing, name: $boardName,
                 onEdit: startEditing, onFinish: finishEditing, onDelete: { module.deleteBoard($0) },
                 onMove: { module.moveBoard($0, to: $1) }, onStep: { module.moveBoard($0, by: $1) },
-                onIcon: { module.setBoardIcon($0, to: $1) }, onColor: { module.setBoardColor($0, to: $1) }
+                onIcon: { module.setBoardIcon($0, to: $1) }, onColor: { module.setBoardColor($0, to: $1) },
+                onVault: { vaultPrompt = $0 }, onRelock: { module.relockBoard($0) }
             )
             // The `@` filters the search text holds, as chips that remove them.
             if !state.chips.isEmpty {
@@ -117,7 +135,29 @@ struct ClipboardTabView: View {
             ClipboardStackStartButton(module: module)
         }
         .frame(height: 22)
-        cards
+        if let prompt = vaultPrompt, let board = state.history.boards.first(where: { $0.id == prompt.boardID }) {
+            ClipboardBoardVaultView(
+                module: module, look: .notch, mode: mode(of: prompt), board: board,
+                onDone: { vaultPrompt = nil }, onCancel: { vaultPrompt = nil }
+            )
+            .id(prompt.id)
+            .frame(maxWidth: .infinity, minHeight: ClipboardCardView.size.height, alignment: .topLeading)
+        } else if let board = lockedBoard {
+            // Esc leaves the locked board for the whole history.
+            ClipboardBoardVaultView(module: module, look: .notch, mode: .unlock, board: board, onDone: {}, onCancel: { state.query.boardID = nil })
+                .id(board.id)
+                .frame(maxWidth: .infinity, minHeight: ClipboardCardView.size.height, alignment: .topLeading)
+        } else {
+            cards
+        }
+    }
+
+    private func mode(of prompt: ClipboardVaultPrompt) -> ClipboardBoardVaultView.Mode {
+        switch prompt {
+        case .lock: .setUp
+        case .removeLock: .removeLock
+        case .deleteData: .deleteData
+        }
     }
 
     // MARK: Cards

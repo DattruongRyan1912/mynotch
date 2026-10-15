@@ -155,9 +155,17 @@ struct ClipboardLibraryBoardTile: View {
                 .font(.system(size: 18))
                 .foregroundStyle(board.color.color(accent: accent))
             VStack(alignment: .leading, spacing: 2) {
-                Text(board.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(board.name)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    if let lock = board.lock {
+                        Image(systemName: lock.isUnlocked ? "lock.open.fill" : "lock.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel(lock.isUnlocked ? "đã mở khoá" : "đã khoá")
+                    }
+                }
                 Text("\(count) mục")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)

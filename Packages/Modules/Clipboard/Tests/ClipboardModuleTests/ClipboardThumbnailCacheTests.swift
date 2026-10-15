@@ -31,6 +31,15 @@ import UniformTypeIdentifiers
         return url
     }
 
+    @Test func removingAllForgetsEveryThumbnailEvenTheRecentOnes() async throws {
+        let url = try writePNG(width: 64, height: 64)
+        let cache = ClipboardThumbnailCache()
+        _ = try #require(await cache.thumbnail(for: url))
+        #expect(cache.cachedThumbnail(for: url) != nil)
+        cache.removeAll()
+        #expect(cache.cachedThumbnail(for: url) == nil)
+    }
+
     @Test func theSameFileGivesTheSameImageObject() async throws {
         let url = try writePNG(width: 64, height: 64)
         let cache = ClipboardThumbnailCache()

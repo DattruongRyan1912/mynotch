@@ -43,8 +43,8 @@ extension ClipboardModule {
         let settings = context.settings
         let controller = ClipboardMCPController(
             state: mcp, history: { [weak self] in self?.state.history ?? ClipboardHistory() }, index: state.searchIndex,
-            // Boards cannot be locked yet; when they can, this names the locked ones and their items stay out.
-            lockedBoardIDs: { [] },
+            // Every board that has a lock, open or not: the user opening one to look at it does not let agents read it.
+            lockedBoardIDs: { [weak self] in self?.protectedBoardIDs ?? [] },
             // Asked on every call: turning the feature off stops the next call, even on a connection that is already open.
             isEnabled: { [weak self] in self?.store != nil && settings.value(keys.mcpEnabled) },
             now: now, uptime: ClipboardMCPHelper.ToolRunner.uptime
