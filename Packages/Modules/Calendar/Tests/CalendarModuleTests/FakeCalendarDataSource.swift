@@ -12,6 +12,10 @@ nonisolated final class FakeCalendarDataSource: CalendarDataSource {
         var calendars: [CalendarInfo] = []
         var completedIDs: [String] = []
         var completionFailure: (any Error)?
+        var createdEvents: [NewEvent] = []
+        var createCalls = 0
+        var creationFailure: (any Error)?
+        var createGate: (@Sendable () async -> Void)?
         var eventRanges: [DateInterval] = []
         var eventsGate: (@Sendable () async -> Void)?
         var reminderFetchCount = 0
@@ -45,6 +49,23 @@ nonisolated final class FakeCalendarDataSource: CalendarDataSource {
     var completionFailure: (any Error)? {
         get { state.withLock { $0.completionFailure } }
         set { state.withLock { $0.completionFailure = newValue } }
+    }
+
+    /// What was saved through `createEvent`, in order. Nothing here ever reaches a real calendar.
+    var createdEvents: [NewEvent] { state.withLock { $0.createdEvents } }
+    /// How many saves were asked for, those held by `createGate` or failed included.
+    var createCalls: Int { state.withLock { $0.createCalls } }
+
+    /// Makes `createEvent` throw, like EventKit refusing the save.
+    var creationFailure: (any Error)? {
+        get { state.withLock { $0.creationFailure } }
+        set { state.withLock { $0.creationFailure = newValue } }
+    }
+
+    /// Awaited by every save after it is counted and before it answers, to hold one in the middle of its work.
+    var createGate: (@Sendable () async -> Void)? {
+        get { state.withLock { $0.createGate } }
+        set { state.withLock { $0.createGate = newValue } }
     }
 
     /// Awaited by every events request after it is recorded and before it answers, so a test can hold a refresh in
@@ -99,6 +120,26 @@ nonisolated final class FakeCalendarDataSource: CalendarDataSource {
             if let failure = $0.completionFailure { throw failure }
             $0.completedIDs.append(reminderID)
             $0.reminders.removeAll { $0.id == reminderID }
+        }
+    }
+
+    /// Like the real one, an event saved shows up in the next read of the range.
+    func createEvent(_ new: NewEvent) async throws {
+        let gate = state.withLock { state in
+            state.createCalls += 1
+            return state.createGate
+        }
+        await gate?()
+        try state.withLock { state in
+            if let failure = state.creationFailure { throw failure }
+            guard state.statuses[.calendars] == .granted else { throw CalendarServiceError.accessDenied }
+            state.createdEvents.append(new)
+            let id = "created\(state.createdEvents.count)"
+            state.events.append(AgendaEvent(
+                id: id, calendarItemIdentifier: id, title: new.title, start: new.start, end: new.end, isAllDay: new.isAllDay,
+                calendarID: new.calendarID ?? "work", calendarTitle: "Work", calendarColor: .gray, location: nil, meetingURL: nil,
+                status: .confirmed, myParticipation: .unknown
+            ))
         }
     }
 

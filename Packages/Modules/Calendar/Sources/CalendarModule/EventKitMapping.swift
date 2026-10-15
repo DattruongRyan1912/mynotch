@@ -71,7 +71,10 @@ nonisolated extension AgendaReminder {
 }
 
 nonisolated extension CalendarInfo {
-    init(_ calendar: EKCalendar) {
-        self.init(id: calendar.calendarIdentifier, title: calendar.title, color: RGBAColor(calendar.color))
+    init(_ calendar: EKCalendar, isDefault: Bool = false) {
+        self.init(
+            id: calendar.calendarIdentifier, title: calendar.title, color: RGBAColor(calendar.color),
+            allowsModifications: calendar.allowsContentModifications, isDefaultForNewEvents: isDefault
+        )
     }
 }

@@ -19,6 +19,18 @@ import Testing
         }
     }
 
+    @Test func savingWithoutAccessSaysAccessWasDeniedBeforeTouchingEventKit() async {
+        let event = NewEvent(title: "Họp", start: .now, end: .now.addingTimeInterval(3_600), isAllDay: false, calendarID: nil)
+        await #expect(throws: CalendarServiceError.accessDenied) {
+            try await denied.createEvent(event)
+        }
+        // Write-only access cannot read events, so it counts as denied here too.
+        let notAsked = CalendarService(authorizationStatus: { _ in .notDetermined })
+        await #expect(throws: CalendarServiceError.accessDenied) {
+            try await notAsked.createEvent(event)
+        }
+    }
+
     @Test func authorizationComesFromTheInjectedStatus() {
         let service = CalendarService(authorizationStatus: { $0 == .calendars ? .granted : .notDetermined })
         #expect(service.authorization(for: .calendars) == .granted)

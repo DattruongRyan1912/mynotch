@@ -6,6 +6,8 @@ nonisolated enum CalendarServiceError: Error, Equatable {
     /// Reminders access is missing, so nothing can be read or changed.
     case accessDenied
     case reminderNotFound
+    /// Every calendar is read-only, so there is nowhere to put the event.
+    case noWritableCalendar
 }
 
 /// Carries EventKit's reminders out of its callback thread unchanged: they aren't `Sendable`, and reading them is
@@ -53,7 +55,30 @@ actor CalendarService: CalendarDataSource {
 
     func calendars() async -> [CalendarInfo] {
         guard authorization(for: .calendars) == .granted else { return [] }
-        return store.calendars(for: .event).map(CalendarInfo.init)
+        let defaultID = store.defaultCalendarForNewEvents?.calendarIdentifier
+        return store.calendars(for: .event).map { CalendarInfo($0, isDefault: $0.calendarIdentifier == defaultID) }
+    }
+
+    /// `endDate` of an all-day event is its last second, as Calendar saves it; the value passed in is the start of the next day.
+    func createEvent(_ new: NewEvent) async throws {
+        guard authorization(for: .calendars) == .granted else { throw CalendarServiceError.accessDenied }
+        guard let calendar = writableCalendar(id: new.calendarID) else { throw CalendarServiceError.noWritableCalendar }
+        let event = EKEvent(eventStore: store)
+        event.calendar = calendar
+        event.title = new.title
+        event.isAllDay = new.isAllDay
+        // An all-day event has no zone (it is the same day everywhere); the others are in the one the user typed them in.
+        if !new.isAllDay { event.timeZone = .current }
+        event.startDate = new.start
+        event.endDate = new.isAllDay ? new.end.addingTimeInterval(-1) : new.end
+        try store.save(event, span: .thisEvent, commit: true)
+    }
+
+    /// The chosen calendar if it still exists and takes events, else the system's one for new events, else any that does.
+    private func writableCalendar(id: String?) -> EKCalendar? {
+        if let id, let chosen = store.calendar(withIdentifier: id), chosen.allowsContentModifications { return chosen }
+        if let system = store.defaultCalendarForNewEvents, system.allowsContentModifications { return system }
+        return store.calendars(for: .event).first(where: \.allowsContentModifications)
     }
 
     func complete(reminderID: String) async throws {

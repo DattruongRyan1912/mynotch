@@ -30,6 +30,20 @@ nonisolated enum AgendaFormat {
         return formatted(date, template: "EEEEdM", calendar: calendar, locale: locale)
     }
 
+    /// "Hôm nay · 15:00 – 16:00", "Ngày mai · Cả ngày", "Thứ Sáu, 16/10 · 12:30 – 13:30": when a quick-added event would be.
+    static func when(of draft: QuickAddDraft, now: Date, calendar: Calendar) -> String {
+        let day = dayLabel(for: draft.start, now: now, calendar: calendar) ?? "Hôm nay"
+        guard !draft.isAllDay else { return "\(day) · Cả ngày" }
+        return "\(day) · \(time(draft.start, calendar: calendar)) – \(time(draft.end, calendar: calendar))"
+    }
+
+    /// What the preview says about how the line was read.
+    static func text(of note: QuickAddDraft.Note) -> String {
+        switch note {
+        case .noTime: "Không đọc được giờ nên tạo sự kiện cả ngày."
+        }
+    }
+
     /// "5 phút" before the start, "Đang diễn ra" after it; nil while the activity is hidden.
     static func countdown(_ state: UpcomingMeetingPolicy.State) -> String? {
         switch state {

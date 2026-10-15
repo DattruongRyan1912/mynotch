@@ -33,6 +33,8 @@ struct CalendarSettingsView: View {
                 value: settings.binding(keys.meetingLeadMinutes), in: CalendarSettingsKeys.meetingLeadRange
             )
             Toggle("Hiện sự kiện cả ngày", isOn: settings.binding(keys.showAllDay))
+            daySummaryRows
+            newEventCalendarRow
             calendarRows
         }
         .task(id: accessRevision) { calendars = await loadCalendars() }
@@ -56,6 +58,58 @@ struct CalendarSettingsView: View {
         await RemindersAccess(permissions: permissions).request(openSettingsIfDenied: openSettingsIfDenied)
         accessRevision += 1
         remindersAccessAnswered()
+    }
+
+    // MARK: Day summary
+
+    @ViewBuilder
+    private var daySummaryRows: some View {
+        Toggle(isOn: settings.binding(keys.showDaySummary)) {
+            Text("Hiện tóm tắt trong ngày")
+            Text("Một dòng ở đầu tab Lịch: số sự kiện, khoảng rảnh và giờ kết thúc.")
+        }
+        Stepper(
+            "Bắt đầu làm việc lúc \(Self.clock(workStart))",
+            value: settings.binding(keys.workStartHour), in: 0...(workEnd - 1)
+        )
+        Stepper(
+            "Kết thúc làm việc lúc \(Self.clock(workEnd))",
+            value: settings.binding(keys.workEndHour), in: (workStart + 1)...24
+        )
+    }
+
+    private var workStart: Int { settings.value(keys.workStartHour) }
+    private var workEnd: Int { settings.value(keys.workEndHour) }
+
+    static func clock(_ hour: Int) -> String { String(format: "%02d:00", hour) }
+
+    // MARK: New events
+
+    /// Where an event added with "+" goes. Only calendars that take events are offered; the first choice is the one
+    /// the system uses, which also covers a calendar that has since been deleted.
+    @ViewBuilder
+    private var newEventCalendarRow: some View {
+        let writable = HiddenCalendars.sorted((calendars ?? []).filter(\.allowsModifications))
+        Picker(selection: newEventCalendar(among: writable)) {
+            Text("Lịch mặc định của hệ thống").tag("")
+            ForEach(writable) { calendar in
+                Text(calendar.title).tag(calendar.id)
+            }
+        } label: {
+            Text("Lịch cho sự kiện mới")
+            Text("Nơi lưu sự kiện thêm bằng dấu + trong tab Lịch.")
+        }
+        .disabled(permissions.status(of: .calendars) != .granted)
+    }
+
+    private func newEventCalendar(among writable: [CalendarInfo]) -> Binding<String> {
+        Binding(
+            get: {
+                let chosen = settings.value(keys.defaultCalendarID)
+                return writable.contains { $0.id == chosen } ? chosen : ""
+            },
+            set: { settings.set($0, for: keys.defaultCalendarID) }
+        )
     }
 
     // MARK: Calendars

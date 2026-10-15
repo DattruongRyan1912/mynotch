@@ -13,6 +13,10 @@ struct CalendarActions {
     var requestRemindersAccess: () -> Void
     /// The tab came on screen: access may have changed in Settings while it was away.
     var appeared: () -> Void
+    var openQuickAdd: () -> Void = {}
+    var editQuickAdd: (String) -> Void = { _ in }
+    var saveQuickAdd: () -> Void = {}
+    var cancelQuickAdd: () -> Void = {}
 }
 
 /// Opens a URL for the user and says whether something took it. Injected so tests never launch an app or a browser.
@@ -59,6 +63,9 @@ public final class CalendarModule: FeatureModule {
     private var debounce: ScheduledAction?
     /// Only the newest refresh applies its result: an older one may have read the calendar before a change.
     private var refreshGeneration = 0
+    /// Changes whenever the quick-add field is opened, closed or the module stops, so an answer that comes late
+    /// (the calendars it asked for, the save it waited on) never touches a field that is no longer the one it was for.
+    private var quickAddSession = 0
     /// Reminders the user has ticked whose save hasn't finished: hidden, so a refresh doesn't bring them back early.
     private var completing: Set<String> = []
     /// Number of refreshes whose result was applied, and of requests for one; tests wait on them.
@@ -120,6 +127,7 @@ public final class CalendarModule: FeatureModule {
         debounce = nil
         context = nil
         refreshGeneration += 1
+        quickAddSession += 1
         completing = []
         publishedMeeting = nil
         policy = UpcomingMeetingPolicy(leadMinutes: policy.leadMinutes)
@@ -152,7 +160,11 @@ public final class CalendarModule: FeatureModule {
             dismiss: { [weak self] event in self?.dismissMeeting(event) },
             complete: { [weak self] reminder in self?.context?.run { await self?.complete(reminder) } },
             requestRemindersAccess: { [weak self] in self?.context?.run { await self?.requestRemindersAccess() } },
-            appeared: { [weak self] in self?.tabAppeared() }
+            appeared: { [weak self] in self?.tabAppeared() },
+            openQuickAdd: { [weak self] in self?.openQuickAdd() },
+            editQuickAdd: { [weak self] text in self?.editQuickAdd(text) },
+            saveQuickAdd: { [weak self] in self?.context?.run { await self?.saveQuickAdd() } },
+            cancelQuickAdd: { [weak self] in self?.cancelQuickAdd() }
         )
     }
 
@@ -199,6 +211,65 @@ public final class CalendarModule: FeatureModule {
         guard kept != policy.replies else { return }
         policy.replies = kept
         storeReplies()
+    }
+
+    // MARK: Quick add
+
+    /// "+": opens the field. Already open, it stays as it is, with what was typed.
+    func openQuickAdd() {
+        guard context != nil, state.quickAdd == nil else { return }
+        let canWrite = dataSource.authorization(for: .calendars) == .granted
+        state.quickAdd = QuickAddState(canWrite: canWrite)
+        quickAddSession += 1
+        guard canWrite else { return }
+        let session = quickAddSession
+        context?.run { [weak self] in await self?.loadQuickAddCalendar(session: session) }
+    }
+
+    /// Finds out where the event would go, so the preview can name the calendar before anything is saved.
+    private func loadQuickAddCalendar(session: Int) async {
+        let calendars = await dataSource.calendars()
+        guard session == quickAddSession, let context, state.quickAdd != nil else { return }
+        let chosen = context.settings.value(CalendarSettingsKeys(context.settings).defaultCalendarID)
+        state.quickAdd?.calendar = QuickAddTarget.resolve(chosenID: chosen, in: calendars)
+    }
+
+    /// Reads the line again at every keystroke, with the clock as it is then.
+    func editQuickAdd(_ text: String) {
+        guard var quickAdd = state.quickAdd, quickAdd.canWrite, quickAdd.phase != .saving else { return }
+        quickAdd.text = text
+        quickAdd.draft = QuickAddParser.parse(text, now: clock(), calendar: calendar)
+        quickAdd.phase = .editing
+        state.quickAdd = quickAdd
+    }
+
+    /// Esc: the line is dropped.
+    func cancelQuickAdd() {
+        quickAddSession += 1
+        state.quickAdd = nil
+    }
+
+    /// Return: saves what the preview shows, then reads the calendar so the event is on the list. A line with no title,
+    /// or one already being saved, does nothing; a failure keeps the line so Return can try again.
+    func saveQuickAdd() async {
+        // A draft only exists once `canWrite` let the line be typed.
+        guard let quickAdd = state.quickAdd, quickAdd.phase != .saving, let draft = quickAdd.draft, !draft.title.isEmpty
+        else { return }
+        state.quickAdd?.phase = .saving
+        let session = quickAddSession
+        let event = NewEvent(
+            title: draft.title, start: draft.start, end: draft.end, isAllDay: draft.isAllDay, calendarID: quickAdd.calendar?.id
+        )
+        do {
+            try await dataSource.createEvent(event)
+        } catch {
+            // The title is the user's own text, so it is not logged.
+            context?.logger.error("Could not save a new event: \(String(describing: error), privacy: .public)")
+            if session == quickAddSession { state.quickAdd?.phase = .failed }
+            return
+        }
+        if session == quickAddSession { state.quickAdd = nil }
+        await refresh()
     }
 
     /// Ticks the reminder off in the data source, then reads the list again: a save that failed brings it back.
@@ -264,6 +335,9 @@ public final class CalendarModule: FeatureModule {
         let agenda = AgendaBuilder.build(events: shown, now: now, calendar: calendar)
         if state.now != now { state.now = now }
         if state.agenda != agenda { state.agenda = agenda }
+        let summary = settings.showDaySummary
+            ? DaySummary.text(for: agenda, now: now, workingHours: settings.workingHours, calendar: calendar) : nil
+        if state.daySummary != summary { state.daySummary = summary }
         let section = remindersSection(reminders, settings: settings)
         if state.reminders != section { state.reminders = section }
         appliedRefreshes += 1

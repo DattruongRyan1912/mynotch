@@ -10,6 +10,8 @@ nonisolated protocol CalendarDataSource: Sendable {
     /// The calendars events can come from, for the "hidden calendars" setting. Empty without Calendars access.
     func calendars() async -> [CalendarInfo]
     func complete(reminderID: String) async throws
+    /// Saves a new event. Needs full Calendars access; throws without it or when no calendar can take the event.
+    func createEvent(_ event: NewEvent) async throws
     /// Signals that events or reminders changed, with bursts coalesced. Every access starts a new stream.
     var changes: AsyncStream<Void> { get }
     /// Never prompts. Only `.calendars` and `.reminders` have an answer; anything else is `.denied`.

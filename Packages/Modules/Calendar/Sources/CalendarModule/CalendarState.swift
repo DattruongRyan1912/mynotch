@@ -23,6 +23,10 @@ final class CalendarState {
     /// The same, and the meeting has not started: the card also offers "Báo lại".
     var canSnoozeFeatured = false
     var reminders = RemindersSection.hidden
+    /// The line at the top of the tab; nil when the setting hides it.
+    var daySummary: String?
+    /// The quick-add field; nil while it is closed.
+    var quickAdd: QuickAddState?
     let calendar: Calendar
 
     init(now: Date = .now, calendar: Calendar) {
@@ -46,5 +50,7 @@ final class CalendarState {
         canDismissFeatured = false
         canSnoozeFeatured = false
         reminders = .hidden
+        daySummary = nil
+        quickAdd = nil
     }
 }

@@ -9,27 +9,53 @@ struct CalendarTabView: View {
     static let cardWidth: CGFloat = 216
     /// Left and right space between the card's edge and its text.
     static let cardInset: CGFloat = 10
+    /// The date line, which also holds the "+".
+    static let headerHeight: CGFloat = 19
+    /// The day summary under the date line.
+    static let summaryHeight: CGFloat = 14
     /// What is left for the card: the tab's height less the notch's inner padding (14), the tab bar (30), the date
-    /// line above it (19) and the gap under that line (8).
-    static let cardMaxHeight: CGFloat = height - 14 - 30 - 19 - 8
+    /// line (19), the day summary under it (14, and 1 between) and the gap under that (8).
+    static let cardMaxHeight: CGFloat = height - 14 - 30 - headerHeight - 1 - summaryHeight - 8
 
     let state: CalendarState
     let actions: CalendarActions
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(AgendaFormat.dayHeader(state.now, calendar: state.calendar))
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(NotchTokens.primaryText)
-                .lineLimit(1)
-            HStack(alignment: .top, spacing: 12) {
-                UpcomingCard(state: state, actions: actions)
-                    .frame(width: Self.cardWidth)
-                TodayList(state: state, actions: actions)
+            VStack(alignment: .leading, spacing: 1) {
+                header
+                if state.quickAdd == nil, let summary = state.daySummary {
+                    Text(summary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(NotchTokens.secondaryText)
+                        .lineLimit(1)
+                        .frame(height: Self.summaryHeight, alignment: .leading)
+                }
+            }
+            if let quickAdd = state.quickAdd {
+                QuickAddView(quickAdd: quickAdd, now: state.now, calendar: state.calendar, actions: actions)
+            } else {
+                HStack(alignment: .top, spacing: 12) {
+                    UpcomingCard(state: state, actions: actions)
+                        .frame(width: Self.cardWidth)
+                    TodayList(state: state, actions: actions)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear(perform: actions.appeared)
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text(AgendaFormat.dayHeader(state.now, calendar: state.calendar))
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(NotchTokens.primaryText)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            AddEventButton(isOpen: state.quickAdd != nil, actions: actions)
+        }
+        .frame(height: Self.headerHeight)
     }
 }
 
