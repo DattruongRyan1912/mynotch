@@ -42,6 +42,16 @@ struct ClipboardEditorTextView: NSViewRepresentable {
             textView.string = model.text
             context.coordinator.restyle(textView)
         }
+        Self.applyDroppedState(textView, for: model)
+    }
+
+    /// An editor whose words a lock dropped shows nothing and takes no typing, and forgets what could be undone: the undo stack holds
+    /// the words it replaced, which must not outlive the lock either.
+    static func applyDroppedState(_ textView: NSTextView, for model: ClipboardEditorModel) {
+        textView.isEditable = !model.isDroppedOnLock
+        guard model.isDroppedOnLock else { return }
+        if !textView.string.isEmpty { textView.string = "" }
+        textView.undoManager?.removeAllActions()
     }
 
     /// Plain text, editable, with undo and find, and nothing changed behind the user's back (no smart quotes, dashes or replacements,

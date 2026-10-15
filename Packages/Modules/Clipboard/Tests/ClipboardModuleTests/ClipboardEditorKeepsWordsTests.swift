@@ -211,7 +211,61 @@ extension ClipboardEditorModuleTests {
         #expect(module.relockBoard(board))
 
         #expect(harness.presenter.toastCount == toasts + 1)
+        // And the window says it too, where the user is looking: it stays, empty, with the notice.
+        #expect(editorWindow.isOpen(model.itemID))
+        #expect(model.isDroppedOnLock)
+    }
+
+    @Test func anEditorThatShowsTheLockNoticeIsNotClosedByTheNextChangeOfTheHistory() async throws {
+        await start()
+        let board = try await openBoard(holding: [Self.secretText])
+        let model = try openEditor(on: Self.secretText)
+        model.text = Self.secretText + "-đang gõ dở"
+        #expect(module.relockBoard(board))
+        let toasts = harness.presenter.toastCount
+
+        copy("một mục thường")
+        copy("một mục khác")
+
+        #expect(editorWindow.isOpen(model.itemID))
+        #expect(model.isDroppedOnLock)
+        #expect(module.editors.open.count == 1)
+        // Said once, not at every change of the history.
+        #expect(harness.presenter.toastCount == toasts)
+    }
+
+    @Test func stoppingClosesAnEditorThatShowsTheLockNotice() async throws {
+        await start()
+        let board = try await openBoard(holding: [Self.secretText])
+        let model = try openEditor(on: Self.secretText)
+        model.text = Self.secretText + "-đang gõ dở"
+        #expect(module.relockBoard(board))
+
+        await stop()
+
         #expect(!editorWindow.isOpen(model.itemID))
+        #expect(module.editors.open.isEmpty)
+        #expect(!reload().items.contains { $0.content.plainText?.contains("đang gõ dở") == true })
+    }
+
+    @Test func aWipeIsNotTypingSoLockingOneBoardDoesNotKeepAnotherOpenLonger() async throws {
+        await start()
+        let first = try await openBoard(holding: ["bí mật của hai"])
+        copy("bí mật của ba")
+        let second = try #require(module.createBoard(named: "Két ba"))
+        module.pin(try item("bí mật của ba"), to: second)
+        try await module.lockBoard(second, setup: .password(Self.password))
+        try await module.unlockBoard(second, credential: .password(Self.password))
+        let model = try openEditor(on: "bí mật của hai")
+        model.text += "x"
+        // Both boards were opened about now; 200 s later the first locks under the editor, with unsaved words.
+        harness.scheduler.advance(by: .seconds(200))
+        system.now = system.now.addingTimeInterval(200)
+        #expect(module.relockBoard(first))
+
+        // The wipe is not the user working in the other board: its idle time runs out when it was meant to.
+        harness.scheduler.advance(by: .seconds(150))
+        #expect(try #require(history.boards.first { $0.id == second }).isLocked)
     }
 
     @Test func aLockWithNothingUnsavedSaysNothing() async throws {
@@ -237,8 +291,8 @@ extension ClipboardEditorModuleTests {
 
         #expect(module.relockBoard(board))
 
-        #expect(!editorWindow.isOpen(model.itemID))
-        #expect(model.text.isEmpty)
+        #expect(model.text.isEmpty && model.isDroppedOnLock)
+        #expect(editorWindow.isOpen(model.itemID))
     }
 
     @Test func afterTheLockIsRemovedTheItemIsOrdinaryAgainAndItsWordsAreKept() async throws {

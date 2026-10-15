@@ -91,10 +91,12 @@ extension ClipboardModule {
             model.isProtected = history.protectedItemIDs.contains(item.id)
             model.wasSensitive = item.isSensitive
         } else if model.isProtected {
-            let hadWords = model.hasEditedWords
+            // An editor that already shows the notice has said it: later changes of the history leave it be until it is closed.
+            guard !model.isDroppedOnLock else { return }
             model.itemGone()
-            // Without a word of what it was: only that an edit was dropped.
-            if hadWords { showToast(ClipboardEditorModel.droppedOnLockNotice, systemImage: "lock.fill") }
+            // The editor shows the notice itself, for the user who is looking at it; the toast is for one who is not. Without a word of
+            // what it was in either: only that an edit was dropped.
+            if model.isDroppedOnLock { showToast(ClipboardEditorModel.droppedOnLockNotice, systemImage: "lock.fill") }
         } else {
             model.originalGone()
         }

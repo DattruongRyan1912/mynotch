@@ -39,6 +39,9 @@ final class ClipboardEditorModel {
     /// The item left the history (pruned, deleted, cleared) while it was edited and it was not a secret: the words here are all that is
     /// left of it. They stay, and only a new item can hold them.
     private(set) var isOriginalGone = false
+    /// The item was a secret of a board that locked while it had unsaved words: they are wiped, and the editor stays, empty and read-only,
+    /// with a lasting caption saying so, until the user closes it.
+    private(set) var isDroppedOnLock = false
 
     @ObservationIgnored private let saveAction: Save
     @ObservationIgnored private let closeAction: () -> Void
@@ -108,12 +111,17 @@ final class ClipboardEditorModel {
     }
 
     /// The item of a locked board is no longer in the history: there is nothing to save to or ask about, and the words must not
-    /// outlive the lock, so the editor closes at once and lets go of them.
+    /// outlive the lock, so the editor lets go of them at once. With nothing unsaved it closes. With edited words it stays, empty, to
+    /// say what happened where the user is looking (`isDroppedOnLock`), and closes when they do. Wiping is not typing: it must not
+    /// count as activity, which would keep another open board from locking when it should.
     func itemGone() {
+        guard !isDroppedOnLock else { return }
+        onActivity = nil
         isConfirmingDiscard = false
+        let hadWords = hasEditedWords
         originalText = ""
         text = ""
-        closeNow()
+        if hadWords { isDroppedOnLock = true } else { closeNow() }
     }
 
     private func closeNow() {
@@ -126,6 +134,8 @@ final class ClipboardEditorModel {
     static let originalGoneNotice = "Mục gốc không còn trong lịch sử. Nội dung này vẫn lưu được thành mục mới."
     /// What a toast says when a lock closes an editor that had unsaved words: that, and nothing of the words or of the item.
     static let droppedOnLockNotice = "Board đã khoá nên bản sửa chưa lưu đã bị bỏ"
+    /// The lasting caption of an editor whose words a lock dropped: the same, and what can be done.
+    static let droppedOnLockCaption = droppedOnLockNotice + ". Mở khoá board rồi sửa lại nếu cần."
 
     static func words(for outcome: ClipboardEditOutcome) -> String? {
         switch outcome {
@@ -133,7 +143,8 @@ final class ClipboardEditorModel {
         case .unchanged: "Nội dung chưa thay đổi."
         case .blank: "Nội dung đang trống."
         case .tooLarge: "Nội dung quá dài: tối đa 2 MB."
-        case .duplicate: "Đã có một mục khác với đúng nội dung này. Chọn “Lưu thành mục mới” để đưa mục đó lên đầu."
+        case .duplicate:
+            "Đã có một mục khác với đúng nội dung này, nên chưa lưu được. Hãy sửa nội dung cho khác đi, hoặc chép nội dung này (⌘A, ⌘C) để dùng ở nơi khác."
         case .missing: "Mục gốc không còn trong lịch sử, nên không thay thế được."
         case .locked: "Không lưu được: mục này đang nằm trong board đã khoá."
         case .notEditable: "Loại mục này không sửa được."

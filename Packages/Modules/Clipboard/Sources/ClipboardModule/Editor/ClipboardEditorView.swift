@@ -8,7 +8,16 @@ struct ClipboardEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             ClipboardEditorTextView(model: model)
-            // Not the notice: a key clears that, and this stays true for as long as the editor is open.
+            // Not the notice: a key clears that, and these stay true for as long as the editor is open.
+            if model.isDroppedOnLock {
+                Label(ClipboardEditorModel.droppedOnLockCaption, systemImage: "lock.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .accessibilityAddTraits(.updatesFrequently)
+            }
             if model.isOriginalGone {
                 Label(ClipboardEditorModel.originalGoneNotice, systemImage: "info.circle.fill")
                     .font(.system(size: 12))
@@ -57,7 +66,7 @@ struct ClipboardEditorView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
-            Button("Huỷ") { model.cancel() }
+            Button(model.isDroppedOnLock ? "Đóng" : "Huỷ") { model.cancel() }
                 .help("Esc")
             Button("Thay thế mục này") { model.save(.replace) }
                 .keyboardShortcut("s", modifiers: [.command, .option])

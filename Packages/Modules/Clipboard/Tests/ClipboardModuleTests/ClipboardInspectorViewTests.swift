@@ -153,6 +153,49 @@ import Testing
         #expect(textView.writingToolsBehavior == .none)
     }
 
+    @Test func anEditorWhoseWordsWereDroppedOnALockShowsNothingTakesNoTypingAndForgetsWhatCouldBeUndone() throws {
+        let item = ClipboardItem(id: UUID(), content: .text("bí mật"), contentHash: "h", copiedAt: Self.start)
+        let model = ClipboardEditorModel(item: item, text: "bí mật", isProtected: true, save: { _, _ in .stopped }, close: {})
+        let scroll = NSTextView.scrollableTextView()
+        let textView = try #require(scroll.documentView as? NSTextView)
+        ClipboardEditorTextView.configure(textView)
+        // The text view takes its undo manager from the window it is in, which is never shown.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: true)
+        window.contentView = scroll
+        textView.string = "bí mật"
+        textView.insertText(" thêm", replacementRange: NSRange(location: 6, length: 0))
+        model.text = textView.string
+        #expect(textView.isEditable)
+        #expect(textView.undoManager?.canUndo == true)
+
+        model.text += "!"
+        model.itemGone()
+        ClipboardEditorTextView.applyDroppedState(textView, for: model)
+
+        #expect(model.isDroppedOnLock)
+        #expect(textView.string.isEmpty)
+        #expect(!textView.isEditable)
+        #expect(textView.undoManager?.canUndo == false)
+    }
+
+    @Test func anEditorThatIsNotDroppedIsLeftAlone() throws {
+        let model = editorModel()
+        let textView = try #require(NSTextView.scrollableTextView().documentView as? NSTextView)
+        ClipboardEditorTextView.configure(textView)
+        textView.string = "Xin chào"
+        ClipboardEditorTextView.applyDroppedState(textView, for: model)
+        #expect(textView.isEditable && textView.string == "Xin chào")
+    }
+
+    @Test func theEditorIsBuiltForTheStateAfterALockDroppedItsWords() {
+        let item = ClipboardItem(id: UUID(), content: .text("bí mật"), contentHash: "h", copiedAt: Self.start)
+        let model = ClipboardEditorModel(item: item, text: "bí mật", isProtected: true, save: { _, _ in .stopped }, close: {})
+        model.text = "bí mật đã sửa"
+        model.itemGone()
+        #expect(model.isDroppedOnLock)
+        #expect(size(of: ClipboardEditorView(model: model).environment(\.notchAccent, .cyan)).width >= 440)
+    }
+
     @Test func theMonospacedToggleChoosesAFixedWidthFont() {
         #expect(ClipboardEditorTextView.font(monospaced: true).isFixedPitch)
         #expect(!ClipboardEditorTextView.font(monospaced: false).isFixedPitch)

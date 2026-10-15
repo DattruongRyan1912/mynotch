@@ -102,7 +102,7 @@ import Testing
         answer = .duplicate(UUID())
         model.save(.replace)
         #expect(closed == 0)
-        #expect(model.notice?.contains("Lưu thành mục mới") == true)
+        #expect(model.notice?.contains("sửa") == true)
         // Typing again clears it, and saving as new is still there.
         model.text = "Xin chào bạn ơi"
         #expect(model.notice == nil)
@@ -280,15 +280,71 @@ import Testing
 
     // MARK: The item going away
 
-    @Test func whenTheItemIsGoneTheEditorClosesAtOnceAndForgetsItsWords() {
+    @Test func whenTheItemIsGoneTheEditorForgetsItsWordsAndStaysOnlyToSaySo() {
         let model = make()
         model.text = "bí mật đã sửa dở"
         model.itemGone()
-        #expect(closed == 1)
-        // Nothing to ask about: the words are dropped, as a locked board's must be.
+        // The words are dropped, as a locked board's must be; the window stays, empty, so the user is told.
         #expect(model.text.isEmpty && model.originalText.isEmpty)
-        #expect(!model.isConfirmingDiscard)
+        #expect(model.isDroppedOnLock && closed == 0)
+        #expect(!model.isConfirmingDiscard && !model.hasChanges && !model.canSave)
         #expect(saves.isEmpty)
+        // Closing it is plain: nothing is left to ask about.
+        #expect(model.windowShouldClose())
+        model.cancel()
+        #expect(closed == 1)
+    }
+
+    @Test func whenTheItemIsGoneAndNothingWasEditedTheEditorJustCloses() {
+        let model = make()
+        model.itemGone()
+        #expect(closed == 1)
+        #expect(!model.isDroppedOnLock)
+        #expect(model.text.isEmpty && model.originalText.isEmpty)
+    }
+
+    @Test func theItemGoingAwayTwiceDoesNotCloseAnEditorThatShowsTheNotice() {
+        let model = make()
+        model.text = "bí mật đã sửa dở"
+        model.itemGone()
+        model.itemGone()
+        #expect(model.isDroppedOnLock && closed == 0)
+    }
+
+    @Test func aWipeIsNotTypingEvenForAProtectedItem() {
+        var notes = 0
+        let item = ClipboardItem(id: UUID(), content: .text("bí mật"), contentHash: "h", copiedAt: Self.start)
+        let secret = ClipboardEditorModel(item: item, text: "bí mật", isProtected: true, save: { _, _ in .stopped }, close: {})
+        secret.onActivity = { notes += 1 }
+        secret.text = "bí mật 1"
+        #expect(notes == 1)
+        secret.itemGone()
+        #expect(notes == 1)
+        #expect(secret.text.isEmpty)
+    }
+
+    @Test func theNoticeWordsForADroppedEditAreLastingAndSayNothingOfTheWords() {
+        let caption = ClipboardEditorModel.droppedOnLockCaption
+        #expect(caption.hasPrefix(ClipboardEditorModel.droppedOnLockNotice))
+        #expect(caption.contains("khoá"))
+        for word in ["BÍ-MẬT", "mật khẩu", "Xin chào"] { #expect(!caption.contains(word)) }
+    }
+
+    @Test func theDuplicateNoticeSaysWhatHappenedAndWhatToDoWithoutNamingAButton() {
+        let model = make()
+        model.text = "khác"
+        answer = .duplicate(UUID())
+        model.save(.saveAsNew)
+        let notice = model.notice ?? ""
+        // What happened, and the two things left to do: change the words, or take them elsewhere.
+        #expect(notice.contains("đã có") || notice.contains("Đã có"))
+        #expect(notice.contains("sửa") && notice.contains("chép"))
+        // Neither button is named: one of them is the action that was just refused.
+        #expect(!notice.contains("Lưu thành mục mới") && !notice.contains("Thay thế mục này"))
+        model.text = "khác nữa"
+        model.save(.replace)
+        let again = model.notice ?? ""
+        #expect(again == notice)
     }
 
     // MARK: Keys

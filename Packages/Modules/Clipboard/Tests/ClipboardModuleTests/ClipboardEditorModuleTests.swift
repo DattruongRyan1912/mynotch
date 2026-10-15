@@ -309,7 +309,8 @@ final class FakeEditorWindow: ClipboardEditorWindowing {
         model.save(.replace)
 
         #expect(history == before)
-        #expect(model.notice?.contains("Lưu thành mục mới") == true)
+        #expect(model.notice?.contains("sửa") == true && model.notice?.contains("chép") == true)
+        #expect(model.notice?.contains("Lưu thành mục mới") == false)
         #expect(editorWindow.isOpen(model.itemID))
         // Saving as new is the way: it brings the other item to the top.
         model.save(.saveAsNew)
@@ -452,7 +453,7 @@ final class FakeEditorWindow: ClipboardEditorWindowing {
         #expect(!reload().items.contains { $0.content.plainText?.contains(Self.secretText) == true })
     }
 
-    @Test func lockingTheBoardClosesTheEditorAndDropsTheSecretWords() async throws {
+    @Test func lockingTheBoardWipesTheSecretWordsAndTheEditorStaysToSaySo() async throws {
         await start()
         let board = try await openBoard(holding: [Self.secretText])
         let model = try openEditor(on: Self.secretText)
@@ -460,12 +461,49 @@ final class FakeEditorWindow: ClipboardEditorWindowing {
 
         #expect(module.relockBoard(board))
 
-        #expect(!editorWindow.isOpen(model.itemID))
+        // The words are gone from the editor and the history; the window stays, empty, with the notice, so the user sees why.
         #expect(model.text.isEmpty && model.originalText.isEmpty)
+        #expect(model.isDroppedOnLock)
+        #expect(editorWindow.isOpen(model.itemID))
         #expect(!model.isConfirmingDiscard)
-        #expect(module.editors.open.isEmpty)
+        #expect(!model.hasChanges && !model.canSave)
         // Once locked there is no item to edit: it is not in the history at all.
         #expect(history.items.isEmpty)
+
+        // Closing it is plain: nothing is left to lose.
+        model.cancel()
+        #expect(!editorWindow.isOpen(model.itemID))
+        #expect(module.editors.open.isEmpty)
+        #expect(state.historyObserverCount == 0)
+    }
+
+    @Test func lockingTheBoardClosesAnEditorThatHadNothingUnsaved() async throws {
+        await start()
+        let board = try await openBoard(holding: [Self.secretText])
+        let model = try openEditor(on: Self.secretText)
+
+        #expect(module.relockBoard(board))
+
+        #expect(!editorWindow.isOpen(model.itemID))
+        #expect(!model.isDroppedOnLock)
+        #expect(model.text.isEmpty && module.editors.open.isEmpty)
+    }
+
+    @Test func savingAsNewFromASecretWhoseWordsAnotherItemHasIsRefusedAndTheEditorSaysWhyWithoutPointingAtTheButton() async throws {
+        await start()
+        copy("một mục thường")
+        _ = try await openBoard(holding: [Self.secretText])
+        let model = try openEditor(on: Self.secretText)
+        model.text = "một mục thường"
+
+        model.save(.saveAsNew)
+
+        #expect(editorWindow.isOpen(model.itemID))
+        let notice = try #require(model.notice)
+        #expect(!notice.contains("Lưu thành mục mới") && !notice.contains("Thay thế"))
+        #expect(!notice.contains("một mục thường") && !notice.contains(Self.secretText))
+        // Nothing was pinned or moved: the ordinary item is where it was.
+        #expect(history.boards.first { $0.name == "Két" }?.itemIDs.count == 1)
     }
 
     @Test func aLockedBoardsItemIsRefusedWhereverItIsStillListed() async throws {
