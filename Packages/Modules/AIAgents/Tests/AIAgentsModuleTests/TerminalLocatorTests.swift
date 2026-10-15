@@ -26,12 +26,29 @@ func process(_ pid: pid_t, parent: pid_t, tty: String? = nil, path: String? = ni
         "/Applications/Cursor.app": "com.todesktop.230313mzl4w4u92",
         "/Applications/Ghostty.app": "com.mitchellh.ghostty",
         "/Applications/Warp.app": "dev.warp.Warp-Stable",
+        "/Applications/WezTerm.app": "com.github.wez.wezterm",
+        "/Applications/Claude.app": "com.anthropic.claudefordesktop",
+        "/Applications/Codex.app": "com.openai.codex",
     ]
+    let iTermServer = "/Users/x/Library/Application Support/iTerm2/iTermServer-3.5.0"
 
-    func locate(_ pid: pid_t, _ table: FakeProcessTable) -> TerminalTarget? {
-        TerminalLocator.locate(pid: pid, table: table) { bundleIDs[$0.path] }
+    /// `running` are the app folders that are running apps; all the known ones unless a test says which.
+    func find(_ pid: pid_t, _ table: FakeProcessTable, running: Set<String>? = nil) -> TerminalLocator.Found {
+        let running = running ?? Set(bundleIDs.keys)
+        let ids = bundleIDs
+        return TerminalLocator(
+            table: table, bundleIdentifier: { ids[$0.path] }, isRunning: { running.contains($0.path) },
+            runningApp: { id in ids.first { running.contains($0.key) && $0.value == id }.map { URL(filePath: $0.key, directoryHint: .isDirectory) } }
+        ).find(pid: pid)
     }
 
+    func locate(_ pid: pid_t, _ table: FakeProcessTable, running: Set<String>? = nil) -> TerminalTarget? {
+        find(pid, table, running: running).target
+    }
+
+    // MARK: Terminal.app and iTerm2
+
+    /// The shape of a real Terminal.app tab, read from the process table: zsh on the tab's tty, the root-owned `login` and the app.
     @Test func terminalAppIsFoundThroughTheShellAndLogin() throws {
         let table = FakeProcessTable(
             process(500, parent: 400, tty: "ttys003", path: "/Users/x/.local/bin/claude"),
@@ -45,17 +62,53 @@ func process(_ pid: pid_t, parent: pid_t, tty: String? = nil, path: String? = ni
         #expect(target.tty == "/dev/ttys003")
     }
 
-    @Test func iTermIsFoundThroughItsServerProcess() throws {
+    /// iTerm2 runs the jobs of its sessions in `iTermServer`, a copy in its Application Support folder, outside the app bundle and
+    /// outliving it (its parent is launchd): the chain from the agent never meets the `.app`.
+    @Test func iTermIsFoundThroughItsServerThatLivesOutsideTheApp() throws {
         let table = FakeProcessTable(
             process(500, parent: 400, tty: "ttys011", path: "/opt/homebrew/bin/node"),
-            process(400, parent: 350, tty: "ttys011", path: "/bin/zsh"),
-            process(350, parent: 1, path: "/Applications/iTerm.app/Contents/MacOS/iTermServer-3.5.0")
+            process(400, parent: 300, tty: "ttys011", path: "/bin/zsh"),
+            process(300, parent: 200, tty: "ttys011", path: "/usr/bin/login"),
+            process(200, parent: 1, path: iTermServer)
         )
         let target = try #require(locate(500, table))
         #expect(target.kind == .iTerm)
         #expect(target.app.path == "/Applications/iTerm.app")
         #expect(target.tty == "/dev/ttys011")
     }
+
+    @Test func iTermIsFoundWhicheverWayTheServerSitsBetweenTheShellAndLaunchd() throws {
+        for chain in [
+            [process(500, parent: 400, tty: "ttys011", path: "/bin/claude"), process(400, parent: 200, tty: "ttys011", path: "/bin/zsh"), process(200, parent: 1, path: iTermServer)],
+            [process(500, parent: 400, tty: "ttys011", path: "/bin/claude"), process(400, parent: 300, tty: "ttys011", path: "/bin/zsh"), process(300, parent: 200, path: iTermServer), process(200, parent: 1, path: "/Applications/iTerm.app/Contents/MacOS/iTerm2")],
+        ] {
+            var table = FakeProcessTable()
+            for entry in chain { table.entries[entry.pid] = entry }
+            let target = try #require(locate(500, table))
+            #expect(target.kind == .iTerm)
+            #expect(target.tty == "/dev/ttys011")
+        }
+    }
+
+    @Test func aServerOfAnITermThatIsNotRunningIsNotATerminalToFind() {
+        let table = FakeProcessTable(process(500, parent: 400, tty: "ttys011", path: "/bin/claude"), process(400, parent: 1, path: iTermServer))
+        let found = find(500, table, running: [])
+        #expect(found.target == nil)
+        #expect(found.tty == "/dev/ttys011")
+    }
+
+    @Test func theServerIsRecognisedByItsNameWhereverItLives() {
+        #expect(TerminalLocator.isITermServer("/Users/x/Library/Application Support/iTerm2/iTermServer-3.5.0"))
+        #expect(TerminalLocator.isITermServer("/Applications/iTerm.app/Contents/MacOS/iTermServer-3.4.20"))
+        #expect(TerminalLocator.isITermServer("/tmp/iTermServer"))
+        #expect(!TerminalLocator.isITermServer("/usr/bin/login"))
+        #expect(!TerminalLocator.isITermServer("/tmp/myiTermServer"))
+        #expect(!TerminalLocator.isITermServer("/tmp/iTermServer/inside/zsh"))
+        #expect(!TerminalLocator.isITermServer(nil))
+        #expect(!TerminalLocator.isITermServer(""))
+    }
+
+    // MARK: Editors and other terminals
 
     @Test func anEditorsTerminalLeadsToTheEditorAppNotItsHelper() throws {
         let table = FakeProcessTable(
@@ -73,31 +126,89 @@ func process(_ pid: pid_t, parent: pid_t, tty: String? = nil, path: String? = ni
         ("/Applications/Cursor.app/Contents/MacOS/Cursor", "/Applications/Cursor.app", TerminalTarget.Kind.editor),
         ("/Applications/Ghostty.app/Contents/MacOS/ghostty", "/Applications/Ghostty.app", .other),
         ("/Applications/Warp.app/Contents/MacOS/stable", "/Applications/Warp.app", .other),
+        ("/Applications/WezTerm.app/Contents/MacOS/wezterm-gui", "/Applications/WezTerm.app", .other),
         ("/Applications/Unknown Term.app/Contents/MacOS/term", "/Applications/Unknown Term.app", .other),
     ])
     func otherAppsAreFoundAndOnlyEditorsAreTold(path: String, app: String, kind: TerminalTarget.Kind) throws {
         let table = FakeProcessTable(process(500, parent: 400, tty: "ttys001", path: "/bin/codex"), process(400, parent: 1, path: path))
-        let target = try #require(locate(500, table))
+        let target = try #require(locate(500, table, running: [app]))
         #expect(target.app.path == app)
         #expect(target.kind == kind)
     }
 
-    @Test func aSessionInsideTmuxOrAnyDaemonHasNoTerminalToFind() {
+    /// Ghostty on macOS starts the shell through `login` (its configuration reference says so), like Terminal.app does.
+    @Test func ghosttyIsFoundThroughLogin() throws {
+        let table = FakeProcessTable(
+            process(500, parent: 400, tty: "ttys002", path: "/bin/claude"), process(400, parent: 300, tty: "ttys002", path: "/bin/zsh"),
+            process(300, parent: 200, tty: "ttys002", path: "/usr/bin/login"),
+            process(200, parent: 1, path: "/Applications/Ghostty.app/Contents/MacOS/ghostty")
+        )
+        let target = try #require(locate(500, table))
+        #expect(target.app.path == "/Applications/Ghostty.app")
+        #expect(target.kind == .other)
+    }
+
+    /// Warp, WezTerm and any terminal that runs its jobs in a helper or a daemon from inside its own bundle are found by that
+    /// bundle, as long as the app is running; their process trees are not documented, so only where the binaries live is used.
+    @Test func aJobHostInsideTheBundleOfARunningAppIsThatApp() throws {
+        for (host, app) in [
+            ("/Applications/Warp.app/Contents/MacOS/stable", "/Applications/Warp.app"),
+            ("/Applications/WezTerm.app/Contents/MacOS/wezterm-mux-server", "/Applications/WezTerm.app"),
+        ] {
+            let table = FakeProcessTable(
+                process(500, parent: 400, tty: "ttys004", path: "/bin/claude"), process(400, parent: 300, tty: "ttys004", path: "/bin/zsh"),
+                process(300, parent: 1, path: host)
+            )
+            #expect(try #require(locate(500, table)).app.path == app)
+            #expect(locate(500, table, running: []) == nil)
+        }
+    }
+
+    /// The shape of a real session of the Claude desktop app, read from the process table: the `claude` it downloads is itself in
+    /// an `.app` folder, but it is not a running app, so the walk goes on to the app above it.
+    @Test func aToolInsideAnAppFolderThatIsNotARunningAppDoesNotStandInForTheTerminal() throws {
+        let table = FakeProcessTable(
+            process(500, parent: 480, path: "/Users/x/Library/Application Support/Claude/claude-code/2.1.295/9d6405864fdc/claude.app/Contents/MacOS/claude"),
+            process(480, parent: 470, path: "/Applications/Claude.app/Contents/Helpers/disclaimer"),
+            process(470, parent: 1, path: "/Applications/Claude.app/Contents/MacOS/Claude")
+        )
+        let target = try #require(locate(500, table))
+        #expect(target.app.path == "/Applications/Claude.app")
+        #expect(target.kind == .other)
+        #expect(target.tty == nil)
+    }
+
+    @Test func theTerminalInsideAnotherAppIsThatApp() throws {
+        let table = FakeProcessTable(
+            process(500, parent: 400, tty: "ttys001", path: "/bin/claude"), process(400, parent: 300, tty: "ttys001", path: "/bin/zsh"),
+            process(300, parent: 200, path: "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper"),
+            process(200, parent: 1, path: "/Applications/Claude.app/Contents/MacOS/Claude")
+        )
+        let target = try #require(locate(500, table))
+        #expect(target.app.path == "/Applications/Claude.app")
+        #expect(target.tty == "/dev/ttys001")
+    }
+
+    // MARK: No app above the agent
+
+    @Test func aSessionInsideTmuxOrAnyDaemonHasNoAppButKeepsItsTty() {
         let table = FakeProcessTable(
             process(500, parent: 400, tty: "ttys005", path: "/bin/claude"),
             process(400, parent: 300, tty: "ttys005", path: "/bin/zsh"),
             process(300, parent: 1, path: "/opt/homebrew/bin/tmux")
         )
-        #expect(locate(500, table) == nil)
+        let found = find(500, table)
+        #expect(found.target == nil)
+        #expect(found.tty == "/dev/ttys005")
     }
 
     @Test func aMissingProcessOrNoPidFindsNothing() {
         let table = FakeProcessTable(process(500, parent: 400, path: "/bin/claude"))
-        #expect(locate(500, table) == nil)
-        #expect(locate(9, table) == nil)
-        #expect(locate(1, table) == nil)
-        #expect(locate(0, table) == nil)
-        #expect(locate(-3, table) == nil)
+        #expect(find(500, table) == TerminalLocator.Found(target: nil, tty: nil))
+        #expect(find(9, table) == TerminalLocator.Found(target: nil, tty: nil))
+        #expect(find(1, table) == TerminalLocator.Found(target: nil, tty: nil))
+        #expect(find(0, table) == TerminalLocator.Found(target: nil, tty: nil))
+        #expect(find(-3, table) == TerminalLocator.Found(target: nil, tty: nil))
     }
 
     @Test func aLoopInTheTableEndsTheSearch() {
@@ -127,13 +238,16 @@ func process(_ pid: pid_t, parent: pid_t, tty: String? = nil, path: String? = ni
                 process(500, parent: 400, tty: bad, path: "/bin/claude"),
                 process(400, parent: 1, path: "/Applications/iTerm.app/Contents/MacOS/iTerm2")
             )
-            #expect(try #require(locate(500, table)).tty == nil, "\(bad)")
+            let found = find(500, table)
+            #expect(try #require(found.target).tty == nil, "\(bad)")
+            #expect(found.tty == nil, "\(bad)")
         }
     }
 
-    @Test func anAgentInsideAnAppIsThatAppsOwn() throws {
+    @Test func anAgentInsideARunningAppIsThatAppsOwn() throws {
         let table = FakeProcessTable(process(500, parent: 1, path: "/Applications/Codex.app/Contents/Resources/codex"))
-        #expect(try #require(locate(500, table)).app.path == "/Applications/Codex.app")
+        #expect(try #require(locate(500, table, running: ["/Applications/Codex.app"])).app.path == "/Applications/Codex.app")
+        #expect(locate(500, table, running: []) == nil)
     }
 
     @Test func aFolderThatMerelyLooksLikeAnAppIsNotOne() {
@@ -164,16 +278,43 @@ func process(_ pid: pid_t, parent: pid_t, tty: String? = nil, path: String? = ni
         #expect(entry.executablePath?.hasPrefix("/") == true)
     }
 
+    /// `login` between a terminal app and the shell belongs to root, and `proc_pidinfo` refuses it; the kernel's process list, which
+    /// `ps` reads, does not. The init process is root's too.
+    @Test func aProcessOfAnotherUserIsReadableToo() throws {
+        let launchd = try #require(SystemProcessTable().entry(pid: 1))
+        #expect(launchd.parentPID == 0)
+        #expect(launchd.executablePath == "/sbin/launchd")
+        #expect(launchd.tty == nil)
+    }
+
     @Test func aPidThatIsNotThereIsNoEntry() {
         #expect(SystemProcessTable().entry(pid: 0) == nil)
         #expect(SystemProcessTable().entry(pid: -1) == nil)
         #expect(SystemProcessTable().entry(pid: 2_000_000_000) == nil)
     }
 
-    @Test func theChainFromTheTestProcessEndsAtTheInitProcessWithoutLooping() {
+    @Test func theChainFromTheTestProcessReachesTheInitProcessWithoutLooping() {
         var pid = getpid()
         var seen: Set<pid_t> = []
-        while pid > 1, let entry = SystemProcessTable().entry(pid: pid), seen.insert(pid).inserted, seen.count < 64 { pid = entry.parentPID }
-        #expect(seen.count < 64)
+        var reachedInit = false
+        while let entry = SystemProcessTable().entry(pid: pid), seen.insert(pid).inserted, seen.count < 64 {
+            if pid == 1 { reachedInit = true }
+            pid = entry.parentPID
+        }
+        #expect(reachedInit)
+    }
+
+    /// A pseudo-terminal of the test's own, which no terminal app owns: the name of its device is what the table would report.
+    @Test func aTerminalDeviceIsNamedLikeTheTabsTty() throws {
+        let master = posix_openpt(O_RDWR | O_NOCTTY)
+        try #require(master >= 0)
+        defer { close(master) }
+        try #require(grantpt(master) == 0 && unlockpt(master) == 0)
+        let path = String(cString: try #require(ptsname(master)))
+        var status = stat()
+        try #require(stat(path, &status) == 0)
+        #expect("/dev/" + (SystemProcessTable.ttyName(of: status.st_rdev) ?? "") == path)
+        #expect(TerminalScript.isDevicePath(path))
+        #expect(SystemProcessTable.ttyName(of: -1) == nil)
     }
 }

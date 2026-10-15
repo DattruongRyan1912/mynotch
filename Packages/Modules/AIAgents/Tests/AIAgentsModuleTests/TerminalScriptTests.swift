@@ -24,6 +24,27 @@ import Testing
         #expect(script.contains(#"return "none""#))
     }
 
+    /// A tab without a tty, or one that closes while the search runs, raises an error that must not end the whole search.
+    @Test func aTabThatCannotBeReadIsSkippedNotFatal() throws {
+        for kind in [TerminalTarget.Kind.terminal, .iTerm] {
+            let script = try #require(TerminalScript.selectTab(of: kind, tty: "/dev/ttys003"))
+            let lines = script.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            let tryLine = try #require(lines.firstIndex(of: "try"))
+            let compare = try #require(lines.firstIndex { $0.hasPrefix("if tty of") })
+            let found = try #require(lines.firstIndex { $0.hasPrefix("return \"\(TerminalScript.found)\"") })
+            let end = try #require(lines.lastIndex(of: "end try"))
+            #expect(tryLine < compare && compare < found && found < end, "\(kind)")
+        }
+    }
+
+    @Test func aMinimisedTerminalWindowIsBroughtBackBeforeItIsRaised() throws {
+        let script = try #require(TerminalScript.selectTab(of: .terminal, tty: "/dev/ttys003"))
+        let miniaturized = try #require(script.range(of: "set miniaturized of w to false"))
+        let index = try #require(script.range(of: "set index of w to 1"))
+        #expect(miniaturized.lowerBound < index.lowerBound)
+        #expect(!(try #require(TerminalScript.selectTab(of: .iTerm, tty: "/dev/ttys003"))).contains("miniaturized"))
+    }
+
     @Test func neitherScriptEverTypesRunsOrClosesAnything() throws {
         for kind in [TerminalTarget.Kind.terminal, .iTerm] {
             let script = try #require(TerminalScript.selectTab(of: kind, tty: "/dev/ttys003"))

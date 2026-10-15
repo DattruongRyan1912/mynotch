@@ -138,6 +138,39 @@ import Testing
         #expect(machine.steps.last == .activated("/System/Applications/Utilities/Terminal.app"))
     }
 
+    @Test func aRunningTerminalThatCannotBeAskedOpensTheFolderAsBeforeAndShowsTheHintOnce() async {
+        machine.running = ["/Applications/iTerm.app", "/System/Applications/Utilities/Terminal.app"]
+        machine.scriptQueue = [.notPermitted, .value("none"), .notPermitted, .value("none")]
+        let tmux = FakeProcessTable(
+            process(500, parent: 400, tty: "ttys005", path: "/bin/claude"), process(400, parent: 1, path: "/opt/homebrew/bin/tmux")
+        )
+        let (module, _) = await start(table: tmux)
+        session(module)
+        #expect(await module.jump(to: key) == false)
+        #expect(opener.terminal.map(\.path) == [sandbox.directory.path])
+        #expect(module.jumpHint.message == AgentJumpHint.automationDenied)
+
+        module.jumpHint.dismiss()
+        #expect(await module.jump(to: key))
+        #expect(opener.terminal.count == 2)
+        #expect(module.jumpHint.message == nil)
+    }
+
+    @Test func anITermSessionIsFoundThroughItsServerAndTheNotchCloses() async {
+        machine.running = ["/Applications/iTerm.app"]
+        let iTerm = FakeProcessTable(
+            process(500, parent: 400, tty: "ttys011", path: "/bin/claude"), process(400, parent: 300, tty: "ttys011", path: "/bin/zsh"),
+            process(300, parent: 200, tty: "ttys011", path: "/usr/bin/login"),
+            process(200, parent: 1, path: "/Users/example/Library/Application Support/iTerm2/iTermServer-3.5.0")
+        )
+        let (module, _) = await start(table: iTerm)
+        session(module)
+        #expect(await module.jump(to: key))
+        #expect(machine.scripts.first?.contains("com.googlecode.iterm2") == true)
+        #expect(machine.steps.last == .activated("/Applications/iTerm.app"))
+        #expect(opener.terminal.isEmpty)
+    }
+
     @Test func theHintTellsWhereToAllowItAndNamesNoApp() {
         #expect(AgentJumpHint.automationDenied.contains("Tự động hóa"))
         #expect(AgentJumpHint.automationDenied.contains("Cài đặt hệ thống"))

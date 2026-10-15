@@ -219,6 +219,10 @@ public final class AIAgentsModule: FeatureModule {
         let session = store?.sessions[key]
         switch await jumper.jump(pid: session?.pid, folder: AgentOpener.directory(for: session?.cwd)) {
         case .notFound: return openInTerminal(cwd: session?.cwd)
+        case .notFoundWithoutAutomation:
+            // A running terminal could not be asked: the folder opens as for any session that has none, and the hint says why.
+            let opened = openInTerminal(cwd: session?.cwd)
+            return showAutomationHint() ? false : opened
         case .activatedAppWithoutAutomation: return !showAutomationHint()
         case .selectedTab, .activatedApp, .openedFolder: return true
         }

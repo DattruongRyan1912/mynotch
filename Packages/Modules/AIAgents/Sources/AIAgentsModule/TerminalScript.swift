@@ -22,11 +22,16 @@ nonisolated enum TerminalScript {
             tell application id "com.apple.Terminal"
                 repeat with w in windows
                     repeat with t in tabs of w
-                        if tty of t is "\(tty)" then
-                            set selected tab of w to t
-                            set index of w to 1
-                            return "\(found)"
-                        end if
+                        try
+                            if tty of t is "\(tty)" then
+                                try
+                                    set miniaturized of w to false
+                                end try
+                                set selected tab of w to t
+                                set index of w to 1
+                                return "\(found)"
+                            end if
+                        end try
                     end repeat
                 end repeat
             end tell
@@ -38,12 +43,14 @@ nonisolated enum TerminalScript {
                 repeat with w in windows
                     repeat with t in tabs of w
                         repeat with s in sessions of t
-                            if tty of s is "\(tty)" then
-                                select w
-                                select t
-                                select s
-                                return "\(found)"
-                            end if
+                            try
+                                if tty of s is "\(tty)" then
+                                    select w
+                                    select t
+                                    select s
+                                    return "\(found)"
+                                end if
+                            end try
                         end repeat
                     end repeat
                 end repeat
