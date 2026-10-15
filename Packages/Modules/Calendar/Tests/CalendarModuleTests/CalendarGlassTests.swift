@@ -30,6 +30,8 @@ import Testing
                 host.frame = CGRect(origin: .zero, size: size)
                 let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
                 window.isReleasedWhenClosed = false
+                // AppKit controls follow the window's appearance, not SwiftUI's colour scheme.
+                window.appearance = NSAppearance(named: scheme == .light ? .aqua : .darkAqua)
                 window.contentView = host
                 host.layoutSubtreeIfNeeded()
                 let bitmap = try #require(NSBitmapImageRep(
