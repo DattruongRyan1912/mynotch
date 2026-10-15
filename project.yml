@@ -122,7 +122,7 @@ targets:
         NSCalendarsFullAccessUsageDescription: "MyNotch hiển thị lịch sắp tới trong notch."
         NSRemindersFullAccessUsageDescription: "MyNotch hiển thị lời nhắc trong notch."
         NSBluetoothAlwaysUsageDescription: "MyNotch hiển thị pin của thiết bị Bluetooth trong notch."
-        NSAppleEventsUsageDescription: "MyNotch điều khiển ứng dụng khác, ví dụ trình phát nhạc, từ notch."
+        NSAppleEventsUsageDescription: "MyNotch điều khiển ứng dụng khác từ notch, ví dụ trình phát nhạc, hoặc Terminal và iTerm để mở đúng tab của một phiên AI."
         NSMicrophoneUsageDescription: "MyNotch dùng micro cho các tính năng ghi âm trong notch."
         NSAudioCaptureUsageDescription: "MyNotch hiển thị phổ âm thanh của nhạc đang phát."
         NSDesktopFolderUsageDescription: "MyNotch lưu ảnh chụp màn hình vào Desktop khi bạn chọn."
