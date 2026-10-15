@@ -107,3 +107,43 @@ func eventually(_ condition: () -> Bool) async {
 func settle() async {
     for _ in 0..<50 { await Task.yield() }
 }
+
+/// Waits for work that runs on another thread (reading a text for quantities) to make `condition` true, which yielding
+/// to the main actor cannot wait for. Bounded at two seconds.
+func eventuallyOnAnotherThread(_ condition: () -> Bool) async {
+    for _ in 0..<400 where !condition() { try? await Task.sleep(for: .milliseconds(5)) }
+}
+
+/// Reads quantities like the real recognizer and records every call, on which thread, so tests can see when a text is
+/// read and that it is not on the main thread. The first call can be held until `release()`, like a slow reading.
+nonisolated final class SpyRecognizer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var texts: [String] = []
+    private var threads: [Bool] = []
+    private var held: DispatchSemaphore?
+    private var hasHeld = false
+
+    var calls: [String] { lock.withLock { texts } }
+    var ranOnTheMainThread: Bool { lock.withLock { threads.contains(true) } }
+
+    func holdFirstCall() {
+        lock.withLock { held = DispatchSemaphore(value: 0) }
+    }
+
+    func release() {
+        lock.withLock { held }?.signal()
+    }
+
+    func recognize(_ text: String, _ currency: Bool) -> Recognition {
+        let semaphore: DispatchSemaphore? = lock.withLock {
+            texts.append(text)
+            threads.append(Thread.isMainThread)
+            guard let held, !hasHeld else { return nil }
+            hasHeld = true
+            return held
+        }
+        // Bounded, so a reading that wrongly runs on the thread that has to release it fails the test instead of hanging it.
+        _ = semaphore?.wait(timeout: .now() + 3)
+        return QuantityRecognizer.recognize(text, currency: currency)
+    }
+}

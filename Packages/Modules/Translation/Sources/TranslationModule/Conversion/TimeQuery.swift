@@ -1,15 +1,17 @@
 import Foundation
 
-/// A time of day, with the zone it was written in (nil when it had none, which means the user's own).
-struct TimeQuery: Equatable {
+/// A time of day and the zone it was written in.
+nonisolated struct TimeQuery: Equatable {
     var hour: Int
     var minute: Int
-    var zone: TimeZone?
+    var zone: TimeZone
 }
 
-/// Reads a whole text as a time of day and optionally a zone: "3pm PST", "15:00 UTC+9", "9h sáng giờ Tokyo", "9:30 AM",
-/// "21h30", "8 giờ tối giờ Hà Nội". Hours are 24-hour unless "am"/"pm" or a Vietnamese part of the day follows.
-enum TimeQueryParser {
+/// Reads a whole text as a time of day with its zone: "3pm PST", "15:00 UTC+9", "9h sáng giờ Tokyo", "9:30 AM EST",
+/// "8 giờ tối theo giờ Hà Nội". Hours are 24-hour unless "am"/"pm" or a Vietnamese part of the day follows. The zone is
+/// required, and must be one `TimeZoneCatalog.explicitZone` accepts: a time alone ("10:30", "5h", "3pm") has nothing to
+/// convert from, and is as likely a score, a duration or a ratio.
+nonisolated enum TimeQueryParser {
     private enum DayPart: String, CaseIterable {
         case morning = "sang", noon = "trua", afternoon = "chieu", evening = "toi", night = "dem", lateNight = "khuya"
 
@@ -28,11 +30,13 @@ enum TimeQueryParser {
         }
     }
 
-    /// With `requiresZone`, a time without a zone is refused: "7 am" inside a sentence is no reason to convert anything.
-    static func parse(_ text: String, requiresZone: Bool = false) -> TimeQuery? {
+    static func parse(_ text: String) -> TimeQuery? {
         // Every form has a colon or a word ("h", "giờ", "pm"); the scan of running text asks this about every number.
         guard text.contains(where: { $0.isLetter || $0 == ":" }) else { return nil }
-        let characters = Array(text.folded.trimmingCharacters(in: .whitespacesAndNewlines))
+        let raw = Array(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        // Matched on the folded text, so the zone is read from the written one, whose capitals matter.
+        let characters = Array(String(raw).folded)
+        guard characters.count == raw.count else { return nil }
         guard let (hour, afterHour) = readInt(characters, from: 0, maxDigits: 2) else { return nil }
         var index = afterHour
         var minute = 0
@@ -81,11 +85,7 @@ enum TimeQueryParser {
         }
         guard let hour24, (0...23).contains(hour24), (0...59).contains(minute) else { return nil }
 
-        let rest = String(characters[min(index, characters.count)...])
-        if rest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return requiresZone ? nil : TimeQuery(hour: hour24, minute: minute, zone: nil)
-        }
-        guard let zone = TimeZoneCatalog.zone(named: rest) else { return nil }
+        guard let zone = TimeZoneCatalog.explicitZone(String(raw[min(index, raw.count)...])) else { return nil }
         return TimeQuery(hour: hour24, minute: minute, zone: zone)
     }
 

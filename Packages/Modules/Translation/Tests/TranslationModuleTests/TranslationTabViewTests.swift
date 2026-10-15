@@ -77,6 +77,7 @@ import Testing
         let tab = try #require(fixture.module.makeTab())
         let translator = try #require(fixture.module.translator)
         translator.submit("72 °F")
+        await fixture.translated()
         let hosting = NSHostingView(rootView: AnyView(tab.content.frame(width: 452, height: 176)))
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 452, height: 176), styleMask: .borderless, backing: .buffered, defer: true)
         window.contentView = hosting

@@ -1,18 +1,19 @@
 import Foundation
 
-enum UnitCategory: CaseIterable {
+nonisolated enum UnitCategory: CaseIterable {
     case length, mass, temperature, volume, area, speed, data
 }
 
 /// The two ways a quantity can be written: for data, decimal (KB, MB) and binary (KiB, MiB).
-enum UnitSystem {
+nonisolated enum UnitSystem {
     case metric, us
 
     var other: UnitSystem { self == .metric ? .us : .metric }
 }
 
-/// A unit `Measurement` can convert, with the symbol results show.
-struct MeasureUnit: Equatable {
+/// A unit `Measurement` can convert, with the symbol results show. `Dimension` is a class, but these are never changed
+/// after they are made, so they may be used from any thread.
+nonisolated struct MeasureUnit: Equatable, @unchecked Sendable {
     let id: String
     let symbol: String
     let category: UnitCategory
@@ -31,7 +32,7 @@ struct MeasureUnit: Equatable {
 }
 
 /// The units the quick convert knows and the words people write them with, English and Vietnamese.
-enum UnitCatalog {
+nonisolated enum UnitCatalog {
     struct Match {
         var unit: MeasureUnit
         /// Safe to look for inside running text: not a single letter ("5 m", "5 c") and not "in" ("2 in a row").
@@ -59,9 +60,14 @@ enum UnitCatalog {
     static let kelvin = unit("temperature.k", "K", .temperature, UnitTemperature.kelvin)
 
     static let milliliter = unit("volume.ml", "ml", .volume, UnitVolume.milliliters)
+    static let centiliter = unit("volume.cl", "cl", .volume, UnitVolume.centiliters)
+    static let deciliter = unit("volume.dl", "dl", .volume, UnitVolume.deciliters)
     static let liter = unit("volume.l", "l", .volume, UnitVolume.liters)
     static let fluidOunce = unit("volume.floz", "fl oz", .volume, UnitVolume.fluidOunces)
-    static let cup = unit("volume.cup", "cup", .volume, UnitVolume.cups)
+    /// Eight US fluid ounces, as recipes say. Foundation's cup is the metric 240 ml, which would make "1 cup" 8,12 fl oz.
+    static let cup = unit(
+        "volume.cup", "cup", .volume, UnitVolume(symbol: "cup", converter: UnitConverterLinear(coefficient: 8 * 0.0295735295625))
+    )
     static let tablespoon = unit("volume.tbsp", "tbsp", .volume, UnitVolume.tablespoons)
     static let teaspoon = unit("volume.tsp", "tsp", .volume, UnitVolume.teaspoons)
     static let pint = unit("volume.pt", "pt", .volume, UnitVolume.pints)
@@ -99,14 +105,21 @@ enum UnitCatalog {
         MeasureUnit(id: id, symbol: symbol, category: category, dimension: dimension)
     }
 
+    /// Words that are also units: "12 pt font", "5 ký tên", "5 kt", "2 gigs tonight". They count in running text only
+    /// when nothing else is said, so they are units on their own and not inside a sentence.
+    private static let ambiguousWords: Set<String> = ["in", "pt", "ky", "ki", "gig", "gigs", "kt"]
+
     /// The unit written as `text` (what follows the number): case, accents, spaces after a degree sign and dots do not
-    /// matter, so "Sq. Ft." is "sq ft" and "mét" is "met". Only a capital B is a byte, since "b" is a bit.
-    static func match(_ text: String) -> Match? {
+    /// matter, so "Sq. Ft." is "sq ft" and "mét" is "met". Two letters are read by their case: a capital B is a byte
+    /// ("b" is a bit), and a capital K after a space is kelvin ("300 K"). A lower-case "k" is never kelvin: "50k" is fifty
+    /// thousand and "5k" a race. `afterSpace` says whether a space came between the number and the unit.
+    static func match(_ text: String, afterSpace: Bool = true) -> Match? {
         let words = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         if words == "B" { return Match(unit: byte, isUnambiguous: false) }
+        if words == "K" { return afterSpace ? Match(unit: kelvin, isUnambiguous: false) : nil }
         let key = words.folded.replacing(".", with: "").replacing("º", with: "°").replacing("° ", with: "°")
         guard let unit = aliases[key] else { return nil }
-        return Match(unit: unit, isUnambiguous: key.count >= 2 && key != "in")
+        return Match(unit: unit, isUnambiguous: key.count >= 2 && !ambiguousWords.contains(key))
     }
 
     private static let aliases: [String: MeasureUnit] = {
@@ -133,8 +146,10 @@ enum UnitCatalog {
                 "°f", "f", "℉", "fahrenheit", "độ f", "độ ép", "degree f", "degrees f", "degree fahrenheit",
                 "degrees fahrenheit", "độ fahrenheit", "deg f",
             ]),
-            (kelvin, ["k", "kelvin", "°k", "độ k"]),
+            (kelvin, ["kelvin", "°k", "độ k"]),
             (milliliter, ["ml", "milliliter", "milliliters", "millilitre", "millilitres", "mililít", "mi-li-lít"]),
+            (centiliter, ["cl", "centiliter", "centiliters", "centilitre", "centilitres", "xăng-ti-lít"]),
+            (deciliter, ["dl", "deciliter", "deciliters", "decilitre", "decilitres", "đề-xi-lít"]),
             (liter, ["l", "liter", "liters", "litre", "litres", "lít", "lit"]),
             (fluidOunce, ["fl oz", "floz", "fluid ounce", "fluid ounces"]),
             (cup, ["cup", "cups"]),

@@ -1,13 +1,13 @@
 import Foundation
 
 /// An amount of money: "$12", "12 USD", "100.000đ", "5 triệu đồng".
-struct MoneyAmount: Equatable {
+nonisolated struct MoneyAmount: Equatable {
     var value: Decimal
     /// ISO 4217 code.
     var currency: String
 }
 
-enum CurrencyCatalog {
+nonisolated enum CurrencyCatalog {
     /// What can be read and chosen as the target: the common currencies of the rates source.
     static let codes = [
         "VND", "USD", "EUR", "GBP", "JPY", "KRW", "CNY", "SGD", "THB", "AUD", "CAD", "CHF", "HKD", "INR", "IDR", "MYR", "PHP", "TWD", "NZD",
@@ -28,13 +28,13 @@ enum CurrencyCatalog {
     }
 }
 
-private extension String {
+nonisolated private extension String {
     var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
 }
 
 /// Reads a whole text as an amount of money, with the currency before ("$12", "USD 12") or after ("12 USD", "12€",
 /// "100.000đ"). Dong also takes the way people write thousands and millions: "50k đ", "5 triệu đồng", "2 tỷ VND".
-enum CurrencyParser {
+nonisolated enum CurrencyParser {
     /// Longest first, so "US$" is not read as "$".
     private static let symbolPrefixes: [(String, String)] = [
         ("US$", "USD"), ("HK$", "HKD"), ("NZ$", "NZD"), ("CA$", "CAD"), ("S$", "SGD"), ("A$", "AUD"), ("C$", "CAD"), ("$", "USD"),

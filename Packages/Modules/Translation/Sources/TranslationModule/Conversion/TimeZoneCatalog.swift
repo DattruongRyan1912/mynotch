@@ -1,7 +1,7 @@
 import Foundation
 
 /// Names of time zones as people write them next to a time: "PST", "UTC+9", "Tokyo", "giờ Hà Nội".
-enum TimeZoneCatalog {
+nonisolated enum TimeZoneCatalog {
     /// A zone by abbreviation, offset ("UTC+9", "GMT-05:30"), city or country in English or Vietnamese, or IANA name.
     /// "giờ", "in", "at" and a trailing "time" are ignored.
     ///
@@ -17,6 +17,32 @@ enum TimeZoneCatalog {
         if let offset = fixedOffset(name) { return offset }
         if let identifier = names[name] { return TimeZone(identifier: identifier) }
         return identifiers[name.replacing(" ", with: "_")].flatMap { TimeZone(identifier: $0) }
+    }
+
+    /// A zone the text names unmistakably, which is all a time inside a sentence may rely on:
+    ///
+    /// - a capital abbreviation ("PST", "ICT") or an offset ("UTC+9", "gmt-5:30") or an IANA name ("Asia/Tokyo");
+    /// - "giờ" or "theo giờ" and a place ("giờ Tokyo", "giờ Nga");
+    /// - a place and "time" ("Tokyo time", "Russia time").
+    ///
+    /// A bare place never counts, since "Nga" is Russia and a common name, "anh" is England and "elder brother", "ý" is Italy
+    /// and "meaning", and "west" is a direction. Lower-case abbreviations ("pst", "et", "west") are words as well.
+    static func explicitZone(_ text: String) -> TimeZone? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "()[],-–:;.")))
+        let words = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard let first = words.first else { return nil }
+        if words.count == 1 {
+            if let offset = fixedOffset(first.folded), first.folded != "z" { return offset }
+            if first == "Z" { return TimeZone(identifier: "GMT") }
+            if first == first.uppercased(), let identifier = abbreviations[first.folded] { return TimeZone(identifier: identifier) }
+            return first.contains("/") ? identifiers[first.folded].flatMap { TimeZone(identifier: $0) } : nil
+        }
+        let folded = words.map(\.folded)
+        if folded[0] == "gio" || (folded[0] == "theo" && folded[1] == "gio") {
+            return zone(named: words.joined(separator: " "))
+        }
+        if folded.last == "time" { return zone(named: words.dropLast().joined(separator: " ")) }
+        return nil
     }
 
     /// "UTC", "GMT+7", "utc-03:30", "utc+0530", "z".
@@ -82,9 +108,9 @@ enum TimeZoneCatalog {
         Dictionary(TimeZone.knownTimeZoneIdentifiers.map { ($0.folded, $0) }, uniquingKeysWith: { first, _ in first })
     }()
 
-    /// Folded name to IANA identifier.
-    private static let names: [String: String] = {
-        let abbreviations: [String: [String]] = [
+    /// Abbreviation (folded, as in "pst") to IANA identifier.
+    private static let abbreviations: [String: String] = {
+        let table: [String: [String]] = [
             "America/Los_Angeles": ["pst", "pdt", "pt"],
             "America/Denver": ["mst", "mdt", "mt"],
             "America/Chicago": ["cst", "cdt", "ct"],
@@ -112,6 +138,15 @@ enum TimeZoneCatalog {
             "Africa/Johannesburg": ["sast"],
             "America/Sao_Paulo": ["brt"],
         ]
+        var result: [String: String] = [:]
+        for (identifier, names) in table {
+            for name in names { result[name] = identifier }
+        }
+        return result
+    }()
+
+    /// Folded name to IANA identifier: the abbreviations and the places.
+    private static let names: [String: String] = {
         let places: [String: [String]] = [
             "Asia/Ho_Chi_Minh": ["Hà Nội", "Hanoi", "Sài Gòn", "Saigon", "Hồ Chí Minh", "Ho Chi Minh", "TP HCM", "TPHCM", "HCM", "Đà Nẵng", "Da Nang", "Việt Nam", "Vietnam"],
             "Asia/Tokyo": ["Tokyo", "Tôkyô", "Đông Kinh", "Osaka", "Kyoto", "Nhật", "Nhật Bản", "Japan"],
@@ -149,8 +184,8 @@ enum TimeZoneCatalog {
             "Pacific/Honolulu": ["Honolulu", "Hawaii"],
             "UTC": ["Universal"],
         ]
-        var table: [String: String] = [:]
-        for (identifier, names) in abbreviations.merging(places, uniquingKeysWith: +) {
+        var table = abbreviations
+        for (identifier, names) in places {
             for name in names { table[name.folded] = identifier }
         }
         return table

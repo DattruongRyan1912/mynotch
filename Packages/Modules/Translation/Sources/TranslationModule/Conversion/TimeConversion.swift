@@ -1,7 +1,7 @@
 import Foundation
 
 /// What time conversions need to know about the moment and the user.
-struct TimeEnvironment {
+nonisolated struct TimeEnvironment {
     var now: Date
     /// The zone of the Mac: where a time without a zone is, and the first result for one with a zone.
     var local: TimeZone
@@ -9,12 +9,12 @@ struct TimeEnvironment {
     var zones: [TimeZone]
 }
 
-enum TimeConversion {
+nonisolated enum TimeConversion {
     /// The time in the user's zone and the chosen ones, with the day it falls on when that is not the day it was written
     /// for. The day is today's date in the zone the time was written in, so "3pm PST" is the 3pm of the Pacific
     /// calendar day now, and daylight saving is the one in force on that day.
     static func conversion(for query: TimeQuery, source text: String, in environment: TimeEnvironment) -> Conversion {
-        let source = query.zone ?? environment.local
+        let source = query.zone
         var sourceCalendar = Calendar(identifier: .gregorian)
         sourceCalendar.timeZone = source
         var day = sourceCalendar.dateComponents([.year, .month, .day], from: environment.now)
@@ -23,10 +23,9 @@ enum TimeConversion {
         guard let instant = sourceCalendar.date(from: day) else { return Conversion(source: text, outcome: .lines([])) }
         let sourceOffset = source.secondsFromGMT(for: instant)
 
-        var targets: [(zone: TimeZone, label: String)] = []
-        if query.zone != nil {
-            targets.append((environment.local, "Giờ máy · " + TimeZoneCatalog.offsetText(environment.local.secondsFromGMT(for: instant))))
-        }
+        var targets: [(zone: TimeZone, label: String)] = [
+            (environment.local, "Giờ máy · " + TimeZoneCatalog.offsetText(environment.local.secondsFromGMT(for: instant)))
+        ]
         targets += environment.zones.map { ($0, TimeZoneCatalog.label(for: $0, at: instant)) }
 
         var lines: [ConversionLine] = []
@@ -36,9 +35,7 @@ enum TimeConversion {
             guard shownOffsets.insert(target.zone.secondsFromGMT(for: instant)).inserted else { continue }
             lines.append(ConversionLine(label: target.label, text: clock(of: instant, in: target.zone, comparedWith: day)))
         }
-        let note = query.zone.map {
-            "Hiểu là " + String(format: "%02d:%02d", query.hour, query.minute) + ", " + TimeZoneCatalog.label(for: $0, at: instant)
-        }
+        let note = "Hiểu là " + String(format: "%02d:%02d", query.hour, query.minute) + ", " + TimeZoneCatalog.label(for: source, at: instant)
         return Conversion(source: text, outcome: .lines(lines), note: note)
     }
 

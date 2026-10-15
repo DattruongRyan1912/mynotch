@@ -90,7 +90,8 @@ public final class TranslationModule: FeatureModule {
             now: conversion.environment.now
         )
         let converter = QuickConverter(
-            settings: context.settings, keys: TranslationKeys(context.settings), rates: rates, environment: conversion.environment
+            settings: context.settings, keys: TranslationKeys(context.settings), rates: rates, environment: conversion.environment,
+            recognize: conversion.recognize
         )
         translator = Translator(
             state: state, engine: engine, converter: converter, scheduler: context.scheduler, settings: context.settings,

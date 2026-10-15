@@ -1,7 +1,7 @@
 import Foundation
 
 /// One result under a conversion, with the copy button of its own.
-struct ConversionLine: Equatable {
+nonisolated struct ConversionLine: Equatable {
     /// What the result is for, such as the time zone; nil when the conversion needs no label.
     var label: String?
     /// The result as the line shows it, and as its copy button copies it.
@@ -9,7 +9,7 @@ struct ConversionLine: Equatable {
 }
 
 /// What the quick convert found in the text, and what it came to.
-struct Conversion: Equatable {
+nonisolated struct Conversion: Equatable {
     enum Outcome: Equatable {
         case lines([ConversionLine])
         /// Currency: waiting for the day's rates.

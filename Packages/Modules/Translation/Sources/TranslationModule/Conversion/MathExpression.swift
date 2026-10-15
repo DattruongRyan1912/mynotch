@@ -1,6 +1,6 @@
 import Foundation
 
-enum MathError: Error, Equatable {
+nonisolated enum MathError: Error, Equatable {
     case empty, syntax, divisionByZero
     /// Too big for a result, or not a real number (the root of a negative one).
     case outOfRange
@@ -8,7 +8,7 @@ enum MathError: Error, Equatable {
 }
 
 /// What an expression came to.
-struct MathResult: Equatable {
+nonisolated struct MathResult: Equatable {
     var value: Decimal
     /// False for a bare number, "(5)", "-5" or "50%": nothing was calculated, so there is nothing to show.
     var usesOperator: Bool
@@ -28,7 +28,7 @@ struct MathResult: Equatable {
 ///
 /// "%" between two operands is the remainder ("17 % 5"); after one it is a percent, which in a sum is a percent of
 /// the left side ("100 + 10%" is 110) and a hundredth elsewhere ("200 * 15%" is 30).
-enum MathExpression {
+nonisolated enum MathExpression {
     static let maxLength = 200
     static let maxDepth = 64
     /// Whole exponents up to this size are worked out exactly; larger ones go through floating point.
@@ -115,8 +115,8 @@ enum MathExpression {
             while let token = next, token == .plus || token == .minus {
                 position += 1
                 let right = try parseTerm()
-                // "100 + 10%" adds a tenth of the 100.
-                let amount = right.isPercent ? left.plain * right.value / 100 : right.plain
+                // "100 + 10%" adds a tenth of the 100, but "10% + 5%" adds two percents: 15%.
+                let amount = right.isPercent && !left.isPercent ? left.plain * right.value / 100 : right.plain
                 left = Operand(value: try check(token == .plus ? left.plain + amount : left.plain - amount))
                 operations += 1
             }

@@ -1,36 +1,65 @@
 import Foundation
 
-extension Character {
+nonisolated extension Character {
     /// Only 0 to 9: `isNumber` also accepts "²" and the digits of other scripts.
     var isASCIIDigit: Bool { ("0"..."9").contains(self) }
 }
 
 /// Numbers as a Vietnamese reader writes and expects them: "." between thousands and "," before the decimals.
 /// Reading accepts both conventions, since selected text may use either.
-enum VietnameseNumber {
+nonisolated enum VietnameseNumber {
     /// From this size up, results are shown as "1,5e15": plain digits stop being readable.
     private static let scientificFrom = 1e15
 
+    /// Spaces that group thousands, written as a space, a no-break space, a narrow no-break space or a thin space.
+    private static let groupSpaces: Set<Character> = [" ", "\u{00A0}", "\u{202F}", "\u{2009}"]
+
     /// The number that starts at `start` and the index just after it; nil when none starts there or its separators
-    /// make no sense ("15.10.2024" is a date, not a number). A separator not followed by a digit ends the number.
+    /// make no sense ("15.10.2024" is a date, not a number). A separator not followed by a digit ends the number, and a
+    /// space belongs to it only as a group of exactly three digits ("1 500", "12 345 678"): any other digits after a
+    /// space are another number, never a continuation.
     static func scan(_ characters: [Character], from start: Int) -> (value: Decimal, end: Int)? {
         guard start >= 0, start < characters.count, characters[start].isASCIIDigit else { return nil }
         var end = start
+        var token = ""
         while end < characters.count {
             let character = characters[end]
-            let continues = character.isASCIIDigit
-                || ((character == "." || character == ",") && end + 1 < characters.count && characters[end + 1].isASCIIDigit)
-            guard continues else { break }
+            if character.isASCIIDigit {
+                token.append(character)
+            } else if (character == "." || character == ","), end + 1 < characters.count, characters[end + 1].isASCIIDigit {
+                token.append(character)
+            } else if groupSpaces.contains(character), startsAGroup(characters, spaceAt: end, after: token) {
+                token.append(" ")
+            } else {
+                break
+            }
             end += 1
         }
-        guard let value = interpret(String(characters[start..<end])) else { return nil }
+        guard let value = interpret(token) else { return nil }
         return (value, end)
+    }
+
+    /// Whether the space at `index` is followed by the next group of a number written so far as `token`: three digits and
+    /// no fourth, after one to three digits that do not begin with 0 (or after a group of three), and before any point
+    /// or comma.
+    private static func startsAGroup(_ characters: [Character], spaceAt index: Int, after token: String) -> Bool {
+        guard !token.contains("."), !token.contains(",") else { return false }
+        let runs = token.split(separator: " ", omittingEmptySubsequences: false)
+        guard let last = runs.last else { return false }
+        if runs.count == 1 {
+            guard (1...3).contains(last.count), last.first != "0" else { return false }
+        } else {
+            guard last.count == 3 else { return false }
+        }
+        guard index + 3 < characters.count, (1...3).allSatisfy({ characters[index + $0].isASCIIDigit }) else { return false }
+        return !(index + 4 < characters.count && characters[index + 4].isASCIIDigit)
     }
 
     /// A lone separator before exactly three digits (and not after a leading zero) is a thousands separator, because
     /// "100.000đ" and "1,000" are far more common than three decimals. Otherwise it is the decimal separator. With
     /// both kinds present, the last one is the decimal separator.
     private static func interpret(_ token: String) -> Decimal? {
+        if token.contains(" ") { return interpretGrouped(token) }
         let separators = token.filter { $0 == "." || $0 == "," }
         let groups = token.split(omittingEmptySubsequences: false) { $0 == "." || $0 == "," }.map(String.init)
         let digits: String
@@ -62,6 +91,21 @@ enum VietnameseNumber {
 
     private static let posix = Locale(identifier: "en_US_POSIX")
 
+    /// "1 500", "12 345 678" and "1 500,5": groups of three digits after spaces and, at most, a decimal part after the last
+    /// one. A decimal part of exactly three digits ("1 500.000") is ambiguous with another group, so it is no number.
+    private static func interpretGrouped(_ token: String) -> Decimal? {
+        let parts = token.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        guard let last = parts.last else { return nil }
+        let pieces = last.split(omittingEmptySubsequences: false) { $0 == "." || $0 == "," }.map(String.init)
+        guard pieces.count <= 2, pieces[0].count == 3 else { return nil }
+        var digits = parts.dropLast().joined() + pieces[0]
+        if pieces.count == 2 {
+            guard !pieces[1].isEmpty, pieces[1].count != 3 else { return nil }
+            digits += "." + pieces[1]
+        }
+        return decimal(digits)
+    }
+
     /// One to three digits (no leading zero) and then groups of exactly three.
     private static func groupsOfThousands(_ groups: ArraySlice<String>) -> Bool {
         guard let first = groups.first, (1...3).contains(first.count), first.first != "0" else { return false }
@@ -82,6 +126,12 @@ enum VietnameseNumber {
             decimals = min(1 - Int(floor(log10(magnitude))), 9)
         }
         return fixed(value, decimals: decimals, dropsZeros: true)
+    }
+
+    /// A temperature: one decimal, which matters where whole degrees do (98,6 °F), without a trailing zero.
+    static func tenths(_ value: Double) -> String {
+        guard value.isFinite else { return "—" }
+        return fixed(value, decimals: 1, dropsZeros: true)
     }
 
     /// Always `decimals` digits after the comma, as money is written.

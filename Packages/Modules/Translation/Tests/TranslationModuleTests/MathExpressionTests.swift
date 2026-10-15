@@ -28,7 +28,7 @@ import Testing
 
     @Test(arguments: [
         ("6×7", "42"), ("84÷2", "42"), ("9−4", "5"), ("7*6", "42"), ("42/6", "7"), ("17%5", "2"), ("-17%5", "-2"),
-        ("17,5%5", "2.5"), ("2 × (3 + 4)", "14"), ("1 000 ÷ 4", ""),
+        ("17,5%5", "2.5"), ("2 × (3 + 4)", "14"), ("1 000 ÷ 4", "250"), ("1 2 ÷ 4", ""),
     ])
     func readsTheSignsPeopleType(text: String, expected: String) {
         #expect(value(text) == (expected.isEmpty ? nil : decimal(expected)))
@@ -36,7 +36,7 @@ import Testing
 
     @Test(arguments: [
         ("200*15%", "30"), ("100+10%", "110"), ("100-10%", "90"), ("200+50%+10%", "330"), ("50%*3", "1.5"), ("-10%*50", "-5"),
-        ("(50)%", "0.5"), ("50%", "0.5"),
+        ("(50)%", "0.5"), ("50%", "0.5"), ("10%+5%", "0.15"), ("10% + 5% + 5%", "0.1575"),
     ])
     func aPercentIsAPercentOfTheLeftSideInASumAndAHundredthElsewhere(text: String, expected: String) {
         #expect(value(text) == decimal(expected))

@@ -22,6 +22,8 @@ struct ModuleFixture {
     let ratesClient = FakeRatesClient()
     /// 15 January 2026, noon UTC: winter in the northern hemisphere and 19:00 in Hanoi.
     let clock = TestClock("2026-01-15T12:00:00Z")
+    /// Reads quantities like the real one, and records when and where.
+    let recognizer = SpyRecognizer()
     let pasteboard = NSPasteboard(name: NSPasteboard.Name("MyNotchTests.\(UUID().uuidString)"))
     let module: TranslationModule
     let harness: RegistryHarness
@@ -44,7 +46,8 @@ struct ModuleFixture {
                 // Hanoi and a metric region, whatever the Mac running the tests is set to.
                 environment: ConversionEnvironment(
                     now: { [clock] in clock.now }, localZone: { TimeZone(identifier: "Asia/Ho_Chi_Minh")! }, system: { .metric }
-                )
+                ),
+                recognize: { [recognizer] text, currency in recognizer.recognize(text, currency) }
             ),
             shortcut: nil
         )

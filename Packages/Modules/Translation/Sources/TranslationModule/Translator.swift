@@ -72,7 +72,8 @@ final class Translator {
         pendingTyping = scheduler.schedule(after: Self.typingDelay) { [weak self] in self?.translate() }
     }
 
-    /// Translates the input now (Return, a menu change, new text), superseding any translation in flight.
+    /// Translates the input now (Return, a menu change, new text), superseding any translation in flight. A text that
+    /// might be a quantity is first read off the main actor, and is not translated when that is all it is.
     func translate() {
         guard !isStopped else { return }
         pendingTyping?.cancel()
@@ -82,24 +83,33 @@ final class Translator {
             clearResult()
             return
         }
-        let plan = converter.plan(for: text)
-        state.conversions = plan.conversions
-        state.showsConversionsOnly = plan.isPure
-        let request = generation
-        resolveMoney(of: plan, for: request)
-        // A text that is nothing but quantities has nothing to translate.
-        guard !plan.isPure else {
-            showNoTranslation()
-            return
-        }
-        let pair = direction(for: text)
-        state.detectedSource = state.source == nil ? pair.source : nil
-        state.target = pair.target
-        state.replaceFailure = nil
-        // Same direction: keep the banner up while retranslating, so it doesn't flicker with every pause in typing.
-        if pair != statusPair { state.pairStatus = nil }
         state.isTranslating = true
-        translation = Task { [weak self, engine] in
+        let request = generation
+        // Most texts have no digit, and nothing to read: they are translated without waiting for anything.
+        let readsQuantities = QuickConverter.mightHaveQuantities(text)
+        var direction: LanguagePair?
+        if readsQuantities {
+            // The tab keeps what it showed until it is known whether the new text is a quantity.
+        } else {
+            state.conversions = []
+            state.showsConversionsOnly = false
+            direction = begin(translating: text)
+        }
+        translation = Task { [weak self, engine, converter] in
+            var pair = direction
+            if readsQuantities {
+                let plan = await converter.plan(for: text)
+                guard let self, request == generation else { return }
+                state.conversions = plan.conversions
+                state.showsConversionsOnly = plan.isPure
+                resolveMoney(of: plan, for: request)
+                guard !plan.isPure else {
+                    showNoTranslation()
+                    return
+                }
+                pair = begin(translating: text)
+            }
+            guard let pair else { return }
             let result: Result<String, TranslationFailure>
             do throws(TranslationFailure) {
                 result = .success(try await engine.translate(text, from: pair.source, to: pair.target))
@@ -109,6 +119,17 @@ final class Translator {
             guard let self, request == self.generation else { return }
             self.show(result, for: pair)
         }
+    }
+
+    /// Picks the direction for `text` and shows it, ready for the translation request.
+    private func begin(translating text: String) -> LanguagePair {
+        let pair = direction(for: text)
+        state.detectedSource = state.source == nil ? pair.source : nil
+        state.target = pair.target
+        state.replaceFailure = nil
+        // Same direction: keep the banner up while retranslating, so it doesn't flicker with every pause in typing.
+        if pair != statusPair { state.pairStatus = nil }
+        return pair
     }
 
     /// Return. `text` is what the field shows, which can differ from the input while an input method composes.
@@ -214,6 +235,7 @@ final class Translator {
 
     /// Nothing is translated: whatever an earlier translation left is gone.
     private func showNoTranslation() {
+        state.isTranslating = false
         state.output = ""
         state.error = nil
         state.detectedSource = nil
