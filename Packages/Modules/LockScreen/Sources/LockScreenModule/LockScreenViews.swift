@@ -28,6 +28,8 @@ struct LockScreenRootView: View {
                 .environment(\.lockScreenControlsEnabled, controlsEnabled())
                 .environment(\.lockScreenLyricsEnabled, lyricsEnabled())
                 .environment(\.notchIsOnScreen, presence.isOnScreen)
+                // The card below is black whatever the notch's look is, so what a contributor draws on it uses the light text tokens.
+                .notchOnDarkBackground()
                 .id(entry.module)
                 .padding(.horizontal, 16)
                 .padding(.vertical, Self.verticalPadding)
