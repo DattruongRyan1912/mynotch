@@ -102,7 +102,7 @@ struct ScreenshotCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             ZStack {
-                Color.white.opacity(0.08)
+                NotchTokens.fill(0.08)
                 if let thumbnail {
                     Image(decorative: thumbnail, scale: 2)
                         .resizable()
