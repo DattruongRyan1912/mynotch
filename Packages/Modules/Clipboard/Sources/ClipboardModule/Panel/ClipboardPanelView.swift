@@ -8,6 +8,8 @@ struct ClipboardPanelView: View {
     let module: ClipboardModule
     @Bindable var model: ClipboardPanelModel
 
+    @Environment(\.notchAccent) private var accent
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -63,7 +65,7 @@ struct ClipboardPanelView: View {
                 model.togglePin()
             } label: {
                 Image(systemName: model.isPinned ? "pin.fill" : "pin")
-                    .foregroundStyle(model.isPinned ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(model.isPinned ? accent : Color.secondary)
                     .frame(width: 26, height: 26)
                     .contentShape(Rectangle())
             }
@@ -97,7 +99,7 @@ struct ClipboardPanelView: View {
                 Image(systemName: stack.isOn ? "square.stack.3d.up.fill" : "square.stack.3d.up")
                 if stack.isOn { Text("\(stack.entries.count)").font(.system(size: 11, weight: .semibold).monospacedDigit()) }
             }
-            .foregroundStyle(stack.isOn ? Color.accentColor : Color.secondary)
+            .foregroundStyle(stack.isOn ? accent : Color.secondary)
             .frame(minWidth: 26, minHeight: 26)
             .contentShape(Rectangle())
         }

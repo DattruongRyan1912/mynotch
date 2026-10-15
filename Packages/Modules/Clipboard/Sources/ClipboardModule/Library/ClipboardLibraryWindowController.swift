@@ -42,7 +42,8 @@ final class ClipboardLibraryWindowController: NSObject, ClipboardLibraryWindowin
     /// The window, configured but not on any screen, and already hidden from recordings when the setting says so: there is
     /// no frame in which a recorder could see it. The user opens it like an open notch, so "only while collapsed" shows it.
     func makeWindow(_ content: AnyView) -> NSWindow {
-        let controller = NSHostingController(rootView: content)
+        // The window is outside the notch's views, so it is given the notch's accent here.
+        let controller = NSHostingController(rootView: ClipboardAccentHost(interface: interface) { content })
         // The toolbar items and the subtitle of the content go into the title bar.
         controller.sceneBridgingOptions = .all
         let window = NSWindow(contentViewController: controller)

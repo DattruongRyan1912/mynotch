@@ -98,7 +98,7 @@ struct ClipboardStackView: View {
 }
 
 /// One entry of the stack's list.
-private struct ClipboardStackRow: View {
+struct ClipboardStackRow: View {
     enum Direction { case up, down }
 
     let entry: CopyStackEntry
@@ -108,6 +108,7 @@ private struct ClipboardStackRow: View {
     let remove: () -> Void
     let move: (Direction) -> Void
 
+    @Environment(\.notchAccent) private var accent
     @State private var isHovered = false
 
     private var shape: RoundedRectangle {
@@ -130,7 +131,7 @@ private struct ClipboardStackRow: View {
             if isNext {
                 Text("Kế tiếp")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(NotchTokens.accent)
+                    .foregroundStyle(accent)
             }
             Button(action: remove) {
                 Image(systemName: "xmark.circle.fill")
@@ -147,7 +148,7 @@ private struct ClipboardStackRow: View {
         .frame(height: 24)
         .background(Color.white.opacity(isHovered ? 0.12 : 0.07), in: shape)
         .overlay {
-            if isNext { shape.strokeBorder(NotchTokens.accent, lineWidth: 1.5) }
+            if isNext { shape.strokeBorder(accent, lineWidth: 1.5) }
         }
         .contentShape(shape)
         .onHover { isHovered = $0 }

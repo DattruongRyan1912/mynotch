@@ -38,6 +38,12 @@ import Testing
         #expect(await eventually { window.sharingType == .readOnly })
     }
 
+    @Test func theLibraryWindowIsHostedWithTheAccentOfTheNotch() {
+        let controller = ClipboardLibraryWindowController(interface: NotchInterface())
+        let window = controller.makeWindow(AnyView(EmptyView()))
+        #expect(window.contentViewController is NSHostingController<ClipboardAccentHost<AnyView>>)
+    }
+
     @Test func aClosedLibraryWindowStopsFollowing() async {
         let interface = NotchInterface()
         let controller = ClipboardLibraryWindowController(interface: interface)

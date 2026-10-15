@@ -11,6 +11,7 @@ struct ClipboardPanelRow: View {
     let imageURL: URL?
     let thumbnails: ClipboardThumbnailCache
 
+    @Environment(\.notchAccent) private var accent
     @State private var isHovered = false
 
     private var shape: RoundedRectangle {
@@ -48,9 +49,9 @@ struct ClipboardPanelRow: View {
         }
         .padding(.horizontal, 8)
         .frame(height: 44)
-        .background(ClipboardLibraryStyle.fill(isSelected: isSelected, isHovered: isHovered && !isSelected), in: shape)
+        .background(ClipboardLibraryStyle.fill(isSelected: isSelected, isHovered: isHovered && !isSelected, accent: accent), in: shape)
         .overlay {
-            if isSelected { shape.strokeBorder(Color.accentColor, lineWidth: 1.5) }
+            if isSelected { shape.strokeBorder(accent, lineWidth: 1.5) }
         }
         .contentShape(shape)
         .onHover { isHovered = $0 }

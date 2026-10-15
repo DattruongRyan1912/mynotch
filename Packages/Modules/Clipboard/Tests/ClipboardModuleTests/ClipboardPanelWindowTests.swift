@@ -1,5 +1,6 @@
 import AppKit
 import NotchUI
+import SwiftUI
 import Testing
 @testable import ClipboardModule
 
@@ -29,6 +30,12 @@ import Testing
             with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: 0, context: nil,
             characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code
         ))
+    }
+
+    @Test func theFloatingPanelIsHostedWithTheAccentOfTheNotch() throws {
+        let (controller, _) = makeController()
+        let background = controller.makeContentView(AnyView(EmptyView()), size: CGSize(width: 100, height: 100))
+        #expect(background.subviews.contains { $0 is ClipboardFirstMouseHostingView<ClipboardAccentHost<AnyView>> })
     }
 
     // MARK: Flags

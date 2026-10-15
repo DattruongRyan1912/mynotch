@@ -18,6 +18,7 @@ struct ClipboardLibrarySidebar: View {
     @State private var dropTarget: UUID?
     /// The board whose icon and colour are being chosen, in a popover from its row.
     @State private var styling: UUID?
+    @Environment(\.notchAccent) private var accent
 
     var body: some View {
         List(selection: selection) {
@@ -85,17 +86,16 @@ struct ClipboardLibrarySidebar: View {
             if board.color == .accent {
                 Image(systemName: board.systemImage)
             } else {
-                Image(systemName: board.systemImage).foregroundStyle(board.color.color(accent: .accentColor))
+                Image(systemName: board.systemImage).foregroundStyle(board.color.color(accent: accent))
             }
         }
         .badge(model.counts.boards[board.id] ?? 0)
         .tag(ClipboardLibrarySelection.board(board.id))
-        .listRowBackground(dropTarget == board.id ? Color.accentColor.opacity(0.3) : nil)
+        .listRowBackground(dropTarget == board.id ? accent.opacity(0.3) : nil)
         .onDrop(of: [.item], delegate: ClipboardCardDropDelegate(boardID: board.id, model: model, target: $dropTarget))
         .popover(isPresented: Binding(get: { styling == board.id }, set: { if !$0, styling == board.id { styling = nil } }), arrowEdge: .trailing) {
             ClipboardBoardStylePicker(
-                board: board, accent: .accentColor,
-                onIcon: { module.setBoardIcon(board.id, to: $0) }, onColor: { module.setBoardColor(board.id, to: $0) }
+                board: board, onIcon: { module.setBoardIcon(board.id, to: $0) }, onColor: { module.setBoardColor(board.id, to: $0) }
             )
         }
         .contextMenu {

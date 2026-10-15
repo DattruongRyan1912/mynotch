@@ -16,7 +16,7 @@ struct ClipboardSuggestionListView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(Array(list.items.enumerated()), id: \.element.id) { index, suggestion in
-                        row(suggestion, isHighlighted: index == list.highlighted)
+                        ClipboardSuggestionRow(look: look, suggestion: suggestion, isHighlighted: index == list.highlighted)
                             .id(suggestion.id)
                             .onTapGesture { onPick(index) }
                     }
@@ -45,8 +45,19 @@ struct ClipboardSuggestionListView: View {
                 .shadow(color: .black.opacity(0.2), radius: 8, y: 3)
         }
     }
+}
 
-    private func row(_ suggestion: ClipboardSearchSuggestion, isHighlighted: Bool) -> some View {
+/// One row of the suggestions, highlighted in the accent while the keys point at it.
+struct ClipboardSuggestionRow: View {
+    let look: ClipboardLook
+    let suggestion: ClipboardSearchSuggestion
+    let isHighlighted: Bool
+
+    @Environment(\.notchAccent) private var accent
+
+    private var rowHeight: CGFloat { look == .notch ? 24 : 26 }
+
+    var body: some View {
         HStack(spacing: 6) {
             icon(suggestion.subject)
                 .frame(width: 16, height: 16)
@@ -89,7 +100,7 @@ struct ClipboardSuggestionListView: View {
     }
 
     private var highlight: Color {
-        look == .notch ? NotchTokens.accent.opacity(0.7) : Color.accentColor
+        look == .notch ? accent.opacity(0.7) : accent
     }
 
     private func foreground(isHighlighted: Bool) -> Color {
@@ -106,6 +117,8 @@ struct ClipboardSearchChips: View {
     let tokens: [ClipboardSearchToken]
     let onRemove: (ClipboardSearchToken) -> Void
 
+    @Environment(\.notchAccent) private var accent
+
     var body: some View {
         HStack(spacing: 4) {
             ForEach(tokens) { token in
@@ -121,7 +134,7 @@ struct ClipboardSearchChips: View {
                     .foregroundStyle(look == .notch ? NotchTokens.primaryText : Color.primary)
                     .padding(.horizontal, 8)
                     .frame(height: look == .notch ? 22 : 24)
-                    .background(look == .notch ? NotchTokens.accent.opacity(0.45) : Color.accentColor.opacity(0.2), in: Capsule())
+                    .background(accent.opacity(look == .notch ? 0.45 : 0.2), in: Capsule())
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)

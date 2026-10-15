@@ -1,10 +1,11 @@
 import AppKit
 import SwiftUI
 
-/// Colors shared by the library's cards, rows and tiles. System colors, so the window follows light and dark.
+/// Colors shared by the library's cards, rows and tiles, which also serve the floating panel. System colors, so the window
+/// follows light and dark, and the accent the window has (the notch's).
 enum ClipboardLibraryStyle {
-    static func fill(isSelected: Bool, isHovered: Bool) -> Color {
-        isSelected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(isHovered ? 0.1 : 0.06)
+    static func fill(isSelected: Bool, isHovered: Bool, accent: Color) -> Color {
+        isSelected ? accent.opacity(0.16) : Color.primary.opacity(isHovered ? 0.1 : 0.06)
     }
 }
 
@@ -20,6 +21,7 @@ struct ClipboardLibraryCard: View {
     let imageURL: URL?
     let thumbnails: ClipboardThumbnailCache
 
+    @Environment(\.notchAccent) private var accent
     @State private var isHovered = false
 
     private var shape: RoundedRectangle {
@@ -36,9 +38,9 @@ struct ClipboardLibraryCard: View {
         .padding(10)
         .frame(maxWidth: .infinity)
         .frame(height: size.height)
-        .background(ClipboardLibraryStyle.fill(isSelected: isSelected, isHovered: isHovered), in: shape)
+        .background(ClipboardLibraryStyle.fill(isSelected: isSelected, isHovered: isHovered, accent: accent), in: shape)
         .overlay {
-            if isSelected { shape.strokeBorder(Color.accentColor, lineWidth: 2) }
+            if isSelected { shape.strokeBorder(accent, lineWidth: 2) }
         }
         .contentShape(shape)
         .onHover { isHovered = $0 }
@@ -57,7 +59,7 @@ struct ClipboardLibraryCard: View {
             if isPinned {
                 Image(systemName: "pin.fill")
                     .font(.system(size: 10))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(accent)
                     .accessibilityLabel("Đã ghim")
             }
         }
@@ -75,6 +77,7 @@ struct ClipboardLibraryRow: View {
     let imageURL: URL?
     let thumbnails: ClipboardThumbnailCache
 
+    @Environment(\.notchAccent) private var accent
     @State private var isHovered = false
 
     private var shape: RoundedRectangle {
@@ -105,16 +108,16 @@ struct ClipboardLibraryRow: View {
                 .frame(width: 100, alignment: .trailing)
             Image(systemName: "pin.fill")
                 .font(.system(size: 10))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(accent)
                 .opacity(isPinned ? 1 : 0)
                 .frame(width: 14)
                 .accessibilityHidden(!isPinned)
         }
         .padding(.horizontal, 10)
         .frame(height: 44)
-        .background(ClipboardLibraryStyle.fill(isSelected: isSelected, isHovered: isHovered), in: shape)
+        .background(ClipboardLibraryStyle.fill(isSelected: isSelected, isHovered: isHovered, accent: accent), in: shape)
         .overlay {
-            if isSelected { shape.strokeBorder(Color.accentColor, lineWidth: 1.5) }
+            if isSelected { shape.strokeBorder(accent, lineWidth: 1.5) }
         }
         .contentShape(shape)
         .onHover { isHovered = $0 }
@@ -144,11 +147,13 @@ struct ClipboardLibraryBoardTile: View {
     let count: Int
     let isTargeted: Bool
 
+    @Environment(\.notchAccent) private var accent
+
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: board.systemImage)
                 .font(.system(size: 18))
-                .foregroundStyle(board.color.color(accent: Color.accentColor))
+                .foregroundStyle(board.color.color(accent: accent))
             VStack(alignment: .leading, spacing: 2) {
                 Text(board.name)
                     .font(.system(size: 13, weight: .semibold))
@@ -184,12 +189,14 @@ struct ClipboardLibraryNewBoardTile: View {
 private struct ClipboardLibraryTileBackground: ViewModifier {
     let isTargeted: Bool
 
+    @Environment(\.notchAccent) private var accent
+
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
         content
             .background(Color.primary.opacity(isTargeted ? 0.16 : 0.06), in: shape)
             .overlay {
-                if isTargeted { shape.strokeBorder(Color.accentColor, lineWidth: 2) }
+                if isTargeted { shape.strokeBorder(accent, lineWidth: 2) }
             }
             .contentShape(shape)
     }

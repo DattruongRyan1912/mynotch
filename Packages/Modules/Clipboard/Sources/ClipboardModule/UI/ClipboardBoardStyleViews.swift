@@ -119,13 +119,14 @@ struct ClipboardBoardStyleStrip: View {
     }
 }
 
-/// The library's picker, in a popover from the board: a grid of icons over a row of colours. Drawn in the system's colours.
+/// The library's picker, in a popover from the board: a grid of icons over a row of colours. Drawn in the system's colours and
+/// the accent of the window, which the default colour takes.
 struct ClipboardBoardStylePicker: View {
     let board: ClipboardBoard
-    /// The accent of the window, for the default colour.
-    let accent: Color
     let onIcon: (String) -> Void
     let onColor: (ClipboardBoardColor) -> Void
+
+    @Environment(\.notchAccent) private var accent
 
     private static let columns = 8
 

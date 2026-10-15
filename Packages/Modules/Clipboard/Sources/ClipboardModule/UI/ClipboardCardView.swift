@@ -15,6 +15,7 @@ struct ClipboardCardView: View {
     let imageURL: URL?
     let thumbnails: ClipboardThumbnailCache
 
+    @Environment(\.notchAccent) private var accent
     @State private var isHovered = false
 
     private var shape: RoundedRectangle {
@@ -31,7 +32,7 @@ struct ClipboardCardView: View {
         .frame(width: Self.size.width, height: Self.size.height)
         .background(Color.white.opacity(isHovered ? 0.12 : 0.07), in: shape)
         .overlay {
-            if isSelected { shape.strokeBorder(NotchTokens.accent, lineWidth: 2) }
+            if isSelected { shape.strokeBorder(accent, lineWidth: 2) }
         }
         .contentShape(shape)
         .onHover { isHovered = $0 }
@@ -59,7 +60,7 @@ struct ClipboardCardView: View {
             if isPinned {
                 Image(systemName: "pin.fill")
                     .font(.system(size: 9))
-                    .foregroundStyle(NotchTokens.accent)
+                    .foregroundStyle(accent)
                     .accessibilityLabel("Đã ghim")
             }
         }

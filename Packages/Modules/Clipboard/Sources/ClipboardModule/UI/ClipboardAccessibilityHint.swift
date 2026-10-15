@@ -12,6 +12,8 @@ struct ClipboardAccessibilityHint: View {
     let look: Look
     let onGrant: () -> Void
 
+    @Environment(\.notchAccent) private var accent
+
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "hand.raised.fill")
@@ -35,7 +37,7 @@ struct ClipboardAccessibilityHint: View {
                     .foregroundStyle(NotchTokens.primaryText)
                     .padding(.horizontal, 8)
                     .frame(height: 20)
-                    .background(NotchTokens.accent.opacity(0.7), in: Capsule())
+                    .background(accent.opacity(0.7), in: Capsule())
                     .contentShape(Capsule())
             }
             .buttonStyle(.plain)

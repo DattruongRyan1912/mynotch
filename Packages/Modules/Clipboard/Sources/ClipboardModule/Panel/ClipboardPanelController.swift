@@ -146,7 +146,7 @@ final class ClipboardPanelController: NSObject, ClipboardPanelWindowing {
 
     // MARK: Private
 
-    private func makeContentView(_ content: AnyView, size: CGSize) -> NSView {
+    func makeContentView(_ content: AnyView, size: CGSize) -> NSView {
         let background = NSVisualEffectView(frame: CGRect(origin: .zero, size: size))
         background.material = .popover
         background.blendingMode = .behindWindow
@@ -156,7 +156,8 @@ final class ClipboardPanelController: NSObject, ClipboardPanelWindowing {
         background.layer?.cornerRadius = Self.cornerRadius
         background.layer?.cornerCurve = .continuous
         background.layer?.masksToBounds = true
-        let hosting = ClipboardFirstMouseHostingView(rootView: content)
+        // The panel is outside the notch's views, so it is given the notch's accent here.
+        let hosting = ClipboardFirstMouseHostingView(rootView: ClipboardAccentHost(interface: interface) { content })
         hosting.frame = background.bounds
         hosting.autoresizingMask = [.width, .height]
         background.addSubview(hosting)

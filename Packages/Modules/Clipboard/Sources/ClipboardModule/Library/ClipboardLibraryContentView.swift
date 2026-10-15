@@ -73,8 +73,7 @@ struct ClipboardLibraryContentView: View {
                         }
                         .popover(isPresented: Binding(get: { styling == board.id }, set: { if !$0, styling == board.id { styling = nil } })) {
                             ClipboardBoardStylePicker(
-                                board: board, accent: .accentColor,
-                                onIcon: { module.setBoardIcon(board.id, to: $0) }, onColor: { module.setBoardColor(board.id, to: $0) }
+                                board: board, onIcon: { module.setBoardIcon(board.id, to: $0) }, onColor: { module.setBoardColor(board.id, to: $0) }
                             )
                         }
                         .contextMenu {

@@ -76,7 +76,8 @@ import Testing
     }
 
     @Test func theLibraryPickerOffersTheAccentAndTheFixedColours() throws {
-        let picker = ClipboardBoardStylePicker(board: board(.accent), accent: Self.accent, onIcon: { _ in }, onColor: { _ in })
+        let picker = ClipboardBoardStylePicker(board: board(.accent), onIcon: { _ in }, onColor: { _ in })
+            .environment(\.notchAccent, Self.accent)
         let drawn = try pixels(of: picker, width: 340, height: 220)
         let accent = contains(drawn, near: (26, 204, 230)), orange = contains(drawn, near: (255, 149, 0), tolerance: 45)
         #expect(accent)
