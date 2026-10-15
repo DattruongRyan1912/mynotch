@@ -74,7 +74,7 @@ nonisolated enum ClipboardSearchSuggestions {
         let component = ClipboardAppName.component(of: app.bundleID)
         let firstWord = app.name.split(whereSeparator: \.isWhitespace).first.map(String.init)
         let preferred = component.flatMap { ClipboardSearchIndex.fold($0).hasPrefix(typed) ? $0 : nil } ?? firstWord
-        return [preferred, component].compactMap(\.self).first { !ClipboardSearchTerms.isReserved(ClipboardSearchIndex.fold($0)) } ?? ""
+        return [preferred, component].compactMap(\.self).first { !ClipboardSearchTerms.isReserved($0) } ?? ""
     }
 }
 

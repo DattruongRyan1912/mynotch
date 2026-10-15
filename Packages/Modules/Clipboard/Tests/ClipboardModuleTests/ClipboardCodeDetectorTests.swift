@@ -72,37 +72,35 @@ import Testing
         for filler in ["ế", "€"] {
             let text = "let a = 1;\n" + String(repeating: filler, count: 5_000)
             _ = ClipboardCodeDetector.detect(text: text)
-            let wide = "func f() {\n" + String(repeating: "\(filler) = 1;\n", count: 3_000)
+            let wide = "func f() {\n" + String(repeating: "    print(\"\(filler)\", 1);\n", count: 3_000) + "}"
             #expect(ClipboardCodeDetector.detect(text: wide).language != nil)
         }
     }
 
-    /// The goal is under 1 ms for 4 KB in an optimised build (measured with a release benchmark, 0.5 ms on a quiet machine).
-    /// `swift test` builds without optimisation, which is ten to fifty times slower, so the bound here only catches a text
-    /// that is read more than once per line or more than its first 4 KB.
-    @Test func aFourKilobyteTextIsDecidedQuickly() {
-        let code = String(repeating: "    let value = compute(input, 42) + offset // note\n", count: 80)
-        let prose = String(repeating: "Hôm nay trời đẹp, mình đi dạo công viên (nếu rảnh) nhé.\n", count: 70)
-        #if DEBUG
-        let limit = Duration.milliseconds(300)
-        #else
-        let limit = Duration.milliseconds(3)
-        #endif
-        for text in [code, prose] {
-            #expect(text.utf8.count >= 4_000)
-            let clock = ContinuousClock()
-            let elapsed = clock.measure { for _ in 0..<20 { _ = ClipboardCodeDetector.detect(text: text) } } / 20
-            #expect(elapsed < limit, "\(elapsed)")
+    /// The cost of a detection is bounded by what it reads, not by a clock: the sample is the first 4 KB, cut between whole
+    /// lines, and holds at most 150 lines. (An optimised build decides 4 KB in well under a millisecond; a throwaway release
+    /// benchmark, not a test, measured it.)
+    @Test func whateverTheSizeOfATextOnlyItsFirstFourKilobytesAreRead() {
+        for text in [String(repeating: "let value = compute(input) + 1\n", count: 100_000), String(repeating: "ế", count: 2_000_000), "x"] {
+            let sample = DetectionSample(text)
+            #expect(sample.text.utf8.count <= ClipboardCodeDetector.sampleBytes)
+            #expect(sample.lines.count <= 150)
+            #expect(sample.isCut == (text.utf8.count > ClipboardCodeDetector.sampleBytes))
         }
+        let many = String(repeating: "a\n", count: 10_000)
+        #expect(DetectionSample(many).lines.count <= 150)
     }
 
+    /// A text above the parse limit is judged by its edges: an invalid document with the edges and a key is called JSON, which
+    /// a parse would have refused, so the document was not parsed.
     @Test func aHugeJSONDocumentIsNotParsedWhole() {
-        let json = "[" + String(repeating: #"{"id": 1, "name": "An"},"#, count: 100_000) + #"{"id": 2}]"#
-        #expect(json.utf8.count > 2_000_000)
-        let clock = ContinuousClock()
-        var detection = CodeDetection.notCode
-        let elapsed = clock.measure { detection = ClipboardCodeDetector.detect(text: json) }
-        #expect(detection == .code(.json))
-        #expect(elapsed < .milliseconds(200), "\(elapsed)")
+        let body = String(repeating: #""id": 1, "name": "An", "#, count: 4_000)
+        let broken = "{" + body + "oops}"
+        #expect(broken.utf8.count > ClipboardCodeDetector.jsonParseLimit)
+        #expect(ClipboardCodeDetector.detect(text: broken) == .code(.json))
+        // Under the limit the same text is parsed, and refused.
+        #expect(ClipboardCodeDetector.detect(text: "{" + String(repeating: #""id": 1, "#, count: 100) + "oops}") == .notCode)
+        let valid = "[" + String(repeating: #"{"id": 1, "name": "An"},"#, count: 100_000) + #"{"id": 2}]"#
+        #expect(ClipboardCodeDetector.detect(text: valid) == .code(.json))
     }
 }

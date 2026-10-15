@@ -7,11 +7,10 @@ struct ClipboardCardMenu: View {
     /// so the menu still opens at once for a huge copy.
     static let transformCheckLimit = 200_000
 
-    /// "Dán dạng văn bản thường" is for a rich text, whose plain paste differs from the default one, and for code, which a
-    /// plain "Dán" already pastes as plain text but which the user may still look for here.
+    /// "Dán dạng văn bản thường" is for a rich text, whose plain paste differs from the normal one, code or not: a text that
+    /// has no formatting is pasted as it is, so the item would only repeat "Dán".
     static func offersPlainTextPaste(for item: ClipboardItem) -> Bool {
-        if case .richText = item.content { return true }
-        return item.isCode
+        if case .richText = item.content { true } else { false }
     }
 
     let module: ClipboardModule

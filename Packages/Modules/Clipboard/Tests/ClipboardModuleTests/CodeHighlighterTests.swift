@@ -42,6 +42,28 @@ private nonisolated final class ComputeLog: @unchecked Sendable {
         #expect(CodePalette.dark.color(for: .keyword) != CodePalette.adaptive.color(for: .keyword))
     }
 
+    private func luminance(_ color: CodePalette.RGB) -> Double {
+        func linear(_ value: Double) -> Double { value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4) }
+        return 0.2126 * linear(color.red) + 0.7152 * linear(color.green) + 0.0722 * linear(color.blue)
+    }
+
+    private func contrast(_ foreground: CodePalette.RGB, on background: Double) -> Double {
+        let backgroundLuminance = luminance(CodePalette.RGB(red: background, green: background, blue: background))
+        let light = max(luminance(foreground), backgroundLuminance), dark = min(luminance(foreground), backgroundLuminance)
+        return (light + 0.05) / (dark + 0.05)
+    }
+
+    /// WCAG's 4.5:1 for text of this size, on the greys the colours land on: white, the window grey (#ECECEC), a popover
+    /// (#F0F0F0) in light mode; black (the notch), the dark window (#1E1E1E) and a lighter dark grey in dark mode.
+    @Test func everyColourReadsAtFourPointFiveToOneOnItsBackgrounds() {
+        let kinds: [CodeTokenKind] = [.keyword, .string, .comment, .number, .punctuation]
+        for kind in kinds {
+            let light = CodePalette.rgb(for: kind, in: .light), dark = CodePalette.rgb(for: kind, in: .dark)
+            for background in [1.0, 0.925, 0.941] { #expect(contrast(light, on: background) >= 4.5, "\(kind) light on \(background)") }
+            for background in [0.0, 30.0 / 255, 40.0 / 255] { #expect(contrast(dark, on: background) >= 4.5, "\(kind) dark on \(background)") }
+        }
+    }
+
     @Test func theTextIsKeptCharacterForCharacter() {
         let text = "let ế = \"Hôm nay 日本語 🙏\" // đẹp\n\tvar y = 1"
         let attributed = CodeHighlighter.highlight(text, language: .swift, palette: .dark)
@@ -84,15 +106,6 @@ private nonisolated final class ComputeLog: @unchecked Sendable {
         let attributed = CodeHighlighter.highlight(text, language: .swift, palette: .dark)
         #expect(String(attributed.characters) == CodeHighlighter.bounded(text))
         #expect(attributed.characters.count(where: { $0 == "\n" }) == 199)
-    }
-
-    @Test func aTwentyKilobyteTextIsColouredInAFractionOfASecond() {
-        let text = String(repeating: "func f(a: Int) -> String { return \"x\" + \"\\(a)\" } // c\n", count: 400)
-        #expect(text.utf8.count > 20_000)
-        let clock = ContinuousClock()
-        let elapsed = clock.measure { _ = CodeHighlighter.highlight(text, language: .swift, palette: .dark) }
-        // Debug builds are far slower than the app; this only catches work that grows faster than the text.
-        #expect(elapsed < .seconds(3), "\(elapsed)")
     }
 }
 

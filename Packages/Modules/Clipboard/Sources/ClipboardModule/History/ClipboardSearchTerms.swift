@@ -36,9 +36,16 @@ nonisolated struct ClipboardSearchTerms: Equatable, Sendable {
     static let codeTitle = "Mã"
     static let codeSystemImage = "curlybraces"
 
-    /// Whether `folded` is a word that names a kind or code, so an app token must not use it.
-    static func isReserved(_ folded: String) -> Bool {
-        kindWords.contains { ClipboardSearchIndex.fold($0.word) == folded } || codeWords.contains { ClipboardSearchIndex.fold($0) == folded }
+    /// Whether `word` names a kind or code, so an app token must not use it. A kind is found whatever the case and accents,
+    /// code only as `code` or `mã` (any case): folding the accent off would make `@ma` the code filter and take it from Mail,
+    /// Maps and Mattermost.
+    static func isReserved(_ word: String) -> Bool {
+        let folded = ClipboardSearchIndex.fold(word)
+        return kindWords.contains { ClipboardSearchIndex.fold($0.word) == folded } || isCodeWord(word)
+    }
+
+    static func isCodeWord(_ word: String) -> Bool {
+        codeWords.contains(word.lowercased())
     }
 
     /// Every filter once, in the order typed.
@@ -79,7 +86,7 @@ nonisolated struct ClipboardSearchTerms: Equatable, Sendable {
             let name = ClipboardSearchIndex.fold(String(word.dropFirst()))
             // An "@" alone is a token just begun; it filters nothing and is not searched for.
             if name.isEmpty { continue }
-            guard let (filter, title) = Self.resolve(name, apps: apps) else {
+            guard let (filter, title) = Self.resolve(name, raw: String(word.dropFirst()), apps: apps) else {
                 free.append(word)
                 continue
             }
@@ -101,11 +108,11 @@ nonisolated struct ClipboardSearchTerms: Equatable, Sendable {
     }
 
     /// A kind by its whole name, so "@file" is the kind even if an app is called "Files"; otherwise the first app that matches.
-    private static func resolve(_ name: String, apps: [ClipboardLibraryApp]) -> (ClipboardSearchToken.Filter, title: String)? {
+    private static func resolve(_ name: String, raw: String, apps: [ClipboardLibraryApp]) -> (ClipboardSearchToken.Filter, title: String)? {
         if let entry = kindWords.first(where: { ClipboardSearchIndex.fold($0.word) == name }) {
             return (.kind(entry.kind), entry.kind.title)
         }
-        if codeWords.contains(where: { ClipboardSearchIndex.fold($0) == name }) { return (.code, codeTitle) }
+        if isCodeWord(raw) { return (.code, codeTitle) }
         guard let app = apps.first(where: { $0.matches(prefix: name) }) else { return nil }
         return (.app(prefix: name), app.name)
     }

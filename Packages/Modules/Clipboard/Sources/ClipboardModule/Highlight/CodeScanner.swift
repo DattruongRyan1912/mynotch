@@ -9,7 +9,11 @@ nonisolated struct CodeScanner {
 
     let bytes: UnsafeBufferPointer<UInt8>
     let syntax: CodeSyntax
-    private var index = 0
+    /// Never beyond the end of the text, whatever a scanner adds to it: a backslash at the very end is followed by a byte that
+    /// does not exist, and skipping that byte must not carry the scan past the end.
+    private var index = 0 {
+        didSet { if index > bytes.count { index = bytes.count } }
+    }
     private var tokens: [CodeToken] = []
     private var nesting = 0
     private var braceDepth = 0
@@ -50,7 +54,7 @@ nonisolated struct CodeScanner {
                 }
                 if byte == UInt8(ascii: "{") { braceDepth += 1 }
                 if byte == UInt8(ascii: "}") { braceDepth = max(0, braceDepth - 1) }
-                if Self.isPunctuation(byte) { emit(.punctuation, index..<index + 1) }
+                if Self.isPunctuation(byte) { emit(.punctuation, index, index + 1) }
                 index += 1
             }
         }
@@ -58,12 +62,15 @@ nonisolated struct CodeScanner {
 
     // MARK: Output
 
-    private mutating func emit(_ kind: CodeTokenKind, _ range: Range<Int>) {
-        guard !range.isEmpty else { return }
-        if kind == .punctuation, let last = tokens.last, last.kind == .punctuation, last.range.upperBound == range.lowerBound {
-            tokens[tokens.count - 1] = CodeToken(kind: .punctuation, range: last.range.lowerBound..<range.upperBound)
+    /// Adds a token for the bytes from `lower` up to `upper`. Both are clamped to the text, so no position computed from a
+    /// skipped byte can make an invalid range; an empty one adds nothing.
+    private mutating func emit(_ kind: CodeTokenKind, _ lower: Int, _ upper: Int) {
+        let upper = min(upper, bytes.count), lower = max(lower, 0)
+        guard lower < upper else { return }
+        if kind == .punctuation, let last = tokens.last, last.kind == .punctuation, last.range.upperBound == lower {
+            tokens[tokens.count - 1] = CodeToken(kind: .punctuation, range: last.range.lowerBound..<upper)
         } else {
-            tokens.append(CodeToken(kind: kind, range: range))
+            tokens.append(CodeToken(kind: kind, range: lower..<upper))
         }
     }
 
@@ -85,7 +92,7 @@ nonisolated struct CodeScanner {
             if syntax.commentNeedsSpace, index > 0, !Self.isSpace(bytes[index - 1]) { continue }
             let start = index
             while index < bytes.count, bytes[index] != UInt8(ascii: "\n"), bytes[index] != UInt8(ascii: "\r") { index += 1 }
-            emit(.comment, start..<index)
+            emit(.comment, start, index)
             return true
         }
         guard let block = syntax.blockComment, matches(block.open) else { return false }
@@ -103,14 +110,14 @@ nonisolated struct CodeScanner {
                 index += 1
             }
         }
-        emit(.comment, start..<index)
+        emit(.comment, start, index)
         return true
     }
 
     private mutating func scanPHPTag() -> Bool {
         guard syntax.phpTags else { return false }
         for tag: StaticString in ["<?php", "?>"] where matches(tag) {
-            emit(.keyword, index..<index + tag.utf8CodeUnitCount)
+            emit(.keyword, index, index + tag.utf8CodeUnitCount)
             index += tag.utf8CodeUnitCount
             return true
         }
@@ -167,8 +174,8 @@ nonisolated struct CodeScanner {
             if byte == UInt8(ascii: "\n") || byte == UInt8(ascii: "\r") { break }
             if escapes, byte == UInt8(ascii: "\\") {
                 if interpolates, peek(index + 1) == UInt8(ascii: "("), nesting < Self.maxNesting {
-                    emitString(pieceStart..<index)
-                    emit(.punctuation, index..<index + 2)
+                    emitString(pieceStart, index)
+                    emit(.punctuation, index, index + 2)
                     index += 2
                     interpolate(closing: UInt8(ascii: ")"))
                     pieceStart = index
@@ -187,7 +194,7 @@ nonisolated struct CodeScanner {
             }
             index += 1
         }
-        emitString(pieceStart..<min(index, bytes.count))
+        emitString(pieceStart, min(index, bytes.count))
     }
 
     /// Scans the code of an interpolation up to its closing byte, emits that byte as punctuation and moves past it.
@@ -196,7 +203,7 @@ nonisolated struct CodeScanner {
         scan(closing: closing)
         nesting -= 1
         if index < bytes.count {
-            emit(.punctuation, index..<index + 1)
+            emit(.punctuation, index, index + 1)
             index += 1
         }
     }
@@ -213,7 +220,7 @@ nonisolated struct CodeScanner {
                 index += 1
             }
         }
-        emit(.string, start..<min(index, bytes.count))
+        emit(.string, start, min(index, bytes.count))
     }
 
     /// `#"…"#`, `##"…"##`, and with a Rust prefix `r"…"` and `r#"…"#`: nothing inside is escaped.
@@ -221,7 +228,14 @@ nonisolated struct CodeScanner {
         let hasRawPrefix = bytes[start..<index].contains { $0 | 0x20 == UInt8(ascii: "r") }
         var hashes = 0
         while peek(index + hashes) == UInt8(ascii: "#") { hashes += 1 }
-        guard peek(index + hashes) == UInt8(ascii: "\""), hashes > 0 || hasRawPrefix else { return false }
+        guard peek(index + hashes) == UInt8(ascii: "\""), hashes > 0 || hasRawPrefix else {
+            // A run of `#` that opens no string is one token. Counting it again from each of its bytes would take time that grows
+            // with the square of its length.
+            guard hashes > 1, start == index else { return false }
+            emit(.punctuation, index, index + hashes)
+            index += hashes
+            return true
+        }
         index += hashes + 1
         while index < bytes.count {
             if bytes[index] == UInt8(ascii: "\"") {
@@ -234,7 +248,7 @@ nonisolated struct CodeScanner {
             }
             index += 1
         }
-        emit(.string, start..<min(index, bytes.count))
+        emit(.string, start, min(index, bytes.count))
         return true
     }
 
@@ -255,7 +269,7 @@ nonisolated struct CodeScanner {
             }
             index += 1
         }
-        emit(.string, start..<min(index, bytes.count))
+        emit(.string, start, min(index, bytes.count))
         return true
     }
 
@@ -265,10 +279,10 @@ nonisolated struct CodeScanner {
         if peek(end) == UInt8(ascii: "\\") { end += 2 } else { end = skipCharacter(at: end) }
         while end < bytes.count, bytes[end] != UInt8(ascii: "'"), bytes[end] != UInt8(ascii: "\n"), end - index < 12 { end += 1 }
         if peek(end) == UInt8(ascii: "'") {
-            emit(.string, start..<end + 1)
+            emit(.string, start, end + 1)
             index = end + 1
         } else {
-            emit(.punctuation, index..<index + 1)
+            emit(.punctuation, index, index + 1)
             index += 1
         }
     }
@@ -283,7 +297,7 @@ nonisolated struct CodeScanner {
             end = skipCharacter(at: end)
         }
         if peek(end) == UInt8(ascii: "'") {
-            emit(.string, start..<end + 1)
+            emit(.string, start, end + 1)
             index = end + 1
             return
         }
@@ -303,7 +317,7 @@ nonisolated struct CodeScanner {
         index += 1
         while index < bytes.count, bytes[index] != UInt8(ascii: "`") { index += 1 }
         index = min(index + 1, bytes.count)
-        emit(.string, start..<index)
+        emit(.string, start, index)
     }
 
     /// JavaScript's backtick string, which spans lines and runs `${…}` as code, nested as deep as the text goes.
@@ -318,8 +332,8 @@ nonisolated struct CodeScanner {
                 index += 1
                 break
             } else if byte == UInt8(ascii: "$"), peek(index + 1) == UInt8(ascii: "{"), nesting < Self.maxNesting {
-                emitString(pieceStart..<index)
-                emit(.punctuation, index..<index + 2)
+                emitString(pieceStart, index)
+                emit(.punctuation, index, index + 2)
                 index += 2
                 interpolate(closing: UInt8(ascii: "}"))
                 pieceStart = index
@@ -327,15 +341,15 @@ nonisolated struct CodeScanner {
                 index += 1
             }
         }
-        emitString(pieceStart..<min(index, bytes.count))
+        emitString(pieceStart, min(index, bytes.count))
     }
 
     /// A string; or a key, when the language marks `"key": …` as one.
-    private mutating func emitString(_ range: Range<Int>) {
-        if syntax.highlightsKeys, isFollowedByColon(at: range.upperBound) {
-            emit(.keyword, range)
+    private mutating func emitString(_ lower: Int, _ upper: Int) {
+        if syntax.highlightsKeys, isFollowedByColon(at: upper) {
+            emit(.keyword, lower, upper)
         } else {
-            emit(.string, range)
+            emit(.string, lower, upper)
         }
     }
 
@@ -365,7 +379,7 @@ nonisolated struct CodeScanner {
         if bytes[index] == UInt8(ascii: "0"), let marker = peek(index + 1), [0x78, 0x62, 0x6F].contains(marker | 0x20) {
             index += 2
             while index < bytes.count, Self.isWordByte(bytes[index]) { index += 1 }
-            emit(.number, start..<index)
+            emit(.number, start, index)
             return
         }
         skipDigits()
@@ -381,7 +395,7 @@ nonisolated struct CodeScanner {
             }
         }
         while index < bytes.count, Self.isWordByte(bytes[index]) { index += 1 }
-        emit(.number, start..<index)
+        emit(.number, start, index)
     }
 
     private mutating func skipDigits() {
@@ -407,9 +421,9 @@ nonisolated struct CodeScanner {
             return
         }
         if syntax.highlightsKeys, isKey(start..<index) {
-            emit(.keyword, start..<index)
+            emit(.keyword, start, index)
         } else if isKeyword(start..<index) {
-            emit(.keyword, start..<index)
+            emit(.keyword, start, index)
         }
     }
 
@@ -454,21 +468,21 @@ nonisolated struct CodeScanner {
             let start = index
             index += 1
             while index < bytes.count, Self.isWordByte(bytes[index]) || (syntax.wordExtras.contains(bytes[index])) { index += 1 }
-            emit(.keyword, start..<index)
+            emit(.keyword, start, index)
             return true
         case UInt8(ascii: "#") where syntax.preprocessor:
             guard let next, next | 0x20 >= UInt8(ascii: "a"), next | 0x20 <= UInt8(ascii: "z"), isFirstOnLine(index) else { return false }
             let start = index
             index += 1
             while index < bytes.count, Self.isWordByte(bytes[index]) { index += 1 }
-            emit(.keyword, start..<index)
+            emit(.keyword, start, index)
             return true
         case UInt8(ascii: "#") where syntax.hexColors && braceDepth > 0:
             var end = index + 1
             while end < bytes.count, Self.isHexDigit(bytes[end]) { end += 1 }
             let digits = end - index - 1
             guard [3, 4, 6, 8].contains(digits), !(peek(end).map(Self.isWordByte) ?? false) else { return false }
-            emit(.number, index..<end)
+            emit(.number, index, end)
             index = end
             return true
         default:

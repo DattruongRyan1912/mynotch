@@ -42,10 +42,27 @@ nonisolated struct ClipboardHistory: Codable, Equatable, Sendable {
         return .inserted(item.id)
     }
 
-    /// Decides, once, whether each text saved before code detection existed is code. Items that have an answer keep it.
-    mutating func classifyUnclassifiedTexts() {
+    /// The next texts saved before code detection existed, newest first, which still have no answer. The list stops when
+    /// the items together have given `maxBytes` of what detection reads of them (at most 4 KB each, so one long text is
+    /// never worth more than that) or at `maxItems`, and always holds one if there is one.
+    func unclassifiedTexts(maxBytes: Int, maxItems: Int) -> [(id: UUID, text: String)] {
+        var found: [(id: UUID, text: String)] = []
+        var bytes = 0
+        for item in items where item.codeDetection == nil {
+            guard let text = item.content.plainText, item.content.kind == .text else { continue }
+            found.append((item.id, text))
+            bytes += min(text.utf8.count, ClipboardCodeDetector.sampleBytes)
+            if bytes >= maxBytes || found.count >= maxItems { break }
+        }
+        return found
+    }
+
+    /// Records answers found elsewhere, such as in the background. An item that has one already (a copy made meanwhile) keeps
+    /// it, and an item that is gone is skipped.
+    mutating func applyDetections(_ detections: [(UUID, CodeDetection)]) {
+        let byID = Dictionary(detections, uniquingKeysWith: { first, _ in first })
         for index in items.indices where items[index].codeDetection == nil {
-            items[index].codeDetection = ClipboardCodeDetector.detect(items[index].content)
+            if let detection = byID[items[index].id] { items[index].codeDetection = detection }
         }
     }
 

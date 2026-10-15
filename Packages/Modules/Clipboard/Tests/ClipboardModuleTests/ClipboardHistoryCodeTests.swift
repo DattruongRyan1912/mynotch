@@ -62,23 +62,55 @@ import Testing
 
     // MARK: Items from before code detection
 
-    @Test func classifyingFillsOnlyTheTextsThatHaveNone() throws {
-        func legacy(_ content: ClipboardContent, _ detection: CodeDetection? = nil) -> ClipboardItem {
-            ClipboardItem(
-                id: UUID(), content: content, contentHash: ClipboardContent.hash(of: content), copiedAt: Self.start,
-                sourceBundleID: nil, sourceAppName: nil, codeDetection: detection
-            )
-        }
-        var history = ClipboardHistory(items: [
-            legacy(.text(Self.swiftCode)), legacy(.text("Xin chào")), legacy(.link(URL(string: "https://example.com")!)),
-            // Decided already: not looked at again, even when the text now looks like something else.
-            legacy(.text(Self.swiftCode), .notCode),
+    func legacy(_ content: ClipboardContent, _ detection: CodeDetection? = nil) -> ClipboardItem {
+        ClipboardItem(
+            id: UUID(), content: content, contentHash: ClipboardContent.hash(of: content), copiedAt: Self.start,
+            sourceBundleID: nil, sourceAppName: nil, codeDetection: detection
+        )
+    }
+
+    @Test func theTextsWithoutAnAnswerAreListedNewestFirst() throws {
+        let rtf = Data("{\\rtf1 x}".utf8)
+        let code = legacy(.text(Self.swiftCode)), prose = legacy(.text("Xin chào")), rich = legacy(.richText(plain: "Bảng giá", rtf: rtf))
+        let history = ClipboardHistory(items: [
+            code, legacy(.link(URL(string: "https://example.com")!)), prose, legacy(.text("decided"), .notCode), rich,
+            legacy(.color(hex: "#FF8800")),
         ])
-        history.classifyUnclassifiedTexts()
-        #expect(history.items.map(\.codeDetection) == [.code(.swift), .notCode, nil, .notCode])
+        let found = history.unclassifiedTexts(maxBytes: 1_000_000, maxItems: 100)
+        #expect(found.map(\.id) == [code.id, prose.id, rich.id])
+        #expect(found.map(\.text) == [Self.swiftCode, "Xin chào", "Bảng giá"])
+    }
+
+    @Test func theListStopsAtTheItemCountAndAtTheByteBudgetButAlwaysHoldsOneItem() throws {
+        let big = String(repeating: "a", count: 10_000)
+        let history = ClipboardHistory(items: (0..<10).map { legacy(.text("\(big)\($0)")) })
+        #expect(history.unclassifiedTexts(maxBytes: 1_000_000, maxItems: 3).count == 3)
+        // Each text counts for what detection reads of it, at most 4 KB.
+        let perItem = ClipboardCodeDetector.sampleBytes
+        #expect(history.unclassifiedTexts(maxBytes: perItem * 2, maxItems: 100).count == 2)
+        #expect(history.unclassifiedTexts(maxBytes: perItem * 2 + perItem / 2, maxItems: 100).count == 3)
+        #expect(history.unclassifiedTexts(maxBytes: 1, maxItems: 100).count == 1)
+        let short = ClipboardHistory(items: (0..<10).map { legacy(.text("t\($0)")) })
+        #expect(short.unclassifiedTexts(maxBytes: 100, maxItems: 100).count == 10)
+    }
+
+    @Test func detectionsAreAppliedOnlyWhereThereIsNoAnswerYet() throws {
+        let fresh = legacy(.text(Self.swiftCode)), decided = legacy(.text(Self.swiftCode + " "), .notCode), link = legacy(.link(URL(string: "https://example.com")!))
+        var history = ClipboardHistory(items: [fresh, decided, link])
+        history.applyDetections([(fresh.id, .code(.swift)), (decided.id, .code(.swift)), (UUID(), .code(.go))])
+        #expect(history.items.map(\.codeDetection) == [.code(.swift), .notCode, nil])
         let again = history
-        history.classifyUnclassifiedTexts()
+        history.applyDetections([(fresh.id, .notCode)])
         #expect(history == again)
+    }
+
+    @Test func detectionsLandOnTheirItemsWhateverTheOrderOfTheHistory() throws {
+        let first = legacy(.text("one")), second = legacy(.text("two"))
+        var history = ClipboardHistory(items: [first, second])
+        history.applyDetections([(second.id, .code(.go))])
+        history.items.insert(legacy(.text("new"), .notCode), at: 0)
+        history.applyDetections([(first.id, .notCode)])
+        #expect(history.items.map(\.codeDetection) == [.notCode, .notCode, .code(.go)])
     }
 
     @Test func aHistorySavedBeforeDetectionStillLoads() throws {

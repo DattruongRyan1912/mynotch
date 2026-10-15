@@ -20,7 +20,8 @@ nonisolated enum ClipboardCodeDetector {
     static func detect(text: String) -> CodeDetection {
         let sample = DetectionSample(text)
         guard let first = sample.lines.first?.text else { return .notCode }
-        if first.hasPrefix("#!") { return .code(shebangLanguage(first)) }
+        // "#!important" is a sentence; a shebang names a path.
+        if first.hasPrefix("#!/") || first.hasPrefix("#! /") { return .code(shebangLanguage(first)) }
         if first.hasPrefix("<?php") { return .code(.php) }
         if looksLikeJSON(sample, of: text) { return .code(.json) }
         if looksLikeXML(sample, of: text) { return .code(.xml) }
@@ -59,27 +60,36 @@ nonisolated enum ClipboardCodeDetector {
         return sample.text.containsAnyBytes(["</", "/>"])
     }
 
-    /// At least three lines, nearly all of them `key: value`, `- item` or comments, with two or more keys. A key is a plain
-    /// ASCII word, so Vietnamese notes such as "Ghi chú: …" stay prose.
+    /// YAML has structure: a `---` line, or keys that hold nested lines or `- ` items. Plain `Key: value` lines (e-mail headers,
+    /// forms, contact cards, schedules) have none and stay text. At least three lines, nearly all of them `key: value`, `- item`
+    /// or comments, with two or more keys; the keys are plain ASCII words and no line has letters beyond ASCII outside quotes,
+    /// which would make it a sentence.
     private static func looksLikeYAML(_ sample: DetectionSample) -> Bool {
         guard sample.lines.count >= 3 else { return false }
         let allowedOther = sample.lines.count * 15 / 100
         var keys = 0, other = 0
-        for line in sample.lines {
+        var hasStructure = sample.lines[0].text == "---"
+        for (index, line) in sample.lines.enumerated() {
             let text = line.text
             if text == "---" || text.hasPrefix("#") { continue }
+            if CodeLineText.hasProseLetters(text) { return false }
             let isItem = text.hasPrefix("- ")
             let body = isItem ? text.dropFirst(2).drop { $0 == " " } : Substring(text)
             if let value = yamlValue(afterKeyIn: body) {
                 guard !value.hasSuffix(";"), !value.hasSuffix(","), !value.hasSuffix("{") else { return false }
                 keys += 1
+                // A key with nothing after it that is followed by a deeper line or an item of its own.
+                if value.isEmpty, !isItem, index + 1 < sample.lines.count {
+                    let next = sample.lines[index + 1]
+                    if next.indent > line.indent || next.text.hasPrefix("- ") { hasStructure = true }
+                }
             } else if !isItem || text.hasSuffix(";") || text.hasSuffix(",") {
                 other += 1
                 // Prose and code fail on their first lines, so most texts stop here.
                 if other > allowedOther { return false }
             }
         }
-        return keys >= 2
+        return keys >= 2 && hasStructure
     }
 
     /// What follows "key:" when the text starts with a plain key, nil otherwise.

@@ -41,7 +41,7 @@ import Testing
 
     @Test func theVietnameseAliasMeansTheSame() {
         #expect(ids("@mã") == ids("@code"))
-        #expect(ids("@ma") == ids("@code"))
+        #expect(ids("@ma").isEmpty)
         #expect(ids("@MÃ") == ids("@code"))
     }
 

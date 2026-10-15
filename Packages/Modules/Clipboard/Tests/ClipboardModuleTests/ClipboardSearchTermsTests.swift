@@ -29,7 +29,7 @@ enum SearchFixtureApps {
         #expect(terms.text == "")
     }
 
-    @Test(arguments: ["@code", "@Code", "@CODE", "@mã", "@ma", "@MÃ", "@Mã"])
+    @Test(arguments: ["@code", "@Code", "@CODE", "@mã", "@MÃ", "@Mã", "@ma\u{0303}"])
     func codeTokensKeepTheTextsThatAreCode(input: String) throws {
         let terms = terms(input + " ")
         #expect(terms.wantsCode)
@@ -40,6 +40,15 @@ enum SearchFixtureApps {
         #expect(token.filter == .code)
         #expect(token.title == "Mã")
         #expect(token.raw == input)
+    }
+
+    @Test func withoutItsAccentTheAliasIsNotTheCodeFilter() {
+        let mail = [ClipboardLibraryApp(id: "com.apple.mail", bundleID: "com.apple.mail", name: "Mail", count: 3)]
+        let terms = terms("@ma ", apps: mail)
+        #expect(!terms.wantsCode)
+        #expect(terms.appPrefixes == ["ma"])
+        #expect(self.terms("@ma ").tokens.isEmpty)
+        #expect(self.terms("@ma ").text == "@ma")
     }
 
     @Test func codeTakesTheWordBeforeAnAppCalledCode() {

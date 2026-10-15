@@ -30,7 +30,7 @@ nonisolated enum CodeLanguage: String, Codable, Sendable, CaseIterable {
 }
 
 /// What a text turned out to be when it was copied, decided once and stored with the item. An item saved before code
-/// detection existed has none, and gets one when the history loads.
+/// detection existed has none, and gets one in the background after the module starts.
 nonisolated enum CodeDetection: Hashable, Sendable {
     case notCode
     case code(CodeLanguage)

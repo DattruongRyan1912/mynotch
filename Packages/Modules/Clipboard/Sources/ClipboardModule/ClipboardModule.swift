@@ -50,6 +50,18 @@ public final class ClipboardModule: FeatureModule {
     private var paster: ClipboardPaster?
     /// Closed on stop, so a ⌘V still waiting for the paste delay is never sent into whatever app is in front by then.
     private var keystrokeGate: KeystrokeGate?
+    /// How much text one step of the classification of old items looks at (what detection reads of each, at most 4 KB, so about
+    /// 64 long texts), and the most items a step takes, which only matters for very short ones.
+    static let classifyBatchBytes = 256 * 1024
+    static let classifyBatchItems = 2_000
+    /// The wait between two steps, which leaves the main actor to the window.
+    static let classifyStepDelay: Duration = .milliseconds(25)
+
+    /// The step that is being worked out in the background, nil before the first and after the last. Tests wait for it.
+    private(set) var classification: Task<Void, Never>?
+    /// The sizes of the steps taken so far, in items and in bytes looked at.
+    private(set) var classificationBatches: [(items: Int, bytes: Int)] = []
+    private var classificationStep: ScheduledAction?
     /// The last flush or file edit. Starts, flushes and edits wait for it, so two of them never touch the files at once.
     /// Not private so tests can queue work they control.
     var diskWork: Task<Void, Never>?
@@ -106,14 +118,13 @@ public final class ClipboardModule: FeatureModule {
         self.context = context
         self.keys = keys
         self.store = store
+        classificationBatches = []
 
         let loaded = store.load()
         var history = loaded
         // Images are deleted before the save that drops their items, so a crash in between leaves items without images.
         _ = history.remove(ids: Set(loaded.items.filter { !hasImageFile($0, in: store) }.map(\.id)))
         history.removeDanglingPins()
-        // Texts saved before code detection existed are classified now, once; the save below keeps the answer.
-        history.classifyUnclassifiedTexts()
         let removed = prune(&history)
         state.history = history
         store.deleteImages(for: removed)
@@ -121,6 +132,7 @@ public final class ClipboardModule: FeatureModule {
         refreshPasteboardAccess()
         refreshAccessibility()
         restoreStack(from: store, keys: keys, settings: context.settings)
+        scheduleClassification()
 
         let keystrokeGate = KeystrokeGate(keystrokes)
         self.keystrokeGate = keystrokeGate
@@ -185,6 +197,9 @@ public final class ClipboardModule: FeatureModule {
         closePanel()
         keystrokeGate?.isOpen = false
         keystrokeGate = nil
+        classificationStep?.cancel()
+        classificationStep = nil
+        classification?.cancel()
         monitor?.stop()
         monitor = nil
         paster = nil
@@ -625,10 +640,41 @@ public final class ClipboardModule: FeatureModule {
         }
     }
 
-    /// Puts the item on the pasteboard and moves it to the top. Code is always put as plain text, whatever formatting it
-    /// was copied with: an editor that takes rich text would paste the colours of the app it came from. A paste always
-    /// closes the notch, at once, so keyboard focus is back in the previous app before ⌘V is sent; a copy closes it when
-    /// "close after action" is on. A failed write changes nothing and keeps the notch open. A paste from the library window hands the keyboard
+    // MARK: Old items
+
+    /// Texts saved before code detection existed are classified a batch at a time: the scheduler starts a step, the batch is
+    /// worked out on a background task (about a millisecond for a 4 KB text, so up to 256 KB takes tens of milliseconds, none of
+    /// it on the main actor), and the answers are applied in one change that costs a pass over the history. Nothing is
+    /// scheduled when there is nothing to do, and a copy made meanwhile keeps its own answer.
+    private func scheduleClassification() {
+        guard let context, !state.history.unclassifiedTexts(maxBytes: 1, maxItems: 1).isEmpty else { return }
+        classificationStep = context.scheduler.schedule(after: Self.classifyStepDelay) { [weak self] in
+            self?.classifyNextBatch()
+        }
+    }
+
+    private func classifyNextBatch() {
+        let batch = state.history.unclassifiedTexts(maxBytes: Self.classifyBatchBytes, maxItems: Self.classifyBatchItems)
+        guard !batch.isEmpty else {
+            classification = nil
+            return
+        }
+        classificationBatches.append((batch.count, batch.reduce(0) { $0 + min($1.text.utf8.count, ClipboardCodeDetector.sampleBytes) }))
+        classification = Task { [weak self] in
+            let answers = await Task.detached(priority: .utility) {
+                batch.map { ($0.id, ClipboardCodeDetector.detect(text: $0.text)) }
+            }.value
+            guard let self, !Task.isCancelled, store != nil else { return }
+            update { history in
+                history.applyDetections(answers)
+                return []
+            }
+            scheduleClassification()
+        }
+    }
+
+    /// Puts the item on the pasteboard and moves it to the top. A paste always closes the notch, at once, so keyboard focus
+    /// is back in the previous app before ⌘V is sent; a copy closes it when "close after action" is on. A failed write changes nothing and keeps the notch open. A paste from the library window hands the keyboard
     /// back to the app behind it and waits longer for that before sending ⌘V. `beforePaste` is the floating panel's way to
     /// get the keyboard out of its own window between the write and ⌘V; a refusal pastes nothing and asks the user to
     /// press ⌘V. `touchesHistory` is off for the stack, whose pastes must not reorder the history. `afterKeysUp` is the
@@ -643,7 +689,7 @@ public final class ClipboardModule: FeatureModule {
         // Remembers a refusal, which comes back as a plain `.copied`.
         var keyboardRefused = false
         let outcome = paster.perform(
-            item, imageURL: imageURL(of: item), paste: paste, plainTextOnly: plainTextOnly || item.isCode,
+            item, imageURL: imageURL(of: item), paste: paste, plainTextOnly: plainTextOnly,
             delay: fromLibrary ? Self.libraryPasteDelay : nil,
             beforePaste: beforePaste.map { ask in
                 {

@@ -346,6 +346,35 @@ nonisolated enum CodeSamples {
         """, .shell),
         CodeSample("minified css", "a{color:red;margin:0}", .css),
         CodeSample("json with vietnamese", #"{"tên": "Bình", "tuổi": 20}"#, .json),
+        CodeSample("swift function", "func f() {}"),
+        CodeSample("arrow constant", "const x = () => 1;", .javascript),
+        CodeSample("full sql statement", "SELECT * FROM users WHERE id = 1;", .sql),
+        CodeSample("npm install flags", "npm install --save express", .shell),
+        CodeSample("rm with flags", "rm -rf node_modules", .shell),
+        CodeSample("ssh address", "ssh user@host", .shell),
+        CodeSample("pip install", "pip install requests", .shell),
+        CodeSample("env shebang", """
+        #!/usr/bin/env python3
+        print("x")
+        """, .python),
+        CodeSample("spaced shebang", """
+        #! /bin/sh
+        echo ok
+        """, .shell),
+        CodeSample("yaml with separator", """
+        ---
+        title: Hello
+        tags:
+          - a
+          - b
+        """, .yaml),
+        CodeSample("yaml list under keys", """
+        fruits:
+        - apple
+        - banana
+        veggies:
+        - kale
+        """, .yaml),
         CodeSample("markdown document", """
         # Title
 
@@ -479,6 +508,170 @@ nonisolated enum CodeSamples {
         CodeSample("lorem ipsum", "Lorem ipsum dolor sit amet, consectetur adipiscing elit."),
         CodeSample("emoji", "Cảm ơn nhiều 🙏😊"),
         CodeSample("english semicolons", "I came; I saw (briefly); I left."),
+        // Everyday Vietnamese lists and notes in which every line carries one weak sign.
+        CodeSample("official list", """
+        Điều kiện đăng ký:
+        a) Có quốc tịch Việt Nam;
+        b) Đủ 18 tuổi trở lên;
+        c) Có đủ năng lực hành vi dân sự.
+        """),
+        CodeSample("polite semicolons", """
+        vâng ạ;
+        dạ em hiểu rồi;
+        """),
+        CodeSample("closing semicolons", """
+        Trân trọng;
+        Nguyễn Văn A;
+        """),
+        CodeSample("shopping with semicolons", """
+        Mua: sữa; trứng; bánh mì;
+        Làm: giặt đồ; rửa bát;
+        """),
+        CodeSample("route arrows", """
+        Hà Nội -> Đà Nẵng: 1h20
+        Đà Nẵng -> TP.HCM: 1h30
+        """),
+        CodeSample("route double arrows", """
+        Lộ trình: Hà Nội => Đà Nẵng
+        Chi phí: 1.2tr => 1.5tr
+        """),
+        CodeSample("price list with equals", """
+        Áo thun = 150k
+        Quần jeans = 350k
+        Giày = 890k
+        """),
+        CodeSample("fruit with equals", """
+        chuối = 5 quả
+        táo = 3 quả
+        cam = 2 quả
+        """),
+        CodeSample("quoted mail", """
+        >> Anh gửi file nhé
+        >> Cảm ơn
+        > ok em
+        """),
+        CodeSample("grades with semicolons", """
+        Điểm Toán: 9.5; Lý: 8.0; Hóa: 7.5;
+        Điểm Văn: 8.0; Sử: 9.0; Địa: 8.5;
+        """),
+        CodeSample("application log", """
+        [2026-10-15 12:00:01] INFO: user logged in (id=42)
+        [2026-10-15 12:00:05] INFO: user logged out (id=42)
+        """),
+        CodeSample("logfmt", #"level=info msg="request done" status=200 dur=12ms"#),
+        CodeSample("english list with semicolons", """
+        a) Be a citizen;
+        b) Be over 18;
+        c) Have capacity.
+        """),
+        CodeSample("english price list", """
+        Apple = 5
+        Banana = 3
+        Cherry = 2
+        """),
+        CodeSample("english arrows", """
+        A -> B
+        B -> C
+        C -> D
+        """),
+        CodeSample("english fat arrows", """
+        x => y
+        y => z
+        """),
+        CodeSample("english quote", """
+        > first line
+        > second line
+        > third line
+        """),
+        // A sentence that starts with a command, a keyword or a few words that SQL also uses.
+        CodeSample("git sentence", "git is a version control system"),
+        CodeSample("cargo sentence", "cargo ship arrives on Friday"),
+        CodeSample("yarn sentence", "yarn is on sale at the store"),
+        CodeSample("brew sentence", "brew coffee for me please"),
+        CodeSample("cp sentence", "cp this to my desktop"),
+        CodeSample("mv sentence", "mv the box to the left"),
+        CodeSample("docker sentence", "docker is running slowly today"),
+        CodeSample("ln sentence", "ln is a short word"),
+        CodeSample("grep sentence", "grep the logs for errors"),
+        CodeSample("vietnamese git sentence", "git là công cụ quản lý phiên bản"),
+        CodeSample("vietnamese ssh sentence", "ssh vào server rồi kiểm tra log nhé"),
+        CodeSample("vietnamese pip sentence", "pip install thì chậm lắm"),
+        CodeSample("vietnamese npm sentence", "npm install nếu bị lỗi thì xóa node_modules rồi chạy lại nhé"),
+        CodeSample("vietnamese def sentence", "def là viết tắt của definition"),
+        CodeSample("vietnamese select sentence", "SELECT là câu lệnh để truy vấn dữ liệu từ bảng, FROM chỉ định bảng."),
+        CodeSample("english select sentence", "Select all from the menu; delete it; set the options; update later."),
+        CodeSample("sql words only", "select from where join group order"),
+        CodeSample("update sentence", "update the table set from the database where possible"),
+        CodeSample("return sentence", "return to base before the storm arrives"),
+        CodeSample("import sentence", "import duty is charged on every parcel"),
+        CodeSample("package sentence", "package arrived this morning"),
+        CodeSample("def sentence", "def is short for definition"),
+        CodeSample("make sentence", "make sure you lock the door"),
+        CodeSample("open sentence", "open the window please"),
+        // Blocks of "Key: value" lines that are not YAML.
+        CodeSample("email headers", """
+        From: an@example.com
+        To: binh@example.com
+        Subject: Meeting
+        Date: Mon, 12 May 2025
+        """),
+        CodeSample("employee card", """
+        Name: An
+        Role: Dev
+        Department: IT
+        Email: an@example.com
+        """),
+        CodeSample("http headers", """
+        Host: example.com
+        User-Agent: curl/8.0
+        Accept: */*
+        """),
+        CodeSample("ticket fields", """
+        ID: 42
+        Status: open
+        Type: bug
+        """),
+        CodeSample("coordinates", """
+        Latitude: 21.03
+        Longitude: 105.85
+        Altitude: 12
+        """),
+        CodeSample("weekly plan", """
+        Monday: gym
+        Tuesday: rest
+        Wednesday: swim
+        """),
+        CodeSample("order line", """
+        Item: Áo
+        Price: 100k
+        Qty: 2
+        """),
+        CodeSample("contacts", """
+        Facebook: fb.com/an
+        Zalo: 0912345678
+        Telegram: @abc
+        """),
+        CodeSample("prices", """
+        BTC: 62,000 USD (+2.5%)
+        ETH: 3,100 USD (-1.2%)
+        SOL: 150 USD (+0.8%)
+        """),
+        CodeSample("lowercase fields", """
+        name: an
+        role: dev
+        team: web
+        """),
+        CodeSample("vietnamese schedule list", """
+        Monday:
+          - gym
+        Tuesday:
+          - bơi
+        """),
+        CodeSample("bang prefix", "#!important thông báo cho mọi người"),
+        CodeSample("ascii bang prefix", "#!important announcement for everyone"),
+        CodeSample("mustache sentence", "{{name}} đã được gửi đến {{email}}"),
+        CodeSample("worked example", "Ví dụ: x = 10, y = 20, z = x + y = 30"),
+        CodeSample("function formula", "f(x) = x^2 + 2x + 1"),
         CodeSample("markdown-looking prose", "**Lưu ý:** xem [tài liệu](https://example.com) trước khi chạy."),
     ]
 }

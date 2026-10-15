@@ -9,7 +9,7 @@ nonisolated struct ClipboardItem: Identifiable, Codable, Sendable, Hashable {
     var sourceBundleID: String?
     var sourceAppName: String?
     /// Whether a text is code, and in which language, decided when it was copied. nil for other kinds, and for a text
-    /// saved before this existed until the history loads.
+    /// saved before this existed until the module has looked at it, a batch at a time, after it starts.
     var codeDetection: CodeDetection?
 
     /// The language of a text that is code.
