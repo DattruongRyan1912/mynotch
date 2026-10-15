@@ -24,6 +24,19 @@ import Testing
         #expect(SelectionIgnoreRules.application(safari, ownProcessID: 1, denyList: ["com.apple.Notes", "com.apple.Safari"]) == .deniedApplication)
     }
 
+    @Test func theDenyListIsMatchedWithoutRegardToCase() {
+        #expect(SelectionIgnoreRules.application(safari, ownProcessID: 1, denyList: ["COM.APPLE.SAFARI"]) == .deniedApplication)
+    }
+
+    @Test(arguments: [
+        "com.1password.1password", "com.agilebits.onepassword7", "com.agilebits.onepassword-osx", "com.bitwarden.desktop",
+        "com.apple.keychainaccess", "com.apple.Passwords", "org.keepassxc.keepassxc", "COM.APPLE.PASSWORDS",
+    ])
+    func aPasswordManagerIsNeverReadWithoutAnyoneAskingForThat(bundleID: String) {
+        let manager = FocusedApplication(processID: 8, bundleID: bundleID)
+        #expect(SelectionIgnoreRules.application(manager, ownProcessID: 1, denyList: []) == .deniedApplication)
+    }
+
     @Test func anAppWithNoBundleIDCannotBeDenied() {
         let unnamed = FocusedApplication(processID: 7, bundleID: nil)
         #expect(SelectionIgnoreRules.application(unnamed, ownProcessID: 1, denyList: ["", "com.apple.Safari"]) == nil)
@@ -46,23 +59,23 @@ import Testing
     // MARK: text
 
     @Test func blankTextIsEmpty() {
-        #expect(SelectionIgnoreRules.text(selection(""), lastShown: nil) == .empty)
-        #expect(SelectionIgnoreRules.text(selection(" \n\t "), lastShown: nil) == .empty)
+        #expect(SelectionIgnoreRules.text(selection(""), lastHandled: nil) == .empty)
+        #expect(SelectionIgnoreRules.text(selection(" \n\t "), lastHandled: nil) == .empty)
     }
 
     @Test func twoThousandCharactersAreFineAndOneMoreIsTooLong() {
-        #expect(SelectionIgnoreRules.text(selection(String(repeating: "a", count: 2_000)), lastShown: nil) == nil)
-        #expect(SelectionIgnoreRules.text(selection(String(repeating: "a", count: 2_001)), lastShown: nil) == .tooLong)
+        #expect(SelectionIgnoreRules.text(selection(String(repeating: "a", count: 2_000)), lastHandled: nil) == nil)
+        #expect(SelectionIgnoreRules.text(selection(String(repeating: "a", count: 2_001)), lastHandled: nil) == .tooLong)
     }
 
-    @Test func theSelectionTheChipAlreadyShowsIsUnchanged() {
+    @Test func theSelectionAlreadyHandledIsUnchanged() {
         let shown = selection("Hello world")
-        #expect(SelectionIgnoreRules.text(selection("Hello world"), lastShown: shown) == .unchanged)
-        #expect(SelectionIgnoreRules.text(selection("Hello world!"), lastShown: shown) == nil)
+        #expect(SelectionIgnoreRules.text(selection("Hello world"), lastHandled: shown) == .unchanged)
+        #expect(SelectionIgnoreRules.text(selection("Hello world!"), lastHandled: shown) == nil)
         // The same words in another app are another selection.
         let notes = FocusedApplication(processID: 43, bundleID: "com.apple.Notes")
-        #expect(SelectionIgnoreRules.text(selection("Hello world", in: notes), lastShown: shown) == nil)
-        #expect(SelectionIgnoreRules.text(selection("Hello world"), lastShown: nil) == nil)
+        #expect(SelectionIgnoreRules.text(selection("Hello world", in: notes), lastHandled: shown) == nil)
+        #expect(SelectionIgnoreRules.text(selection("Hello world"), lastHandled: nil) == nil)
     }
 
     // MARK: password fields

@@ -15,7 +15,22 @@ final class FakeAccessibility: AccessibilityClient {
     /// Attributes `enable` set, in order.
     private(set) var enabled: [String] = []
 
-    func focusedApplication() -> FocusedApplication? { application }
+    private(set) var focusedLookups = 0
+
+    func focusedApplication() -> FocusedApplication? {
+        focusedLookups += 1
+        return application
+    }
+
+    /// The front app, which a passive read goes by; `application` when nil.
+    var frontmost: FocusedApplication?
+
+    func frontmostApplication() -> FocusedApplication? { frontmost ?? application }
+
+    /// Apps that hold secure event input, as one does while a password field has the focus.
+    var secureInputHolders: Set<pid_t> = []
+
+    func isSecureInputHeld(by application: FocusedApplication) -> Bool { secureInputHolders.contains(application.processID) }
 
     /// What every read finds once `selections` is used up.
     var standing: String?
@@ -25,8 +40,10 @@ final class FakeAccessibility: AccessibilityClient {
     var length: Int?
     /// Where the selection is, in Accessibility coordinates; nil when the app does not say.
     var bounds: CGRect?
-    private(set) var lengthReads = 0
-    private(set) var boundsReads = 0
+    /// A passive read finds an app that does not answer in time.
+    var hangs = false
+    /// How many passive looks were taken, each of which is one round of Accessibility calls.
+    private(set) var inspections = 0
 
     func readSelection(in application: FocusedApplication) -> SelectionRead {
         guard !isSecureField else { return .empty }
@@ -35,14 +52,16 @@ final class FakeAccessibility: AccessibilityClient {
         return (reads < selections.count ? selections[reads] : standing).map(SelectionRead.text) ?? .empty
     }
 
-    func selectionLength(in application: FocusedApplication) -> Int? {
-        lengthReads += 1
-        return isSecureField ? nil : length
-    }
-
-    func selectionBounds(in application: FocusedApplication) -> CGRect? {
-        boundsReads += 1
-        return isSecureField ? nil : bounds
+    func inspectSelection(in application: FocusedApplication) -> SelectionInspection {
+        inspections += 1
+        if hangs { return .unresponsive }
+        if isSecureField { return .none }
+        if let reason = SelectionIgnoreRules.length(length) { return reason == .tooLong ? .tooLong : .none }
+        switch readSelection(in: application) {
+        case .text(let text): return .selected(text: text, bounds: bounds)
+        case .empty: return .none
+        case .unresponsive: return .unresponsive
+        }
     }
 
     func isEnabled(_ attribute: String, in application: FocusedApplication) -> Bool { attributes.contains(attribute) }

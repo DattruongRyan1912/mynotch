@@ -27,6 +27,11 @@ protocol TranslationEngine: AnyObject {
     func invalidate()
 }
 
+/// An engine that translates on this Mac and sends the text nowhere. What a translation made without the user asking for it,
+/// such as a preview beside a selection, must be made with: the engines that need the user's own key do not conform, so the
+/// compiler keeps a selection's text from being sent anywhere by mistake.
+protocol OnDeviceTranslationEngine: TranslationEngine {}
+
 /// One translation session for a fixed pair.
 protocol TranslatingSession: AnyObject {
     func translate(_ text: String) async throws -> String
@@ -43,7 +48,7 @@ protocol TranslationSessionProviding {
 
 /// Translates with Apple's on-device models. Keeps one session per pair, so a pair's model loads only once,
 /// and runs one translation at a time, so a session is never used concurrently.
-final class AppleTranslationEngine: TranslationEngine {
+final class AppleTranslationEngine: OnDeviceTranslationEngine {
     private let sessions: any TranslationSessionProviding
     private var cache: [LanguagePair: any TranslatingSession] = [:]
     /// The newest request; the next one waits for it to finish before touching a session.

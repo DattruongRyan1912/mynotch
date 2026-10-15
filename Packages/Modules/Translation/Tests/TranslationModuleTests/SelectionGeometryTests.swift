@@ -74,6 +74,37 @@ import Testing
         #expect(anchor == CGRect(x: 7, y: 8, width: 0, height: 0))
     }
 
+    // MARK: when the pointer is the better guide
+
+    @Test func aRectangleBesideThePointerIsBelievedForAMouseGesture() {
+        let bounds = CGRect(x: 100, y: 100, width: 200, height: 20)
+        let anchor = SelectionGeometry.anchor(bounds: bounds, pointer: CGPoint(x: 250, y: 790), screens: all, pointerMatters: true)
+        #expect(anchor == CGRect(x: 100, y: 780, width: 200, height: 20))
+    }
+
+    @Test func aRectangleFarFromThePointerIsNotBelievedForAMouseGesture() {
+        // Some apps answer with a rectangle at the corner of the display whatever is selected.
+        let bounds = CGRect(x: 0, y: 0, width: 40, height: 20)
+        let pointer = CGPoint(x: 800, y: 400)
+        #expect(SelectionGeometry.anchor(bounds: bounds, pointer: pointer, screens: all, pointerMatters: true) == CGRect(origin: pointer, size: .zero))
+        // A keyboard selection has no pointer to check against, so the rectangle is all there is.
+        #expect(SelectionGeometry.anchor(bounds: bounds, pointer: pointer, screens: all, pointerMatters: false) == CGRect(x: 0, y: 880, width: 40, height: 20))
+    }
+
+    @Test func aTallSelectionOfAMouseGestureGoesByThePointerNotTheBlock() {
+        // A paragraph 300 pt tall: the end of the drag is where the user is looking, not under the whole block.
+        let bounds = CGRect(x: 100, y: 100, width: 400, height: 300)
+        let pointer = CGPoint(x: 480, y: 520)
+        #expect(SelectionGeometry.anchor(bounds: bounds, pointer: pointer, screens: all, pointerMatters: true) == CGRect(origin: pointer, size: .zero))
+        let threeLines = CGRect(x: 100, y: 100, width: 400, height: 60)
+        #expect(SelectionGeometry.anchor(bounds: threeLines, pointer: CGPoint(x: 480, y: 760), screens: all, pointerMatters: true).height == 60)
+    }
+
+    @Test func aTallSelectionOfTheKeyboardKeepsItsRectangle() {
+        let bounds = CGRect(x: 100, y: 100, width: 400, height: 300)
+        #expect(SelectionGeometry.anchor(bounds: bounds, pointer: CGPoint(x: 480, y: 520), screens: all, pointerMatters: false).height == 300)
+    }
+
     // MARK: the chip's place
 
     @Test func theChipSitsJustBelowTheSelectionCentredOnIt() {

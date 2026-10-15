@@ -111,7 +111,7 @@ import Testing
     @Test func aDragOverAQuantityShowsItsConversionBesideTheSelection() async throws {
         await start()
         fixture.accessibility.bounds = CGRect(x: 100, y: 100, width: 200, height: 20)
-        await fixture.dragSelecting("5 ft 11 in")
+        await fixture.dragSelecting("5 ft 11 in", from: CGPoint(x: 100, y: 790), to: CGPoint(x: 250, y: 790))
         let shown = try #require(chip.current)
         #expect(shown.content.text == "5 ft 11 in → 180 cm")
         #expect(shown.content.kind == .conversion)
@@ -156,7 +156,7 @@ import Testing
         fixture.input.drag(from: .zero, to: CGPoint(x: 100, y: 0))
         fixture.harness.scheduler.advance(by: .milliseconds(249))
         #expect(fixture.accessibility.reads == 0)
-        #expect(fixture.accessibility.lengthReads == 0)
+        #expect(fixture.accessibility.inspections == 0)
     }
 
     @Test func aPlainClickReadsNothing() async {
@@ -168,15 +168,35 @@ import Testing
         #expect(chip.shown.isEmpty)
     }
 
-    @Test func theChromiumSettingDecidesWhetherAChromeSelectionTurnsItsAccessibilityOn() async {
+    @Test func aPassiveReadNeverTurnsAccessibilityOnInAnotherApp() async {
         await start()
-        fixture.set(false, for: \.useChromiumAccessibility)
+        for setting in [true, false] {
+            fixture.set(setting, for: \.useChromiumAccessibility)
+            for bundleID in ["com.google.Chrome", "com.tinyspeck.slackmacgap", "com.microsoft.VSCode"] {
+                fixture.focus(bundleID)
+                await fixture.dragSelecting(nil)
+                await fixture.dragSelecting("5 ft 11 in")
+            }
+        }
+        // Setting a flag on Chrome or an Electron app is only ever done for the shortcut, on the user's press.
+        #expect(fixture.accessibility.enabled.isEmpty)
+        #expect(fixture.accessibility.attributes.isEmpty)
+    }
+
+    @Test func aChromeThatExposesNothingShowsNothingAndIsLeftAlone() async {
+        await start()
         fixture.focus("com.google.Chrome")
         await fixture.dragSelecting(nil)
+        #expect(chip.shown.isEmpty)
         #expect(fixture.accessibility.enabled.isEmpty)
-        fixture.set(true, for: \.useChromiumAccessibility)
-        await fixture.dragSelecting(nil)
-        #expect(fixture.accessibility.enabled == ["AXEnhancedUserInterface"])
+    }
+
+    @Test func aChromeThatExposesItsSelectionIsReadLikeAnyOtherApp() async {
+        await start()
+        fixture.focus("com.google.Chrome")
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(chip.current?.content.text == "5 ft 11 in → 180 cm")
+        #expect(fixture.accessibility.enabled.isEmpty)
     }
 
     // MARK: what it ignores
@@ -186,7 +206,7 @@ import Testing
         fixture.accessibility.isTrusted = false
         await fixture.dragSelecting("5 ft 11 in")
         #expect(fixture.accessibility.reads == 0)
-        #expect(fixture.accessibility.lengthReads == 0)
+        #expect(fixture.accessibility.inspections == 0)
         #expect(chip.shown.isEmpty)
     }
 
@@ -195,7 +215,6 @@ import Testing
         fixture.accessibility.isSecureField = true
         await fixture.dragSelecting("5 ft 11 in")
         #expect(fixture.accessibility.reads == 0)
-        #expect(fixture.accessibility.boundsReads == 0)
         #expect(chip.shown.isEmpty)
         #expect(fixture.previewEngine.requests.isEmpty)
     }
@@ -205,7 +224,7 @@ import Testing
         fixture.accessibility.application = FocusedApplication(processID: getpid(), bundleID: "io.lucasvu.mynotch")
         await fixture.dragSelecting("5 ft 11 in")
         #expect(fixture.accessibility.reads == 0)
-        #expect(fixture.accessibility.lengthReads == 0)
+        #expect(fixture.accessibility.inspections == 0)
         #expect(chip.shown.isEmpty)
     }
 
@@ -214,7 +233,7 @@ import Testing
         await start()
         await fixture.dragSelecting("5 ft 11 in")
         #expect(fixture.accessibility.reads == 0)
-        #expect(fixture.accessibility.lengthReads == 0)
+        #expect(fixture.accessibility.inspections == 0)
         #expect(chip.shown.isEmpty)
     }
 
@@ -275,16 +294,78 @@ import Testing
         #expect(fixture.previewEngine.requests.count == 1)
     }
 
-    @Test func theSameSelectionShowsAgainOnceItsChipHasGone() async {
+    @Test func aSelectionAlreadyHandledIsNotShownAgainWhenItsChipHasGone() async {
         await start()
         await fixture.dragSelecting("5 ft 11 in")
         fixture.harness.scheduler.advance(by: .seconds(5))
         #expect(!chip.isVisible)
         let count = chip.shown.count
+        // A drag that selects nothing new (a scrollbar, a resize) leaves the same selection in the app.
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(chip.shown.count == count)
+        fixture.input.press(0, command: true)
+        fixture.harness.scheduler.advance(by: .milliseconds(250))
+        await fixture.smart.reading?.value
+        #expect(chip.shown.count == count)
+    }
+
+    @Test func aSelectionThatNothingWasShownForIsNotLookedAtAgainEither() async {
+        await start()
+        await fixture.dragSelecting("Hôm nay trời đẹp quá, chúng ta đi dạo nhé")
+        await fixture.dragSelecting("Hôm nay trời đẹp quá, chúng ta đi dạo nhé")
+        #expect(chip.shown.isEmpty)
+        #expect(fixture.previewEngine.requests.isEmpty)
+    }
+
+    @Test(arguments: ["click", "key", "app"])
+    func theSameTextSelectedAgainAfterSomethingThatEndedTheSelectionShowsAgain(ending: String) async {
+        await start()
+        await fixture.dragSelecting("5 ft 11 in")
+        fixture.harness.scheduler.advance(by: .seconds(5))
+        let count = chip.shown.count
+        switch ending {
+        case "click": fixture.input.click(at: CGPoint(x: 900, y: 100))
+        case "key": fixture.input.press(0)
+        default: fixture.input.send(.applicationActivated(777))
+        }
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(chip.shown.count == count + 1, "\(ending)")
+    }
+
+    @Test func aReadThatFindsNothingSelectedMakesTheSameTextANewSelectionAgain() async {
+        await start()
+        await fixture.dragSelecting("5 ft 11 in")
+        fixture.harness.scheduler.advance(by: .seconds(5))
+        let count = chip.shown.count
+        fixture.accessibility.standing = nil
+        fixture.input.press(124, shift: true)
+        fixture.harness.scheduler.advance(by: .milliseconds(250))
+        await fixture.smart.reading?.value
+        fixture.accessibility.standing = "5 ft 11 in"
         fixture.input.press(0, command: true)
         fixture.harness.scheduler.advance(by: .milliseconds(250))
         await fixture.smart.reading?.value
         #expect(chip.shown.count == count + 1)
+    }
+
+    @Test func aDoubleClickOnTheSameWordAgainShowsItAgain() async {
+        await start()
+        await fixture.dragSelecting("5 ft 11 in")
+        fixture.harness.scheduler.advance(by: .seconds(5))
+        let count = chip.shown.count
+        fixture.input.send(.mouseDown(CGPoint(x: 5, y: 5)))
+        fixture.input.send(.mouseUp(CGPoint(x: 5, y: 5), clicks: 1))
+        fixture.input.send(.mouseDown(CGPoint(x: 5, y: 5)))
+        fixture.input.send(.mouseUp(CGPoint(x: 5, y: 5), clicks: 2))
+        fixture.harness.scheduler.advance(by: .milliseconds(250))
+        await fixture.smart.reading?.value
+        #expect(chip.shown.count == count + 1)
+    }
+
+    @Test func copyingKeepsTheChip() async {
+        await start()
+        await fixture.dragSelecting("5 ft 11 in")
+        fixture.input.press(8, command: true)   // ⌘C
         #expect(chip.isVisible)
     }
 
@@ -554,5 +635,118 @@ import Testing
         #expect(fixture.keys.selectionChip.defaultValue == true)
         #expect(fixture.keys.selectionActivity.defaultValue == false)
         #expect(fixture.keys.selectionDenyList.defaultValue.isEmpty)
+    }
+
+    // MARK: an app that does not answer must not stall the notch
+
+    @Test func aGestureIsOneLookAtTheFrontAppAndNeverAskedTheSystemWideElement() async {
+        await start()
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(fixture.accessibility.inspections == 1)
+        #expect(fixture.accessibility.focusedLookups == 0)
+        await fixture.dragSelecting(english)
+        #expect(fixture.accessibility.inspections == 2)
+        #expect(fixture.accessibility.focusedLookups == 0)
+    }
+
+    @Test func theFrontAppIsWhoseSelectionIsRead() async {
+        await start()
+        fixture.accessibility.frontmost = FocusedApplication(processID: 77, bundleID: "com.apple.Notes")
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(chip.current?.content.text == "5 ft 11 in → 180 cm")
+        #expect(fixture.accessibility.focusedLookups == 0)
+    }
+
+    @Test func anAppThatDoesNotAnswerShowsNothingAndIsOneLookPerGestureThatCostsOneTimeout() async {
+        await start()
+        fixture.accessibility.hangs = true
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(fixture.accessibility.inspections == 1)
+        #expect(chip.shown.isEmpty)
+        // One look, at most one timeout of the main actor's time.
+        #expect(Double(fixture.accessibility.inspections) * Double(SystemAccessibilityClient.passiveTimeout) < 0.3)
+    }
+
+    @Test func anAppThatDidNotAnswerIsLeftAloneForThirtySeconds() async {
+        await start()
+        fixture.accessibility.hangs = true
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(fixture.accessibility.inspections == 1)
+        // The app recovers, but it is not asked again before the cool-down is over.
+        fixture.accessibility.hangs = false
+        for _ in 0..<5 { await fixture.dragSelecting("5 ft 11 in") }
+        #expect(fixture.accessibility.inspections == 1)
+        #expect(chip.shown.isEmpty)
+        // Still cooling down well into the thirty seconds, and over once they are.
+        fixture.harness.scheduler.advance(by: .seconds(25))
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(fixture.accessibility.inspections == 1)
+        fixture.harness.scheduler.advance(by: .seconds(5))
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(fixture.accessibility.inspections == 2)
+        #expect(chip.isVisible)
+    }
+
+    @Test func theCoolDownIsForThatAppOnly() async {
+        await start()
+        fixture.accessibility.hangs = true
+        await fixture.dragSelecting("5 ft 11 in")
+        fixture.accessibility.hangs = false
+        fixture.accessibility.application = FocusedApplication(processID: 43, bundleID: "com.apple.Notes")
+        await fixture.dragSelecting("10 kg")
+        #expect(chip.isVisible)
+    }
+
+    // MARK: password fields, and what holds the keyboard for one
+
+    @Test func nothingIsReadWhileTheFrontAppHoldsSecureInput() async {
+        await start()
+        fixture.accessibility.secureInputHolders = [42]
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(fixture.accessibility.inspections == 0)
+        #expect(fixture.accessibility.reads == 0)
+        #expect(chip.shown.isEmpty)
+    }
+
+    @Test func secureInputHeldByAnotherAppDoesNotStopTheRead() async {
+        await start()
+        // A process that left secure input on must not silence the feature everywhere.
+        fixture.accessibility.secureInputHolders = [999]
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(chip.isVisible)
+    }
+
+    @Test func aPasswordManagerIsNeverReadEvenWithAnEmptyDenyList() async {
+        await start()
+        fixture.accessibility.application = FocusedApplication(processID: 42, bundleID: "com.1password.1password")
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(fixture.accessibility.inspections == 0)
+        #expect(chip.shown.isEmpty)
+    }
+
+    @Test func theDenyListIgnoresCase() async {
+        fixture.set(["COM.APPLE.SAFARI"], for: \.selectionDenyList)
+        await start()
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(fixture.accessibility.inspections == 0)
+    }
+
+    // MARK: where the chip goes
+
+    @Test func aRectangleAtTheCornerOfTheDisplayIsNotBelievedForAMouseGesture() async throws {
+        await start()
+        fixture.accessibility.bounds = CGRect(x: 0, y: 0, width: 40, height: 20)
+        await fixture.dragSelecting("5 ft 11 in", from: CGPoint(x: 400, y: 400), to: CGPoint(x: 500, y: 400))
+        #expect(try #require(chip.current).anchor == CGRect(x: 500, y: 400, width: 0, height: 0))
+    }
+
+    @Test func aKeyboardSelectionUsesItsRectangleWhateverThePointerIsDoing() async throws {
+        await start()
+        fixture.accessibility.bounds = CGRect(x: 100, y: 100, width: 200, height: 20)
+        fixture.accessibility.standing = "5 ft 11 in"
+        fixture.input.press(124, shift: true, pointer: CGPoint(x: 900, y: 100))
+        fixture.harness.scheduler.advance(by: .milliseconds(250))
+        await fixture.smart.reading?.value
+        #expect(try #require(chip.current).anchor == CGRect(x: 100, y: 780, width: 200, height: 20))
     }
 }

@@ -13,6 +13,10 @@ nonisolated struct ScreenArea: Equatable, Sendable {
 nonisolated enum SelectionGeometry {
     /// Between the selection and the chip, in points.
     static let gap: CGFloat = 6
+    /// A selection taller than about three chips is a block of text; the chip belongs where the drag ended, not under it.
+    static let tallSelection: CGFloat = 96
+    /// How far from the selection's rectangle the pointer may be for the rectangle to be believed.
+    static let pointerTolerance: CGFloat = 60
 
     static func cocoaRect(fromAccessibility rect: CGRect, primaryHeight: CGFloat) -> CGRect {
         CGRect(x: rect.origin.x, y: primaryHeight - rect.origin.y - rect.size.height, width: rect.size.width, height: rect.size.height)
@@ -20,11 +24,21 @@ nonisolated enum SelectionGeometry {
 
     /// The selection's rectangle in AppKit's coordinates, or the pointer as an empty rectangle when the app gave none that
     /// can be trusted: not finite, with no area, or on no display. The main display is the first of `screens`.
-    static func anchor(bounds: CGRect?, pointer: CGPoint, screens: [ScreenArea]) -> CGRect {
+    ///
+    /// - Parameter pointerMatters: the pointer made the selection, so it is where the selection is: a rectangle far from it
+    ///   (some apps answer with one at the corner of the display whatever is selected) is not believed, and a rectangle of a
+    ///   whole block of text is replaced by the pointer. A keyboard selection has no pointer to go by.
+    static func anchor(bounds: CGRect?, pointer: CGPoint, screens: [ScreenArea], pointerMatters: Bool = false) -> CGRect {
         let fallback = CGRect(origin: pointer, size: .zero)
         guard let bounds, let main = screens.first, isUsable(bounds) else { return fallback }
         let rect = cocoaRect(fromAccessibility: bounds, primaryHeight: main.frame.height)
-        return screens.contains { $0.frame.intersects(rect) } ? rect : fallback
+        guard screens.contains(where: { $0.frame.intersects(rect) }) else { return fallback }
+        if pointerMatters {
+            guard rect.insetBy(dx: -pointerTolerance, dy: -pointerTolerance).contains(pointer), rect.height <= tallSelection else {
+                return fallback
+            }
+        }
+        return rect
     }
 
     /// The chip centred just below the anchor, above it when there is no room below, always inside the visible frame of the

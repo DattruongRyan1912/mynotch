@@ -14,25 +14,57 @@ nonisolated enum SelectionLanguage {
     }
 
     static func dominant(of text: String) -> NLLanguage? {
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(text)
-        return pick(from: recognizer.languageHypotheses(withMaximum: 1))
+        guess(of: text)?.language
     }
 
-    /// Two words, or four characters of Chinese, Japanese or Korean, which have no spaces between words. One word is a
-    /// dictionary's business, and the recognizer is often wrong about it.
+    private static func guess(of text: String) -> (language: NLLanguage, confidence: Double)? {
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(text)
+        let hypotheses = recognizer.languageHypotheses(withMaximum: 1)
+        return pick(from: hypotheses).map { ($0, hypotheses[$0] ?? 0) }
+    }
+
+    /// Two words, or four characters of Chinese, Japanese or Korean, which have no spaces between words. Words are what sits
+    /// between spaces and has a letter in it: a URL, an email address and a path are one each, however many parts they have.
+    /// One word is a dictionary's business, and the recognizer is often wrong about it.
     static func hasEnoughToTranslate(_ text: String) -> Bool {
         if text.unicodeScalars.count(where: isCJK) >= 4 { return true }
-        let words = text.split { !$0.isLetter && !$0.isNumber && $0 != "'" && $0 != "’" }
-        return words.count(where: { $0.contains(where: \.isLetter) }) >= 2
+        return wordCount(of: text) >= 2
+    }
+
+    private static func wordCount(of text: String) -> Int {
+        text.split(whereSeparator: \.isWhitespace).count(where: { $0.contains(where: \.isLetter) })
     }
 
     /// The language to translate `text` from: the one it is written in, when it is not the target's, enough of it is there,
-    /// and some candidate is that language. Candidates are tried in order, so the one the user prefers wins ("en" before "en-AU").
+    /// it is a text somebody wrote to be read (see `SelectionShape`), and some candidate is that language. Candidates are tried
+    /// in order, so the one the user prefers wins ("en" before "en-AU").
+    ///
+    /// For a Vietnamese user, text with no accents is held to more: Vietnamese typed that way is often taken for Italian or
+    /// Romanian, so a text with several common Vietnamese words shows nothing, and any guess needs 0.9 and three words.
     static func source(of text: String, target: Locale.Language, candidates: [Locale.Language]) -> Locale.Language? {
-        guard hasEnoughToTranslate(text), let dominant = dominant(of: text) else { return nil }
-        guard LanguageDetector.writtenLanguage(of: target) != dominant else { return nil }
-        return candidates.first { LanguageDetector.writtenLanguage(of: $0) == dominant }
+        guard hasEnoughToTranslate(text), SelectionShape.isProse(text), let guess = guess(of: text) else { return nil }
+        guard LanguageDetector.writtenLanguage(of: target) != guess.language else { return nil }
+        guard passesUnaccentedRules(text: text, target: target, confidence: guess.confidence) else { return nil }
+        return candidates.first { LanguageDetector.writtenLanguage(of: $0) == guess.language }
+    }
+
+    /// Whether a guess about `text` of that confidence stands once the rules for a Vietnamese user's unaccented text are
+    /// applied: no several common Vietnamese words in it, and a sure enough guess about enough words.
+    static func passesUnaccentedRules(text: String, target: Locale.Language, confidence: Double) -> Bool {
+        guard appliesUnaccentedRules(target: target, text: text) else { return true }
+        return !SelectionShape.looksLikeUnaccentedVietnamese(text)
+            && trustsGuessOnUnaccentedText(confidence: confidence, wordCount: wordCount(of: text))
+    }
+
+    /// The Vietnamese user's text with no accents at all.
+    static func appliesUnaccentedRules(target: Locale.Language, text: String) -> Bool {
+        target.languageCode?.identifier == "vi" && text.unicodeScalars.allSatisfy(\.isASCII)
+    }
+
+    /// Text with no accents says little about its language, so a guess about it needs 0.9 and three words.
+    static func trustsGuessOnUnaccentedText(confidence: Double, wordCount: Int) -> Bool {
+        confidence >= 0.9 && wordCount >= 3
     }
 
     /// `source`, off the main actor: recognizing a long text is not instant.

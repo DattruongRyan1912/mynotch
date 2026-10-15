@@ -137,8 +137,35 @@ import Testing
     }
 
     @Test func aShortTranslationIsNotCut() async throws {
-        let hint = await hint("Hello there my friend", using: try await decider())
-        #expect(hint?.text == "Hello there my friend [en→vi]")
+        let hint = await hint("Please send me the report before the meeting tomorrow", using: try await decider())
+        #expect(hint?.text == "Please send me the report before the meeting tomorrow [en→vi]")
+    }
+
+    @Test func aLongSelectionIsOnlyTranslatedAsFarAsThePreviewNeeds() async throws {
+        let long = String(repeating: english + ". ", count: 25)
+        #expect(long.count > SelectionDecider.previewLimit)
+        let hint = await hint(long, using: try await decider())
+        #expect(fixture.previewEngine.requests.first?.text.count == SelectionDecider.previewLimit)
+        #expect(hint?.kind == .translation)
+        #expect(try #require(hint?.text).count <= SelectionHint.maxLength)
+    }
+
+    @Test func aShortSelectionIsTranslatedWhole() async throws {
+        _ = await hint(english, using: try await decider())
+        #expect(fixture.previewEngine.requests.first?.text == english)
+    }
+
+    // MARK: only an on-device engine can make a preview
+
+    @Test func onlyAppleIsAnOnDeviceEngine() {
+        func isOnDevice(_ engine: any TranslationEngine) -> Bool { engine is any OnDeviceTranslationEngine }
+        #expect(isOnDevice(AppleTranslationEngine()))
+        let remote = RemoteEngines(keys: fixture.keyStore, transport: fixture.transport, log: fixture.engineLog, config: { EngineConfig() })
+        for choice in EngineChoice.allCases where choice != .apple {
+            let engine = remote.engine(for: choice)
+            #expect(engine != nil)
+            #expect(engine.map(isOnDevice) == false, "\(choice)")
+        }
     }
 
     // MARK: failures show nothing

@@ -50,7 +50,7 @@ struct SmartSelectionSettingsView: View {
         Group {
             Toggle(isOn: $smartSelection) {
                 Text("Bôi đen là hiểu")
-                Text("Bôi đen chữ ở app nào cũng được: MyNotch tự nhận ra tiền, đơn vị, giờ có múi giờ hay chữ nước ngoài, và cho xem kết quả cạnh vùng chọn. Cần quyền Accessibility. Chữ bạn chọn chỉ xử lý trên máy; bản dịch xem trước chỉ dùng Apple, trên máy, và các bộ máy khác chỉ chạy khi bạn bấm “Mở”.")
+                Text("Bôi đen chữ ở app nào cũng được: MyNotch tự nhận ra tiền, đơn vị, giờ có múi giờ hay chữ nước ngoài, và cho xem kết quả cạnh vùng chọn. Cần quyền Accessibility. Chữ bạn chọn chỉ xử lý trên máy; bản dịch xem trước chỉ dùng Apple, trên máy, và bộ máy khác chỉ chạy khi bạn bấm “Mở”. Số tiền cần tỷ giá hằng ngày từ internet khi bạn bật “Quy đổi tiền tệ”, không gửi chữ nào. Không đọc ô mật khẩu, app quản lý mật khẩu, đường dẫn, link hay mã. Trong Chrome và app Electron, chỉ đọc được sau khi bạn dùng phím tắt dịch một lần ở app đó.")
             }
             Toggle(isOn: $showChip) {
                 Text("Hiện nút cạnh vùng chọn")

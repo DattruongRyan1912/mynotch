@@ -14,7 +14,8 @@ struct SelectionChipContent {
     var hover: @MainActor (Bool) -> Void
 }
 
-/// The small pill beside a selection: what was understood in one line, "Mở", and a menu to stop showing it for this app.
+/// The small pill beside a selection: what was understood in one line, "Mở", and a button to stop showing it for this app (a
+/// plain button, not a menu: a menu would move the pointer off the chip, which then starts to go away under it).
 /// Drawn like the notch, black with the notch's accent, since a panel of its own does not inherit the notch's environment.
 struct SelectionChipView: View {
     static let maxWidth: CGFloat = 360
@@ -44,18 +45,15 @@ struct SelectionChipView: View {
             .buttonStyle(.plain)
             .help("Mở kết quả đầy đủ trong tab Dịch")
             if let deny = content.deny {
-                Menu {
-                    Button("Không hiện trong app này", action: deny)
-                } label: {
-                    Image(systemName: "ellipsis")
+                Button(action: deny) {
+                    Image(systemName: "eye.slash")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(NotchTokens.secondaryText)
-                        .frame(width: 16, height: 18)
+                        .frame(width: 18, height: 18)
                         .contentShape(Rectangle())
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
+                .buttonStyle(.plain)
+                .help("Không hiện trong app này")
             }
         }
         .padding(.leading, 10)

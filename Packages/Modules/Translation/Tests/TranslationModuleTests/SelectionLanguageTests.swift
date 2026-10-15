@@ -31,7 +31,8 @@ import Testing
 
     @Test(arguments: [
         ("Hello", false), ("Hello.", false), ("Hello world", true), ("Hello, world", true), ("  Hello  ", false),
-        ("don't", false), ("12 34", false), ("你好吗", false), ("你好吗？", false), ("你好吗朋", true), ("今天天气很好我们去散步吧", true),
+        ("don't", false), ("12 34", false), ("https://example.com/a/b", false), ("john.smith@example.com", false),
+        ("/Users/x/Project/MyNotch", false), ("snake_case_name", false), ("well-known", false), ("Hello   world", true), ("你好吗", false), ("你好吗？", false), ("你好吗朋", true), ("今天天气很好我们去散步吧", true),
         ("こんにちは", true), ("カタカナ", true), ("안녕하세요", true), ("Bonjour tout le monde", true), ("", false),
     ])
     func needsTwoWordsOrFourCJKCharacters(text: String, enough: Bool) {

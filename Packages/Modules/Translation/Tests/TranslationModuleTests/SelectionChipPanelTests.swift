@@ -68,7 +68,7 @@ import Testing
         window.hide()
     }
 
-    @Test func theMenuForDenyingTheAppIsOnlyThereWhenTheAppCanBeDenied() {
+    @Test func theButtonForDenyingTheAppIsOnlyThereWhenTheAppCanBeDenied() {
         func width(canDeny: Bool) -> CGFloat {
             let view = SelectionChipView(content: content(canDeny: canDeny), interface: interface)
             return NSHostingView(rootView: view).fittingSize.width

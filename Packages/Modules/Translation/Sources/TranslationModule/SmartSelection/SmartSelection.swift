@@ -10,7 +10,7 @@ struct SmartSelectionSetup {
     var window: any SelectionChipWindowing = SystemSelectionChipWindow()
     /// Apple's on-device engine, which makes the previews. Not the one the tab translates with: a preview must not
     /// supersede a translation the tab has under way, and no engine that needs a key may ever be put here.
-    var preview: any TranslationEngine = AppleTranslationEngine()
+    var preview: any OnDeviceTranslationEngine = AppleTranslationEngine()
     /// The displays, the main one first.
     var screens: () -> [ScreenArea] = { SmartSelectionSetup.systemScreens() }
     var ownProcessID: pid_t = getpid()
@@ -23,10 +23,16 @@ struct SmartSelectionSetup {
 /// "Bôi đen là hiểu": watches for selections in other apps, understands them (a conversion or a preview of a translation)
 /// and shows what it found beside the selection and, if the user wants, beside the collapsed notch.
 ///
-/// Nothing the user selects is kept longer than the chip is up, written anywhere or sent anywhere from here: the preview
-/// is on-device, and the selected text is never logged.
+/// Nothing the user selects is written anywhere or sent anywhere from here, and it is held in memory only until the next
+/// selection or the end of the module: the preview is on-device, and the selected text is never logged.
+///
+/// It reads passively, so it must never disturb the app it reads from or the notch: it goes by the front app (no Accessibility
+/// call), makes one pass over one element with a short timeout, leaves an app alone for 30 s once it has not answered, and
+/// never switches another app into accessibility mode (that is for the shortcut, on the user's press).
 final class SmartSelection {
     static let activityID = "selection"
+    /// How long an app that did not answer in time is left alone.
+    static let coolDown = Duration.seconds(30)
 
     let decider: SelectionDecider
     /// The newest reading; tests await it. A newer gesture, a click, a key or another app coming forward supersedes it.
@@ -34,28 +40,29 @@ final class SmartSelection {
 
     private let context: ModuleContext
     private let setup: SmartSelectionSetup
-    private let reader: SelectionReader
     private let keys: TranslationKeys
     private let openResult: @MainActor (SelectionSource) -> Void
     private var chip: SelectionChip!
     private var watcher: SelectionWatcher?
     private var isWatching = false
     private var watchesKeys = false
-    /// The selection the chip shows now; a read of the same one is not worth a new chip.
-    private var lastShown: SelectionSource?
+    /// The last selection handled, whether it was shown or there was nothing to show: reading the same one again (a drag that
+    /// selected nothing new, such as a scrollbar's) is not worth a new chip. A click, a key that is not a selection, another
+    /// app coming forward and an empty read make it a new selection again.
+    private var lastHandled: SelectionSource?
     /// Bumped by everything that makes a reading in flight stale.
     private var generation = 0
     /// The app a reading in flight is about.
     private var readingProcessID: pid_t?
+    /// Apps that did not answer, which are not asked again for `coolDown`.
+    private var coolingDown: Set<pid_t> = []
 
     /// - Parameter open: the chip's "Mở": opens the notch's Translation tab on the selection.
     init(
-        context: ModuleContext, setup: SmartSelectionSetup, reader: SelectionReader, decider: SelectionDecider,
-        open: @escaping @MainActor (SelectionSource) -> Void
+        context: ModuleContext, setup: SmartSelectionSetup, decider: SelectionDecider, open: @escaping @MainActor (SelectionSource) -> Void
     ) {
         self.context = context
         self.setup = setup
-        self.reader = reader
         self.decider = decider
         openResult = open
         keys = TranslationKeys(context.settings)
@@ -63,7 +70,7 @@ final class SmartSelection {
             scheduler: context.scheduler,
             show: { [weak self] hint, anchor in self?.present(hint, near: anchor) },
             hide: { [weak self] in self?.withdraw() },
-            onDismiss: { [weak self] in self?.lastShown = nil }
+            onDismiss: { }
         )
     }
 
@@ -102,8 +109,8 @@ final class SmartSelection {
     private func startWatching() {
         watcher = SelectionWatcher(
             scheduler: context.scheduler,
-            onSelection: { [weak self] in self?.selectionGesture(at: $0) },
-            onDismiss: { [weak self] in self?.selectionMayBeChanging() }
+            onSelection: { [weak self] in self?.selectionGesture(at: $0, byPointer: $1) },
+            onDismiss: { [weak self] in self?.selectionMayBeChanging(gone: $0) }
         )
         isWatching = true
         startInput()
@@ -117,6 +124,8 @@ final class SmartSelection {
         watcher = nil
         supersedeReading()
         chip.dismiss()
+        lastHandled = nil
+        coolingDown.removeAll()
     }
 
     /// Key-ups need Accessibility, so they are only asked for once it is granted; the mouse needs nothing, which also lets the
@@ -129,17 +138,20 @@ final class SmartSelection {
     private func handle(_ input: SelectionInput) {
         if case .applicationActivated(let processID) = input {
             chip.applicationActivated(processID)
-            // The selection being read is in an app that is no longer in front.
+            // The selection being read, and the one handled last, are in an app that is no longer in front.
             if let readingProcessID, readingProcessID != processID { supersedeReading() }
+            if let lastHandled, lastHandled.application.processID != processID { self.lastHandled = nil }
             return
         }
         watcher?.handle(input)
     }
 
-    /// A press or a key: whatever was read or shown is about a selection that may be going away.
-    private func selectionMayBeChanging() {
+    /// A press or a key: whatever was read or shown is about a selection that may be going away. When it is known to be gone,
+    /// the same text selected again is a new selection.
+    private func selectionMayBeChanging(gone: Bool) {
         supersedeReading()
         chip.dismiss()
+        if gone { lastHandled = nil }
     }
 
     private func supersedeReading() {
@@ -148,11 +160,11 @@ final class SmartSelection {
         reading?.cancel()
     }
 
-    private func selectionGesture(at pointer: CGPoint) {
+    private func selectionGesture(at pointer: CGPoint, byPointer: Bool) {
         if isWatching, !watchesKeys, setup.accessibility.isTrusted { startInput() }
         supersedeReading()
         let request = generation
-        reading = Task { [weak self] in await self?.read(at: pointer, request: request) }
+        reading = Task { [weak self] in await self?.read(at: pointer, byPointer: byPointer, request: request) }
     }
 
     // MARK: reading
@@ -161,31 +173,49 @@ final class SmartSelection {
         request == generation && !Task.isCancelled
     }
 
-    private func read(at pointer: CGPoint, request: Int) async {
+    private func read(at pointer: CGPoint, byPointer: Bool, request: Int) async {
         let accessibility = setup.accessibility
         let settings = context.settings
-        guard accessibility.isTrusted, let application = accessibility.focusedApplication(),
+        guard accessibility.isTrusted, let application = accessibility.frontmostApplication(),
               SelectionIgnoreRules.application(application, ownProcessID: setup.ownProcessID, denyList: settings.value(keys.selectionDenyList)) == nil,
-              SelectionIgnoreRules.length(accessibility.selectionLength(in: application)) == nil else { return chip.dismiss() }
+              !coolingDown.contains(application.processID),
+              !accessibility.isSecureInputHeld(by: application) else { return chip.dismiss() }
         readingProcessID = application.processID
         defer { if request == generation { readingProcessID = nil } }
-        // The same choice the shortcut honours: whether to switch Chrome and Electron apps into the mode that exposes text.
-        reader.useChromiumAccessibility = settings.value(keys.useChromiumAccessibility)
-        guard let source = await reader.selection(), isCurrent(request) else {
-            if isCurrent(request) { chip.dismiss() }
-            return
+        // One look, which never turns accessibility on in the app: Chrome and Electron apps show their selection here only once
+        // the shortcut has switched them on.
+        let source: SelectionSource
+        let bounds: CGRect?
+        switch accessibility.inspectSelection(in: application) {
+        case .selected(let text, let found):
+            source = SelectionSource(text: text, application: application)
+            bounds = found
+        case .unresponsive:
+            coolDown(application.processID)
+            return chip.dismiss()
+        case .none, .tooLong:
+            lastHandled = nil
+            return chip.dismiss()
         }
-        guard source.application == application else { return chip.dismiss() }
-        if let reason = SelectionIgnoreRules.text(source, lastShown: lastShown) {
-            if reason != .unchanged { chip.dismiss() }
+        if let reason = SelectionIgnoreRules.text(source, lastHandled: lastHandled) {
+            if reason != .unchanged {
+                lastHandled = nil
+                chip.dismiss()
+            }
             return
         }
         let hint = await decider.hint(for: source)
         guard isCurrent(request) else { return }
+        lastHandled = source
         guard let hint else { return chip.dismiss() }
-        let anchor = SelectionGeometry.anchor(bounds: accessibility.selectionBounds(in: application), pointer: pointer, screens: setup.screens())
-        lastShown = source
+        let anchor = SelectionGeometry.anchor(bounds: bounds, pointer: pointer, screens: setup.screens(), pointerMatters: byPointer)
         chip.show(hint, anchor: anchor)
+    }
+
+    /// The app did not answer in time: it is not asked again for 30 s, so a hung app costs one short wait, not one per drag.
+    private func coolDown(_ processID: pid_t) {
+        coolingDown.insert(processID)
+        context.scheduler.schedule(after: Self.coolDown) { [weak self] in self?.coolingDown.remove(processID) }
     }
 
     // MARK: showing

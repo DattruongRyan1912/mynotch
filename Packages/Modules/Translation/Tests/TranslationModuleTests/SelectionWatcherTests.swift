@@ -6,10 +6,17 @@ import Testing
 /// What the watcher asked for, in order.
 final class WatcherLog {
     private(set) var selections: [CGPoint] = []
-    private(set) var dismissals = 0
+    /// For each read, whether the pointer made the selection (a mouse gesture) rather than the keyboard.
+    private(set) var byPointer: [Bool] = []
+    /// For each dismissal, whether the selection itself is gone (a click or a key) rather than only maybe changing (a press).
+    private(set) var dismissals: [Bool] = []
 
-    func selection(at point: CGPoint) { selections.append(point) }
-    func dismissal() { dismissals += 1 }
+    func selection(at point: CGPoint, byPointer: Bool) {
+        selections.append(point)
+        self.byPointer.append(byPointer)
+    }
+
+    func dismissal(forgetting: Bool) { dismissals.append(forgetting) }
 }
 
 /// The state machine over fake input: nothing here posts or reads a real event.
@@ -20,7 +27,9 @@ final class WatcherLog {
 
     init() {
         let (scheduler, log) = (scheduler, log)
-        watcher = SelectionWatcher(scheduler: scheduler, onSelection: { log.selection(at: $0) }, onDismiss: { log.dismissal() })
+        watcher = SelectionWatcher(
+            scheduler: scheduler, onSelection: { log.selection(at: $0, byPointer: $1) }, onDismiss: { log.dismissal(forgetting: $0) }
+        )
     }
 
     func drag(from start: CGPoint, to end: CGPoint) {
@@ -85,7 +94,7 @@ final class WatcherLog {
         key(code, shift: true, at: CGPoint(x: 70, y: 80))
         scheduler.advance(by: .milliseconds(250))
         #expect(log.selections == [CGPoint(x: 70, y: 80)])
-        #expect(log.dismissals == 0)
+        #expect(log.dismissals.isEmpty)
     }
 
     @Test func shiftAndCommandWithAnArrowReads() {
@@ -98,7 +107,7 @@ final class WatcherLog {
         key(0, command: true)
         scheduler.advance(by: .milliseconds(250))
         #expect(log.selections.count == 1)
-        #expect(log.dismissals == 0)
+        #expect(log.dismissals.isEmpty)
     }
 
     @Test func otherKeysReadNothingAndSayTheSelectionMayBeGone() {
@@ -108,7 +117,7 @@ final class WatcherLog {
         key(53)                              // Esc
         scheduler.advance(by: .seconds(1))
         #expect(log.selections.isEmpty)
-        #expect(log.dismissals == 4)
+        #expect(log.dismissals == [true, true, true, true])
     }
 
     @Test func twoGesturesInQuickSuccessionReadOnceAtTheLastOne() {
@@ -134,12 +143,12 @@ final class WatcherLog {
     @Test func everyPressSaysTheSelectionMayBeGone() {
         watcher.handle(.mouseDown(CGPoint(x: 1, y: 1)))
         watcher.handle(.mouseDown(CGPoint(x: 2, y: 2)))
-        #expect(log.dismissals == 2)
+        #expect(log.dismissals == [false, false])
     }
 
     @Test func aReleaseDismissesNothing() {
         drag(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 100, y: 0))
-        #expect(log.dismissals == 1)   // only the press
+        #expect(log.dismissals == [false])   // only the press
     }
 
     @Test func stoppingDropsTheReadInWaitAndIgnoresLaterInput() {
@@ -151,13 +160,55 @@ final class WatcherLog {
         key(124, shift: true)
         scheduler.advance(by: .seconds(1))
         #expect(log.selections.isEmpty)
-        #expect(log.dismissals == 1)
+        #expect(log.dismissals == [false])
+    }
+
+    @Test func theReadSaysWhetherThePointerMadeTheSelection() {
+        drag(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 100, y: 0))
+        scheduler.advance(by: .milliseconds(250))
+        key(124, shift: true, at: CGPoint(x: 300, y: 300))
+        scheduler.advance(by: .milliseconds(250))
+        watcher.handle(.mouseDown(CGPoint(x: 5, y: 5)))
+        watcher.handle(.mouseUp(CGPoint(x: 5, y: 5), clicks: 2))
+        scheduler.advance(by: .milliseconds(250))
+        #expect(log.byPointer == [true, false, true])
+    }
+
+    @Test func aPlainClickSaysTheSelectionIsGone() {
+        drag(from: CGPoint(x: 50, y: 50), to: CGPoint(x: 51, y: 50))
+        // The press only says it may be changing; the release that selected nothing says it has.
+        #expect(log.dismissals == [false, true])
+    }
+
+    @Test func aDragOrAMultiClickDoesNotSayTheSelectionIsGone() {
+        drag(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 100, y: 0))
+        watcher.handle(.mouseDown(CGPoint(x: 5, y: 5)))
+        watcher.handle(.mouseUp(CGPoint(x: 5, y: 5), clicks: 2))
+        #expect(log.dismissals == [false, false])
+    }
+
+    @Test func aDoubleClickStartsWithAPlainClickWhichForgetsTheOldSelection() {
+        watcher.handle(.mouseDown(CGPoint(x: 5, y: 5)))
+        watcher.handle(.mouseUp(CGPoint(x: 5, y: 5), clicks: 1))
+        #expect(log.dismissals == [false, true])
+    }
+
+    @Test func copyingLeavesTheSelectionAndAPendingReadAlone() {
+        drag(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 100, y: 0))
+        scheduler.advance(by: .milliseconds(100))
+        key(8, command: true)   // ⌘C
+        scheduler.advance(by: .milliseconds(150))
+        #expect(log.selections == [CGPoint(x: 100, y: 0)])
+        #expect(log.dismissals == [false])   // only the press
+        // Another command key is not a copy.
+        key(7, command: true)   // ⌘X
+        #expect(log.dismissals == [false, true])
     }
 
     @Test func switchingAppsIsNotTheWatchersBusiness() {
         watcher.handle(.applicationActivated(123))
         scheduler.advance(by: .seconds(1))
         #expect(log.selections.isEmpty)
-        #expect(log.dismissals == 0)
+        #expect(log.dismissals.isEmpty)
     }
 }

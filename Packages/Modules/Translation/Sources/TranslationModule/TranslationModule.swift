@@ -125,7 +125,7 @@ public final class TranslationModule: FeatureModule {
             converter: converter, scheduler: context.scheduler, settings: context.settings, pasteboard: pasteboard
         )
         let smart = SmartSelection(
-            context: context, setup: smartSelectionSetup, reader: selection,
+            context: context, setup: smartSelectionSetup,
             decider: SelectionDecider(converter: converter, preview: smartSelectionSetup.preview, languages: languages, settings: context.settings),
             open: { [weak self] in self?.openSelection($0) }
         )

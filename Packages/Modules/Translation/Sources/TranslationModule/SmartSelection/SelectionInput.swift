@@ -9,10 +9,16 @@ nonisolated struct KeyPress: Equatable, Sendable {
     /// Arrows, Home, End, Page Up, Page Down: with shift held they move the edge of a selection.
     private static let movingKeys: Set<UInt16> = [123, 124, 125, 126, 115, 119, 116, 121]
     private static let aKey: UInt16 = 0
+    private static let cKey: UInt16 = 8
 
     /// Shift with a moving key extends a selection, and ⌘A selects everything.
     var changesSelection: Bool {
         (shift && Self.movingKeys.contains(code)) || (command && !shift && code == Self.aKey)
+    }
+
+    /// ⌘C: the most natural thing to do with a selection, and it leaves it as it is.
+    var keepsSelection: Bool {
+        command && !shift && code == Self.cKey
     }
 }
 

@@ -3,7 +3,7 @@ import Foundation
 
 /// Echoes the text with its direction, or throws the failure set for its text. Like the real engine, a new request
 /// wins over the one in flight, which then fails with `.cancelled`.
-final class FakeEngine: TranslationEngine {
+final class FakeEngine: @MainActor OnDeviceTranslationEngine {
     struct Request: Equatable {
         var text: String
         var pair: LanguagePair
