@@ -64,7 +64,7 @@ import Testing
         store.setControlLayout(layout)
         if unsynced { store.showUnsyncedLyrics() }
         if hidden { store.toggleLyricsHidden() }
-        let tab = MediaTabView(store: store, actions: MediaActions(send: { _ in }, seek: { _ in }), volume: VolumeModel(device: NoVolumeDevice()))
+        let tab = MediaTabView(store: store, actions: MediaActions(send: { _ in }, seek: { _ in }), volume: VolumeModel(hardware: NoVolumeHardware(), queue: ManualVolumeQueue()))
             .frame(width: Self.narrowestContentWidth)
         return NSHostingView(rootView: tab).fittingSize.height
     }
@@ -104,7 +104,7 @@ import Testing
         let store = NowPlayingStore(lookUpApp: { _ in nil })
         store.apply(line: AdapterLines.track(), receivedAt: Date())
         store.setControlLayout(MediaControlLayout(slots: [.shuffle, .previous, .next, .repeatMode]))
-        let row = MediaControlsRow(store: store, actions: MediaActions(send: { _ in }, seek: { _ in }), volume: VolumeModel(device: NoVolumeDevice()))
+        let row = MediaControlsRow(store: store, actions: MediaActions(send: { _ in }, seek: { _ in }), volume: VolumeModel(hardware: NoVolumeHardware(), queue: ManualVolumeQueue()))
         let width = NSHostingView(rootView: row).fittingSize.width
         let columnWidth = Self.narrowestContentWidth - MediaTabView.artworkSize - 14
         #expect(width > 0)

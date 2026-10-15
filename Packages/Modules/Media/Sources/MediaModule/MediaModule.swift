@@ -74,7 +74,7 @@ public final class MediaModule: FeatureModule {
     private let makeSource: ((any Scheduler) -> any NowPlayingSource)?
     private let spectrum: any SpectrumSource
     private let lyricsClient: any HTTPClient
-    /// The system output volume the row's slider shows and sets.
+    /// The system output volume the row's slider shows and sets; Core Audio is only called on its queue.
     let volume: VolumeModel
     /// The user's Apple Music sign-in, which Settings shows and lyrics lookups use.
     let appleAccount: AppleMusicAccount
@@ -136,6 +136,8 @@ public final class MediaModule: FeatureModule {
     /// Skips sent to the extension and not answered yet, oldest first.
     private var unansweredSkips: [UnansweredSkip] = []
     private var unansweredSkipCount = 0
+    /// The latest seek, until the player reports the position it moved to: quick taps on a seek button start from it.
+    private var pendingSeek: PendingSeek?
     /// The latest press the extension took; it explains a title that is about to change (see `SkipRoute.titleChangeWindow`).
     private var bridgedSkip: SkipRoute.BridgedSkip?
     /// Whether the lock screen view is on offer; its view reads `store`, so it is set once and cleared once.
@@ -154,12 +156,12 @@ public final class MediaModule: FeatureModule {
                 lyricsClient: URLSessionHTTPClient(),
                 tokens: KeychainTokenStore(),
                 signIn: AppleMusicLoginWindow(),
-                volume: CoreAudioVolume()
+                volume: .system()
             )
         } else {
             self.init(
                 makeSource: nil, spectrum: spectrum, lyricsClient: URLSessionHTTPClient(),
-                tokens: KeychainTokenStore(), signIn: AppleMusicLoginWindow(), volume: CoreAudioVolume()
+                tokens: KeychainTokenStore(), signIn: AppleMusicLoginWindow(), volume: .system()
             )
         }
     }
@@ -178,7 +180,7 @@ public final class MediaModule: FeatureModule {
         youtubeSocketPath: String? = nil,
         youtubeSetup: YouTubeBridgeSetup? = nil,
         youtubeLog: YouTubeBridgeLog = .silent,
-        volume: any VolumeDevice = NoVolumeDevice()
+        volume: VolumeModel = VolumeModel(hardware: NoVolumeHardware(), queue: SerialVolumeQueue())
     ) {
         self.init(
             makeSource: { _ in source }, spectrum: spectrum, lyricsClient: lyricsClient,
@@ -193,13 +195,13 @@ public final class MediaModule: FeatureModule {
         lyricsClient: any HTTPClient,
         tokens: any TokenStore,
         signIn: any AppleMusicSignIn,
-        volume: any VolumeDevice,
+        volume: VolumeModel,
         lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed,
         youtubeSocketPath: String? = nil,
         youtubeSetup: YouTubeBridgeSetup? = nil,
         youtubeLog: YouTubeBridgeLog = .system
     ) {
-        self.volume = VolumeModel(device: volume)
+        self.volume = volume
         self.youtubeSocketPath = youtubeSocketPath
         self.youtubeSetup = youtubeSetup
         self.youtubeLog = youtubeLog
@@ -277,6 +279,7 @@ public final class MediaModule: FeatureModule {
         source?.stop()
         source = nil
         store.setCanLike(false)
+        pendingSeek = nil
         volume.stopWatching()
         spectrumFeed?.shutDown()
         spectrumFeed = nil
@@ -435,7 +438,8 @@ public final class MediaModule: FeatureModule {
         bridgedSkip = nil
     }
 
-    func seek(toSeconds seconds: Double) {
+    func seek(toSeconds seconds: Double, at now: Date = Date()) {
+        pendingSeek = PendingSeek(seconds: seconds, anchor: store.state.elapsedAnchor, date: now)
         source?.seek(toSeconds: seconds)
     }
 
@@ -443,10 +447,11 @@ public final class MediaModule: FeatureModule {
     /// button that cannot be used does nothing. Next and previous go through `send`, so they take the same route as the hotkeys.
     func press(_ button: MediaControlButton, at now: Date = Date()) {
         // The volume slider is the row's own: it has no effect on the player and is never open from here.
-        let context = store.controlContext(hasVolume: volume.isAvailable, volumeIsOpen: false)
+        let waiting = pendingSeek.flatMap { $0.isPending(for: store.state, at: now) ? $0.seconds : nil }
+        let context = store.controlContext(hasVolume: volume.isAvailable, volumeIsOpen: false, pendingSeek: waiting)
         switch button.effect(in: context, at: now) {
         case .command(let command): send(command)
-        case .seek(let seconds): seek(toSeconds: seconds)
+        case .seek(let seconds): seek(toSeconds: seconds, at: now)
         case .shuffle(let mode): source?.setShuffle(mode)
         case .repeatMode(let mode): source?.setRepeat(mode)
         case .toggleLyrics:

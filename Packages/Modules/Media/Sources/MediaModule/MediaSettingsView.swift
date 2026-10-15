@@ -84,13 +84,18 @@ struct MediaControlRows: View {
         }
         ForEach(Self.slotTitles.indices, id: \.self) { slot in
             Picker(Self.slotTitles[slot], selection: choice(for: slot)) {
-                ForEach(MediaControlButton.allCases, id: \.self) { Text($0.title).tag($0) }
+                ForEach(MediaControlButton.choices, id: \.self) { Text($0.title).tag($0) }
             }
         }
     }
 
+    /// What the picker shows for a stored button: a button it does not offer (a stored like) is none, as the row draws it.
+    static func shownChoice(_ button: MediaControlButton) -> MediaControlButton {
+        MediaControlButton.choices.contains(button) ? button : .none
+    }
+
     private func choice(for slot: Int) -> Binding<MediaControlButton> {
-        Binding(get: { layout.slots[slot] }, set: { layout = layout.setting($0, at: slot) })
+        Binding(get: { Self.shownChoice(layout.slots[slot]) }, set: { layout = layout.setting($0, at: slot) })
     }
 }
 

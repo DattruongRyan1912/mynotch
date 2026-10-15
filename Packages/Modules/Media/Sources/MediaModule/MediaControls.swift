@@ -16,6 +16,10 @@ nonisolated enum MediaControlButton: String, CaseIterable, Codable, Sendable {
     /// How far the seek buttons go.
     static let seekStep: Double = 15
 
+    /// What the Settings picker offers. Like is left out until the adapter can send it (`NowPlayingSource.canLike`): a heart
+    /// that is faded for ever is no choice. Its stored name stays, so a later adapter needs no migration.
+    static let choices = allCases.filter { $0 != .like }
+
     /// The name in Settings.
     var title: String {
         switch self {
@@ -91,6 +95,9 @@ nonisolated struct MediaControlContext {
     /// The default output device has a volume that can be set.
     var hasVolume: Bool
     var volumeIsOpen: Bool
+    /// Where the latest seek is going while the player has not reported it yet: the next seek starts from there, so quick
+    /// taps add up.
+    var pendingSeek: Double?
 }
 
 /// How a button is drawn: an SF Symbol, the words for the tooltip and for VoiceOver, whether it can be used, and whether it
@@ -182,6 +189,15 @@ nonisolated extension MediaControlButton {
         }
     }
 
+    /// Whether the row draws it. A like the source cannot send is drawn as an empty slot, whatever was stored.
+    func isDrawn(in context: MediaControlContext) -> Bool {
+        switch self {
+        case .none: false
+        case .like: context.canLike
+        default: true
+        }
+    }
+
     /// What pressing it asks of the module at `now`; nil when it cannot be used, and for the volume, which the row handles.
     func effect(in context: MediaControlContext, at now: Date) -> MediaControlEffect? {
         guard look(in: context).isEnabled else { return nil }
@@ -189,8 +205,8 @@ nonisolated extension MediaControlButton {
         switch self {
         case .previous: return .command(.previousTrack)
         case .next: return .command(.nextTrack)
-        case .rewind: return seekTarget(state, by: -Self.seekStep, at: now).map { .seek(toSeconds: $0) }
-        case .forward: return seekTarget(state, by: Self.seekStep, at: now).map { .seek(toSeconds: $0) }
+        case .rewind: return seekTarget(context, by: -Self.seekStep, at: now).map { .seek(toSeconds: $0) }
+        case .forward: return seekTarget(context, by: Self.seekStep, at: now).map { .seek(toSeconds: $0) }
         case .shuffle: return state.shuffleMode.map { .shuffle($0.toggled) }
         case .repeatMode: return state.repeatMode.map { .repeatMode($0.next) }
         case .like: return .command(.likeTrack)
@@ -199,9 +215,11 @@ nonisolated extension MediaControlButton {
         }
     }
 
-    /// `delta` seconds from where the playback clock puts the track at `now`, kept inside the track.
-    private func seekTarget(_ state: NowPlayingState, by delta: Double, at now: Date) -> Double? {
-        guard let duration = state.durationSeconds, let position = PlaybackClock.position(state, at: now) else { return nil }
+    /// `delta` seconds from the seek still on its way or else from where the playback clock puts the track at `now`, kept
+    /// inside the track.
+    private func seekTarget(_ context: MediaControlContext, by delta: Double, at now: Date) -> Double? {
+        let state = context.state
+        guard let duration = state.durationSeconds, let position = context.pendingSeek ?? PlaybackClock.position(state, at: now) else { return nil }
         return min(max(position + delta, 0), duration)
     }
 }

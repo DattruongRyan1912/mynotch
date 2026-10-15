@@ -7,7 +7,8 @@ import Testing
 /// The buttons beside play and pause, driven through the module with a fake source and a fake output device.
 @Suite final class MediaControlRowTests {
     let source = FakeNowPlayingSource()
-    let device = FakeVolumeDevice(level: 0.4)
+    let hardware = FakeVolumeHardware(level: 0.4)
+    let volumeQueue = ManualVolumeQueue()
     let client = FakeHTTPClient()
     let module: MediaModule
     let harness: RegistryHarness
@@ -16,7 +17,8 @@ import Testing
     init() {
         module = MediaModule(
             source: source, spectrum: FakeSpectrumSource(), lyricsClient: client, tokens: FakeTokenStore(),
-            signIn: FakeAppleMusicSignIn(), lookUpApp: { _ in nil }, volume: device
+            signIn: FakeAppleMusicSignIn(), lookUpApp: { _ in nil },
+            volume: VolumeModel(hardware: hardware, queue: volumeQueue)
         )
         harness = RegistryHarness([module])
         storageBase = harness.storageRoot.caches.deletingLastPathComponent()
@@ -85,6 +87,8 @@ import Testing
         await harness.registry.bootstrap()
         play(elapsed: 100, duration: 200)
         module.press(.forward)
+        // The player reports its position again (here still 100 s), which ends the wait for the first seek.
+        play(elapsed: 100, duration: 200)
         module.press(.rewind)
         let forward = try #require(source.seeks.first)
         let back = try #require(source.seeks.last)
@@ -102,6 +106,75 @@ import Testing
         play(elapsed: 199, duration: 200)
         module.press(.forward)
         #expect(source.seeks == [0, 200])
+    }
+
+    /// The moment the player's last report put the track at its position, so the clock gives exactly that position.
+    var clockNow: Date { store.state.elapsedAnchor!.timestamp }
+
+    @Test func quickRepeatedSeekTapsAddUpFromTheTargetStillWaitingForThePlayer() async {
+        await harness.registry.bootstrap()
+        play(elapsed: 30, duration: 200)
+        let start = clockNow
+        module.press(.forward, at: start)
+        module.press(.forward, at: start + 0.2)
+        module.press(.forward, at: start + 0.4)
+        #expect(source.seeks == [45, 60, 75], "three taps move 45 s, not 15")
+        module.press(.rewind, at: start + 0.6)
+        #expect(source.seeks == [45, 60, 75, 60])
+    }
+
+    @Test func accumulatedSeeksStayInsideTheTrack() async {
+        await harness.registry.bootstrap()
+        play(elapsed: 180, duration: 200)
+        let start = clockNow
+        for tap in 0..<3 { module.press(.forward, at: start + Double(tap) * 0.2) }
+        #expect(source.seeks == [195, 200, 200])
+        play(elapsed: 20, duration: 200)
+        let again = clockNow
+        for tap in 0..<3 { module.press(.rewind, at: again + Double(tap) * 0.2) }
+        #expect(source.seeks.suffix(3) == [5, 0, 0])
+    }
+
+    @Test func aSeekThatWasNotAnsweredForTwoSecondsIsForgotten() async {
+        await harness.registry.bootstrap()
+        play(elapsed: 30, duration: 200)
+        let start = clockNow
+        module.press(.forward, at: start)
+        module.press(.forward, at: start + 3)
+        // Three seconds on, the clock itself is at 33 s.
+        #expect(source.seeks == [45, 48])
+    }
+
+    @Test func thePlayersNewReportReplacesTheWaitingTarget() async {
+        await harness.registry.bootstrap()
+        play(elapsed: 30, duration: 200)
+        let start = clockNow
+        module.press(.forward, at: start)
+        source.emit(AdapterLines.position(45))
+        let reported = clockNow
+        module.press(.forward, at: reported)
+        #expect(source.seeks == [45, 60], "from the position the player reported, which is the same here")
+        source.emit(AdapterLines.position(100))
+        module.press(.forward, at: clockNow)
+        #expect(source.seeks == [45, 60, 115])
+    }
+
+    @Test func aSeekFromTheProgressBarIsWhereTheNextButtonTapStartsFrom() async {
+        await harness.registry.bootstrap()
+        play(elapsed: 30, duration: 200)
+        let start = clockNow
+        module.seek(toSeconds: 100, at: start)
+        module.press(.forward, at: start + 0.3)
+        #expect(source.seeks == [100, 115])
+    }
+
+    @Test func aNewTrackStartsFromItsOwnClock() async {
+        await harness.registry.bootstrap()
+        play(elapsed: 30, duration: 200)
+        module.press(.forward, at: clockNow)
+        source.emit(AdapterLines.track("Another", elapsed: 5, duration: 100))
+        module.press(.forward, at: clockNow)
+        #expect(source.seeks == [45, 20])
     }
 
     @Test func shuffleSetsTheOppositeModeAndTheNextReportFollows() async {
@@ -169,7 +242,8 @@ import Testing
         module.press(.none)
         #expect(source.sent.isEmpty)
         #expect(source.seeks.isEmpty)
-        #expect(device.writes.isEmpty)
+        #expect(hardware.levelWrites.isEmpty)
+        #expect(volumeQueue.pendingCount == 0)
     }
 
     @Test func pressesAreIgnoredWhileStopped() {
@@ -204,9 +278,21 @@ import Testing
 
     @Test func theModuleOffersTheDeviceItWasGiven() {
         module.volume.refresh()
+        volumeQueue.drain()
         #expect(module.volume.level == 0.4)
         module.volume.set(0.7)
-        #expect(device.writes == [0.7])
+        volumeQueue.drain()
+        #expect(hardware.levelWrites == [0.7])
+    }
+
+    @Test func stoppingTheModuleStopsListeningToTheDevice() async {
+        await harness.registry.bootstrap()
+        module.volume.startWatching()
+        volumeQueue.drain()
+        #expect(hardware.observerCount == 1)
+        await harness.registry.setEnabled(false, for: "media")
+        volumeQueue.drain()
+        #expect(hardware.observerCount == 0)
     }
 
     // MARK: lyrics

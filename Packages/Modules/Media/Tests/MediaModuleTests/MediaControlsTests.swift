@@ -13,11 +13,25 @@ import Testing
         #expect(MediaControlLayout.slotCount == 4, "two on each side of play and pause: five buttons at most")
     }
 
-    @Test func theChoicesAreTheBriefsInOrderWithNoneLast() {
+    @Test func everyButtonOfTheBriefKeepsItsStoredNameInTheOrderOfTheBrief() {
         #expect(MediaControlButton.allCases.map(\.title) == [
             "Bài trước", "Bài tiếp theo", "Tua lùi 15 giây", "Tua tới 15 giây", "Phát ngẫu nhiên",
             "Lặp lại", "Thích", "Âm lượng", "Lời bài hát", "Không có",
         ])
+        #expect(MediaControlButton.like.rawValue == "like", "kept, so that a later adapter needs no migration")
+    }
+
+    @Test func thePickerLeavesLikeOutUntilTheAdapterCanSendIt() {
+        #expect(MediaControlButton.choices.map(\.title) == [
+            "Bài trước", "Bài tiếp theo", "Tua lùi 15 giây", "Tua tới 15 giây", "Phát ngẫu nhiên",
+            "Lặp lại", "Âm lượng", "Lời bài hát", "Không có",
+        ])
+        #expect(MediaControlButton.choices.last == MediaControlButton.none)
+    }
+
+    @Test func aStoredLikeIsNoChoiceTheSettingsPickerCouldShow() {
+        #expect(MediaControlRows.shownChoice(.like) == .none, "a selection with no matching row would be an invalid picker")
+        for button in MediaControlButton.choices { #expect(MediaControlRows.shownChoice(button) == button) }
     }
 
     @Test func aLayoutIsStoredAsTheNamesOfItsButtons() throws {
@@ -76,11 +90,11 @@ import Testing
 
     func context(
         _ state: NowPlayingState, lyricsAreOn: Bool = true, lyricsHidden: Bool = false, canLike: Bool = true,
-        hasVolume: Bool = true, volumeIsOpen: Bool = false
+        hasVolume: Bool = true, volumeIsOpen: Bool = false, pendingSeek: Double? = nil
     ) -> MediaControlContext {
         MediaControlContext(
             state: state, lyricsAreOn: lyricsAreOn, lyricsHidden: lyricsHidden, canLike: canLike,
-            hasVolume: hasVolume, volumeIsOpen: volumeIsOpen
+            hasVolume: hasVolume, volumeIsOpen: volumeIsOpen, pendingSeek: pendingSeek
         )
     }
 
@@ -149,6 +163,16 @@ import Testing
         #expect(effect(.forward, context(state(elapsed: 190, duration: 200)), after: 60) == .seek(toSeconds: 200))
     }
 
+    @Test func aSeekStillWaitingForThePlayerIsWhereTheNextOneStartsFrom() {
+        let waiting = context(state(elapsed: 100), pendingSeek: 130)
+        #expect(effect(.forward, waiting) == .seek(toSeconds: 145))
+        #expect(effect(.rewind, waiting) == .seek(toSeconds: 115))
+        // Still inside the track.
+        #expect(effect(.forward, context(state(elapsed: 100, duration: 200), pendingSeek: 195)) == .seek(toSeconds: 200))
+        #expect(effect(.rewind, context(state(elapsed: 100, duration: 200), pendingSeek: 5)) == .seek(toSeconds: 0))
+        #expect(effect(.forward, context(state(elapsed: 100, duration: 200), pendingSeek: 240)) == .seek(toSeconds: 200), "a stale target cannot leave the track")
+    }
+
     @Test func seekingNeedsAKnownPositionAndLength() {
         for unseekable in [state(elapsed: nil), state(duration: nil), state(elapsed: nil, duration: nil)] {
             let live = context(unseekable)
@@ -200,7 +224,7 @@ import Testing
 
     // MARK: like
 
-    @Test func likeNeedsAPlayerThatSupportsItAndASourceThatCanSendIt() {
+    @Test func likeNeedsAPlayerThatSupportsIt() {
         let supported = context(state(supportsLike: true))
         #expect(look(.like, supported) == MediaControlLook(symbol: "heart", label: "Thích", isEnabled: true, isActive: false))
         #expect(effect(.like, supported) == .command(.likeTrack))
@@ -208,10 +232,30 @@ import Testing
         #expect(!look(.like, unsupported).isEnabled)
         #expect(look(.like, unsupported).label == "Thích: trình phát không hỗ trợ")
         #expect(effect(.like, unsupported) == nil)
+    }
+
+    @Test func aSourceThatCannotLikeSendsNothingAndDrawsNoHeartAtAll() {
         let blind = context(state(supportsLike: true), canLike: false)
-        #expect(!look(.like, blind).isEnabled)
-        #expect(look(.like, blind).label == "Thích: adapter chưa hỗ trợ")
         #expect(effect(.like, blind) == nil)
+        #expect(!MediaControlButton.like.isDrawn(in: blind), "never an always-faded heart")
+        #expect(MediaControlButton.like.isDrawn(in: context(state(supportsLike: true))))
+        #expect(MediaControlButton.like.isDrawn(in: context(state(supportsLike: false))), "a source that can like draws it, faded for a player that cannot")
+    }
+
+    @Test func aStoredLikeIsDrawnAsAnEmptySlotWhileTheSourceCannotLike() {
+        let stored = MediaControlLayout(slots: [.like, .previous, .next, .shuffle])
+        let blind = context(state(shuffle: .off), canLike: false)
+        #expect(MediaControlsRow.drawn(stored, in: blind) == [.none, .previous, .next, .shuffle])
+        #expect(MediaControlsRow.drawn(stored, in: context(state(shuffle: .off))) == [.like, .previous, .next, .shuffle])
+        #expect(MediaControlsRow.drawn(.standard, in: blind) == [.none, .previous, .next, .none])
+    }
+
+    @Test func everyOtherButtonIsDrawnAndNoneNever() {
+        let plain = context(state(), canLike: false)
+        for button in MediaControlButton.allCases where button != .like && button != .none {
+            #expect(button.isDrawn(in: plain), "\(button)")
+        }
+        #expect(!MediaControlButton.none.isDrawn(in: plain))
     }
 
     @Test func aLikedTrackShowsAFilledHeartAndOffersToUndo() {

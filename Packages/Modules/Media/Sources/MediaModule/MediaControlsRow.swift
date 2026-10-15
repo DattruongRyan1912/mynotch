@@ -30,13 +30,20 @@ struct MediaControlsRow: View {
         .onChange(of: volume.isAvailable) { _, isAvailable in if !isAvailable { closeVolume() } }
     }
 
+    /// The slots left to right as the row draws them: a button it does not draw (no button, a like the source cannot send)
+    /// is an empty slot.
+    static func drawn(_ layout: MediaControlLayout, in context: MediaControlContext) -> [MediaControlButton] {
+        layout.slots.map { $0.isDrawn(in: context) ? $0 : .none }
+    }
+
     private var buttons: some View {
         let context = store.controlContext(hasVolume: volume.isAvailable, volumeIsOpen: volumeIsOpen)
-        let layout = store.controlLayout
+        let drawn = Self.drawn(store.controlLayout, in: context)
+        let half = drawn.count / 2
         return HStack(spacing: Self.spacing) {
-            ForEach(layout.left.indices, id: \.self) { slot(layout.left[$0], context) }
+            ForEach(0..<half, id: \.self) { slot(drawn[$0], context) }
             PlayPauseButton(isPlaying: store.state.isPlaying) { actions.send(.togglePlayPause) }
-            ForEach(layout.right.indices, id: \.self) { slot(layout.right[$0], context) }
+            ForEach(half..<drawn.count, id: \.self) { slot(drawn[$0], context) }
         }
     }
 
@@ -57,13 +64,15 @@ struct MediaControlsRow: View {
         }
     }
 
+    /// Opens on what was last read: nothing waits for the device. The button is faded while there is no volume to set, and a
+    /// device that loses it while the slider is open closes the slider.
     private func openVolume() {
-        volume.startWatching()
         guard volume.isAvailable else {
-            volume.stopWatching()
+            volume.refresh()
             return
         }
         volumeIsOpen = true
+        volume.startWatching()
     }
 
     private func closeVolume() {
@@ -144,13 +153,15 @@ private struct VolumeRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            RowButton(symbol: "speaker.wave.2.fill", label: "Đóng thanh âm lượng", symbolSize: 14, isActive: true, action: close)
+            // A muted speaker and a dimmed level say that nothing is heard; moving the slider unmutes.
+            RowButton(symbol: volume.symbol, label: "Đóng thanh âm lượng", symbolSize: 14, isActive: !volume.isMuted, action: close)
             bar
             Text("\(volume.percent ?? 0)%")
                 .font(.system(size: 10, weight: .medium).monospacedDigit())
                 .foregroundStyle(NotchTokens.secondaryText)
                 .frame(width: 34, alignment: .trailing)
         }
+        .opacity(volume.isMuted ? 0.55 : 1)
         .frame(height: MediaControlsRow.buttonSize)
         .onDisappear { if isDragging { notch.setDragging(false) } }
     }
@@ -175,7 +186,7 @@ private struct VolumeRow: View {
         .frame(height: 10)
         .accessibilityElement()
         .accessibilityLabel("Âm lượng")
-        .accessibilityValue("\(volume.percent ?? 0)%")
+        .accessibilityValue(volume.isMuted ? "\(volume.percent ?? 0)%, tắt tiếng" : "\(volume.percent ?? 0)%")
         .accessibilityAdjustableAction { direction in
             let level = volume.level ?? 0
             switch direction {

@@ -131,10 +131,10 @@ final class NowPlayingStore {
     }
 
     /// What the buttons look at: the track, the lyrics and the source, and what only the row knows of the volume.
-    func controlContext(hasVolume: Bool, volumeIsOpen: Bool) -> MediaControlContext {
+    func controlContext(hasVolume: Bool, volumeIsOpen: Bool, pendingSeek: Double? = nil) -> MediaControlContext {
         MediaControlContext(
             state: state, lyricsAreOn: lyricsAreOn, lyricsHidden: lyricsHidden, canLike: canLike,
-            hasVolume: hasVolume, volumeIsOpen: volumeIsOpen
+            hasVolume: hasVolume, volumeIsOpen: volumeIsOpen, pendingSeek: pendingSeek
         )
     }
 
