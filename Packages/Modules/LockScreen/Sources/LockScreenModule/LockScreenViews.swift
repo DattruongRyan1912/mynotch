@@ -5,9 +5,10 @@ import SwiftUI
 /// What the panel shows: the best view the user allows, on the notch's black. It reads the center itself, so a
 /// contributor that changes while the screen is locked changes what is shown without rebuilding the panel.
 struct LockScreenRootView: View {
-    /// The card is this tall at least; a view with controls and a progress bar makes it taller, up to the panel's height.
+    /// The card is this tall at least; a view with controls, a progress bar and lyric lines makes it taller, and the panel follows it.
     static let minimumHeight: CGFloat = 56
     static let verticalPadding: CGFloat = 8
+    static let cornerRadius: CGFloat = 20
 
     let lockScreen: LockScreenPublisher
     let isAllowed: (ModuleID) -> Bool
@@ -18,6 +19,8 @@ struct LockScreenRootView: View {
     let controlsEnabled: () -> Bool
     /// The user lets a view show lyrics ("Hiện lời bài hát trên màn hình khoá"); read here too.
     let lyricsEnabled: () -> Bool
+    /// Told the card's height whenever it changes, so the panel can be made as tall as the card (the lyric lines come and go).
+    var cardHeightChanged: (CGFloat) -> Void = { _ in }
 
     var body: some View {
         if let entry = lockScreen.current(allowing: isAllowed) {
@@ -29,7 +32,8 @@ struct LockScreenRootView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, Self.verticalPadding)
                 .frame(maxWidth: .infinity, minHeight: Self.minimumHeight)
-                .background(NotchTokens.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .background(NotchTokens.background, in: RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { cardHeightChanged($0) }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
     }

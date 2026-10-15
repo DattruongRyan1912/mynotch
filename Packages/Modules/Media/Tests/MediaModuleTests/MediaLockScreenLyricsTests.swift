@@ -207,11 +207,13 @@ import Testing
         withoutWindow.contentView = nil
     }
 
-    @Test func theCardWithLyricsFitsTheRoomThePanelGivesIt() {
+    @Test func theCardWithLyricsIsNoTallerThanThePanelAllowsAndTheBlockIsWhatMakesItTaller() {
         for store in [makeStore(), makeStore(karaoke: false), makeStore(elapsed: 2)] {
             let (hosting, window) = host(lockScreenView(store))
-            // The lock screen's panel is 112 tall (LockScreenPanel.size, which this package cannot see) and the card pads 8 each side.
-            #expect(hosting.fittingSize.height + 16 <= 112)
+            // The lock screen's panel is as tall as the card, up to 160 (LockScreenPanel.maximumHeight, which this package cannot
+            // see); the card pads 8 each side. About 105 with the lyric lines.
+            #expect(hosting.fittingSize.height + 16 <= 160)
+            #expect(hosting.fittingSize.height > 49 + LockScreenLyricsView.height, "the cover row, the bar and the block")
             window.contentView = nil
         }
     }
@@ -241,9 +243,8 @@ import Testing
         return anchor.timestamp + (seconds - anchor.elapsedSeconds) / anchor.rate + LyricTickSchedule.settle
     }
 
-    @Test func theBlockIsEvaluatedOncePerLineNotOnceAFrame() throws {
-        // Lines every 0.2 s (word-timed, so there is a sweep on each): a frame-driven block would be evaluated some fifty times in
-        // the time it takes to sing them, and a 4 Hz one about three times; this one once for each line and once to begin with.
+    /// A song of word-timed lines 0.2 s apart and a last one far off, with the clock at its start.
+    func quickSong() -> NowPlayingStore {
         var sung: [LyricLine] = []
         for index in 0..<4 {
             let begin = Double(index) * 0.2
@@ -252,15 +253,51 @@ import Testing
             sung.append(LyricLine(time: begin, words: [first, second]))
         }
         sung.append(LyricLine(time: 60, text: "end"))
-        let store = makeStore(elapsed: 0, lines: sung)
-        let ticks = try [0.2, 0.4, 0.6].map { try tickDate(of: store, forLineAt: $0) }
-        let evaluations = watch(store: store, until: { evaluations in evaluations.dates.contains { $0 >= ticks[2] } })
+        return makeStore(elapsed: 0, lines: sung)
+    }
+
+    @Test func theScheduleTheBlockRunsOnHasOneTickPerLineAndNoneBetween() throws {
+        // A fixed clock: the entries from the moment the song's clock began, no wall clock involved. A frame-driven block would
+        // have some fifty in the 0.7 s it takes to sing the first four lines, and a 4 Hz one three; this has the start and one per
+        // line after it, however long the song, whatever the machine is doing.
+        let store = quickSong()
+        let anchor = try #require(store.state.elapsedAnchor)
+        let entries = Array(LyricTimeline<EmptyView>.schedule(for: store).entries(from: anchor.timestamp, mode: .normal))
+        #expect(entries.count == 5, "the start and the four lines after the first: \(entries.count)")
+        #expect(entries.first == anchor.timestamp)
+        #expect(entries.filter { $0 <= anchor.timestamp + 0.7 }.count == 4)
+        for (date, seconds) in zip(entries.dropFirst(), [0.2, 0.4, 0.6, 60]) {
+            let late = date.timeIntervalSince(anchor.timestamp) - seconds
+            // Dates today are about 8e8 s from the reference date, so a microsecond is the most they can tell apart.
+            #expect(late > 0 && late <= LyricTickSchedule.settle + 1e-6, "\(seconds)")
+        }
+    }
+
+    @Test func aBlockOfAPausedOrUnsyncedTrackHasNothingToTickFor() throws {
+        let paused = makeStore(elapsed: 5, playing: false)
+        let anchor = try #require(paused.state.elapsedAnchor)
+        #expect(Array(LyricTimeline<EmptyView>.schedule(for: paused).entries(from: anchor.timestamp, mode: .normal)) == [anchor.timestamp])
+        let bare = NowPlayingStore(lookUpApp: { _ in nil })
+        bare.apply(line: AdapterLines.track(elapsed: 5), receivedAt: Date())
+        let bareAnchor = try #require(bare.state.elapsedAnchor)
+        #expect(Array(LyricTimeline<EmptyView>.schedule(for: bare).entries(from: bareAnchor.timestamp, mode: .normal)) == [bareAnchor.timestamp])
+    }
+
+    @Test func theBlockIsEvaluatedAtALineAndNotAgainUntilTheNextOne() throws {
+        // Waits for the one tick, however long a busy machine takes to deliver it, so nothing here depends on how fast the run loop is.
+        // One line change, 0.2 s on, and the next far off.
+        let words = [LyricWord(text: "la ", begin: 0, end: 0.1), LyricWord(text: "la", begin: 0.1, end: 0.2)]
+        let next = [LyricWord(text: "na ", begin: 0.2, end: 0.3), LyricWord(text: "na", begin: 0.3, end: 0.4)]
+        let store = makeStore(elapsed: 0, lines: [LyricLine(time: 0, words: words), LyricLine(time: 0.2, words: next), LyricLine(time: 60, text: "end")])
+        let tick = try tickDate(of: store, forLineAt: 0.2)
+        let evaluations = watch(store: store, until: { evaluations in evaluations.dates.contains { $0 >= tick } }, seconds: 0.3)
         let dates = evaluations.distinctDates
-        let first = try #require(dates.first)
-        let expected = 1 + ticks.filter { $0 > first }.count
-        #expect(dates.count == expected, "one start and one for each line reached after it: \(dates)")
-        #expect(evaluations.dates.count <= 2 * expected, "a view may evaluate an entry twice, never more: \(evaluations.dates.count)")
-        #expect(evaluations.afterSettling == 0, "and then it stands still until the next line")
+        if let first = dates.first, first < tick {
+            #expect(dates.count == 2 && abs(dates[1].timeIntervalSince(tick)) < 0.001, "the start and the tick at the line: \(dates)")
+        } else {
+            #expect(dates.count == 1, "it began after the line, so only a later line can tick: \(dates)")
+        }
+        #expect(evaluations.dates.count <= 2 * dates.count, "a view may evaluate an entry twice, never more: \(evaluations.dates.count)")
     }
 
     @Test func aLineBeingSungDoesNotBuildItsSweepAgain() throws {
@@ -287,24 +324,36 @@ import Testing
     }
 
     @Test func whenTheDisplaySleepsAnAnimatingSweepIsTakenAwayAndTheTimelineStops() throws {
-        // A long line being sung, and lines that begin 0.5 and 0.9 s on: both come while the display sleeps.
         let long = LyricLine(time: 0, words: [LyricWord(text: "la ", begin: 0, end: 30), LyricWord(text: "la", begin: 30, end: 60)])
-        let store = makeStore(elapsed: 1, lines: [long, LyricLine(time: 1.5, text: "b"), LyricLine(time: 1.9, text: "c"), LyricLine(time: 90, text: "d")])
+        let store = makeStore(elapsed: 1, lines: [long, LyricLine(time: 90, text: "far")])
         let presence = LockScreenPresenceForTests()
-        var sleptAt = Date.distantFuture
-        let evaluations = watch(store: store, presence: presence, seconds: 1.2, then: { hosting, evaluations in
+        var boundaries: [Date] = []
+        let evaluations = watch(store: store, presence: presence, seconds: 0, then: { hosting, evaluations in
             #expect(karaokeViews(in: hosting).first?.isAnimating == true, "singing the long line before the display sleeps")
-            sleptAt = Date()
             presence.isOnScreen = false
             // Looked for again each time: the timeline gives way to plain content while the display sleeps, which is a new view.
-            #expect(runLoop(until: { karaokeViews(in: hosting).first?.isAnimating == false }, seconds: 10), "the sweep is taken away at once")
-            // The change itself shows the block once more, as it was when it left the screen.
+            #expect(runLoop(until: { karaokeViews(in: hosting).first?.isAnimating == false }, seconds: 30), "the sweep is taken away at once")
+            runLoopUntilQuiet { evaluations.dates.count }
+
+            // Only now, with the display asleep, do lines come due: the lyrics are replaced by some that begin 0.4 and 0.8 s from
+            // here. That is a change of the store, so the block shows once more (as it was when it left the screen) and the test
+            // waits for that. Then it waits, on the wall clock and not for a fixed time, until both lines are past.
+            let position = store.position(at: Date()) ?? 0
+            store.showLyrics([long, LyricLine(time: position + 0.4, text: "b"), LyricLine(time: position + 0.8, text: "c"), LyricLine(time: 90, text: "far")])
+            let before = evaluations.dates.count
+            #expect(runLoop(until: { evaluations.dates.count > before }, seconds: 30), "the change of lyrics shows the block once")
             runLoopUntilQuiet { evaluations.dates.count }
             evaluations.settledCount = evaluations.dates.count
+            if let anchor = store.state.elapsedAnchor {
+                for offset in [0.4, 0.8] {
+                    boundaries.append(anchor.timestamp + (position + offset - anchor.elapsedSeconds) / anchor.rate)
+                }
+            }
+            let last = boundaries.last ?? .distantFuture
+            #expect(runLoop(until: { Date() > last + 0.3 }, seconds: 30), "both lines are past")
         })
-        let boundary = try tickDate(of: store, forLineAt: 1.9)
-        #expect(sleptAt < boundary, "the display must sleep before the line that follows, or this proves nothing")
-        #expect(evaluations.afterSettling == 0, "a line reached while the display sleeps evaluates nothing: \(evaluations.afterSettling)")
+        #expect(boundaries.count == 2)
+        #expect(evaluations.afterSettling == 0, "lines reached while the display sleeps evaluate nothing: \(evaluations.afterSettling)")
     }
 
     @Test func whenTheDisplayWakesTheSweepComesBackFromTheClock() throws {

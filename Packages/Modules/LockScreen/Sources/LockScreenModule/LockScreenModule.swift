@@ -140,7 +140,8 @@ public final class LockScreenModule: FeatureModule {
         let isAllowed: (ModuleID) -> Bool = { keys.allows($0, in: settings) }
         let root = LockScreenRootView(
             lockScreen: context.lockScreen, isAllowed: isAllowed, presence: presence,
-            controlsEnabled: { settings.value(keys.showMediaControls) }, lyricsEnabled: { settings.value(keys.showLyrics) }
+            controlsEnabled: { settings.value(keys.showMediaControls) }, lyricsEnabled: { settings.value(keys.showLyrics) },
+            cardHeightChanged: { [weak self] height in self?.cardHeightChanged(height) }
         )
         guard context.lockScreen.current(allowing: isAllowed) != nil, let window = makeWindow(AnyView(root)) else { return }
         self.window = window
@@ -149,6 +150,12 @@ public final class LockScreenModule: FeatureModule {
         shim.makeLockScreenSpace()
         window.show()
         shim.attach(windowNumber: window.windowNumber)
+    }
+
+    /// The card is a different height (lyric lines came or went). Taken up on the next turn, not inside SwiftUI's layout, and
+    /// only if a panel is up, so a card that is gone cannot resize the next one.
+    private func cardHeightChanged(_ height: CGFloat) {
+        Task { [weak self] in self?.window?.fit(toCardHeight: height) }
     }
 
     /// Clicks reach the panel only while the view shown has buttons and the user lets them show. Anything else, and the panel is

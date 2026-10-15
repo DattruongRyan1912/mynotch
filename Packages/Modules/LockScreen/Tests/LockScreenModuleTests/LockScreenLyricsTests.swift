@@ -183,10 +183,4 @@ struct EnvironmentProbeView: View {
         presence.set(true)
         #expect(invalidated.isSet)
     }
-
-    @Test func thePanelHasRoomForTheLyricLinesUnderTheTrack() {
-        // The card's inner height: two lyric rows (about 34) over the cover row (40), the bar (3) and the gaps (12), plus the padding.
-        #expect(LockScreenPanel.size.height >= 112)
-        #expect(LockScreenPanel.size.width == 340)
-    }
 }

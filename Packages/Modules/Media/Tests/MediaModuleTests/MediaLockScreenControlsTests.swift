@@ -99,8 +99,8 @@ import Testing
         await harness.registry.bootstrap()
         play()
         let hosting = NSHostingView(rootView: NowPlayingLockScreenView(transport: transport).frame(width: 308))
-        // Without lyrics the card is as short as when the panel was 80 tall (the card is 56 tall at least and adds 8 above and below,
-        // so 72 was the most). The panel is 112 tall now, for the lyric lines; `MediaLockScreenLyricsTests` checks the card with them.
+        // Without lyrics the card is as short as when the panel was a fixed 80 tall (the card is 56 tall at least and adds 8 above and
+        // below, so 72 was the most). The panel is as tall as its card now; `MediaLockScreenLyricsTests` checks the card with lyrics.
         #expect(hosting.fittingSize.height + 16 <= 72)
         #expect(hosting.fittingSize.height >= 40, "the cover at least")
     }

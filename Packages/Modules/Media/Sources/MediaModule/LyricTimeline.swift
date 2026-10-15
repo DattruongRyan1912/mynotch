@@ -10,12 +10,15 @@ struct LyricTimeline<Content: View>: View {
     let store: NowPlayingStore
     @ViewBuilder let content: (Date) -> Content
 
+    /// The schedule the timeline runs on for what the store holds now. Read in `body`, so that a seek or a pause, which move the
+    /// lines' times on the clock, make a new schedule.
+    static func schedule(for store: NowPlayingStore) -> LyricTickSchedule {
+        LyricTickSchedule(anchor: store.state.elapsedAnchor, isPlaying: store.state.isPlaying, lineTimes: store.syncedLyrics?.map(\.time) ?? [])
+    }
+
     var body: some View {
         if isOnScreen {
-            // Read here, so that a seek or a pause, which move the lines' times on the clock, make a new schedule.
-            TimelineView(LyricTickSchedule(
-                anchor: store.state.elapsedAnchor, isPlaying: store.state.isPlaying, lineTimes: store.syncedLyrics?.map(\.time) ?? []
-            )) { content($0.date) }
+            TimelineView(Self.schedule(for: store)) { content($0.date) }
         } else {
             content(.now)
         }

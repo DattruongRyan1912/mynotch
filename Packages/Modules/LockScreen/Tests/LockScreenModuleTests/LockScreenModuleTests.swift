@@ -28,11 +28,14 @@ final class FakeLockScreenWindow: LockScreenWindow {
     let content: AnyView
     /// Click-through until the module says otherwise, like the real panel.
     var takesClicks = false
+    /// The heights of the card the module has fitted the window to, in order.
+    private(set) var fitted: [CGFloat] = []
     init(windowNumber: Int, log: EventLog, content: AnyView = AnyView(EmptyView())) {
         self.windowNumber = windowNumber
         self.log = log
         self.content = content
     }
+    func fit(toCardHeight card: CGFloat) { fitted.append(card) }
     func show() { log.entries.append("show \(windowNumber)") }
     func dismiss() { log.entries.append("dismiss \(windowNumber)") }
 }

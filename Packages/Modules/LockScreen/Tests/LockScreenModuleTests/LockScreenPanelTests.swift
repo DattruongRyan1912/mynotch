@@ -6,7 +6,7 @@ import Testing
 @testable import LockScreenModule
 
 @Suite struct LockScreenPanelTests {
-    private var size: CGSize { LockScreenPanel.size }
+    private var size: CGSize { CGSize(width: LockScreenPanel.width, height: 80) }
     private var gap: CGFloat { LockScreenPanel.gap }
 
     @Test func sitsCentredUnderAHardwareNotch() {
@@ -14,7 +14,7 @@ import Testing
             frame: CGRect(x: 0, y: 0, width: 1512, height: 982), safeAreaTop: 32,
             auxiliaryTopLeftWidth: 656, auxiliaryTopRightWidth: 656, menuBarHeight: 32
         )
-        let frame = LockScreenPanel.frame(on: screen)
+        let frame = LockScreenPanel.frame(on: screen, height: 80)
         #expect(frame.size == size)
         #expect(frame.midX == 756)
         #expect(frame.maxY == 982 - 32 - gap)
@@ -26,7 +26,7 @@ import Testing
             auxiliaryTopLeftWidth: 400, auxiliaryTopRightWidth: 500, menuBarHeight: 30
         )
         // The notch is 100 wide and its centre is 450 from the left edge, 50 left of the screen centre.
-        #expect(LockScreenPanel.frame(on: screen).midX == 450)
+        #expect(LockScreenPanel.frame(on: screen, height: 80).midX == 450)
     }
 
     @Test func usesTheMenuBarHeightWhereThereIsNoNotch() {
@@ -34,7 +34,7 @@ import Testing
             frame: CGRect(x: 0, y: 0, width: 1920, height: 1080), safeAreaTop: 0,
             auxiliaryTopLeftWidth: nil, auxiliaryTopRightWidth: nil, menuBarHeight: 24
         )
-        let frame = LockScreenPanel.frame(on: screen)
+        let frame = LockScreenPanel.frame(on: screen, height: 80)
         #expect(frame.midX == 960)
         #expect(frame.maxY == 1080 - 24 - gap)
     }
@@ -44,7 +44,7 @@ import Testing
             frame: CGRect(x: 1512, y: -200, width: 1920, height: 1080), safeAreaTop: 0,
             auxiliaryTopLeftWidth: nil, auxiliaryTopRightWidth: nil, menuBarHeight: 24
         )
-        let frame = LockScreenPanel.frame(on: screen)
+        let frame = LockScreenPanel.frame(on: screen, height: 80)
         let centre: CGFloat = 2472
         let top: CGFloat = 856 - gap
         #expect(frame.midX == centre)
