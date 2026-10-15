@@ -33,7 +33,9 @@ struct NotchGlassAnimationCanaryTests {
         }.max { $0.width < $1.width }
     }
 
-    func sample(bubbles: Int, change: (NotchViewModel) -> Void, label: String) {
+    /// Applies each change in turn to a glass notch, letting it settle in between, and checks the glass's centre at every sample
+    /// of every change. `bubbles` activities beside the primary one are live from the start.
+    func sample(bubbles: Int, changes: [(String, (NotchViewModel, RegistryHarness) -> Void)], label: String) {
         let harness = RegistryHarness([])
         let settings = SettingsStore(defaults: makeIsolatedDefaults())
         settings.set(.liquidGlass, for: InterfaceSettings.look)
@@ -56,27 +58,68 @@ struct NotchGlassAnimationCanaryTests {
         window.contentView = hosting
         defer { window.contentView = nil }
         spin(0.8)
-        change(model)
-        let start = Date()
-        var samples: [CGRect] = []
-        while Date().timeIntervalSince(start) < 1.0 {
-            spin(0.012)
-            if let frame = notchFrame(in: hosting) { samples.append(frame) }
-        }
-        #expect(samples.count > 5, "\(label): the glass was found while it animated")
         let centre = geometry.panelSize.width / 2
-        let worst = samples.map { abs($0.midX - centre) }.max() ?? 0
-        let widths = Set(samples.map { Int($0.width) }).count
-        print("CANARY \(label): \(samples.count) samples, \(widths) distinct widths, worst centre offset \(worst) pt")
-        #expect(worst < 2, "\(label): the glass stays centred on the notch while it animates (worst \(worst) pt off)")
+        for (step, change) in changes {
+            change(model, harness)
+            let start = Date()
+            var samples: [CGRect] = []
+            while Date().timeIntervalSince(start) < 1.0 {
+                spin(0.012)
+                if let frame = notchFrame(in: hosting) { samples.append(frame) }
+            }
+            let name = "\(label), \(step)"
+            #expect(samples.count > 5, "\(name): the glass was found while it animated")
+            let worst = samples.map { abs($0.midX - centre) }.max() ?? 0
+            let widths = Set(samples.map { Int($0.width) }).count
+            print("CANARY \(name): \(samples.count) samples, \(widths) distinct widths, worst centre offset \(worst) pt")
+            #expect(worst < 2, "\(name): the glass stays centred on the notch while it animates (worst \(worst) pt off)")
+        }
     }
 
-    @Test func openingAndClosingTheNotchWithNoBubble() {
-        sample(bubbles: 0, change: { $0.open(tab: nil) }, label: "open, no bubble")
-        sample(bubbles: 0, change: { $0.showToast(AnyView(Color.clear), duration: .seconds(60)) }, label: "toast, no bubble")
+    @Test func hoverOpeningThenClosingTheNotchWithNoBubble() {
+        sample(
+            bubbles: 0,
+            changes: [("hover open", { model, _ in model.open(tab: nil, onPurpose: false) }), ("close", { model, _ in model.close() })],
+            label: "no bubble"
+        )
     }
 
-    @Test func openingTheNotchWithBubbles() {
-        sample(bubbles: 2, change: { $0.open(tab: nil) }, label: "open, two bubbles")
+    @Test func openingThenClosingTheNotchWithBubbles() {
+        sample(
+            bubbles: 2,
+            changes: [("open", { model, _ in model.open(tab: nil) }), ("close", { model, _ in model.close() })],
+            label: "two bubbles"
+        )
+    }
+
+    @Test func aToastComingAndGoing() {
+        sample(
+            bubbles: 0,
+            changes: [
+                ("toast", { model, _ in model.showToast(AnyView(Color.clear), duration: .seconds(60)) }),
+                ("close", { model, _ in model.close() }),
+            ],
+            label: "no bubble"
+        )
+    }
+
+    @Test func aStripAppearingAndTheListOpening() {
+        sample(
+            bubbles: 1,
+            changes: [
+                ("strip appears", { _, harness in
+                    harness.activities.set(
+                        LiveActivity(
+                            id: "a", leading: AnyView(Color.clear), trailing: AnyView(Color.clear), bottom: AnyView(Color.clear),
+                            bottomHeight: 36, summary: "a"
+                        ),
+                        from: "m"
+                    )
+                }),
+                ("list opens", { model, _ in model.showList() }),
+                ("list closes", { model, _ in model.close() }),
+            ],
+            label: "one bubble"
+        )
     }
 }

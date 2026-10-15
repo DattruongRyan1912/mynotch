@@ -80,6 +80,28 @@ import Testing
         }
     }
 
+    /// A square filled with the primary token, inside `.notchOnDarkBackground()` when `onDark`, over mid grey in `scheme`.
+    func tokenBrightness(glass: Bool, scheme: ColorScheme, onDark: Bool) throws -> Double {
+        try NotchLookState.$current.withValue(state(glass: glass)) {
+            let square = Rectangle().fill(NotchTokens.primaryText).frame(width: 8, height: 8)
+            let view = ZStack { Color(.sRGB, white: 0.5); if onDark { square.notchOnDarkBackground() } else { square } }
+                .environment(\.colorScheme, scheme).frame(width: 12, height: 12)
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 1
+            let bitmap = NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
+            return Double(try #require(bitmap.colorAt(x: 6, y: 6)?.usingColorSpace(.sRGB)).redComponent)
+        }
+    }
+
+    @Test func aViewOnAFixedDarkBackgroundKeepsLightTextOnGlassInALightAppearance() throws {
+        // A floating chip or panel that draws its own black background cannot take the tokens' glass colours in a light appearance:
+        // black text on black. The modifier gives it the dark scheme, where they are light.
+        #expect(try tokenBrightness(glass: true, scheme: .light, onDark: false) < 0.35, "the tokens follow the light appearance")
+        #expect(try tokenBrightness(glass: true, scheme: .light, onDark: true) > 0.7)
+        #expect(try tokenBrightness(glass: true, scheme: .dark, onDark: true) > 0.7)
+        #expect(try tokenBrightness(glass: false, scheme: .light, onDark: true) > 0.7, "and the classic tokens are white anyway")
+    }
+
     /// What an AppKit drawing gets when a module turns a token into an `NSColor`, in each appearance.
     func appKitBrightness(glass: Bool, appearance: NSAppearance.Name) -> Double {
         NotchLookState.$current.withValue(state(glass: glass)) {

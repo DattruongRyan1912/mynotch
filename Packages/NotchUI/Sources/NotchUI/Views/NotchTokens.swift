@@ -37,3 +37,13 @@ public enum NotchTokens {
     /// which kept both tabs on screen while the shape resized.
     static let swap = Animation.easeInOut(duration: 0.14)
 }
+
+extension View {
+    /// For a view that draws on a background of its own that is always dark (a floating chip, the lyrics panel): gives it the dark
+    /// colour scheme, in which the text tokens are light whatever the look is. Without it, on Liquid Glass in the light appearance
+    /// the tokens are the system's primary and secondary colours, which are black there, and text on a black background is lost.
+    /// Not needed inside the notch itself, nor on a system material.
+    public func notchOnDarkBackground() -> some View {
+        environment(\.colorScheme, .dark)
+    }
+}
