@@ -21,7 +21,7 @@ struct AboutPage: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("About")
+        .navigationTitle("Giới thiệu")
     }
 }
 

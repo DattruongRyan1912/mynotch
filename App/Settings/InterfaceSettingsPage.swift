@@ -75,7 +75,7 @@ struct InterfaceSettingsPage: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("Interface")
+        .navigationTitle("Giao diện")
     }
 
     private func slider(_ title: String, _ key: SettingKey<Double>, _ range: ClosedRange<CGFloat>, unit: String) -> some View {

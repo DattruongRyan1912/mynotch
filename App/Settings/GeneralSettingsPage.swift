@@ -62,7 +62,7 @@ struct GeneralSettingsPage: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("General")
+        .navigationTitle("Chung")
         .onAppear(perform: refreshLaunchAtLogin)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshLaunchAtLogin()
