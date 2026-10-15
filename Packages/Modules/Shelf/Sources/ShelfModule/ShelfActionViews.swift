@@ -1,3 +1,4 @@
+import NotchUI
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -132,7 +133,7 @@ struct ShelfActionReportView: View {
                             .textSelection(.enabled)
                             .padding(6)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.white.opacity(0.08), in: .rect(cornerRadius: 6))
+                            .background(NotchTokens.fill(0.08), in: .rect(cornerRadius: 6))
                     }
                     ForEach(report.failures.indices, id: \.self) { index in
                         Text("\(report.failures[index].name): \(report.failures[index].message)")

@@ -1,5 +1,6 @@
 import AppKit
 import MyNotchCore
+import NotchUI
 import SwiftUI
 
 /// The "Khay" tab: a row of cards and a button that clears them.
@@ -79,7 +80,7 @@ struct ShelfCardView: View {
                 .multilineTextAlignment(.center)
         }
         .frame(width: 76, height: 78)
-        .background(.white.opacity(0.08), in: .rect(cornerRadius: 8))
+        .background(NotchTokens.fill(0.08), in: .rect(cornerRadius: 8))
         .overlay(alignment: .topLeading) { selectionMark }
         .background(ShelfShareAnchor(items: { module.shareItems(for: item) }, isPresented: isSharing))
         .overlay(ShelfCardDragSource(item: item, module: module, image: dragImage))
