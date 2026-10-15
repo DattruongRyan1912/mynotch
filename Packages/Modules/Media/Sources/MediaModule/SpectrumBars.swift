@@ -10,13 +10,20 @@ struct SpectrumBars: NSViewRepresentable {
     let store: NowPlayingStore
 
     func makeNSView(context: Context) -> SpectrumBarsView {
-        let view = SpectrumBarsView(store: store)
+        let view = SpectrumBarsView(store: store, accent: Self.accent(in: context.environment))
         view.isNotchOnScreen = context.environment.notchIsOnScreen
         return view
     }
 
     func updateNSView(_ view: SpectrumBarsView, context: Context) {
+        // Handed over on every update, which is as often as the environment changes: the view paints only a colour that is new.
+        view.accent = Self.accent(in: context.environment)
         view.isNotchOnScreen = context.environment.notchIsOnScreen
+    }
+
+    /// The accent of the notch the bars are in, as a layer takes it: the layers do not read the environment themselves.
+    private static func accent(in environment: EnvironmentValues) -> CGColor {
+        environment.notchAccent.resolve(in: environment).cgColor
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: SpectrumBarsView, context: Context) -> CGSize? {
@@ -35,14 +42,26 @@ final class SpectrumBarsView: NSView {
     private var stopListening: (() -> Void)?
     private var stopListeningToColors: (() -> Void)?
     private var playingTask: Task<Void, Never>?
+    /// How many times the layers were painted, for tests: the tap's levels move them and never paint them.
+    private(set) var paintCount = 0
+
+    /// The colour of the bars where neither the cover nor the user's choice has one. It is the notch's accent, and the layers
+    /// keep what they are given, so a new one is painted at once (the bars that carry other colours are not touched).
+    var accent: CGColor {
+        didSet {
+            guard accent != oldValue, store.spectrumColors == nil else { return }
+            paint(nil)
+        }
+    }
 
     /// Whether the notch the view is in can be seen, from the SwiftUI environment.
     var isNotchOnScreen = true {
         didSet { follow(window != nil && isNotchOnScreen) }
     }
 
-    init(store: NowPlayingStore, scheduler: any Scheduler = TaskScheduler(), now: @escaping () -> Date = Date.init) {
+    init(store: NowPlayingStore, accent: CGColor, scheduler: any Scheduler = TaskScheduler(), now: @escaping () -> Date = Date.init) {
         self.store = store
+        self.accent = accent
         bars = (0..<NowPlayingBars.barCount).map { _ in
             let bar = CALayer()
             bar.cornerRadius = NowPlayingBars.barWidth / 2
@@ -109,15 +128,16 @@ final class SpectrumBarsView: NSView {
     }
 
     /// The colour of each bar, or the accent colour where the store has none. Set on the layers once per change, with no
-    /// animation: a track changes the colours at most once, and nothing here is SwiftUI state.
+    /// animation: a track changes the colours at most once, an accent change likewise, and nothing here is SwiftUI state.
     private func paint(_ colors: [SRGBColor]?) {
+        paintCount += 1
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (index, bar) in bars.enumerated() {
             if let colors, colors.indices.contains(index) {
                 bar.backgroundColor = CGColor(srgbRed: colors[index].red, green: colors[index].green, blue: colors[index].blue, alpha: 1)
             } else {
-                bar.backgroundColor = NSColor(NotchTokens.accent).cgColor
+                bar.backgroundColor = accent
             }
         }
         CATransaction.commit()

@@ -77,6 +77,7 @@ struct PlaybackProgressView: View {
     let store: NowPlayingStore
     let seek: (Double) -> Void
     @Environment(\.notch) private var notch
+    @Environment(\.notchAccent) private var accent
     @State private var dragFraction: Double?
     @State private var pendingSeek: PendingSeek?
     @State private var isHovering = false
@@ -110,7 +111,7 @@ struct PlaybackProgressView: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.18))
                 Capsule()
-                    .fill(Self.fill(tint: store.activeTint?.primary, isActive: isActive))
+                    .fill(Self.fill(tint: store.activeTint?.primary, isActive: isActive, accent: accent))
                     .animation(.easeInOut(duration: 0.4), value: store.activeTint?.primary)
                     .frame(width: filled)
                 if isActive {
@@ -135,9 +136,9 @@ struct PlaybackProgressView: View {
     }
 
     /// The filled part of the bar: the cover's colour while there is one, else white, and the accent while the pointer is on it.
-    static func fill(tint: SRGBColor?, isActive: Bool) -> Color {
+    static func fill(tint: SRGBColor?, isActive: Bool, accent: Color) -> Color {
         if let tint { return tint.color }
-        return isActive ? NotchTokens.accent : NotchTokens.primaryText.opacity(0.85)
+        return isActive ? accent : NotchTokens.primaryText.opacity(0.85)
     }
 
     private func seekGesture(width: CGFloat, progress: PlaybackProgress) -> some Gesture {

@@ -97,6 +97,7 @@ struct NowPlayingLockScreenView: View {
 /// How far into the track it is: a thin bar, not seekable. It moves on each whole second of the playback, as the tab's does.
 private struct LockScreenProgress: View {
     let store: NowPlayingStore
+    @Environment(\.notchAccent) private var accent
 
     var body: some View {
         TimelineView(PlaybackTickSchedule(anchor: store.state.elapsedAnchor, isPlaying: store.state.isPlaying)) { timeline in
@@ -105,7 +106,7 @@ private struct LockScreenProgress: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.white.opacity(0.18))
                     Capsule()
-                        .fill(PlaybackProgressView.fill(tint: store.activeTint?.primary, isActive: false))
+                        .fill(PlaybackProgressView.fill(tint: store.activeTint?.primary, isActive: false, accent: accent))
                         .frame(width: geometry.size.width * progress.fraction)
                 }
             }

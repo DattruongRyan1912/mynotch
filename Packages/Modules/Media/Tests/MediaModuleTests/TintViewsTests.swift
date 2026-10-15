@@ -56,14 +56,14 @@ import Testing
 
 @Suite struct ProgressTintTests {
     @Test func withoutATintTheBarKeepsItsOwnColours() {
-        #expect(PlaybackProgressView.fill(tint: nil, isActive: false) == NotchTokens.primaryText.opacity(0.85))
-        #expect(PlaybackProgressView.fill(tint: nil, isActive: true) == NotchTokens.accent)
+        #expect(PlaybackProgressView.fill(tint: nil, isActive: false, accent: .green) == NotchTokens.primaryText.opacity(0.85))
+        #expect(PlaybackProgressView.fill(tint: nil, isActive: true, accent: .green) == .green)
     }
 
     @Test func withATintTheBarIsTheTintWhetherOrNotThePointerIsOnIt() {
         let tint = SRGBColor(red: 0.9, green: 0.2, blue: 0.1)
-        #expect(PlaybackProgressView.fill(tint: tint, isActive: false) == tint.color)
-        #expect(PlaybackProgressView.fill(tint: tint, isActive: true) == tint.color)
+        #expect(PlaybackProgressView.fill(tint: tint, isActive: false, accent: .green) == tint.color)
+        #expect(PlaybackProgressView.fill(tint: tint, isActive: true, accent: .green) == tint.color)
     }
 }
 

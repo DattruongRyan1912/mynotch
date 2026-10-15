@@ -92,6 +92,7 @@ enum LyricsPanelToggle {
 private struct PanelToggleButton: View {
     let isShown: Bool
     let action: () -> Void
+    @Environment(\.notchAccent) private var accent
     @State private var isHovering = false
 
     var body: some View {
@@ -99,7 +100,7 @@ private struct PanelToggleButton: View {
         Button(action: action) {
             Image(systemName: look.symbol)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(look.isActive ? NotchTokens.accent : NotchTokens.secondaryText)
+                .foregroundStyle(look.isActive ? accent : NotchTokens.secondaryText)
                 .opacity(isHovering || look.isActive ? 1 : 0.7)
                 .frame(width: CurrentLyricView.toggleWidth - 4, height: CurrentLyricView.height)
                 .contentShape(Rectangle())

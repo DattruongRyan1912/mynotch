@@ -111,13 +111,14 @@ struct RowButton: View {
     let symbolSize: CGFloat
     let isActive: Bool
     let action: () -> Void
+    @Environment(\.notchAccent) private var accent
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: symbolSize, weight: .semibold))
-                .foregroundStyle(isActive ? NotchTokens.accent : NotchTokens.primaryText)
+                .foregroundStyle(isActive ? accent : NotchTokens.primaryText)
                 .contentTransition(.symbolEffect(.replace))
                 .frame(width: MediaControlsRow.buttonSize, height: MediaControlsRow.buttonSize)
                 .background(Circle().fill(Color.white.opacity(isHovering ? 0.14 : 0)))
@@ -149,6 +150,7 @@ private struct VolumeRow: View {
     let volume: VolumeModel
     let close: () -> Void
     @Environment(\.notch) private var notch
+    @Environment(\.notchAccent) private var accent
     @State private var isDragging = false
 
     var body: some View {
@@ -172,7 +174,7 @@ private struct VolumeRow: View {
             let filled = width * CGFloat(volume.level ?? 0)
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.18))
-                Capsule().fill(NotchTokens.accent).frame(width: filled)
+                Capsule().fill(accent).frame(width: filled)
                 Circle()
                     .fill(NotchTokens.primaryText)
                     .frame(width: 10, height: 10)

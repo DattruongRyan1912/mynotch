@@ -46,6 +46,8 @@ struct LyricsPanelView: View {
     /// Whether the panel can be seen; the views inside read it as `notchIsOnScreen`, as the notch's do, so their timeline stands
     /// still and their sweep is taken away while it cannot.
     let presence: LyricsPanelPresence
+    /// Where the accent comes from: the panel is a window of its own, outside the notch's environment.
+    var interface: NotchInterface = .shared
 
     /// The lines around the current one are smaller than it, but never too small to read.
     static func neighbourSize(for size: Double) -> Double {
@@ -59,6 +61,7 @@ struct LyricsPanelView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous).fill(Color.black.opacity(0.82)))
             .environment(\.notchIsOnScreen, presence.isOnScreen)
+            .followingAccent(of: interface)
     }
 }
 

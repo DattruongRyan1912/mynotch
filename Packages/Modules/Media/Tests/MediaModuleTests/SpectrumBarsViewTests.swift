@@ -10,6 +10,8 @@ import Testing
 @Suite struct SpectrumBarsViewTests {
     let scheduler = ManualScheduler()
     let store: NowPlayingStore
+    /// The accent the bars are made with: what their notch's environment says.
+    let notchAccent = CGColor(srgbRed: 0.2, green: 0.7, blue: 0.4, alpha: 1)
 
     init() {
         store = NowPlayingStore(lookUpApp: { _ in nil })
@@ -19,7 +21,7 @@ import Testing
     func makeView() -> SpectrumBarsView {
         let scheduler = scheduler
         let epoch = Date(timeIntervalSinceReferenceDate: 1_000)
-        return SpectrumBarsView(store: store, scheduler: scheduler, now: {
+        return SpectrumBarsView(store: store, accent: notchAccent, scheduler: scheduler, now: {
             epoch + Double(scheduler.now.components.seconds) + Double(scheduler.now.components.attoseconds) / 1e18
         })
     }
@@ -56,7 +58,7 @@ import Testing
             #expect(abs(layer.frame.midY - 7) < 0.0001)
             #expect(layer.cornerRadius == 1.5)
         }
-        #expect(layers[0].backgroundColor == NSColor(NotchTokens.accent).cgColor)
+        #expect(layers[0].backgroundColor == notchAccent)
         window.contentView = nil
     }
 
@@ -113,7 +115,7 @@ import Testing
         (mode.colors(count: 4, tint: tint, start: start, end: end) ?? []).map { srgb($0) }
     }
 
-    var accent: [CGColor?] { Array(repeating: NSColor(NotchTokens.accent).cgColor, count: 4) }
+    var accent: [CGColor?] { Array(repeating: notchAccent, count: 4) }
 
     @Test func theBarsKeepTheAccentColourUntilAnythingElseIsAsked() {
         let view = makeView()
