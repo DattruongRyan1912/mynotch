@@ -67,21 +67,40 @@ import Testing
         var classicSchemes: [ColorScheme] = [.dark, .light]
     }
 
-    // Shelf draws its text with the system's colours, which are white on the black notch in a dark appearance only, so the
-    // classic notch is checked in that one.
-    var fixtures: [Fixture] {
-        let module = ShelfModule()
-        let card = ShelfItem(kind: .text("Ghi chú cuộc họp"))
-        var report = FileActionRunner.Report(action: .readText)
-        report.text = "Nội dung đọc được từ ảnh chụp màn hình"
-        report.textCopied = true
-        return [
-            Fixture(name: "card", view: AnyView(ShelfCardView(item: card, state: module.state, module: module)), size: CGSize(width: 76, height: 78), wash: 0.005, ink: 50, classicSchemes: [.dark]),
-            Fixture(name: "report", view: AnyView(ShelfActionReportView(report: report, module: module)), size: CGSize(width: 452, height: 100), wash: 0.005, ink: 100, classicSchemes: [.dark]),
-        ]
+    /// Harnesses of the shelves the fixtures draw, kept so the modules outlive the call that made them.
+    static var kept: [ShelfFixture] = []
+
+    /// The Khay tab of a started shelf holding `providers`, as the notch shows it.
+    func tab(holding providers: [NSItemProvider]) async -> AnyView {
+        let fixture = ShelfFixture()
+        await fixture.start()
+        _ = await fixture.module.add(providers: providers)
+        Self.kept.append(fixture)
+        guard let tab = fixture.module.makeTab() else { preconditionFailure("a started module has its tab") }
+        return tab.content
     }
-    @Test func onLightGlassTheViewsDrawDarkAndNothingWhite() throws {
-        for fixture in fixtures {
+
+    var fixtures: [Fixture] {
+        get async {
+            let module = ShelfModule()
+            let card = ShelfItem(kind: .text("Ghi chú cuộc họp"))
+            var report = FileActionRunner.Report(action: .readText)
+            report.text = "Nội dung đọc được từ ảnh chụp màn hình"
+            report.textCopied = true
+            let notes = [NSItemProvider(object: "Ghi chú cuộc họp" as NSString), NSItemProvider(object: URL(string: "https://example.com/a")! as NSURL)]
+            let tabSize = CGSize(width: 452, height: 150)
+            return [
+                // The tab draws with the system's colours and sets the scheme itself, so it is checked in both appearances. The two
+                // views drawn alone are not under the tab's scheme, and are checked in the dark appearance only.
+                Fixture(name: "empty tab", view: await tab(holding: []), size: tabSize, wash: 0.005, ink: 50, reach: 0.15),
+                Fixture(name: "tab with cards", view: await tab(holding: notes), size: tabSize, wash: 0.005, ink: 100, reach: 0.15),
+                Fixture(name: "card", view: AnyView(ShelfCardView(item: card, state: module.state, module: module)), size: CGSize(width: 76, height: 78), wash: 0.005, ink: 50, classicSchemes: [.dark]),
+                Fixture(name: "report", view: AnyView(ShelfActionReportView(report: report, module: module)), size: CGSize(width: 452, height: 100), wash: 0.005, ink: 100, classicSchemes: [.dark]),
+            ]
+        }
+    }
+    @Test func onLightGlassTheViewsDrawDarkAndNothingWhite() async throws {
+        for fixture in await fixtures {
             let reading = try read(fixture.view, glass: true, scheme: .light, size: fixture.size)
             if let wash = fixture.wash {
                 #expect(reading.lighter(than: wash) == 0, "\(fixture.name): something is drawn white on light glass")
@@ -90,15 +109,15 @@ import Testing
         }
     }
 
-    @Test func onDarkGlassTheViewsDrawLight() throws {
-        for fixture in fixtures {
+    @Test func onDarkGlassTheViewsDrawLight() async throws {
+        for fixture in await fixtures {
             let reading = try read(fixture.view, glass: true, scheme: .dark, size: fixture.size)
             #expect(reading.lighter(than: fixture.reach) >= fixture.ink, "\(fixture.name): what it draws reads light")
         }
     }
 
-    @Test func onTheClassicNotchTheViewsStayWhiteOnBlackWhateverTheAppearanceIs() throws {
-        for fixture in fixtures {
+    @Test func onTheClassicNotchTheViewsStayWhiteOnBlackWhateverTheAppearanceIs() async throws {
+        for fixture in await fixtures {
             for scheme in fixture.classicSchemes {
                 let reading = try read(fixture.view, glass: false, scheme: scheme, size: fixture.size)
                 #expect(reading.lighter(than: fixture.reach) >= fixture.ink, "\(fixture.name) in \(scheme)")

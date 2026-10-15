@@ -47,6 +47,9 @@ struct ShelfTabView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // This tab draws with the system's colours, which are light only in a dark scheme: the classic notch is black whatever the
+        // system's appearance is, so it gets the dark one there; on Liquid Glass it follows the glass.
+        .notchColorScheme()
         .onAppear { state.store?.refreshLocations() }
         // The menus are outside the notch's reach: a click there counts as outside and the pointer may leave the
         // notch, so it stays pinned while one is open. The pin is set right here, not in `onChange`, which could wait
