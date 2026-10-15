@@ -26,6 +26,7 @@ struct ActivityBubbles: View {
     let geometry: NotchGeometry
     let label: (ActivityCenter.Entry) -> String
     let activate: (ActivitySlot) -> Void
+    @Environment(\.notchSurface) private var surface
 
     var body: some View {
         // The row is as wide as the panel with the notch's centre line in the middle, so each bubble's layout frame is
@@ -36,7 +37,12 @@ struct ActivityBubbles: View {
             HStack(spacing: NotchGeometry.bubbleGap) {
                 ForEach(slots) { slot in
                     ActivityBubble(slot: slot, diameter: geometry.bubbleDiameter, label: label, activate: activate)
-                        .transition(.scale(scale: NotchTokens.bubbleAppearScale, anchor: .leading).combined(with: .opacity))
+                        // On glass the shape itself comes out of the notch and melts back into it (the glass transition of
+                        // `ActivityBubble`), so only what is drawn on it fades.
+                        .transition(
+                            surface.isLiquidGlass
+                                ? .opacity : .scale(scale: NotchTokens.bubbleAppearScale, anchor: .leading).combined(with: .opacity)
+                        )
                 }
             }
             .padding(.leading, geometry.bubbleFrame(at: 0).minX)
@@ -52,19 +58,25 @@ private struct ActivityBubble: View {
     let diameter: CGFloat
     let label: (ActivityCenter.Entry) -> String
     let activate: (ActivitySlot) -> Void
+    @Environment(\.notchSurface) private var surface
+    @Environment(\.notchAccent) private var accent
+    @Environment(\.notchGlassNamespace) private var namespace
 
     var body: some View {
         Button { activate(slot) } label: {
             ZStack {
-                Circle().fill(NotchTokens.background)
+                // Black, or nothing: on glass the circle is the glass.
+                if !surface.isLiquidGlass { Circle().fill(NotchTokens.background) }
                 switch slot {
                 case .activity(let entry):
                     ActivityIcon(activity: entry.activity, size: diameter, minimalSize: NotchTokens.bubbleIconSize)
                 case .overflow(let count):
-                    Text("+\(count)").font(.system(size: 11, weight: .semibold)).foregroundStyle(NotchTokens.primaryText)
+                    Text("+\(count)").font(.system(size: 11, weight: .semibold)).foregroundStyle(surface.primaryStyle)
                 }
             }
             .frame(width: diameter, height: diameter)
+            .notchGlass(surface, in: Circle(), accent: accent, identity: namespace.map { (NotchGlassID(slot: slot), $0) })
+            .glassBubbleTransition(surface)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -76,5 +88,12 @@ private struct ActivityBubble: View {
         case .activity(let entry): label(entry)
         case .overflow(let count): ActivityLabel.overflow(count: count)
         }
+    }
+}
+
+private extension View {
+    /// A bubble's glass comes out of the shapes next to it (the notch) and melts back into them, rather than fading.
+    @ViewBuilder func glassBubbleTransition(_ surface: NotchSurface) -> some View {
+        if surface.isLiquidGlass { glassEffectTransition(.matchedGeometry) } else { self }
     }
 }

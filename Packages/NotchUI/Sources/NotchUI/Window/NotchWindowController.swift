@@ -9,6 +9,8 @@ final class NotchWindowController {
     private(set) var geometry: NotchGeometry
     private(set) var isVisible = false
     var sharingType: NSWindow.SharingType { panel.sharingType }
+    /// The panel's own appearance: dark while the notch is Liquid Glass, else nil (the system's), as the classic look has always had.
+    var appearance: NSAppearance? { panel.appearance }
     /// This notch's display and geometry, as modules get them through `NotchInterface`.
     var display: NotchDisplay { NotchDisplay(id: displayID, screenFrame: screenFrame, geometry: geometry) }
     private var screenFrame: CGRect
@@ -90,6 +92,7 @@ final class NotchWindowController {
         updateOnScreen()
         // Before the panel can be shown, so a recorder never sees a frame of a notch that was meant to be hidden.
         refreshSharingType()
+        applyAppearance(isGlass: theme?.look == .liquidGlass)
         // Also for what no one here does: a display that sleeps, a screen that locks, a window covered.
         occlusionObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didChangeOcclusionStateNotification, object: panel, queue: .main
@@ -150,6 +153,14 @@ final class NotchWindowController {
     /// Applies the setting to the notch's state right now, for the moments the observation loop would be too late.
     func refreshSharingType() {
         applySharingType(captureHiding().sharingType(for: model.displayState))
+    }
+
+    /// The glass is drawn in the panel's appearance, and so are the AppKit controls in a tab, so a glass notch is dark whatever
+    /// the system's appearance is: the notch is a dark shape that joins the hardware cutout, and the tabs draw light on dark.
+    private func applyAppearance(isGlass: Bool) {
+        let appearance = isGlass ? NSAppearance(named: .darkAqua) : nil
+        guard panel.appearance?.name != appearance?.name else { return }
+        panel.appearance = appearance
     }
 
     private func applySharingType(_ type: NSWindow.SharingType) {
@@ -319,6 +330,8 @@ final class NotchWindowController {
         var isDragging: Bool
         /// Read through the setting, so a change of the setting runs the loop too.
         var sharingType: NSWindow.SharingType
+        /// Whether the look is Liquid Glass, likewise.
+        var isGlass: Bool
     }
 
     private func observe() {
@@ -344,7 +357,8 @@ final class NotchWindowController {
                         state: state, tabUnderToast: covered, tabs: registry.tabs, onPurpose: model.isOpenedOnPurpose
                     ),
                     isDragging: model.isDragging,
-                    sharingType: self?.captureHiding().sharingType(for: state) ?? .readOnly
+                    sharingType: self?.captureHiding().sharingType(for: state) ?? .readOnly,
+                    isGlass: self?.theme?.look == .liquidGlass
                 )
             }) {
                 guard let self else { return }
@@ -368,6 +382,7 @@ final class NotchWindowController {
                 // A finished drag (drop, or the pointer left) must not leave its types behind for later refreshes.
                 if !observed.isDragging { self.dragTypes = [] }
                 self.applySharingType(observed.sharingType)
+                self.applyAppearance(isGlass: observed.isGlass)
                 self.refreshHitTesting()
                 self.updateKeyboard(wants: observed.wantsKeyboard, focuses: observed.focusesKeyboard)
             }

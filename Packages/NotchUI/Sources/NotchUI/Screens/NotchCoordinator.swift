@@ -66,6 +66,11 @@ public final class NotchInterface {
     /// view's body it makes the view redraw when the accent changes. The notch's purple until a theme is followed.
     public var accent: Color { theme?.accent ?? NotchTokens.accent }
 
+    /// What a window of MyNotch that is not the notch draws its background on: black, or Liquid Glass when the user chose that
+    /// look. Put it in with `.environment(\.notchSurface, interface.surface)` before `.notchSurface(in:)`. Read in a view's
+    /// body it makes the view redraw when the look changes. Black until a theme is followed.
+    public var surface: NotchSurface { theme?.floatingSurface ?? .solid }
+
     /// `accent` as plain components, for `Observations` and for drawing that is not SwiftUI; it is `Equatable`, so an
     /// observer hears of real changes only.
     public var accentRGB: NotchAccent.RGB { theme?.resolvedAccent ?? NotchAccent.RGB(red: 125, green: 92, blue: 255) }

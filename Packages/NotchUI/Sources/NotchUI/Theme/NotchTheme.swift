@@ -9,8 +9,8 @@ extension EnvironmentValues {
     @Entry public var notchAccent: Color = NotchTokens.accent
 }
 
-/// What the notch is drawn with, read from the settings and from macOS. Reading `accent` or `glass` in a view's body makes
-/// the view redraw when the setting changes, and `accent` also when macOS changes its own accent.
+/// What the notch is drawn with, read from the settings and from macOS. Reading `accent`, `look`, `glass` or `surface(for:)` in
+/// a view's body makes the view redraw when the setting changes, and `accent` also when macOS changes its own accent.
 @Observable
 public final class NotchTheme {
     @ObservationIgnored private let settings: SettingsStore
@@ -46,11 +46,30 @@ public final class NotchTheme {
 
     public var accent: Color { resolvedAccent.color }
 
-    /// The user's choice of glass. Whether the notch is glass right now also depends on its state: see `showsGlass`.
+    /// The user's choice of the classic look's blur. Whether the notch is blurred right now also depends on its state: see
+    /// `showsGlass`.
     public var glass: Bool { settings.value(InterfaceSettings.glass) }
 
-    /// Glass is for the open notch only. The collapsed one has to match the hardware cutout, which is black.
-    public static func showsGlass(enabled: Bool, state: NotchState) -> Bool {
+    /// Black or Liquid Glass.
+    public var look: NotchLook { settings.value(InterfaceSettings.look) }
+
+    /// Whether the Liquid Glass carries a hint of the accent.
+    public var glassTint: Bool { settings.value(InterfaceSettings.glassTint) }
+
+    /// What the notch's shape is filled with in `state`. Reading it in a view's body makes the view redraw when the look, the
+    /// tint or the classic blur changes.
+    public func surface(for state: NotchState) -> NotchSurface {
+        .resolve(look: look, classicGlass: glass, tinted: glassTint, state: state)
+    }
+
+    /// The surface for a window or view of MyNotch that is not the notch (a floating panel): black or glass, never the open
+    /// notch's blur. See `View.notchSurface(in:)`.
+    public var floatingSurface: NotchSurface {
+        .resolve(look: look, classicGlass: false, tinted: glassTint, state: .closed)
+    }
+
+    /// The classic look's blur is for the open notch only. The collapsed one has to match the hardware cutout, which is black.
+    nonisolated public static func showsGlass(enabled: Bool, state: NotchState) -> Bool {
         enabled && state.isExpanded
     }
 }

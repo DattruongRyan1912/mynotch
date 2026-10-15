@@ -6,6 +6,8 @@ import SwiftUI
 struct InterfaceSettingsPage: View {
     let settings: SettingsStore
 
+    private var isLiquidGlass: Bool { settings.value(InterfaceSettings.look) == .liquidGlass }
+
     var body: some View {
         Form {
             Section("Hiển thị") {
@@ -31,12 +33,27 @@ struct InterfaceSettingsPage: View {
                 Stepper("Trễ khi đóng: \(settings.value(InterfaceSettings.closeDelayMs)) ms",
                         value: settings.binding(InterfaceSettings.closeDelayMs), in: 0...1000, step: 50)
             }
+            Section("Giao diện notch") {
+                Picker("Kiểu", selection: settings.binding(InterfaceSettings.look)) {
+                    Text("Cổ điển (đen)").tag(NotchLook.classic)
+                    Text("Liquid Glass").tag(NotchLook.liquidGlass)
+                }
+                Text("Liquid Glass: notch thu gọn, notch mở rộng, bong bóng và thông báo là một khối kính trong suốt của macOS 26. Trên máy có phần khuyết, kính hiện quanh phần khuyết.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Nhuộm theo màu nhấn", isOn: settings.binding(InterfaceSettings.glassTint))
+                    .disabled(!isLiquidGlass)
+                Text("Phủ một lớp nhẹ màu nhấn lên kính. Chỉ dùng cho Liquid Glass.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Màu sắc") {
                 LabeledContent("Màu nhấn") { AccentSwatches(settings: settings) }
-                Text("Màu của trang đang chọn, thanh tiến trình và công tắc trong notch. Nền notch luôn đen.")
+                Text("Màu của trang đang chọn, thanh tiến trình và công tắc trong notch. Nền notch đen ở giao diện Cổ điển và là kính ở Liquid Glass.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("Kính mờ khi notch mở rộng", isOn: settings.binding(InterfaceSettings.glass))
-                Text("Làm mờ nhẹ phía sau nội dung khi notch mở. Notch thu gọn vẫn đen để khớp với phần khuyết của máy.")
+                    .disabled(isLiquidGlass)
+                Text(isLiquidGlass
+                    ? "Liquid Glass đang bật nên không dùng kính mờ. Lựa chọn này được giữ cho khi bạn quay lại Cổ điển."
+                    : "Làm mờ nhẹ phía sau nội dung khi notch mở. Notch thu gọn vẫn đen để khớp với phần khuyết của máy.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Cử chỉ") {

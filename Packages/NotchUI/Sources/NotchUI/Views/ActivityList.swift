@@ -8,6 +8,7 @@ struct ActivityList: View {
     let label: (ActivityCenter.Entry) -> String
     let hasTab: (ModuleID) -> Bool
     let open: (ModuleID) -> Void
+    @Environment(\.notchSurface) private var surface
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,7 +49,7 @@ struct ActivityList: View {
             Spacer(minLength: 0)
         }
         .font(.system(size: 12))
-        .foregroundStyle(NotchTokens.secondaryText)
+        .foregroundStyle(surface.secondaryStyle)
         .lineLimit(1)
         .frame(height: NotchGeometry.listRowHeight)
         .contentShape(Rectangle())

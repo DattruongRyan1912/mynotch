@@ -10,6 +10,11 @@ public enum NotchTokens {
     nonisolated public static let padding: CGFloat = 14
     /// Opacity of the accent behind the selected tab; `nonisolated` because the accent's legibility on black is worked out from it.
     nonisolated public static let selectionOpacity: CGFloat = 0.32
+    /// The same on Liquid Glass, which is lighter than black, so the capsule needs more of the accent to show (see
+    /// `NotchSurface.selectionOpacity`).
+    nonisolated public static let glassSelectionOpacity: CGFloat = 0.45
+    /// How much of the accent tints the Liquid Glass when the user asks for it: a hint of it, not a coat.
+    nonisolated public static let glassTintOpacity: CGFloat = 0.25
     /// Space left and right of an activity's strip under the collapsed notch, inside the notch's body.
     public static let stripPadding: CGFloat = 12
     /// The one animation of the notch's size and shape; every state change moves it with this spring.

@@ -11,7 +11,12 @@ struct NotchRootView: View {
     /// The user's accent and glass; nothing is the notch's own purple and no glass.
     var theme: NotchTheme?
 
+    @Namespace private var glassNamespace
+
     private var state: NotchState { model.displayState }
+
+    /// What the notch is drawn on: black, the classic look's blur, or Liquid Glass.
+    private var surface: NotchSurface { theme?.surface(for: state) ?? .solid }
 
     /// The open tab, or the tab a toast covers.
     private var shownTab: NotchTab? {
@@ -83,32 +88,43 @@ struct NotchRootView: View {
         )
         let shape = NotchShape(topRadius: radii.top, bottomRadius: radii.bottom)
         let accent = theme?.accent ?? NotchTokens.accent
-        let glass = NotchTheme.showsGlass(enabled: theme?.glass ?? false, state: state)
-        ZStack(alignment: .top) {
-            NotchBackdrop(glass: glass, bodyHeight: geometry.notchSize.height)
-                .overlay(alignment: .top) {
-                    content(accessories)
-                        .padding(.horizontal, radii.top)
-                        .environment(\.notch, NotchHandle(model: model))
-                }
-                .clipShape(shape)
-                .frame(width: size.width, height: size.height)
-                .contentShape(shape)
-                // Once open, taps belong to the tab content; the root tap only opens the notch.
-                .gesture(TapGesture().onEnded { model.click() }, including: isOpen ? .subviews : .all)
-                .animation(NotchTokens.spring, value: Layout(state: state, bottom: bottom))
-                // SwiftUI only reports targeting here. The window controller starts drag mode from the pointer, so
-                // only the end of a drag is forwarded, and the getter just reflects the model.
-                .onDrop(of: allDropTypes, isTargeted: Binding(get: { model.isDragging }, set: { if !$0 { model.setDragging(false) } })) { providers in
-                    drop(providers)
-                }
-            bubbles
+        let surface = surface
+        NotchGlassFamily(surface) {
+            ZStack(alignment: .top) {
+                NotchBackdrop(surface: surface, bodyHeight: geometry.notchSize.height)
+                    .overlay(alignment: .top) {
+                        content(accessories)
+                            .padding(.horizontal, radii.top)
+                            .environment(\.notch, NotchHandle(model: model))
+                    }
+                    .clipShape(shape)
+                    .frame(width: size.width, height: size.height)
+                    // Above the animation below, so the glass takes its shape and size from the same spring as the notch.
+                    .notchGlass(
+                        surface, in: shape, accent: accent, interactive: state.wantsInteractiveGlass,
+                        identity: (NotchGlassID.notch(in: state), glassNamespace)
+                    )
+                    .contentShape(shape)
+                    // Once open, taps belong to the tab content; the root tap only opens the notch.
+                    .gesture(TapGesture().onEnded { model.click() }, including: isOpen ? .subviews : .all)
+                    .animation(NotchTokens.spring, value: Layout(state: state, bottom: bottom))
+                    // SwiftUI only reports targeting here. The window controller starts drag mode from the pointer, so
+                    // only the end of a drag is forwarded, and the getter just reflects the model.
+                    .onDrop(of: allDropTypes, isTargeted: Binding(get: { model.isDragging }, set: { if !$0 { model.setDragging(false) } })) { providers in
+                        drop(providers)
+                    }
+                bubbles
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.notchIsOnScreen, model.isOnScreen)
         // The accent for the notch's own controls and for a tab's marks, and the tint of the system controls in a tab.
         .environment(\.notchAccent, accent)
         .tint(accent)
+        // What the notch is drawn on, for its own views' foreground; the glass's dark scheme for everything inside it.
+        .environment(\.notchSurface, surface)
+        .environment(\.notchGlassNamespace, surface.isLiquidGlass ? glassNamespace : nil)
+        .notchColorScheme(surface.colorScheme)
     }
 
     /// The bubbles of the other live activities, beside the collapsed notch only. They appear and go with the pill's
@@ -197,7 +213,7 @@ struct NotchRootView: View {
                     .transition(.opacity.animation(NotchTokens.swap))
             } else {
                 Text("Chưa có module nào đang chạy")
-                    .foregroundStyle(NotchTokens.secondaryText)
+                    .foregroundStyle(surface.secondaryStyle)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }

@@ -31,8 +31,13 @@ public enum InterfaceSettings {
     public static let swipeBetweenTabs = SettingKey("interface.swipeBetweenTabs", default: true)
     /// The accent of the notch's controls: macOS's own until the user picks one.
     public static let accent = SettingKey("interface.accent", default: NotchAccent.system)
-    /// A blur behind the content of the open notch. Never the collapsed notch, which has to match the hardware cutout.
+    /// A blur behind the content of the open notch, in the classic look. Never the collapsed notch there, which has to match the
+    /// hardware cutout. Liquid Glass supersedes it, and the choice is kept for when the user goes back to the classic look.
     public static let glass = SettingKey("interface.glass", default: false)
+    /// Whether the notch is black (as it always was) or Liquid Glass.
+    public static let look = SettingKey("interface.look", default: NotchLook.classic)
+    /// A hint of the accent colour in the Liquid Glass.
+    public static let glassTint = SettingKey("interface.glassTint", default: false)
     /// A two-finger swipe down over the collapsed notch opens it, and up over the open notch closes it.
     public static let swipeToOpen = SettingKey("interface.swipeToOpen", default: true)
     public static let swipeSensitivity = SettingKey("interface.swipeSensitivity", default: SwipeSensitivity.medium)
