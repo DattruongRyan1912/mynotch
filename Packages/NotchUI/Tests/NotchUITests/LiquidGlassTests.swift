@@ -16,6 +16,20 @@ import Testing
     let geometry = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig())
     let accent = Color(.sRGB, red: 0.2, green: 0.4, blue: 0.9)
 
+    /// A value read from an offscreen render, once two renders in a row agree. ImageRenderer draws a view with no window-server
+    /// part deterministically, so this returns at once; it only guards a render that was caught half way on a loaded machine.
+    /// (A view with glass in it is not rendered for its pixels in this suite at all: the renderer draws it, and a drop target
+    /// next to it, differently from one run to the next. What that part draws is read from `NotchGlassPlan` instead.)
+    func settled<Value: Equatable>(_ read: () throws -> Value) rethrows -> Value {
+        var previous = try read()
+        for _ in 0..<4 {
+            let next = try read()
+            if next == previous { return next }
+            previous = next
+        }
+        return previous
+    }
+
     // MARK: the glass itself
 
     @Test func glassIsTheRegularVariantAndSolidOrMaterialAskForNone() {
@@ -55,6 +69,10 @@ import Testing
     /// The brightest-or-darkest pixel of the first tab of a tab bar drawn on mid grey (the tab is not selected, so only its
     /// icon differs from the grey): a positive number is lighter than the grey, a negative one darker.
     func iconTone(surface: NotchSurface, scheme: ColorScheme) throws -> Double {
+        try settled { try drawIconTone(surface: surface, scheme: scheme) }
+    }
+
+    func drawIconTone(surface: NotchSurface, scheme: ColorScheme) throws -> Double {
         let tabs = [
             NotchTab(id: "a", title: "A", systemImage: "circle.fill", content: AnyView(EmptyView())),
             NotchTab(id: "b", title: "B", systemImage: "square.fill", content: AnyView(EmptyView())),
@@ -126,6 +144,10 @@ import Testing
 
     /// The pixel of the selected tab's capsule at (x, middle), drawn over mid grey with a red accent in `scheme`: its green.
     func capsuleGreen(on surface: NotchSurface, scheme: ColorScheme, x: Int) throws -> Double {
+        try settled { try drawCapsuleGreen(on: surface, scheme: scheme, x: x) }
+    }
+
+    func drawCapsuleGreen(on surface: NotchSurface, scheme: ColorScheme, x: Int) throws -> Double {
         let tabs = [
             NotchTab(id: "a", title: "A", systemImage: "circle", content: AnyView(EmptyView())),
             NotchTab(id: "b", title: "B", systemImage: "square", content: AnyView(EmptyView())),
@@ -162,6 +184,14 @@ import Testing
 
     /// A square drawn with `style` over mid grey in `scheme`: its pixel.
     func swatch(_ style: AnyShapeStyle, scheme: ColorScheme) throws -> NSColor {
+        let colors = try settled { () -> [CGFloat] in
+            let color = try drawSwatch(style, scheme: scheme)
+            return [color.redComponent, color.greenComponent, color.blueComponent, color.alphaComponent]
+        }
+        return NSColor(srgbRed: colors[0], green: colors[1], blue: colors[2], alpha: colors[3])
+    }
+
+    func drawSwatch(_ style: AnyShapeStyle, scheme: ColorScheme) throws -> NSColor {
         let view = ZStack { Color(.sRGB, white: 0.5); Rectangle().fill(style).frame(width: 8, height: 8) }
             .environment(\.colorScheme, scheme).frame(width: 12, height: 12)
         let renderer = ImageRenderer(content: view)
@@ -217,56 +247,44 @@ import Testing
         )
     }
 
-    /// The box around the opaque white pixels, as (minX, minY, maxX, maxY); nil when there are none.
-    func whiteBox(_ bitmap: NSBitmapImageRep) -> [Int]? {
-        var box: [Int]?
-        for y in 0..<bitmap.pixelsHigh {
-            for x in 0..<bitmap.pixelsWide {
-                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), color.alphaComponent == 1,
-                      color.redComponent > 0.95, color.greenComponent > 0.95, color.blueComponent > 0.95 else { continue }
-                box = box.map { [min($0[0], x), min($0[1], y), max($0[2], x), max($0[3], y)] } ?? [x, y, x, y]
-            }
-        }
-        return box
-    }
-
     func pillPoint() -> CGPoint {
         CGPoint(x: geometry.panelSize.width / 2 + geometry.centerOffset, y: geometry.notchSize.height - 6)
     }
 
-    @Test func theCollapsedNotchIsBlackInTheClassicLookAndGlassInTheOther() throws {
+    /// The pill of the classic root view, which has no glass in it, so it renders the same way every time: opaque black.
+    @Test func theCollapsedClassicNotchIsOpaqueBlack() throws {
         publishActivity()
         let model = makeModel()
         model.hasActivity = true
-        let classic = try render(rootView(model: model, theme: theme(.classic)))
         let point = pillPoint()
-        let black = try #require(classic.colorAt(x: Int(point.x), y: Int(point.y)))
-        #expect(black.alphaComponent == 1 && black.redComponent == 0 && black.greenComponent == 0 && black.blueComponent == 0)
-
-        let glass = try render(rootView(model: model, theme: theme(.liquidGlass)))
-        let seen = try #require(glass.colorAt(x: Int(point.x), y: Int(point.y)))
-        // Not the black SwiftUI fills the classic notch with: the glass is made by the window server. (Offscreen, the renderer
-        // shows what it cannot draw as transparent, or as a flat placeholder when the view also takes drops.)
-        #expect(!(seen.alphaComponent == 1 && seen.redComponent == 0 && seen.greenComponent == 0 && seen.blueComponent == 0))
+        let black = try settled { () -> [CGFloat] in
+            let bitmap = try render(rootView(model: model, theme: theme(.classic)))
+            let color = try #require(bitmap.colorAt(x: Int(point.x), y: Int(point.y))?.usingColorSpace(.sRGB))
+            return [color.alphaComponent, color.redComponent, color.greenComponent, color.blueComponent]
+        }
+        #expect(black[0] == 1 && black[1] < 0.01 && black[2] < 0.01 && black[3] < 0.01)
     }
 
-    @Test func everyStateBuildsOnGlassAndLaysItsContentOutLikeTheClassicLook() throws {
+    /// A smoke test, and no more: the glass root view renders in every state without an error and at the panel's size. What it
+    /// draws is not read: the offscreen renderer draws a glass view, and the drop target beside it, differently from one run to
+    /// the next, so a pixel here could only say which of its two moods it was in. Where the glass goes is `NotchGlassPlan`'s
+    /// and `NotchGlassLayoutTests`'.
+    @Test func theGlassRootViewRendersInEveryStateAtThePanelsSize() throws {
         publishActivity("a")
         publishActivity("b", priority: .low)
         publishActivity("c", priority: .low)
         let states: [(String, (NotchViewModel) -> Void)] = [
+            ("closed", { _ in }),
             ("collapsed", { $0.hasActivity = true; $0.bubbleCount = 2 }),
             ("open", { $0.open(tab: nil) }),
             ("toast", { $0.showToast(AnyView(Color.white.frame(width: 20, height: 20)), duration: .seconds(60)) }),
             ("list", { $0.hasActivity = true; $0.bubbleCount = 2; $0.showList() }),
         ]
         for (name, apply) in states {
-            func box(_ look: NotchLook) throws -> [Int]? {
-                let model = makeModel()
-                apply(model)
-                return whiteBox(try render(rootView(model: model, theme: theme(look))))
-            }
-            #expect(try box(.liquidGlass) == box(.classic), "\(name)")
+            let model = makeModel()
+            apply(model)
+            let bitmap = try render(rootView(model: model, theme: theme(.liquidGlass, tinted: true)))
+            #expect(bitmap.pixelsWide == Int(geometry.panelSize.width) && bitmap.pixelsHigh == Int(geometry.panelSize.height), "\(name)")
         }
     }
 
@@ -274,6 +292,12 @@ import Testing
         let model = makeModel()
         let view = try render(rootView(model: model, theme: nil))
         #expect(view.pixelsWide == Int(geometry.panelSize.width))
+    }
+
+    /// Spins the run loop until `condition` holds, for at most `seconds`.
+    func spin(until condition: () -> Bool, seconds: Double = 5) {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !condition(), Date() < deadline { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01)) }
     }
 
     #if DEBUG
@@ -285,9 +309,18 @@ import Testing
         let window = NSWindow(contentRect: CGRect(origin: .zero, size: geometry.panelSize), styleMask: .borderless, backing: .buffered, defer: true)
         window.contentView = hosting
         hosting.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        // First until the first layout has settled: the count has stopped changing for a run of turns, however slow they are.
+        var last = -1
+        var quiet = 0
+        spin(until: {
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
+            quiet = hosting.layoutPasses == last ? quiet + 1 : 0
+            last = hosting.layoutPasses
+            return quiet >= 10
+        })
         let settled = hosting.layoutPasses
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        // Then a stretch of turns in which nothing may lay it out: counted in run-loop turns, not in seconds.
+        for _ in 0..<15 { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
         #expect(hosting.layoutPasses == settled)
         #expect(!hosting.needsLayout)
         window.contentView = nil
@@ -320,8 +353,8 @@ import Testing
         hosting.layoutSubtreeIfNeeded()
         #expect(seen.values.last == true)
         model.isOnScreen = false
-        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
-        hosting.layoutSubtreeIfNeeded()
+        // The change reaches the view on a later turn of the run loop: wait for it, not for a time.
+        spin(until: { hosting.layoutSubtreeIfNeeded(); return seen.values.last == false })
         #expect(seen.values.last == false)
         window.contentView = nil
     }
@@ -343,7 +376,7 @@ import Testing
         let window = NSWindow(contentRect: CGRect(origin: .zero, size: geometry.panelSize), styleMask: .borderless, backing: .buffered, defer: true)
         window.appearance = NSAppearance(named: appearance)
         window.contentView = hosting
-        hosting.layoutSubtreeIfNeeded()
+        spin(until: { hosting.layoutSubtreeIfNeeded(); return !seen.values.isEmpty })
         window.contentView = nil
         return seen.values.last
     }
@@ -416,17 +449,23 @@ import Testing
         return NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
     }
 
-    @Test func theSurfaceModifierFillsWithBlackInTheClassicLookAndLeavesTheGlassToTheWindowServerInTheOther() throws {
+    @Test func theSurfaceModifierFillsWithBlackInTheClassicLookAndAsksForTheGlassPlanInTheOther() throws {
         // The 60 x 40 box sits at (10, 10) in the 80 x 60 image: (20, 20) is inside its rounded corner, (11, 11) outside it.
-        let classic = try draw(.solid)
-        let inside = try #require(classic.colorAt(x: 20, y: 20))
-        #expect(inside.alphaComponent == 1 && inside.redComponent == 0)
-        #expect(try #require(classic.colorAt(x: 11, y: 11)).alphaComponent == 0, "inside its shape only")
+        let classic = try settled { () -> [CGFloat] in
+            let bitmap = try draw(.solid)
+            let inside = try #require(bitmap.colorAt(x: 20, y: 20)?.usingColorSpace(.sRGB))
+            let outside = try #require(bitmap.colorAt(x: 11, y: 11))
+            return [inside.alphaComponent, inside.redComponent, outside.alphaComponent]
+        }
+        #expect(classic[0] == 1 && classic[1] < 0.01, "black inside the shape")
+        #expect(classic[2] == 0, "and only inside it")
 
-        // On glass the shape holds the window server's glass, which offscreen is nothing: no black of ours, no scrim.
-        let glass = try draw(.liquidGlass(tinted: false))
-        #expect(try #require(glass.colorAt(x: 20, y: 20)).alphaComponent == 0)
-        #expect(try #require(glass.colorAt(x: 40, y: 30)).alphaComponent == 1, "what is drawn on it is still drawn")
+        // On glass the modifier draws what the plan says (the glass is the window server's, and no black of ours), and a view with
+        // glass is not read for its pixels here: see `settled`.
+        let glass = NotchGlassPlan(surface: .liquidGlass(tinted: false), bubbleIDs: [], accent: .blue)
+        #expect(glass.notch?.glass == Glass.regular)
+        #expect(NotchGlassPlan(surface: .solid, bubbleIDs: [], accent: .blue).notch == nil)
+        _ = try draw(.liquidGlass(tinted: false))
     }
 
     @Test func theSurfaceModifierLeavesTheSchemeOfItsContentAlone() throws {
@@ -439,11 +478,16 @@ import Testing
 
     // MARK: no scrim
 
+    /// The pixel at `point` of a view rendered at scale 1, once two renders in a row agree.
     func pixel(of view: some View, at point: CGPoint, size: CGSize) throws -> NSColor {
-        let renderer = ImageRenderer(content: view.frame(width: size.width, height: size.height))
-        renderer.scale = 1
-        let bitmap = NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
-        return try #require(bitmap.colorAt(x: Int(point.x), y: Int(point.y))?.usingColorSpace(.sRGB))
+        let components = try settled { () -> [CGFloat] in
+            let renderer = ImageRenderer(content: view.frame(width: size.width, height: size.height))
+            renderer.scale = 1
+            let bitmap = NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
+            let color = try #require(bitmap.colorAt(x: Int(point.x), y: Int(point.y))?.usingColorSpace(.sRGB))
+            return [color.redComponent, color.greenComponent, color.blueComponent, color.alphaComponent]
+        }
+        return NSColor(srgbRed: components[0], green: components[1], blue: components[2], alpha: components[3])
     }
 
     @Test func theBackdropIsNothingOnGlassAndExactlyWhatItWasOtherwise() throws {

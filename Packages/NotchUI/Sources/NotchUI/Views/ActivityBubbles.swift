@@ -62,6 +62,9 @@ private struct ActivityBubble: View {
     @Environment(\.notchGlassPlan) private var plan
     @Environment(\.notchGlassNamespace) private var namespace
 
+    /// The glass this bubble draws, if the notch is Liquid Glass.
+    private var planned: NotchGlassPlan.Shape? { plan.bubble(id: slot.id) }
+
     var body: some View {
         Button { activate(slot) } label: {
             ZStack {
@@ -75,8 +78,8 @@ private struct ActivityBubble: View {
                 }
             }
             .frame(width: diameter, height: diameter)
-            .notchGlass(plan.bubble(id: slot.id), in: Circle(), namespace: namespace)
-            .glassBubbleTransition(surface)
+            .notchGlass(planned, in: Circle(), namespace: namespace)
+            .glassBubbleTransition(planned: planned != nil)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -95,7 +98,7 @@ private extension View {
     /// A bubble's glass materializes where it is and dematerializes there. It does not morph into the shapes next to it: the
     /// bubbles leave when the notch opens, and a morph then would pull them into the notch while it grows (and back out of it as
     /// it closes), which the classic notch's open and close never does.
-    @ViewBuilder func glassBubbleTransition(_ surface: NotchSurface) -> some View {
-        if surface.isLiquidGlass { glassEffectTransition(.materialize) } else { self }
+    @ViewBuilder func glassBubbleTransition(planned: Bool) -> some View {
+        if planned { glassEffectTransition(.materialize) } else { self }
     }
 }
