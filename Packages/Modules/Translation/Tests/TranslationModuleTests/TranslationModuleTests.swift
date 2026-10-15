@@ -36,6 +36,7 @@ struct ModuleFixture {
     /// What the watcher logs, and the waits it makes for an app to build its accessibility tree (which return at once).
     let selectionLog = FakeSelectionLog()
     let treePauses = FakePauses()
+    let toasts = FakeToasts()
     /// 15 January 2026, noon UTC: winter in the northern hemisphere and 19:00 in Hanoi.
     let clock = TestClock("2026-01-15T12:00:00Z")
     /// Reads quantities like the real one, and records when and where.
@@ -71,11 +72,13 @@ struct ModuleFixture {
             smartSelection: SmartSelectionSetup(
                 accessibility: accessibility, input: input, window: chipWindow, preview: previewEngine, screens: { [displays] in displays.areas },
                 log: selectionLog, pause: { [treePauses] in treePauses.durations.append($0) },
+                showToast: { [toasts] in toasts.show($0, $1) },
                 applicationName: { $0.bundleID == "com.apple.Safari" ? "Safari" : ($0.bundleID ?? "app") }
             ),
             shortcut: nil
         )
         harness = RegistryHarness([module])
+        toasts.forward = { [harness] in harness.presenter.showToast($0, duration: $1) }
         // The notch panel holds the keyboard until the module closes the notch.
         applications.holds = { [harness] in harness.presenter.closeCount == 0 }
     }

@@ -42,6 +42,8 @@ final class FakeAccessibility: AccessibilityClient {
     var bounds: CGRect?
     /// A passive read finds an app that does not answer in time.
     var hangs = false
+    /// What the next passive looks find, in order, instead of what the rest of this fake says; used up one by one.
+    var inspectionScript: [SelectionInspection] = []
     /// How many passive looks were taken, each of which is one round of Accessibility calls.
     private(set) var inspections = 0
 
@@ -54,6 +56,7 @@ final class FakeAccessibility: AccessibilityClient {
 
     func inspectSelection(in application: FocusedApplication) -> SelectionInspection {
         inspections += 1
+        if !inspectionScript.isEmpty { return inspectionScript.removeFirst() }
         if hangs { return .unresponsive }
         if isSecureField { return .none }
         if let reason = SelectionIgnoreRules.length(length) { return reason == .tooLong ? .tooLong : .none }
@@ -69,9 +72,14 @@ final class FakeAccessibility: AccessibilityClient {
     /// Whether an app keeps the attribute that was set; some ignore it, and then it reads as off again.
     var enableSticks = true
 
-    func enable(_ attribute: String, in application: FocusedApplication) {
+    /// Whether an app accepts the attribute at all; some refuse it.
+    var enableSucceeds = true
+
+    @discardableResult
+    func enable(_ attribute: String, in application: FocusedApplication) -> Bool {
         enabled.append(attribute)
-        if enableSticks { attributes.insert(attribute) }
+        if enableSticks, enableSucceeds { attributes.insert(attribute) }
+        return enableSucceeds
     }
 
     /// Whether the app takes a replacement.

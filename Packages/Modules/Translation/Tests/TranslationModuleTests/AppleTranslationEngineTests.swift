@@ -99,6 +99,51 @@ struct Boom: LocalizedError {
         #expect(!session.isCancelled)
     }
 
+    /// A request cancelled while a session works may not stop at once (nothing says the framework honours cancellation); a
+    /// preview must not wait behind it.
+    @Test func aCancelledRequestThatWillNotStopDoesNotHoldUpTheNextOneOnAnEngineThatAbandonsIt() async throws {
+        let engine = AppleTranslationEngine(sessions: sessions, graceForCancelled: .milliseconds(20))
+        sessions.holds = true
+        let (vi, en) = (vi, en)
+        let first = Task { try await engine.translate("một", from: vi, to: en) }
+        await waitUntil { sessions.made.first?.waiting == 1 }
+        let stuck = try #require(sessions.made.first)
+        sessions.holds = false
+        let second = Task { try await engine.translate("hai", from: vi, to: en) }
+        // The first one is never released, and the second still gets its answer, from a session of its own.
+        #expect(try await second.value == "hai [vi→en]")
+        #expect(sessions.made.count == 2)
+        #expect(sessions.made[1].requests == ["hai"])
+        #expect(stuck.waiting == 1)
+        stuck.release()
+        await #expect(throws: TranslationFailure.cancelled) { try await first.value }
+    }
+
+    @Test func theOneAbandonedDoesNotCountAsTheSessionOfThePairAnyMore() async throws {
+        let engine = AppleTranslationEngine(sessions: sessions, graceForCancelled: .milliseconds(20))
+        sessions.holds = true
+        let (vi, en) = (vi, en)
+        let first = Task { try await engine.translate("một", from: vi, to: en) }
+        await waitUntil { sessions.made.first?.waiting == 1 }
+        let stuck = try #require(sessions.made.first)
+        sessions.holds = false
+        _ = try await engine.translate("hai", from: vi, to: en)
+        _ = try await engine.translate("ba", from: vi, to: en)
+        // The third reused the second's session; the stuck one saw nothing more.
+        #expect(sessions.made.count == 2)
+        #expect(sessions.made[1].requests == ["hai", "ba"])
+        stuck.release()
+        _ = try? await first.value
+    }
+
+    @Test func aRequestThatEndsWithinTheGraceStillReusesItsSession() async throws {
+        let engine = AppleTranslationEngine(sessions: sessions, graceForCancelled: .seconds(5))
+        let (vi, en) = (vi, en)
+        _ = try await engine.translate("một", from: vi, to: en)
+        _ = try await engine.translate("hai", from: vi, to: en)
+        #expect(sessions.made.count == 1)
+    }
+
     @Test func aRequestSupersededWhileWaitingNeverReachesTheSession() async throws {
         sessions.holds = true
         let first = translate("một")

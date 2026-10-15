@@ -274,6 +274,72 @@ import Testing
         #expect(fixture.accessibility.inspections == 8)
     }
 
+    // MARK: a Chrome that is slow while it wakes is not a hung one
+
+    @Test func aSlowLookWhileTheTreeIsBeingBuiltIsLookedAtAgain() async {
+        await start()
+        fixture.focus("com.google.Chrome")
+        fixture.accessibility.inspectionScript = [.none, .unresponsive, .selected(text: "5 ft 11 in", bounds: nil)]
+        await fixture.dragSelecting(nil)
+        #expect(fixture.accessibility.enabled == ["AXEnhancedUserInterface"])
+        #expect(chip.current?.content.text == "5 ft 11 in → 180 cm")
+        #expect(!fixture.selectionLog.contains("skip reason=unresponsive"))
+        // No cool-down was started: the next selection is looked at.
+        let looks = fixture.accessibility.inspections
+        await fixture.dragSelecting("10 kg")
+        #expect(fixture.accessibility.inspections == looks + 1)
+        #expect(!fixture.selectionLog.contains("skip reason=cooldown"))
+    }
+
+    @Test func aChromeThatStaysSlowThroughAllTheLooksStillStartsNoCoolDown() async {
+        await start()
+        fixture.focus("com.google.Chrome")
+        fixture.accessibility.inspectionScript = [.none] + Array(repeating: .unresponsive, count: SmartSelection.treeLooks)
+        await fixture.dragSelecting(nil)
+        #expect(fixture.selectionLog.lines(startingWith: "skip").last == "skip reason=none")
+        #expect(!fixture.selectionLog.contains("skip reason=unresponsive"))
+        let looks = fixture.accessibility.inspections
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(fixture.accessibility.inspections == looks + 1)
+        #expect(chip.isVisible)
+    }
+
+    @Test func aSlowAnswerOutsideThatWindowStillStartsTheCoolDown() async {
+        await start()
+        fixture.focus("com.google.Chrome")
+        // Switched on and read fine; later the app does not answer.
+        await fixture.dragSelecting("5 ft 11 in")
+        fixture.accessibility.inspectionScript = [.unresponsive]
+        await fixture.dragSelecting("10 kg")
+        #expect(fixture.selectionLog.contains("skip reason=unresponsive"))
+        await fixture.dragSelecting("10 kg")
+        #expect(fixture.selectionLog.contains("skip reason=cooldown"))
+    }
+
+    @Test func aFirstLookThatDoesNotAnswerStartsTheCoolDownAndSwitchesNothingOn() async {
+        await start()
+        fixture.focus("com.google.Chrome")
+        fixture.accessibility.inspectionScript = [.unresponsive]
+        await fixture.dragSelecting(nil)
+        #expect(fixture.accessibility.enabled.isEmpty)
+        #expect(fixture.selectionLog.contains("skip reason=unresponsive"))
+        await fixture.dragSelecting(nil)
+        #expect(fixture.selectionLog.contains("skip reason=cooldown"))
+    }
+
+    @Test func anAppThatRefusesTheAttributeIsNotLookedAtAgainAndTheLogSaysSo() async {
+        await start()
+        fixture.accessibility.enableSucceeds = false
+        fixture.focus("com.google.Chrome")
+        await fixture.dragSelecting(nil)
+        #expect(fixture.treePauses.durations.isEmpty)
+        #expect(fixture.accessibility.inspections == 1)
+        #expect(fixture.selectionLog.contains("accessibility refused attribute=AXEnhancedUserInterface"))
+        #expect(!fixture.selectionLog.lines.contains { $0.hasPrefix("accessibility enabled") })
+        await fixture.dragSelecting(nil)
+        #expect(fixture.accessibility.enabled == ["AXEnhancedUserInterface"])
+    }
+
     @Test func turningTheSettingOffInTheMiddleStopsSwitchingAppsOn() async {
         await start()
         fixture.focus("com.google.Chrome")

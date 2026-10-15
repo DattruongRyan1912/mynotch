@@ -11,6 +11,8 @@ struct SelectionChipContent {
     var actionTitle = "Mở"
     /// The first line of the original, small, over a translation; nil when there is none to show.
     var caption: String?
+    /// Beside the button, small: "Mở để dịch đủ" when only the start of a long selection was translated.
+    var note: String?
     /// The button: the notch opens on the Translation tab with the full result.
     var open: @MainActor () -> Void
     /// "Không hiện trong app này", from the "⋯" menu; nil when the app has no bundle ID to remember it by.
@@ -47,7 +49,8 @@ struct SelectionChipLabel: View {
 
     var body: some View {
         Group {
-            if content.kind == .translation { wholeTranslation } else { compactLine }
+            // With less room beside the selection than the smallest translation chip, the compact line, which fits anywhere.
+            if content.kind == .translation, maxHeight >= SelectionChipLayout.minChipHeight { wholeTranslation } else { compactLine }
         }
         .background(Color.black.opacity(0.9), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.white.opacity(0.14)))
@@ -92,12 +95,17 @@ struct SelectionChipLabel: View {
         }
     }
 
+    /// What the compact line says: a translation squeezed in here gives its first line, which "Mở" shows in full.
+    private var compactText: String {
+        content.kind == .translation ? SelectionHint.firstLine(of: content.text) ?? content.text : content.text
+    }
+
     /// A conversion, or a button: an icon, what was understood in one line, the button and the menu.
     private var compactLine: some View {
         HStack(spacing: 8) {
             icon
-            if !content.text.isEmpty {
-                Text(content.text)
+            if !compactText.isEmpty {
+                Text(compactText)
                     .font(.system(size: 12, weight: .medium))
                     // A button's note is a reason, not a result.
                     .foregroundStyle(content.kind == .button ? NotchTokens.secondaryText : NotchTokens.primaryText)
@@ -136,6 +144,12 @@ struct SelectionChipLabel: View {
             .frame(width: metrics.textWidth, height: metrics.textHeight)
             HStack(spacing: 8) {
                 icon
+                if let note = content.note {
+                    Text(note)
+                        .font(.system(size: 10))
+                        .foregroundStyle(NotchTokens.secondaryText)
+                        .lineLimit(1)
+                }
                 Spacer(minLength: 0)
                 action
                 hideMenu
@@ -204,6 +218,8 @@ struct SelectionAccessibilityNotice: View {
 struct SelectionDenialNotice: View {
     let appName: String
     let undo: () -> Void
+    /// The notice left the screen, so there is no button any more to undo with.
+    let gone: () -> Void
 
     @Environment(\.notchAccent) private var accent
 
@@ -226,5 +242,6 @@ struct SelectionDenialNotice: View {
             }
             .buttonStyle(.plain)
         }
+        .onDisappear(perform: gone)
     }
 }

@@ -149,14 +149,96 @@ import Testing
         #expect(hint?.text == "Please send me the report before the meeting tomorrow [en→vi]")
     }
 
-    @Test func aLongSelectionIsTranslatedWholeUpToTheLimitOfASelection() async throws {
-        let long = String(repeating: english + ". ", count: 25)
-        #expect(long.count > 300)
-        #expect(SelectionDecider.previewLimit == SelectionIgnoreRules.maxLength)
+    // MARK: the preview is capped, "Mở" is not
+
+    let sentence = "The quick brown fox jumps over the lazy dog. "
+
+    @Test func aPreviewTranslatesAtMostSixHundredCharacters() async throws {
+        #expect(SelectionDecider.previewLimit == 600)
+        let long = String(repeating: sentence, count: 30)
+        #expect(long.count > 1_300)
         let hint = await hint(long, using: try await decider())
-        #expect(fixture.previewEngine.requests.first?.text == long.trimmingCharacters(in: .whitespaces))
+        let sent = try #require(fixture.previewEngine.requests.first?.text)
+        #expect(sent.count <= 600)
+        #expect(sent.count > 500)
+        #expect(sent.hasSuffix("dog."), "cut after a whole sentence")
         #expect(hint?.kind == .translation)
-        #expect(try #require(hint?.text).count > long.count)
+    }
+
+    @Test func aCutPreviewSaysSoWithAnEllipsisAndANote() async throws {
+        let hint = await hint(String(repeating: sentence, count: 30), using: try await decider())
+        let text = try #require(hint?.text)
+        #expect(text.hasSuffix("…"))
+        #expect(hint?.note == "Mở để dịch đủ")
+    }
+
+    @Test func aWholePreviewHasNoEllipsisAndNoNote() async throws {
+        let hint = await hint(String(repeating: sentence, count: 5), using: try await decider())
+        #expect(hint?.note == nil)
+        #expect(try #require(hint?.text).hasSuffix("[en→vi]"))
+        #expect(fixture.previewEngine.requests.first?.text.count == String(repeating: sentence, count: 5).count - 1)
+    }
+
+    @Test func openingTranslatesTheWholeSelection() async throws {
+        await fixture.start()
+        let long = String(repeating: sentence, count: 30).trimmingCharacters(in: .whitespaces)
+        await fixture.dragSelecting(long)
+        try #require(fixture.chipWindow.current).content.open()
+        await fixture.translated()
+        #expect(fixture.engine.requests.first?.text == long)
+        #expect(fixture.state.input == long)
+    }
+
+    @Test func theCutIsAtTheLastSentenceEndThatIsFarEnoughIn() {
+        let text = String(repeating: sentence, count: 30)
+        let cut = SelectionDecider.previewCut(of: text, limit: 600)
+        #expect(cut.wasCut)
+        #expect(cut.text.hasSuffix("dog."))
+        #expect(cut.text.count <= 600)
+        #expect(text.hasPrefix(cut.text))
+    }
+
+    @Test func aNewlineIsASentenceEndToo() {
+        let text = (1...60).map { "Line number \($0) of the text without a full stop" }.joined(separator: "\n")
+        let cut = SelectionDecider.previewCut(of: text, limit: 600)
+        #expect(cut.wasCut)
+        #expect(cut.text.count <= 600)
+        #expect(cut.text.hasSuffix("full stop"), "\(cut.text.suffix(20))")
+    }
+
+    @Test func withoutASentenceEndTheCutIsAtAWord() {
+        let text = String(repeating: "lorem ipsum dolor sit amet ", count: 60)
+        let cut = SelectionDecider.previewCut(of: text, limit: 600)
+        #expect(cut.wasCut)
+        #expect(cut.text.count <= 600)
+        #expect(cut.text.hasSuffix("amet") || cut.text.hasSuffix("sit") || cut.text.hasSuffix("dolor") || cut.text.hasSuffix("ipsum") || cut.text.hasSuffix("lorem"))
+    }
+
+    @Test func aTextWithNoBoundaryIsCutAtTheLimit() {
+        let text = String(repeating: "a", count: 1_000)
+        let cut = SelectionDecider.previewCut(of: text, limit: 600)
+        #expect(cut.text.count == 600)
+        #expect(cut.wasCut)
+    }
+
+    @Test func aChineseSentenceEndCounts() {
+        let text = String(repeating: "今天天气很好，我们一起去公园散步吧。", count: 60)
+        let cut = SelectionDecider.previewCut(of: text, limit: 600)
+        #expect(cut.wasCut)
+        #expect(cut.text.hasSuffix("。"))
+    }
+
+    @Test func aShortTextIsNotCut() {
+        let cut = SelectionDecider.previewCut(of: "Hello there my friend", limit: 600)
+        #expect(!cut.wasCut)
+        #expect(cut.text == "Hello there my friend")
+    }
+
+    @Test func aSentenceEndTooEarlyToBeWorthItIsNotUsed() {
+        // The only full stop is at the start: cutting there would translate almost nothing.
+        let text = "Hi. " + String(repeating: "word ", count: 300)
+        let cut = SelectionDecider.previewCut(of: text, limit: 600)
+        #expect(cut.text.count > 400)
     }
 
     @Test func aShortSelectionIsTranslatedWhole() async throws {

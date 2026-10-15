@@ -272,12 +272,34 @@ import Testing
         await fixture.dragSelecting("5 ft 11 in")
         let known = [
             "start watcher=", "gesture pointer=", "skip reason=", "hint kind=", "preview failed reason=", "chip shown", "activity shown",
-            "keys on trusted=", "watcher ", "accessibility enabled ", "notice ",
+            "keys on trusted=", "watcher ", "accessibility enabled ", "accessibility refused ", "notice ", "deny ",
         ]
         for line in log.lines {
             #expect(known.contains { line.hasPrefix($0) }, "\(line)")
             #expect(line.count < 60, "\(line)")
         }
+    }
+
+    // MARK: lines are built, not typed
+
+    @Test func everyLineIsBuiltFromFixedWordsAndNumbers() {
+        #expect(SelectionLogLine.start(watcher: true, trusted: false, keys: true).text == "start watcher=1 trusted=0 keys=1")
+        #expect(SelectionLogLine.gesture(pointer: false, keys: true).text == "gesture pointer=0 keys=1")
+        #expect(SelectionLogLine.skip(.sameLanguage).text == "skip reason=same-language")
+        #expect(SelectionLogLine.hint(.translation).text == "hint kind=preview")
+        #expect(SelectionLogLine.previewFailed(.notInstalled).text == "preview failed reason=not-installed")
+        #expect(SelectionLogLine.deny(added: false).text == "deny added=0")
+        #expect(SelectionLogLine.watcher(on: true, keys: false).text == "watcher on keys=0")
+        #expect(SelectionLogLine.watcher(on: false, keys: false).text == "watcher off")
+        let literal: SelectionLogLine = "chip shown"
+        #expect(literal.text == "chip shown")
+    }
+
+    @Test func anAttributeNameThatIsNotOneOfTheTwoIsNotLogged() {
+        #expect(SelectionLogLine.accessibilityEnabled("AXEnhancedUserInterface").text == "accessibility enabled attribute=AXEnhancedUserInterface")
+        #expect(SelectionLogLine.accessibilityEnabled("AXManualAccessibility").text == "accessibility enabled attribute=AXManualAccessibility")
+        #expect(SelectionLogLine.accessibilityEnabled("Some secret title").text == "accessibility enabled attribute=other")
+        #expect(SelectionLogLine.accessibilityRefused("Some secret title").text == "accessibility refused attribute=other")
     }
 
     // MARK: the translate button

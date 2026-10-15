@@ -53,9 +53,21 @@ final class AppleTranslationEngine: OnDeviceTranslationEngine {
     private var cache: [LanguagePair: any TranslatingSession] = [:]
     /// The newest request; the next one waits for it to finish before touching a session.
     private var latest: Task<String, any Error>?
+    let graceForCancelled: Duration?
+    private let sleep: @Sendable (Duration) async throws -> Void
 
-    init(sessions: any TranslationSessionProviding = SystemTranslationSessions()) {
+    /// - Parameter graceForCancelled: nil, the default, keeps requests strictly one at a time: the next waits for the previous,
+    ///   cancelled or not, so a session is never used by two at once. With a duration, a request that was cancelled and has not
+    ///   ended after it (nothing says the framework stops a translation when its task is cancelled) no longer holds the next one
+    ///   up: that goes to a session of its own, and the pair's cached session becomes that one. For translations nobody waits
+    ///   for, such as a preview beside a selection that the next selection replaces.
+    init(
+        sessions: any TranslationSessionProviding = SystemTranslationSessions(), graceForCancelled: Duration? = nil,
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) {
         self.sessions = sessions
+        self.graceForCancelled = graceForCancelled
+        self.sleep = sleep
     }
 
     func status(from source: Locale.Language, to target: Locale.Language) async -> PairStatus {
@@ -68,9 +80,9 @@ final class AppleTranslationEngine: OnDeviceTranslationEngine {
         let pair = LanguagePair(source: source, target: target)
         let previous = latest
         let request = Task {
-            _ = await previous?.result
+            let overlaps = await self.waitForEnd(of: previous)
             try Task.checkCancellation()
-            return try await self.run(text, pair)
+            return try await self.run(text, pair, onASessionOfItsOwn: overlaps)
         }
         latest = request
         do {
@@ -87,8 +99,32 @@ final class AppleTranslationEngine: OnDeviceTranslationEngine {
         cache.removeAll()
     }
 
-    private func run(_ text: String, _ pair: LanguagePair) async throws(TranslationFailure) -> String {
-        let session = cache[pair] ?? sessions.makeSession(from: pair.source, to: pair.target)
+    /// Waits for the cancelled request before this one to end. True when it was still going after the grace, if there is one:
+    /// this request then must not use the session that one is on.
+    private func waitForEnd(of previous: Task<String, any Error>?) async -> Bool {
+        guard let previous else { return false }
+        guard let grace = graceForCancelled else {
+            _ = await previous.result
+            return false
+        }
+        let sleep = sleep
+        // Whichever ends first answers. Not a task group: a group waits for all its children, and waiting for a task's result
+        // cannot be cut short, so a translation that ignores its cancellation would hold the group, and the next request, up.
+        return await withCheckedContinuation { continuation in
+            let answer = OneAnswer(continuation)
+            Task {
+                _ = await previous.result
+                answer.give(false)
+            }
+            Task {
+                try? await sleep(grace)
+                answer.give(true)
+            }
+        }
+    }
+
+    private func run(_ text: String, _ pair: LanguagePair, onASessionOfItsOwn: Bool = false) async throws(TranslationFailure) -> String {
+        let session = (onASessionOfItsOwn ? nil : cache[pair]) ?? sessions.makeSession(from: pair.source, to: pair.target)
         cache[pair] = session
         do {
             let translation = try await session.translate(text)
@@ -128,5 +164,20 @@ extension TranslationFailure {
         default:
             self = .failed(error.localizedDescription)
         }
+    }
+}
+
+/// A continuation that is resumed by the first of two to answer, and by no one after.
+private final class OneAnswer {
+    private var continuation: CheckedContinuation<Bool, Never>?
+
+    init(_ continuation: CheckedContinuation<Bool, Never>) {
+        self.continuation = continuation
+    }
+
+    func give(_ value: Bool) {
+        guard let continuation else { return }
+        self.continuation = nil
+        continuation.resume(returning: value)
     }
 }

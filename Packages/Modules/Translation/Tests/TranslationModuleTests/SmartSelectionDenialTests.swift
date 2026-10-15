@@ -1,7 +1,9 @@
 import CoreGraphics
+import AppKit
 import Foundation
 import MyNotchCore
 import MyNotchTestSupport
+import SwiftUI
 import Testing
 @testable import TranslationModule
 
@@ -53,15 +55,81 @@ import Testing
         #expect(fixture.harness.presenter.closeCount == closes + 1)
     }
 
-    @Test func undoIsOnlyThereForFiveSeconds() async throws {
+    // MARK: how long the undo lasts
+
+    @Test func theNoticesAskToStayForTheirTime() async throws {
+        fixture.accessibility.isTrusted = false
+        await fixture.start()
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(fixture.toasts.durations == [.seconds(10)])
+        // Hiding an app needs the permission and a chip, so it is made in a second run.
+        let second = ModuleFixture()
+        await second.start()
+        await second.dragSelecting("5 ft 11 in")
+        let deny = try #require(second.chipWindow.current?.content.deny)
+        deny()
+        #expect(second.toasts.durations == [.seconds(5)])
+    }
+
+    @Test func undoWorksForAsLongAsTheNoticeIsOnScreen() async throws {
         await fixture.start()
         try await deny()
-        fixture.harness.scheduler.advance(by: .milliseconds(4_999))
+        // The notch keeps a notice up while the pointer is in it, which can be much longer than it asked for.
+        fixture.harness.scheduler.advance(by: .seconds(600))
         #expect(fixture.smart.pendingUndo != nil)
-        fixture.harness.scheduler.advance(by: .milliseconds(1))
+        fixture.smart.undoDenial()
+        #expect(denyList.isEmpty)
+    }
+
+    @Test func undoEndsWhenTheNoticeIsGone() async throws {
+        await fixture.start()
+        try await deny()
+        let id = try #require(fixture.smart.pendingUndo?.id)
+        fixture.smart.denialNoticeGone(id)
         #expect(fixture.smart.pendingUndo == nil)
         fixture.smart.undoDenial()
         #expect(denyList == ["com.apple.Safari"])
+    }
+
+    @Test func aNoticeThatWasReplacedGoingDoesNotEndTheNewerUndo() async {
+        await fixture.start()
+        let notes = FocusedApplication(processID: 43, bundleID: "com.apple.Notes")
+        fixture.smart.deny(safari)
+        let first = fixture.smart.pendingUndo?.id
+        fixture.smart.deny(notes)
+        fixture.smart.denialNoticeGone(first ?? -1)
+        #expect(fixture.smart.pendingUndo?.bundleID == "com.apple.Notes")
+        fixture.smart.undoDenial()
+        #expect(denyList == ["com.apple.Safari"])
+    }
+
+    @Test func theNoticeTellsWhenItLeavesTheScreen() async throws {
+        let log = HoverLog()
+        let notice = SelectionDenialNotice(appName: "Chrome", undo: {}, gone: { log.record(false) })
+        let hosting = NSHostingView(rootView: AnyView(notice.frame(width: 300, height: 40)))
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 300, height: 40), styleMask: .borderless, backing: .buffered, defer: true)
+        window.contentView = hosting
+        hosting.layoutSubtreeIfNeeded()
+        #expect(log.values.isEmpty)
+        hosting.rootView = AnyView(EmptyView())
+        for _ in 0..<200 where log.values.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(log.values == [false])
+        window.contentView = nil
+    }
+
+    @Test func bothNoticesCanBeDrawn() {
+        let grant = NSHostingView(rootView: SelectionAccessibilityNotice(grant: {}))
+        #expect(grant.fittingSize.width > 150)
+        let denial = NSHostingView(rootView: SelectionDenialNotice(appName: "Chrome", undo: {}, gone: {}))
+        #expect(denial.fittingSize.width > 150)
+    }
+
+    @Test func theSameTextSelectedAgainAfterAnUndoShowsAgain() async throws {
+        await fixture.start()
+        try await deny()
+        fixture.smart.undoDenial()
+        await fixture.dragSelecting("5 ft 11 in")
+        #expect(chip.isVisible)
     }
 
     @Test func undoDoesNothingTwice() async throws {
@@ -139,13 +207,28 @@ import Testing
         #expect(try #require(chip.current?.content).caption == nil)
     }
 
-    @Test func aTranslationIsNeverCutOnItsWayToTheChip() async throws {
+    @Test func aCutPreviewsChipSaysSoAndAWholeOnesDoesNot() async throws {
         await fixture.start()
-        let long = (1...30).map { "\(english) number \($0)." }.joined(separator: "\n")
+        await fixture.dragSelecting(String(repeating: "The quick brown fox jumps over the lazy dog. ", count: 30))
+        let cut = try #require(chip.current?.content)
+        #expect(cut.note == "Mở để dịch đủ")
+        #expect(cut.text.hasSuffix("…"))
+        await fixture.dragSelecting(english)
+        let whole = try #require(chip.current?.content)
+        #expect(whole.note == nil)
+        #expect(!whole.text.hasSuffix("…"))
+    }
+
+    @Test func aTranslationThatFitsThePreviewIsNeverCutOnItsWayToTheChip() async throws {
+        await fixture.start()
+        // Twelve lines, about 575 characters: under what a preview translates, so all of it is.
+        let long = (1...12).map { "\(english) \($0)." }.joined(separator: "\n")
+        #expect(long.count < SelectionDecider.previewLimit)
         await fixture.dragSelecting(long)
         let content = try #require(chip.current?.content)
         #expect(content.text == "\(long) [en→vi]")
-        #expect(content.text.split(separator: "\n").count == 30)
+        #expect(content.text.split(separator: "\n").count == 12)
+        #expect(content.note == nil)
     }
 
     @Test func theNotchActivityKeepsToTheFirstLineOfATranslation() async {

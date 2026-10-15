@@ -20,6 +20,10 @@ nonisolated enum SelectionChipLayout {
     static let linesWorthACaption = 4
     static let minLines = 2
 
+    /// The smallest a translation chip can be: two lines and what is around them. With less room than this beside the selection
+    /// the chip is the compact line instead, which fits anywhere, rather than a translation that would cover the selection.
+    static var minChipHeight: CGFloat { CGFloat(minLines) * lineHeight + chromeHeight }
+
     static func font() -> NSFont { .systemFont(ofSize: 12, weight: .medium) }
 
     /// The height of one line of the translation.

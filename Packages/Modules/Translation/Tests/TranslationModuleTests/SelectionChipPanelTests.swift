@@ -125,6 +125,30 @@ import Testing
         window.hide()
     }
 
+    @Test func aChipWithLessRoomThanItsSmallestFallsBackToTheCompactLineInsteadOfCoveringTheSelection() throws {
+        // 64 pt below the selection and 74 above: less than two lines of translation need.
+        let tight = ScreenArea(frame: CGRect(x: 0, y: 0, width: 800, height: 190), visibleFrame: CGRect(x: 0, y: 0, width: 800, height: 170))
+        let window = SystemSelectionChipWindow(interface: interface) { [tight] in [tight] }
+        let anchor = CGRect(x: 300, y: 70, width: 100, height: 20)
+        #expect(SelectionGeometry.room(besides: anchor, screens: [tight]) < SelectionChipLayout.minChipHeight)
+        let frame = window.place(translation(lines: 30), near: anchor)
+        #expect(frame.height < 50)
+        #expect(!frame.intersects(anchor))
+        #expect(tight.visibleFrame.contains(frame))
+        window.hide()
+    }
+
+    @Test func aChipWithJustEnoughRoomStaysWhole() throws {
+        let enough = ScreenArea(frame: CGRect(x: 0, y: 0, width: 800, height: 230), visibleFrame: CGRect(x: 0, y: 0, width: 800, height: 210))
+        let window = SystemSelectionChipWindow(interface: interface) { [enough] in [enough] }
+        let anchor = CGRect(x: 300, y: 70, width: 100, height: 20)
+        #expect(SelectionGeometry.room(besides: anchor, screens: [enough]) >= SelectionChipLayout.minChipHeight)
+        let frame = window.place(translation(lines: 30), near: anchor)
+        #expect(frame.height >= SelectionChipLayout.minChipHeight)
+        #expect(!frame.intersects(anchor))
+        window.hide()
+    }
+
     @Test func aShortTranslationStaysCompactAndAChipIsNarrowerThanTheWidest() throws {
         let window = makeWindow()
         let short = SelectionChipContent(kind: .translation, text: "Xin chào", caption: nil, open: {}, deny: {}, hover: { _ in })

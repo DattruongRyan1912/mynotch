@@ -56,8 +56,9 @@ protocol AccessibilityClient: AnyObject {
     func inspectSelection(in application: FocusedApplication) -> SelectionInspection
     /// Whether a boolean attribute of the application element is already true.
     func isEnabled(_ attribute: String, in application: FocusedApplication) -> Bool
-    /// Sets a boolean attribute of the application element to true.
-    func enable(_ attribute: String, in application: FocusedApplication)
+    /// Sets a boolean attribute of the application element to true. False when the app refused it.
+    @discardableResult
+    func enable(_ attribute: String, in application: FocusedApplication) -> Bool
     /// Replaces the selection of the application's focused element with `text`. False when the app refused or ignored it.
     func replaceSelection(with text: String, in application: FocusedApplication) -> Bool
 }
@@ -115,8 +116,9 @@ final class SystemAccessibilityClient: AccessibilityClient {
         Self.copyValue(attribute, of: Self.element(for: application)).value as? Bool == true
     }
 
-    func enable(_ attribute: String, in application: FocusedApplication) {
-        AXUIElementSetAttributeValue(Self.element(for: application), attribute as CFString, kCFBooleanTrue)
+    @discardableResult
+    func enable(_ attribute: String, in application: FocusedApplication) -> Bool {
+        AXUIElementSetAttributeValue(Self.element(for: application), attribute as CFString, kCFBooleanTrue) == .success
     }
 
     func replaceSelection(with text: String, in application: FocusedApplication) -> Bool {

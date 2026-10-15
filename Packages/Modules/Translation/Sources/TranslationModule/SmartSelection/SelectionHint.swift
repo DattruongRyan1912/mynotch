@@ -23,6 +23,8 @@ nonisolated struct SelectionHint: Equatable, Sendable {
     static let languagePackNote = "Cần tải gói ngôn ngữ"
     /// What the button chip and its activity say.
     static let buttonTitle = "Dịch"
+    /// Beside the button of a preview that translated only the start of a long selection.
+    static let partialNote = "Mở để dịch đủ"
 
     /// A conversion is one line in the chip; longer is cut here. A translation is never cut: the chip wraps and scrolls it.
     static let maxLength = 80
@@ -35,6 +37,9 @@ nonisolated struct SelectionHint: Equatable, Sendable {
     var text: String
     /// The selection it was made for, which "Mở" opens in the tab and the replace button writes over.
     var source: SelectionSource
+    /// Set when only the start of the selection was translated: the translation then ends with "…" and the chip says that
+    /// "Mở" translates all of it.
+    var note: String?
 
     /// The first line of the original text, for the small caption over its translation; nil when it has none.
     static func caption(of original: String) -> String? {

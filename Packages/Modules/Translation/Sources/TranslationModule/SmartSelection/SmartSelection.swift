@@ -10,7 +10,9 @@ struct SmartSelectionSetup {
     var window: any SelectionChipWindowing = SystemSelectionChipWindow()
     /// Apple's on-device engine, which makes the previews. Not the one the tab translates with: a preview must not
     /// supersede a translation the tab has under way, and no engine that needs a key may ever be put here.
-    var preview: any OnDeviceTranslationEngine = AppleTranslationEngine()
+    /// A preview that is cancelled (a newer selection) never holds up the next one: after a short grace the next goes to a
+    /// session of its own, whether or not the framework stops the old translation.
+    var preview: any OnDeviceTranslationEngine = SmartSelectionSetup.systemPreview()
     /// The displays, the main one first.
     var screens: () -> [ScreenArea] = { SmartSelectionSetup.systemScreens() }
     var ownProcessID: pid_t = getpid()
@@ -20,12 +22,21 @@ struct SmartSelectionSetup {
     var notices = SelectionNotices()
     /// The wait between two looks at an app that has just been switched into accessibility mode.
     var pause: @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    /// Puts a notice up in the notch; nil goes through the module's presenter. Tests record what was asked for.
+    var showToast: (@MainActor (AnyView, Duration) -> Void)?
     /// An app's name for the notice that says it was hidden.
     var applicationName: (FocusedApplication) -> String = { SmartSelectionSetup.systemName(of: $0) }
 
     static func systemName(of application: FocusedApplication) -> String {
         NSRunningApplication(processIdentifier: application.processID)?.localizedName
             ?? application.bundleID.map(RunningApplications.system.name) ?? "app này"
+    }
+
+    /// How long a cancelled preview may run on before the next one goes to a session of its own.
+    static let previewGrace = Duration.milliseconds(150)
+
+    static func systemPreview() -> AppleTranslationEngine {
+        AppleTranslationEngine(graceForCancelled: previewGrace)
     }
 
     static func systemScreens() -> [ScreenArea] {
@@ -57,17 +68,20 @@ final class SmartSelection {
     static let treeInterval = Duration.milliseconds(100)
     /// How long the notice about the missing permission stays up.
     static let noticeDuration = Duration.seconds(10)
-    /// How long an app that was hidden can be brought back with "Hoàn tác".
+    /// How long the notice about a hidden app asks to stay. The undo lasts as long as the notice is really up, which can be longer.
     static let undoDuration = Duration.seconds(5)
 
-    /// What "Hoàn tác" undoes: the app that was put on the deny list, and whether this is what put it there.
+    /// What "Hoàn tác" undoes: the app that was put on the deny list, and whether this is what put it there. `id` tells one
+    /// hiding from the next, so the end of an older notice does not end the newer one's undo.
     struct Denial {
+        var id: Int
         var bundleID: String
         var appName: String
         var added: Bool
     }
 
-    /// The hiding that can still be undone; tests read it.
+    /// The hiding that can still be undone: for as long as the notice that has its button is on screen, which can be longer than
+    /// the notice asked for, since the notch keeps one up while the pointer is in it. Tests read it.
     private(set) var pendingUndo: Denial?
 
     let decider: SelectionDecider
@@ -94,7 +108,7 @@ final class SmartSelection {
     private var coolingDown: Set<pid_t> = []
     /// Processes already switched into accessibility mode, or found in it: once is enough for as long as the process lives.
     private var switchedOn: Set<pid_t> = []
-    private var undoWindow: ScheduledAction?
+    private var denialCount = 0
 
     /// - Parameter open: the chip's "Mở": opens the notch's Translation tab on the selection.
     init(
@@ -116,7 +130,7 @@ final class SmartSelection {
     /// Starts or stops watching to match the settings, and keeps doing so as they change.
     func start() {
         apply()
-        log("start watcher=\(Self.flag(isWatching)) trusted=\(Self.flag(setup.accessibility.isTrusted)) keys=\(Self.flag(watchesKeys))")
+        log(.start(watcher: isWatching, trusted: setup.accessibility.isTrusted, keys: watchesKeys))
         context.run { [weak self] in
             for await _ in Observations({ [weak self] in self?.wantsToWatch ?? false }) {
                 self?.apply(logging: true)
@@ -140,22 +154,20 @@ final class SmartSelection {
         switch (wantsToWatch, isWatching) {
         case (true, false):
             startWatching()
-            if logging { log("watcher on keys=\(Self.flag(watchesKeys))") }
+            if logging { log(.watcher(on: true, keys: watchesKeys)) }
         case (false, true):
             stopWatching()
-            if logging { log("watcher off") }
+            if logging { log(.watcher(on: false, keys: false)) }
         default: break
         }
     }
 
-    private func log(_ line: String) {
+    private func log(_ line: SelectionLogLine) {
         setup.log.write(line)
     }
 
-    private static func flag(_ value: Bool) -> Int { value ? 1 : 0 }
-
     private func skip(_ reason: SelectionSkip) {
-        log("skip reason=\(reason.rawValue)")
+        log(.skip(reason))
         // The same selection is still what the chip shows; any other reason means it is no longer the one worth showing.
         if reason != .unchanged { chip.dismiss() }
     }
@@ -183,6 +195,7 @@ final class SmartSelection {
         lastHandled = nil
         coolingDown.removeAll()
         switchedOn.removeAll()
+        pendingUndo = nil
     }
 
     /// Key-ups need Accessibility, so they are only asked for once it is granted; the mouse needs nothing, which also lets the
@@ -218,7 +231,7 @@ final class SmartSelection {
     }
 
     private func selectionGesture(at pointer: CGPoint, byPointer: Bool) {
-        log("gesture pointer=\(Self.flag(byPointer)) keys=\(Self.flag(watchesKeys))")
+        log(.gesture(pointer: byPointer, keys: watchesKeys))
         if isWatching, !watchesKeys, setup.accessibility.isTrusted {
             startInput()
             log("keys on trusted=1")
@@ -250,9 +263,12 @@ final class SmartSelection {
         readingProcessID = application.processID
         defer { if request == generation { readingProcessID = nil } }
         // One look. A Chrome or Electron app that shows nothing may only be hiding it: with the user's leave it is switched into
-        // accessibility mode, once per process, and looked at again while it builds its tree.
+        // accessibility mode, once per process, and looked at again while it builds its tree. While it does, a look that does not
+        // answer in time is as good as one that finds nothing: Chromium is busy building, not hung.
         var inspection = accessibility.inspectSelection(in: application)
+        var wasWakingUp = false
         if case .none = inspection, switchOnAccessibility(of: application) {
+            wasWakingUp = true
             for _ in 0..<Self.treeLooks {
                 do {
                     try await setup.pause(Self.treeInterval)
@@ -261,7 +277,10 @@ final class SmartSelection {
                 }
                 guard isCurrent(request) else { return }
                 inspection = accessibility.inspectSelection(in: application)
-                if case .none = inspection { continue }
+                switch inspection {
+                case .none, .unresponsive: continue
+                case .selected, .tooLong: break
+                }
                 break
             }
         }
@@ -271,6 +290,11 @@ final class SmartSelection {
         case .selected(let text, let found):
             source = SelectionSource(text: text, application: application)
             bounds = found
+        case .unresponsive where wasWakingUp:
+            // Still not answering after the looks that follow the switch-on: nothing to show yet, and no cool-down, which would
+            // silence the app for 30 s at the very moment it starts to be readable.
+            lastHandled = nil
+            return skip(.none)
         case .unresponsive:
             coolDown(application.processID)
             return skip(.unresponsive)
@@ -292,8 +316,8 @@ final class SmartSelection {
         case .skip(let reason):
             skip(reason)
         case .hint(let hint, let failure):
-            if let failure { log("preview failed reason=\(failure.rawValue)") }
-            log("hint kind=\(hint.kind.logCode)")
+            if let failure { log(.previewFailed(failure)) }
+            log(.hint(hint.kind))
             let anchor = SelectionGeometry.anchor(bounds: bounds, pointer: pointer, screens: setup.screens(), pointerMatters: byPointer)
             chip.show(hint, anchor: anchor)
         }
@@ -306,8 +330,12 @@ final class SmartSelection {
               let attribute = application.bundleID.flatMap({ SelectionReader.accessibilityAttributes[$0] }),
               switchedOn.insert(application.processID).inserted else { return false }
         guard !setup.accessibility.isEnabled(attribute, in: application) else { return false }
-        setup.accessibility.enable(attribute, in: application)
-        log("accessibility enabled attribute=\(attribute)")
+        guard setup.accessibility.enable(attribute, in: application) else {
+            // The app refused it: there is no tree to wait for.
+            log(.accessibilityRefused(attribute))
+            return false
+        }
+        log(.accessibilityEnabled(attribute))
         return true
     }
 
@@ -318,9 +346,15 @@ final class SmartSelection {
     private func announceMissingAccessibility() {
         guard setup.notices.claim() else { return }
         log("notice accessibility")
-        context.presenter.showToast(
-            AnyView(SelectionAccessibilityNotice { [weak self] in self?.requestAccessibility() }), duration: Self.noticeDuration
-        )
+        showToast(AnyView(SelectionAccessibilityNotice { [weak self] in self?.requestAccessibility() }), for: Self.noticeDuration)
+    }
+
+    private func showToast(_ content: AnyView, for duration: Duration) {
+        if let showToast = setup.showToast {
+            showToast(content, duration)
+        } else {
+            context.presenter.showToast(content, duration: duration)
+        }
     }
 
     /// The notice's button: the system's prompt (which lists MyNotch in the Accessibility pane), then that pane when the prompt
@@ -373,7 +407,7 @@ final class SmartSelection {
         if application.bundleID != nil { deny = { [weak self] in self?.deny(application) } }
         return SelectionChipContent(
             kind: hint.kind, text: hint.text, actionTitle: hint.kind == .button ? SelectionHint.buttonTitle : "Mở",
-            caption: hint.kind == .translation ? SelectionHint.caption(of: hint.source.text) : nil,
+            caption: hint.kind == .translation ? SelectionHint.caption(of: hint.source.text) : nil, note: hint.note,
             open: { [weak self] in self?.openCurrent() },
             deny: deny,
             hover: { [weak self] in self?.chip.hoverChanged($0) }
@@ -396,22 +430,29 @@ final class SmartSelection {
         settings.set(SelectionDenyList.adding(bundleID, to: before), for: keys.selectionDenyList)
         supersedeReading()
         chip.dismiss()
-        let denial = Denial(bundleID: bundleID, appName: setup.applicationName(application), added: !before.contains(bundleID))
+        denialCount += 1
+        let denial = Denial(id: denialCount, bundleID: bundleID, appName: setup.applicationName(application), added: !before.contains(bundleID))
         pendingUndo = denial
-        undoWindow?.cancel()
-        undoWindow = context.scheduler.schedule(after: Self.undoDuration) { [weak self] in self?.pendingUndo = nil }
-        log("deny added=\(Self.flag(denial.added))")
-        context.presenter.showToast(
-            AnyView(SelectionDenialNotice(appName: denial.appName) { [weak self] in self?.undoDenial() }), duration: Self.undoDuration
+        log(.deny(added: denial.added))
+        showToast(
+            AnyView(SelectionDenialNotice(appName: denial.appName, undo: { [weak self] in self?.undoDenial() }, gone: { [weak self] in
+                self?.denialNoticeGone(denial.id)
+            })),
+            for: Self.undoDuration
         )
+    }
+
+    /// The notice of the hiding `id` left the screen: its button is gone, so is the way to undo it. A newer hiding has its own.
+    func denialNoticeGone(_ id: Int) {
+        if pendingUndo?.id == id { pendingUndo = nil }
     }
 
     /// "Hoàn tác": the app comes off the deny list again, if hiding it is what put it there, and the notice goes.
     func undoDenial() {
         guard let denial = pendingUndo else { return }
         pendingUndo = nil
-        undoWindow?.cancel()
-        undoWindow = nil
+        // The same text selected again is a new selection now that the app is read again.
+        lastHandled = nil
         let settings = context.settings
         if denial.added {
             settings.set(SelectionDenyList.removing(denial.bundleID, from: settings.value(keys.selectionDenyList)), for: keys.selectionDenyList)

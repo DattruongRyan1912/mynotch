@@ -79,6 +79,12 @@ import Testing
         #expect(with.chipHeight == without.chipHeight + SelectionChipLayout.captionHeight)
     }
 
+    @Test func theSmallestChipIsTwoLinesAndItsChrome() {
+        #expect(SelectionChipLayout.minChipHeight == 2 * line + SelectionChipLayout.chromeHeight)
+        #expect(SelectionChipLayout.metrics(for: lines(8), caption: nil, maxHeight: SelectionChipLayout.minChipHeight).chipHeight
+            == SelectionChipLayout.minChipHeight)
+    }
+
     // MARK: what the view really draws
 
     func content(_ text: String, caption: String? = nil) -> SelectionChipContent {
@@ -102,6 +108,39 @@ import Testing
     @Test func aLongTranslationNeverMakesTheViewTallerThanTheLimit() {
         #expect(size(of: lines(200), caption: "Hello").height <= SelectionChipLayout.maxHeight)
         #expect(size(of: lines(200), maxHeight: 100).height <= 100)
+    }
+
+    @Test func theNoteBesideTheButtonDoesNotMakeTheChipTaller() {
+        func height(note: String?) -> CGFloat {
+            let model = SelectionChipContent(kind: .translation, text: lines(3), caption: "Hello", note: note, open: {}, deny: {}, hover: { _ in })
+            return NSHostingView(rootView: SelectionChipView(content: model, interface: NotchInterface())).fittingSize.height
+        }
+        #expect(abs(height(note: "Mở để dịch đủ") - height(note: nil)) < 1)
+    }
+
+    @Test func theNoteIsDrawnBesideTheButton() throws {
+        func brightPixelsInTheBottomRow(note: String?) throws -> Int {
+            let model = SelectionChipContent(kind: .translation, text: lines(3), caption: nil, note: note, open: {}, deny: nil, hover: { _ in })
+            let renderer = ImageRenderer(content: SelectionChipLabel(content: model).environment(\.colorScheme, .dark).background(Color.black))
+            renderer.scale = 1
+            let bitmap = NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
+            var count = 0
+            // The row under the text: the icon, the note, the button.
+            for y in (bitmap.pixelsHigh - 28)..<(bitmap.pixelsHigh - 8) {
+                for x in 0..<(bitmap.pixelsWide / 2) {
+                    if let pixel = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), pixel.brightnessComponent > 0.35 { count += 1 }
+                }
+            }
+            return count
+        }
+        #expect(try brightPixelsInTheBottomRow(note: "Mở để dịch đủ") > brightPixelsInTheBottomRow(note: nil) + 20)
+    }
+
+    @Test func theChipsPreviewEngineLetsACancelledPreviewGoAfterAShortGrace() {
+        #expect(SmartSelectionSetup.systemPreview().graceForCancelled == SmartSelectionSetup.previewGrace)
+        #expect(SmartSelectionSetup.previewGrace <= .milliseconds(200))
+        // The tab's own engine keeps requests strictly one at a time.
+        #expect(AppleTranslationEngine().graceForCancelled == nil)
     }
 
     @Test func aShortTranslationStaysCompact() {

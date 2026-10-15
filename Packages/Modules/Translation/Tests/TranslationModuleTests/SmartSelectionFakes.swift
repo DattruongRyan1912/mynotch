@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import MyNotchTestSupport
+import SwiftUI
 @testable import TranslationModule
 
 /// Stands in for the system's mouse and key monitors: tests play what the user does, and nothing is ever observed.
@@ -73,14 +74,25 @@ final class FakeChipWindow: SelectionChipWindowing {
 final class FakeSelectionLog: SelectionLog {
     private(set) var lines: [String] = []
 
-    func write(_ line: String) {
-        lines.append(line)
+    func write(_ line: SelectionLogLine) {
+        lines.append(line.text)
     }
 
     func contains(_ line: String) -> Bool { lines.contains(line) }
 
     /// The lines that start with `prefix`, in order.
     func lines(startingWith prefix: String) -> [String] { lines.filter { $0.hasPrefix(prefix) } }
+}
+
+/// The notices the watcher put up in the notch, with how long each asked to stay; they are also handed on to the fake presenter.
+final class FakeToasts {
+    private(set) var durations: [Duration] = []
+    var forward: (@MainActor (AnyView, Duration) -> Void)?
+
+    func show(_ content: AnyView, _ duration: Duration) {
+        durations.append(duration)
+        forward?(content, duration)
+    }
 }
 
 /// The displays the chip is placed on; tests set them.

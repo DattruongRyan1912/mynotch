@@ -44,7 +44,7 @@ struct TranslationSettingsView: View {
             }
             Toggle(isOn: $useChromiumAccessibility) {
                 Text("Đọc vùng chọn trong Chrome và app Electron")
-                Text("Cho phím tắt và Bôi đen là hiểu. Chrome chuyển sang chế độ hỗ trợ trình đọc màn hình, và một số app đổi cách di chuyển cửa sổ.")
+                Text("Cho phím tắt và Bôi đen là hiểu. Chrome chuyển sang chế độ hỗ trợ trình đọc màn hình, và một số app đổi cách di chuyển cửa sổ; tắt mục này không hoàn lại chế độ của app đang chạy, mở lại app để trở về như cũ.")
             }
             SmartSelectionSettingsView(
                 smartSelection: $smartSelection, showChip: $showSelectionChip, showActivity: $showSelectionActivity,
