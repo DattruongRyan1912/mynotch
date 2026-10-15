@@ -46,10 +46,21 @@ public final class NotchInterface {
     public var captureHiding: CaptureHiding
     /// The displays that show a notch now, which are not always all of them (display mode, fullscreen, hidden by the user).
     public var notches: [NotchDisplay]
+    /// Whether the user wants a tap on the trackpad for a gesture (see `feel`).
+    public var hapticsEnabled = true
+    @ObservationIgnored private let performer: any HapticPerformer
 
-    public init(captureHiding: CaptureHiding = .never, notches: [NotchDisplay] = []) {
+    public init(captureHiding: CaptureHiding = .never, notches: [NotchDisplay] = [], performer: any HapticPerformer = SystemHapticPerformer()) {
         self.captureHiding = captureHiding
         self.notches = notches
+        self.performer = performer
+    }
+
+    /// A light tap for something a gesture did, unless the user turned taps off. For the notch's own gestures and for a
+    /// module whose gesture belongs with them (a window snapped into a tile).
+    public func feel(_ haptic: Haptic) {
+        guard hapticsEnabled else { return }
+        performer.perform(haptic)
     }
 
     /// The displays among `displays` whose notch is visible, in display order so the list only changes when a notch
@@ -58,13 +69,16 @@ public final class NotchInterface {
         displays.filter(\.isVisible).map(\.display).sorted { $0.id < $1.id }
     }
 
-    /// Makes `captureHiding` the user's setting now and again after every change. The returned task ends it.
+    /// Makes `captureHiding` and `hapticsEnabled` the user's settings now and again after every change. The returned task
+    /// ends it.
     @discardableResult
     func follow(_ settings: SettingsStore) -> Task<Void, Never> {
         captureHiding = settings.value(InterfaceSettings.hideFromCapture)
+        hapticsEnabled = settings.value(InterfaceSettings.haptics)
         return Task { [weak self] in
-            for await hiding in Observations({ settings.value(InterfaceSettings.hideFromCapture) }) {
+            for await (hiding, haptics) in Observations({ (settings.value(InterfaceSettings.hideFromCapture), settings.value(InterfaceSettings.haptics)) }) {
                 self?.captureHiding = hiding
+                self?.hapticsEnabled = haptics
             }
         }
     }

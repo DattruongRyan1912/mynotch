@@ -8,6 +8,8 @@ struct NotchRootView: View {
     let activities: ActivityCenter
     let registry: ModuleRegistry
     let geometry: NotchGeometry
+    /// The user's accent and glass; nothing is the notch's own purple and no glass.
+    var theme: NotchTheme?
 
     private var state: NotchState { model.displayState }
 
@@ -80,9 +82,10 @@ struct NotchRootView: View {
                 + "bottom=\(bottom) bubbles=\(accessories.bubbles) list=\(accessories.listRows) shownTab=\(shownTab?.id.rawValue ?? "-")"
         )
         let shape = NotchShape(topRadius: radii.top, bottomRadius: radii.bottom)
+        let accent = theme?.accent ?? NotchTokens.accent
+        let glass = NotchTheme.showsGlass(enabled: theme?.glass ?? false, state: state)
         ZStack(alignment: .top) {
-            shape
-                .fill(NotchTokens.background)
+            NotchBackdrop(glass: glass, bodyHeight: geometry.notchSize.height)
                 .overlay(alignment: .top) {
                     content(accessories)
                         .padding(.horizontal, radii.top)
@@ -103,6 +106,9 @@ struct NotchRootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.notchIsOnScreen, model.isOnScreen)
+        // The accent for the notch's own controls and for a tab's marks, and the tint of the system controls in a tab.
+        .environment(\.notchAccent, accent)
+        .tint(accent)
     }
 
     /// The bubbles of the other live activities, beside the collapsed notch only. They appear and go with the pill's

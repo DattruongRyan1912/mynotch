@@ -5,6 +5,7 @@ struct TabBar: View {
     let tabs: [NotchTab]
     let selected: ModuleID?
     let onSelect: (ModuleID) -> Void
+    @Environment(\.notchAccent) private var accent
 
     var body: some View {
         HStack(spacing: 6) {
@@ -15,7 +16,7 @@ struct TabBar: View {
                         .font(.system(size: 13, weight: .semibold))
                         .frame(width: 30, height: 24)
                         .foregroundStyle(tab.id == selected ? NotchTokens.primaryText : NotchTokens.secondaryText)
-                        .background(tab.id == selected ? Color.white.opacity(0.14) : .clear, in: Capsule())
+                        .background(tab.id == selected ? accent.opacity(0.32) : .clear, in: Capsule())
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)

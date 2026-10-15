@@ -97,6 +97,40 @@ import Testing
     @Test func theSettingsKeysAreTheOnesTheAppStoresThemUnder() {
         #expect(InterfaceSettings.openWidth.name == "interface.openWidth")
         #expect(InterfaceSettings.displayMode.name == "interface.displayMode")
+        #expect(InterfaceSettings.accent.name == "interface.accent")
+        #expect(InterfaceSettings.glass.name == "interface.glass")
+        #expect(InterfaceSettings.swipeToOpen.name == "interface.swipeToOpen")
+        #expect(InterfaceSettings.swipeSensitivity.name == "interface.swipeSensitivity")
+        #expect(InterfaceSettings.haptics.name == "interface.haptics")
+    }
+
+    // MARK: look and gestures
+
+    @Test func theLookAndGesturesStartTheWayTheBriefAsks() {
+        let settings = SettingsStore(defaults: makeIsolatedDefaults())
+        #expect(settings.value(InterfaceSettings.accent) == .system)
+        #expect(settings.value(InterfaceSettings.glass) == false)
+        #expect(settings.value(InterfaceSettings.swipeToOpen))
+        #expect(settings.value(InterfaceSettings.swipeSensitivity) == .medium)
+        #expect(settings.value(InterfaceSettings.haptics))
+    }
+
+    @Test func theLookAndGestureChoicesAreKeptForTheNextLaunch() {
+        let defaults = makeIsolatedDefaults()
+        let first = SettingsStore(defaults: defaults)
+        first.set(true, for: InterfaceSettings.glass)
+        first.set(false, for: InterfaceSettings.swipeToOpen)
+        first.set(.high, for: InterfaceSettings.swipeSensitivity)
+        let second = SettingsStore(defaults: defaults)
+        #expect(second.value(InterfaceSettings.glass))
+        #expect(second.value(InterfaceSettings.swipeToOpen) == false)
+        #expect(second.value(InterfaceSettings.swipeSensitivity) == .high)
+    }
+
+    @Test func anUnknownSensitivityIsTheDefault() {
+        let defaults = makeIsolatedDefaults()
+        defaults.set(Data("\"extreme\"".utf8), forKey: InterfaceSettings.swipeSensitivity.name)
+        #expect(SettingsStore(defaults: defaults).value(InterfaceSettings.swipeSensitivity) == .medium)
     }
 
     // MARK: live

@@ -14,12 +14,17 @@ final class NotchWindowController {
     private var screenFrame: CGRect
     private let panel: NotchPanel
     private let hosting: FirstMouseHostingView<NotchRootView>
+    private let theme: NotchTheme?
     private let registry: ModuleRegistry
     private let activities: ActivityCenter
     private let captureHiding: () -> CaptureHiding
     private let swipesBetweenTabs: () -> Bool
     private let systemAllowsSwipe: () -> Bool
+    /// The sensitivity of swiping to open and close, read at each gesture; nil when the user turned it off.
+    private let swipeToOpen: () -> SwipeSensitivity?
+    private let feel: (Haptic) -> Void
     private var swipe = TabSwipeRecognizer()
+    private var openSwipe = NotchSwipeRecognizer()
     private var observation: Task<Void, Never>?
     #if DEBUG
     private let trace: NotchWindowTrace
@@ -49,7 +54,10 @@ final class NotchWindowController {
         delays: @escaping () -> (open: Duration, close: Duration),
         captureHiding: @escaping () -> CaptureHiding,
         swipesBetweenTabs: @escaping () -> Bool,
-        systemAllowsSwipe: @escaping () -> Bool = { NSEvent.isSwipeTrackingFromScrollEventsEnabled }
+        systemAllowsSwipe: @escaping () -> Bool = { NSEvent.isSwipeTrackingFromScrollEventsEnabled },
+        swipeToOpen: @escaping () -> SwipeSensitivity? = { nil },
+        theme: NotchTheme? = nil,
+        feel: @escaping (Haptic) -> Void = { _ in }
     ) {
         self.displayID = displayID
         self.registry = registry
@@ -57,11 +65,16 @@ final class NotchWindowController {
         self.captureHiding = captureHiding
         self.swipesBetweenTabs = swipesBetweenTabs
         self.systemAllowsSwipe = systemAllowsSwipe
+        self.swipeToOpen = swipeToOpen
+        self.theme = theme
+        self.feel = feel
         screenFrame = screen.frame
         geometry = NotchGeometry(screen: screen, config: config)
         model = NotchViewModel(scheduler: scheduler, availableTabs: { [weak registry] in registry?.tabs.map(\.id) ?? [] }, delays: delays)
         panel = NotchPanel(frame: geometry.panelFrame(in: screen.frame))
-        hosting = FirstMouseHostingView(rootView: NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry))
+        hosting = FirstMouseHostingView(
+            rootView: NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry, theme: theme)
+        )
         hosting.frame = CGRect(origin: .zero, size: geometry.panelSize)
         panel.contentView = hosting
         #if DEBUG
@@ -69,7 +82,8 @@ final class NotchWindowController {
         #endif
         hosting.onUnusedScroll = { [weak self] event in
             self?.handleScroll(
-                phase: event.phase, momentumPhase: event.momentumPhase, deltaX: event.scrollingDeltaX, deltaY: event.scrollingDeltaY
+                phase: event.phase, momentumPhase: event.momentumPhase, deltaX: event.scrollingDeltaX, deltaY: event.scrollingDeltaY,
+                naturalScrolling: event.isDirectionInvertedFromDevice
             )
         }
         NotchPerf.start()
@@ -100,7 +114,7 @@ final class NotchWindowController {
         model.bubbleCount = CompactAccessories.bubbleCount(activities: activities, geometry: newGeometry)
         // The new shape first, then the frame: `setFrame(display: true)` draws at once, and it must not draw the old shape
         // in the new frame.
-        hosting.rootView = NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry)
+        hosting.rootView = NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry, theme: theme)
         panel.setFrame(geometry.panelFrame(in: screen.frame), display: true)
         hosting.frame = CGRect(origin: .zero, size: geometry.panelSize)
         refreshHitTesting()
@@ -147,8 +161,16 @@ final class NotchWindowController {
     }
 
     /// A scroll event nothing under the pointer used. A two-finger sideways swipe moves the open notch one tab along the
-    /// tab bar; `NotchPanel` only sees these while the pointer is over the notch, because it ignores the mouse elsewhere.
-    func handleScroll(phase: NSEvent.Phase, momentumPhase: NSEvent.Phase, deltaX: CGFloat, deltaY: CGFloat) {
+    /// tab bar, and a vertical one opens the collapsed notch (down) or closes the open one (up); the view only sees these
+    /// while the pointer is over the notch, because the panel ignores the mouse elsewhere. `naturalScrolling` says whether
+    /// the delta is the fingers' direction (the default) or the opposite, which only the vertical swipe cares about: it is
+    /// about where the fingers go.
+    func handleScroll(phase: NSEvent.Phase, momentumPhase: NSEvent.Phase, deltaX: CGFloat, deltaY: CGFloat, naturalScrolling: Bool = true) {
+        swipeBetweenTabs(phase: phase, momentumPhase: momentumPhase, deltaX: deltaX, deltaY: deltaY)
+        swipeOpenOrClosed(phase: phase, momentumPhase: momentumPhase, deltaX: deltaX, fingersDeltaY: naturalScrolling ? deltaY : -deltaY)
+    }
+
+    private func swipeBetweenTabs(phase: NSEvent.Phase, momentumPhase: NSEvent.Phase, deltaX: CGFloat, deltaY: CGFloat) {
         guard let step = swipe.feed(phase: phase, momentumPhase: momentumPhase, deltaX: deltaX, deltaY: deltaY) else { return }
         let tabs = registry.tabs.map(\.id)
         guard let target = step.target(
@@ -156,6 +178,23 @@ final class NotchWindowController {
         ) else { return }
         NotchLog.record("swipe \(step == .next ? "next" : "previous") \(model.state.logDescription) -> \(target.rawValue)")
         model.open(tab: target)
+        feel(.alignment)
+    }
+
+    private func swipeOpenOrClosed(phase: NSEvent.Phase, momentumPhase: NSEvent.Phase, deltaX: CGFloat, fingersDeltaY: CGFloat) {
+        guard let sensitivity = swipeToOpen() else { return }
+        // `hover` is the part of the notch the pointer was last seen over, so a gesture that begins over a bubble, the list
+        // or nothing at all is not a swipe on the notch.
+        guard let step = openSwipe.feed(
+            phase: phase, momentumPhase: momentumPhase, deltaX: deltaX, deltaY: fingersDeltaY, onNotch: model.hover == .notch,
+            sensitivity: sensitivity
+        ), let action = step.action(state: model.state) else { return }
+        NotchLog.record("swipe \(step) \(model.state.logDescription) -> \(action)")
+        switch action {
+        case .open: model.open(tab: nil)
+        case .close: model.close()
+        }
+        feel(.levelChange)
     }
 
     /// Called for every pointer move; flips click-through and drives hover and drag state. `dragTypes` are the

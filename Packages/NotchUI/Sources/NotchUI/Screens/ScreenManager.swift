@@ -8,6 +8,8 @@ public final class ScreenManager {
     private let settings: SettingsStore
     private let scheduler: any Scheduler
     private let interface: NotchInterface
+    /// The accent and glass every notch is drawn with.
+    private lazy var theme = NotchTheme(settings: settings)
     private var controllers: [String: NotchWindowController] = [:]
     private var fullscreenDisplays: Set<CGDirectDisplayID> = []
     /// The display the user is working on, for the display mode that follows them.
@@ -93,7 +95,12 @@ public final class ScreenManager {
                     displayID: displayID, screen: descriptor, config: config, scheduler: scheduler,
                     registry: registry, activities: activities, delays: { [settings] in Self.delays(settings) },
                     captureHiding: { [settings] in settings.value(InterfaceSettings.hideFromCapture) },
-                    swipesBetweenTabs: { [settings] in settings.value(InterfaceSettings.swipeBetweenTabs) }
+                    swipesBetweenTabs: { [settings] in settings.value(InterfaceSettings.swipeBetweenTabs) },
+                    swipeToOpen: { [settings] in
+                        settings.value(InterfaceSettings.swipeToOpen) ? settings.value(InterfaceSettings.swipeSensitivity) : nil
+                    },
+                    theme: theme,
+                    feel: { [interface] in interface.feel($0) }
                 )
             }
         }
