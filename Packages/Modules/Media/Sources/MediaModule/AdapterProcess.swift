@@ -114,6 +114,9 @@ final class AdapterProcess: NowPlayingSource {
     /// Whether a stream process is running (for tests).
     var isStreamRunning: Bool { stream != nil }
 
+    /// Commands waiting behind the running one (for tests).
+    var pendingCommandCount: Int { queuedCommands.count }
+
     func start(onLine: @escaping @MainActor (String) -> Void, onFailure: @escaping @MainActor (String) -> Void) {
         stop()
         self.onLine = onLine
@@ -203,7 +206,8 @@ final class AdapterProcess: NowPlayingSource {
         Self.readLines(from: errors.fileHandleForReading) { [log] lines in lines.forEach(log) }
     }
 
-    private func deliver(_ lines: [String], from id: Int) {
+    /// What the reader of launch `id` calls with each batch of lines; tests call it for a line that comes late.
+    func deliver(_ lines: [String], from id: Int) {
         for line in lines {
             // Re-checked per line: a callback may stop the source.
             guard id == launchCount, let onLine else { return }
@@ -211,7 +215,8 @@ final class AdapterProcess: NowPlayingSource {
         }
     }
 
-    private func streamExited(_ id: Int, succeeded: Bool, reason: String) {
+    /// What the exit of launch `id` calls on the main actor; tests call it for the exit of a launch that is over.
+    func streamExited(_ id: Int, succeeded: Bool, reason: String) {
         guard id == launchCount, onLine != nil else { return }
         stream = nil
         cancelTimers()

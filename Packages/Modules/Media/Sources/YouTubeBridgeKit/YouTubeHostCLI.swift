@@ -33,13 +33,14 @@ public enum YouTubeHostCLI {
     ) -> Int32 {
         run(
             stdin: stdin, socketPath: socketPath, reconnectInterval: reconnectInterval, now: now, expectedOwner: expectedOwner,
-            log: log, launch: launch, commandOutput: commandOutput, didHandle: nil
+            log: log, launch: launch, commandOutput: commandOutput, didHandle: nil, didRound: nil
         )
     }
 
     /// `run` with a hook that is called after each native message has been dealt with (forwarded, kept for the replay or
     /// dropped). It is how a test learns that the host has got to a message, which the pipe alone does not say: a
-    /// message written to stdin may not have been read yet.
+    /// message written to stdin may not have been read yet. Another hook is called after each round of the thread that
+    /// keeps the connection up, which is how a test learns that the host has tried again while the app is away.
     static func run<Source: ByteReading>(
         stdin: Source,
         socketPath: String,
@@ -49,12 +50,13 @@ public enum YouTubeHostCLI {
         log: YouTubeBridgeLog,
         launch: YouTubeHostLaunch,
         commandOutput: any ByteWriting,
-        didHandle: (@Sendable () -> Void)?
+        didHandle: (@Sendable () -> Void)?,
+        didRound: (@Sendable () -> Void)?
     ) -> Int32 {
         log("host start argc=\(launch.argumentCount) parent=\(launch.parentName ?? "unknown")")
         let relay = HostRelay(
             socketPath: socketPath, expectedOwner: expectedOwner, retryInterval: reconnectInterval, now: now, log: log,
-            commandOutput: commandOutput
+            commandOutput: commandOutput, didRound: didRound
         )
         relay.start(reconnectingEvery: reconnectInterval)
         var reader = NativeMessageReader(source: stdin)
@@ -109,6 +111,8 @@ final class HostRelay: Sendable {
     private let log: YouTubeBridgeLog
     private let commandOutput: any ByteWriting
     private let tally: FrameTally
+    /// Called after each round of the thread that keeps the connection up (for tests).
+    private let didRound: (@Sendable () -> Void)?
     private let state = Mutex(State())
     private let wake = DispatchSemaphore(value: 0)
     private let finished = DispatchSemaphore(value: 0)
@@ -117,7 +121,8 @@ final class HostRelay: Sendable {
 
     init(
         socketPath: String, expectedOwner: uid_t, retryInterval: TimeInterval,
-        now: @escaping @Sendable () -> TimeInterval, log: YouTubeBridgeLog, commandOutput: any ByteWriting
+        now: @escaping @Sendable () -> TimeInterval, log: YouTubeBridgeLog, commandOutput: any ByteWriting,
+        didRound: (@Sendable () -> Void)? = nil
     ) {
         self.socketPath = socketPath
         self.expectedOwner = expectedOwner
@@ -125,6 +130,7 @@ final class HostRelay: Sendable {
         self.now = now
         self.log = log
         self.commandOutput = commandOutput
+        self.didRound = didRound
         tally = FrameTally(counted: "forwarded", lost: "dropped", now: now)
     }
 
@@ -216,6 +222,7 @@ final class HostRelay: Sendable {
             }
         }
         if let summary = tally.line() { log("host frames \(summary)") }
+        didRound?()
     }
 
     /// Sends the replay over a fresh connection, and keeps it when that worked.

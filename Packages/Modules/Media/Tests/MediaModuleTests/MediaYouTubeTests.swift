@@ -639,7 +639,7 @@ import Testing
         module.seek(toSeconds: 30)
         #expect(source.sent == [.togglePlayPause, .play, .pause])
         #expect(source.seeks == [30])
-        #expect(!host.hasData(within: 0.2))
+        #expect(!host.hasUnreadData)
     }
 
     @Test func aPlayerThatIsNoBrowserKeepsMediaRemoteWhateverTheExtensionHasSaid() async throws {
@@ -649,7 +649,7 @@ import Testing
         module.send(.nextTrack)
         module.send(.previousTrack)
         #expect(source.sent == [.nextTrack, .previousTrack])
-        #expect(!host.hasData(within: 0.2))
+        #expect(!host.hasUnreadData)
         #expect(module.skipRoute() == .mediaRemote)
         #expect(fallbacks.isEmpty, "that is the usual route, not a fallback")
     }
@@ -826,7 +826,7 @@ import Testing
         answer("next", "unavailable")
         harness.scheduler.advance(by: .seconds(5))
         #expect(source.sent.isEmpty, "unavailable is an answer: no fallback skip")
-        #expect(!host.hasData(within: 0.2), "and the command is not sent again")
+        #expect(!host.hasUnreadData, "and the command is not sent again")
         #expect(fallbacks.isEmpty)
         module.send(.previousTrack)
         answer("previous", "ok")

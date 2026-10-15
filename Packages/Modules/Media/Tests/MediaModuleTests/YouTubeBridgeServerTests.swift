@@ -31,8 +31,9 @@ final class YouTubeTestClient {
         return count == 0 || (count < 0 && errno != EAGAIN && errno != EINTR)
     }
 
-    /// The frames the server sends, waiting up to `seconds` for each; fewer than `count` when they do not come.
-    func receiveFrames(count: Int, seconds: Double = 5) -> [Data] {
+    /// The frames the server sends, waiting up to `seconds` for each; fewer than `count` when they do not come. The limit
+    /// only matters when something is wrong, so it is very generous: a busy machine can hold a thread back for seconds.
+    func receiveFrames(count: Int, seconds: Double = 60) -> [Data] {
         var decoder = AppFrameDecoder()
         var frames: [Data] = []
         var buffer = [UInt8](repeating: 0, count: 4096)
@@ -50,10 +51,11 @@ final class YouTubeTestClient {
         return frames
     }
 
-    /// Whether the server has sent anything that has not been read yet, within `seconds`.
-    func hasData(within seconds: Double) -> Bool {
+    /// Whether the server has sent anything that has not been read yet. A write is in this socket's buffer once `send`
+    /// has returned, so a test that asks after the server's call has nothing to wait for.
+    var hasUnreadData: Bool {
         var poller = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-        return poll(&poller, 1, Int32(seconds * 1000)) > 0 && poller.revents & Int16(POLLIN) != 0
+        return poll(&poller, 1, 0) > 0 && poller.revents & Int16(POLLIN) != 0
     }
 }
 
@@ -82,13 +84,25 @@ private final class SigpipeCounter: Sendable {
     var seen: Int { sigpipesRaised.load(ordering: .relaxed) - baseline }
 }
 
-/// Waits on the main actor, where the callbacks run, until `condition` holds.
+/// Waits on the main actor, where the callbacks run, until `condition` holds. The limit only matters when something is
+/// wrong, so it is very generous: a busy machine can hold a thread back for many seconds.
 @discardableResult
-func waitUntil(seconds: Double = 5, _ condition: () -> Bool) async -> Bool {
-    let deadline = Date().addingTimeInterval(seconds)
+func waitUntil(seconds: Double = 60, _ condition: () -> Bool) async -> Bool {
+    let deadline = ContinuousClock.now + .seconds(seconds)
     while !condition() {
-        if Date() > deadline { return false }
+        if ContinuousClock.now > deadline { return false }
         try? await Task.sleep(for: .milliseconds(10))
+    }
+    return true
+}
+
+/// Like `waitUntil`, but on this thread, so the main queue does not run meanwhile: for a test that needs what other
+/// threads hand to the main queue to be queued and not yet delivered.
+func waitWithoutLettingTheMainQueueRun(seconds: Double = 60, _ condition: () -> Bool) -> Bool {
+    let deadline = ContinuousClock.now + .seconds(seconds)
+    while !condition() {
+        if ContinuousClock.now > deadline { return false }
+        usleep(1_000)
     }
     return true
 }
@@ -273,12 +287,12 @@ final class Finished: Sendable {
         await sendPlayback(from: second)
         #expect(server.send(.next))
         #expect(second.receiveFrames(count: 1) == [YouTubeCommand.next.json])
-        #expect(!first.hasData(within: 0.2), "only the host that is behind the playing page is asked")
+        #expect(!first.hasUnreadData, "only the host that is behind the playing page is asked")
 
         await sendPlayback(from: first, time: 2)
         #expect(server.send(.previous))
         #expect(first.receiveFrames(count: 1) == [YouTubeCommand.previous.json])
-        #expect(!second.hasData(within: 0.2))
+        #expect(!second.hasUnreadData)
     }
 
     @Test func theFrameIsExactlyTheCommandsFrame() async throws {
@@ -290,7 +304,7 @@ final class Finished: Sendable {
         #expect(server.send(.previous))
         var raw = [UInt8](repeating: 0, count: 64)
         var poller = pollfd(fd: client.fd, events: Int16(POLLIN), revents: 0)
-        #expect(poll(&poller, 1, 5000) > 0)
+        #expect(poll(&poller, 1, 60_000) > 0)
         let count = recv(client.fd, &raw, raw.count, 0)
         #expect(Data(raw[0..<max(count, 0)]) == YouTubeCommand.previous.frame)
     }
@@ -306,7 +320,7 @@ final class Finished: Sendable {
         client.sendFrame(YouTubeTestMessages.json(YouTubeTestMessages.diag("content-start", from: .content)))
         await waitUntil { received.count == 3 }
         #expect(!server.send(.next), "only a playback says where the page is")
-        #expect(!client.hasData(within: 0.2))
+        #expect(!client.hasUnreadData)
     }
 
     @Test func aHostThatClosedIsNotWrittenTo() async throws {
@@ -370,7 +384,7 @@ final class Finished: Sendable {
             client.sendFrame(YouTubeTestMessages.json(message))
         }
         await waitUntil { received.count == 3 }
-        #expect(!client.hasData(within: 0.3))
+        #expect(!client.hasUnreadData)
     }
 
     @Test func aCommandReachesTheHostsStdoutAsANativeMessage() async throws {
@@ -401,7 +415,7 @@ final class Finished: Sendable {
         await waitUntil { received.count == 1 }
         #expect(server.send(.next))
         var poller = pollfd(fd: stdout[0], events: Int16(POLLIN), revents: 0)
-        #expect(poll(&poller, 1, 5000) > 0, "the command did not come out of the host")
+        #expect(poll(&poller, 1, 60_000) > 0, "the command did not come out of the host")
         var reader = NativeMessageReader(source: FileDescriptorReader(fileDescriptor: stdout[0]))
         #expect(reader.next() == .message(YouTubeCommand.next.json))
         close(stdin[1])
@@ -456,14 +470,20 @@ final class Finished: Sendable {
     }
 
     @Test func callbacksQueuedBeforeStopAreDropped() async throws {
-        let server = makeServer()
+        let recorder = LogRecorder()
+        let clock = TestClock()
+        let server = YouTubeBridgeServer(socketPath: path, log: recorder.log, now: { [clock] in clock.now }) { [unowned self] in
+            received.append($0)
+        }
         try server.start()
         let client = try #require(YouTubeTestClient(path: path))
+        // With ten seconds gone, the summary of the frames comes right after a frame has been handed to the main queue.
+        clock.advance(by: 10)
         client.sendFrame(YouTubeTestMessages.json(YouTubeTestMessages.clear()))
-        // Blocks the main thread, so the frame is read and handed to the main queue but not yet delivered.
-        usleep(300_000)
+        // Waits on this thread, so the frame is read and handed to the main queue but not yet delivered.
+        #expect(waitWithoutLettingTheMainQueueRun { !recorder.lines(containing: "app frames").isEmpty })
         server.stop()
-        try await Task.sleep(for: .milliseconds(200))
+        await drainMainQueue()
         #expect(received.isEmpty)
     }
 

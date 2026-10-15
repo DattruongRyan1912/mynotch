@@ -16,10 +16,15 @@ import Testing
     let directory: URL
     let scheduler = ManualScheduler()
     let recorder = Recorder()
+    /// What the fake adapters wait on (`gate.wait`) until the test lets them through.
+    let gate: ProcessGate
+    /// Commands the test has let through so far, in order (see `letCommandsRun`).
+    var finishedCommands: [String] = []
 
     init() throws {
         directory = FileManager.default.temporaryDirectory.appending(path: "AdapterProcessTests-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        gate = try ProcessGate(in: directory)
     }
 
     deinit { try? FileManager.default.removeItem(at: directory) }
@@ -54,9 +59,9 @@ import Testing
     }
 
     /// Lets the process and its callbacks run until `condition` holds. The limit only matters when something is
-    /// wrong, so it is generous: starting a shell can take seconds on a machine that is very busy.
+    /// wrong, so it is very generous: starting a shell can take many seconds on a machine that is very busy.
     func eventually(_ condition: () -> Bool) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(30)
+        let deadline = ContinuousClock.now + .seconds(120)
         while !condition() {
             guard ContinuousClock.now < deadline else { return false }
             try? await Task.sleep(for: .milliseconds(10))
@@ -69,33 +74,31 @@ import Testing
         await eventually { launches == count && !adapter.isStreamRunning }
     }
 
-    /// A fake adapter that runs until the test creates `release`, then exits with `status`.
+    /// A fake adapter that runs until the test opens the gate, then exits with `status`.
     func releasable(exitStatus status: Int32) throws -> AdapterProcess {
-        try makeAdapter("while [ ! -f '\(path("release"))' ]; do sleep 0.02; done\nexit \(status)")
+        try makeAdapter("\(gate.wait)\nexit \(status)")
     }
 
     func release(_ adapter: AdapterProcess, launches count: Int) async -> Bool {
-        FileManager.default.createFile(atPath: path("release"), contents: nil)
-        defer { try? FileManager.default.removeItem(atPath: path("release")) }
+        gate.open()
         return await exited(adapter, launches: count)
     }
 
     func processIsGone(_ pid: pid_t) -> Bool { kill(pid, 0) != 0 && errno == ESRCH }
 
-    /// Lets late output and exit callbacks of finished processes reach the main actor.
-    func settle() async throws { try await Task.sleep(for: .milliseconds(200)) }
-
-
     @Test func deliversCompleteLinesInOrderOnTheMainActor() async throws {
         let adapter = try makeAdapter(#"""
             printf '{"n":1}\n{"n":'
-            sleep 0.1
+            \#(gate.wait)
             printf '2}\n{"n":3}\n'
             exec sleep 30
             """#)
         start(adapter)
         defer { adapter.stop() }
 
+        // The first line and the start of the second are one write, so the reader holds the start when the line arrives.
+        #expect(await eventually { recorder.lines == [#"{"n":1}"#] })
+        gate.open()
         #expect(await eventually { recorder.lines.count == 3 })
         #expect(recorder.lines == [#"{"n":1}"#, #"{"n":2}"#, #"{"n":3}"#])
         #expect(recorder.linesOnMainThread == [true, true, true])
@@ -189,13 +192,13 @@ import Testing
         #expect(await eventually { recorder.failures.count == 1 })
         #expect(await exited(adapter, launches: 3))
 
+        #expect(await eventually { recorder.logs.contains("adapter broke") })
+
         scheduler.advance(by: .seconds(120))
-        try await settle()
         #expect(launches == 3)
         #expect(adapter.launchCount == 3)
         #expect(scheduler.pendingCount == 0)
         #expect(recorder.failures.count == 1)
-        #expect(recorder.logs.contains("adapter broke"))
     }
 
     @Test func signalKilledStartsCountAsFailedStarts() async throws {
@@ -213,19 +216,45 @@ import Testing
     }
 
     @Test func deliversNothingAfterGivingUp() async throws {
-        // The background subshell keeps stdout open and writes after the adapter has exited.
-        let adapter = try makeAdapter("(sleep 0.1; echo late) &\nexit 1")
+        // The background subshell keeps stdout open and writes after the adapter has exited, once the test opens the gate.
+        let adapter = try makeAdapter("(\(gate.wait); echo late; echo written >> '\(path("written"))') &\nexit 1")
         start(adapter)
         defer { adapter.stop() }
 
-        #expect(await eventually { recorder.lines.count == 1 && !adapter.isStreamRunning })
+        // The first two launches are still the current one when their late line comes.
+        #expect(await eventually { launches == 1 })
+        gate.open()
+        #expect(await eventually { recorder.lines == ["late"] && !adapter.isStreamRunning })
         scheduler.advance(by: .seconds(1))
+        #expect(await eventually { launches == 2 })
+        gate.open()
         #expect(await eventually { recorder.lines.count == 2 && !adapter.isStreamRunning })
         scheduler.advance(by: .seconds(2))
+        // The third failed start ends it, and only then is the last late line written.
         #expect(await eventually { recorder.failures.count == 1 })
         #expect(await eventually { launches == 3 })
-        try await settle()
+        gate.open()
+        #expect(await eventually { contents("written").split(separator: "\n").count == 3 })
+        await drainMainQueue()
         #expect(recorder.lines == ["late", "late"])
+        #expect(adapter.launchCount == 3)
+    }
+
+    @Test func aLineThatComesAfterGivingUpIsDropped() {
+        let adapter = AdapterProcess(
+            executable: directory.appending(path: "missing-perl"), baseArguments: [],
+            scheduler: scheduler, log: { [recorder] in recorder.logs.append($0) }
+        )
+        start(adapter)
+        defer { adapter.stop() }
+        adapter.deliver(["early"], from: 1)
+        #expect(recorder.lines == ["early"], "launch 1 is the current one")
+
+        scheduler.advance(by: .seconds(1))
+        scheduler.advance(by: .seconds(2))
+        #expect(recorder.failures.count == 1)
+        adapter.deliver(["late"], from: 3)
+        #expect(recorder.lines == ["early"])
     }
 
     @Test func missingExecutableGivesUpAfterThreeAttempts() {
@@ -277,12 +306,28 @@ import Testing
         adapter.stop()
         #expect(!adapter.isStreamRunning)
         #expect(await eventually { processIsGone(pid) })
-        try await settle()
+        await drainMainQueue()
         scheduler.advance(by: .seconds(120))
         #expect(scheduler.pendingCount == 0)
         #expect(adapter.launchCount == 1)
         #expect(launches == 1)
         #expect(recorder.failures.isEmpty)
+    }
+
+    @Test func theExitOfAStoppedStreamIsIgnored() async throws {
+        let adapter = try makeAdapter("exec sleep 30", killDelay: .seconds(30))
+        start(adapter)
+        #expect(await eventually { launches == 1 })
+        let id = adapter.launchCount
+
+        adapter.stop()
+        // What the terminated process reports, whenever it does: no restart, no failure, no log.
+        adapter.streamExited(id, succeeded: false, reason: "signal 15")
+        #expect(scheduler.pendingCount == 0)
+        scheduler.advance(by: .seconds(120))
+        #expect(adapter.launchCount == 1)
+        #expect(recorder.failures.isEmpty)
+        #expect(recorder.logs.isEmpty)
     }
 
     @Test func stopKillsAnAdapterThatIgnoresSIGTERM() async throws {
@@ -295,28 +340,39 @@ import Testing
         #expect(await eventually { processIsGone(pid) })
     }
 
-    /// The first launch prints a line when it gets SIGTERM, so its output arrives after the second launch started.
+    /// The first launch prints a line when it gets SIGTERM, so its output arrives after the second launch started. The
+    /// second waits for the gate, then prints its own line.
     func replaceableAdapter() throws -> AdapterProcess {
         try makeAdapter("""
-            if [ ! -f '\(path("replaced"))' ]; then
-                touch '\(path("replaced"))'
-                trap 'echo replaced; exit 0' TERM
-                while :; do sleep 0.02; done
+            if [ ! -f '\(path("armed"))' ]; then
+                trap 'echo replaced; kill $!; exit 0' TERM
+                touch '\(path("armed"))'
+                sleep 30 &
+                wait $!
             fi
+            \(gate.wait)
+            echo fresh
             exec sleep 30
             """, killDelay: .seconds(30))
     }
+
+    /// The first launch has set up its SIGTERM handler; one that came earlier would end it without its line.
+    var isArmed: Bool { FileManager.default.fileExists(atPath: path("armed")) }
 
     @Test func startingAgainTerminatesThePreviousProcess() async throws {
         let adapter = try replaceableAdapter()
         start(adapter)
         defer { adapter.stop() }
-        #expect(await eventually { launches == 1 })
+        #expect(await eventually { isArmed })
         let first = try #require(pids.first)
 
         start(adapter)
         #expect(await eventually { launches == 2 && processIsGone(first) })
-        try await settle()
+        // The exit of the first launch comes whenever it comes; it is not the current stream's.
+        adapter.streamExited(1, succeeded: true, reason: "status 0")
+        #expect(adapter.isStreamRunning)
+        #expect(scheduler.pendingCount == 2, "the second launch's own timers, nothing more")
+        await drainMainQueue()
         #expect(adapter.isStreamRunning)
         scheduler.advance(by: .seconds(1))
         #expect(adapter.launchCount == 2)
@@ -326,13 +382,30 @@ import Testing
         let adapter = try replaceableAdapter()
         start(adapter)
         defer { adapter.stop() }
-        #expect(await eventually { launches == 1 })
+        #expect(await eventually { isArmed })
         let first = try #require(pids.first)
 
         start(adapter)
         #expect(await eventually { processIsGone(first) })
-        try await settle()
+        // The first launch said "replaced" before it ended; the second launch says its own line only now.
+        gate.open()
+        #expect(await eventually { recorder.lines.contains("fresh") })
+        await drainMainQueue()
+        #expect(recorder.lines == ["fresh"])
+    }
+
+    @Test func onlyTheCurrentLaunchsLinesAreDelivered() async throws {
+        let adapter = try replaceableAdapter()
+        start(adapter)
+        defer { adapter.stop() }
+        #expect(await eventually { isArmed })
+        start(adapter)
+        #expect(adapter.launchCount == 2)
+
+        adapter.deliver(["from the first"], from: 1)
         #expect(recorder.lines.isEmpty)
+        adapter.deliver(["from the second"], from: 2)
+        #expect(recorder.lines == ["from the second"])
     }
 
 
@@ -374,16 +447,15 @@ import Testing
     }
 
     @Test func shuffleRepeatAndSendRunOneAtATimeInOrder() async throws {
-        let adapter = try slowCommands()
+        let adapter = try heldCommands()
         adapter.setShuffle(.tracks)
         adapter.setRepeat(.playlist)
         adapter.send(.nextTrack)
         adapter.setRepeat(.off)
 
-        let expected = commandLog("shuffle 3", "repeat 3", "send 4", "repeat 1")
-        #expect(await eventually { contents("commands") == expected })
-        try await settle()
-        #expect(contents("commands") == expected, "a repeat is not a seek, so none of them replaces another")
+        #expect(adapter.pendingCommandCount == 3, "the first is running; a repeat is not a seek, so none of them replaces another")
+        await letCommandsRun("shuffle 3", "repeat 3", "send 4", "repeat 1")
+        #expect(adapter.pendingCommandCount == 0)
         #expect(recorder.logs.isEmpty)
     }
 
@@ -407,34 +479,59 @@ import Testing
         #expect(adapter.launchCount == 0)
     }
 
-    /// Each command logs its start and end and takes a while, so overlapping runs would interleave.
-    func slowCommands() throws -> AdapterProcess {
+    /// Each command logs its start, waits for the gate and logs its end, so overlapping runs would show in the log.
+    func heldCommands() throws -> AdapterProcess {
         try makeAdapter("""
             echo "start $*" >> '\(path("commands"))'
-            sleep 0.15
+            \(gate.wait)
             echo "end $*" >> '\(path("commands"))'
             """)
     }
 
-    func commandLog(_ commands: String...) -> String {
+    func commandLog(_ commands: [String]) -> String {
         commands.map { "start \($0)\nend \($0)\n" }.joined()
     }
 
+    /// Waits until the commands log starts with `expected`. False when the log is something that `final`, the log the test
+    /// is heading for, does not start with (a wrong order or an overlap), or when it never gets there.
+    func commandsLogReaches(_ expected: String, heading final: String) async -> Bool {
+        _ = await eventually {
+            let text = contents("commands")
+            return text.hasPrefix(expected) || !final.hasPrefix(text)
+        }
+        let text = contents("commands")
+        return text.hasPrefix(expected) && final.hasPrefix(text)
+    }
+
+    /// Lets `commands` through one at a time, each only once it is the one running, and checks the log at every step:
+    /// while one is held nothing else may have started, and when it is let through it ends before the next begins.
+    func letCommandsRun(_ commands: String..., sourceLocation: SourceLocation = #_sourceLocation) async {
+        let final = commandLog(finishedCommands + commands)
+        for command in commands {
+            let running = commandLog(finishedCommands) + "start \(command)\n"
+            #expect(await commandsLogReaches(running, heading: final), "\(command) did not start", sourceLocation: sourceLocation)
+            #expect(contents("commands") == running, "\(command) did not run alone", sourceLocation: sourceLocation)
+            gate.open()
+            finishedCommands.append(command)
+            #expect(await commandsLogReaches(commandLog(finishedCommands), heading: final), "\(command) did not end", sourceLocation: sourceLocation)
+        }
+        #expect(launches == finishedCommands.count, sourceLocation: sourceLocation)
+    }
+
     @Test func commandsRunOneAtATimeInOrder() async throws {
-        let adapter = try slowCommands()
+        let adapter = try heldCommands()
         adapter.send(.play)
         adapter.send(.nextTrack)
         adapter.send(.pause)
 
-        let expected = commandLog("send 0", "send 4", "send 1")
-        #expect(await eventually { contents("commands") == expected })
-        try await settle()
-        #expect(contents("commands") == expected)
+        #expect(adapter.pendingCommandCount == 2, "only the first is running")
+        await letCommandsRun("send 0", "send 4", "send 1")
+        #expect(adapter.pendingCommandCount == 0)
         #expect(recorder.logs.isEmpty)
     }
 
     @Test func aBurstOfSeeksKeepsOnlyTheLatestPendingSeek() async throws {
-        let adapter = try slowCommands()
+        let adapter = try heldCommands()
         adapter.seek(toSeconds: 1)
         adapter.seek(toSeconds: 2)
         adapter.send(.pause)
@@ -442,26 +539,25 @@ import Testing
         adapter.seek(toSeconds: 4)
 
         // The first seek is already running; 2 and 3 are superseded, and 4 still follows the pause it came after.
-        let expected = commandLog("seek 1000000", "send 1", "seek 4000000")
-        #expect(await eventually { contents("commands") == expected })
-        try await settle()
-        #expect(contents("commands") == expected)
-        #expect(launches == 3)
+        #expect(adapter.pendingCommandCount == 2)
+        await letCommandsRun("seek 1000000", "send 1", "seek 4000000")
+        #expect(adapter.pendingCommandCount == 0)
     }
 
     @Test func stopDropsQueuedCommands() async throws {
-        let adapter = try slowCommands()
+        let adapter = try heldCommands()
         adapter.send(.play)
         adapter.send(.nextTrack)
         adapter.seek(toSeconds: 2)
+        #expect(adapter.pendingCommandCount == 2)
         adapter.stop()
+        #expect(adapter.pendingCommandCount == 0, "nothing that waited behind the running command is left")
 
-        // The running command finishes; nothing that waited behind it runs.
-        #expect(await eventually { contents("commands") == commandLog("send 0") })
-        try await settle()
-        #expect(contents("commands") == commandLog("send 0"))
+        // The running command finishes.
+        await letCommandsRun("send 0")
 
+        // The next command is the one sent after the stop, not one of the dropped.
         adapter.send(.pause)
-        #expect(await eventually { contents("commands") == commandLog("send 0", "send 1") })
+        await letCommandsRun("send 1")
     }
 }

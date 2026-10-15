@@ -55,8 +55,8 @@ import Testing
         defer { server.remove() }
         let host = start()
         await waitUntil { !recorder.lines(containing: "app socket unavailable").isEmpty }
-        // A few more tries (every 50 ms here) that must not say it again.
-        try await Task.sleep(for: .milliseconds(200))
+        // The round that said it was the first; three more (every 50 ms here) must not say it again.
+        #expect(await host.waitForRounds(4))
         #expect(recorder.lines(containing: "app socket unavailable").count == 1)
         #expect(recorder.lines(containing: "app socket unavailable").first == "app socket unavailable reason=no-socket, trying again every 0s")
         #expect(recorder.lines(containing: "still unavailable").isEmpty, "not before thirty seconds")
@@ -210,16 +210,23 @@ import Testing
         host.sendJSON(Self.diag("content", "content-tick-error \(secretID)"))
         host.sendJSON(Self.diag("page", "page-timedtext json3 events=1"))
         await host.waitUntilHandled()
+        // The app has been tried and found away before it is there to connect to.
+        #expect(await host.waitForLog(containing: "app socket unavailable"))
         try server.start()
         await waitUntil { server.frames.count >= 2 }
         host.sendJSON(YouTubeMessageTests.playback(videoID: secretID, title: secretTitle))
         host.sendJSON(["v": 1, "type": "clear", "videoId": secretID])
         host.send(Data("title=\(secretTitle) \(secretID)".utf8))
+        // These are forwarded, or dropped, while the app is still there.
+        await host.waitUntilHandled()
+        await waitUntil { server.frames.count >= 4 }
         server.stop()
-        await host.waitForLog(containing: "app socket disconnected")
+        #expect(await host.waitForLog(containing: "app socket disconnected"))
         #expect(await host.finish() == 0)
 
-        #expect(recorder.lines.count >= 7, "\(recorder.lines)")
+        for part in ["host start", "app socket unavailable", "extension diag", "app socket connected", "app socket disconnected", "host stdin closed", "host frames"] {
+            #expect(recorder.lines.contains { $0.hasPrefix(part) }, "no line for \(part): \(recorder.lines)")
+        }
         for line in recorder.lines {
             for forbidden in [secretID, secretTitle, "Zebra", "Quartz", secretWords, "hidden", "://", "youtube", "/tmp", server.directory.path, "mn-"] {
                 #expect(!line.contains(forbidden), "\(line.debugDescription) holds \(forbidden)")

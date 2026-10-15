@@ -57,6 +57,8 @@ final class HostRun: Sendable {
         /// Messages the test has written and messages the host has dealt with.
         let sent = Mutex(0)
         let handled = Mutex(0)
+        /// Rounds of the thread that keeps the connection up.
+        let rounds = Mutex(0)
         let recorder = LogRecorder()
     }
 
@@ -93,7 +95,8 @@ final class HostRun: Sendable {
             let code = YouTubeHostCLI.run(
                 stdin: LateReader(base: FileDescriptorReader(fileDescriptor: readEnd), delay: readDelay), socketPath: socketPath,
                 reconnectInterval: reconnectInterval, now: { clock.now }, expectedOwner: expectedOwner, log: both, launch: launch,
-                commandOutput: output, didHandle: { progress.handled.withLock { $0 += 1 } }
+                commandOutput: output, didHandle: { progress.handled.withLock { $0 += 1 } },
+                didRound: { progress.rounds.withLock { $0 += 1 } }
             )
             close(readEnd)
             progress.code.withLock { $0 = code }
@@ -130,6 +133,13 @@ final class HostRun: Sendable {
     @discardableResult
     func waitUntilHandled() async -> Bool {
         await waitUntil { progress.handled.withLock { $0 } == progress.sent.withLock { $0 } }
+    }
+
+    /// Waits until the thread that keeps the connection up has been round `count` times, connecting or trying to: what a
+    /// test needs to know before it says that the host did not say something again at every try.
+    @discardableResult
+    func waitForRounds(_ count: Int) async -> Bool {
+        await waitUntil { progress.rounds.withLock { $0 } >= count }
     }
 
     /// Waits until the host has logged a line that contains `fragment`.

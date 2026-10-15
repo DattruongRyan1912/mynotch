@@ -115,12 +115,13 @@ final class FrameServer: Sendable {
     }
 }
 
-/// Polls until `condition` holds, for at most `seconds`; the result says whether it did.
+/// Polls until `condition` holds, for at most `seconds`; the result says whether it did. The limit only matters when
+/// something is wrong, so it is very generous: a busy machine can hold a thread back for many seconds.
 @discardableResult
-func waitUntil(seconds: Double = 5, _ condition: () -> Bool) async -> Bool {
-    let deadline = Date().addingTimeInterval(seconds)
+func waitUntil(seconds: Double = 60, _ condition: () -> Bool) async -> Bool {
+    let deadline = ContinuousClock.now + .seconds(seconds)
     while !condition() {
-        if Date() > deadline { return false }
+        if ContinuousClock.now > deadline { return false }
         try? await Task.sleep(for: .milliseconds(10))
     }
     return true

@@ -122,7 +122,15 @@ final class FakeProcessTable: ProcessTable {
     let directory: URL
     let scheduler = ManualScheduler()
     let table = FakeProcessTable()
-    var logs: [String] = []
+
+    /// What the adapter logged. The adapter's log closure holds this, not the suite: a shell that starts after the test has
+    /// ended and its folder is gone says so on stderr, and that line reaches the closure on the main actor whenever it comes.
+    final class LogBox {
+        var lines: [String] = []
+    }
+
+    let logBox = LogBox()
+    var logs: [String] { logBox.lines }
 
     init() throws {
         directory = FileManager.default.temporaryDirectory.appending(path: "AdapterOrphanTests-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -140,7 +148,7 @@ final class FakeProcessTable: ProcessTable {
         try "echo $$ >> '\(launchesPath)'\n\(body)".write(toFile: scriptPath, atomically: true, encoding: .utf8)
         return AdapterProcess(
             executable: URL(filePath: "/bin/sh"), baseArguments: [scriptPath], scheduler: scheduler, killDelay: .milliseconds(100),
-            processTable: table, log: { [unowned self] in logs.append($0) }
+            processTable: table, log: { [logBox] in logBox.lines.append($0) }
         )
     }
 

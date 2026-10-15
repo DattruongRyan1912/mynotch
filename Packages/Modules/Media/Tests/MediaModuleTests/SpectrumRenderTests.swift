@@ -40,7 +40,7 @@ final class CountingHostingView<Content: View>: NSHostingView<Content> {
         let store = playingStore()
         store.showSpectrum([0.2, 0.2, 0.2, 0.2])
         let (hosting, window) = host(NowPlayingBars(store: store))
-        run(for: 0.05)
+        runLoopUntilQuiet { hosting.layouts }
         let size = hosting.fittingSize
         let layouts = hosting.layouts
         for step in 0..<12 {
@@ -57,7 +57,7 @@ final class CountingHostingView<Content: View>: NSHostingView<Content> {
     @Test func theMadeUpMotionNeverLaysTheHostingViewOutAgain() {
         let store = playingStore()
         let (hosting, window) = host(NowPlayingBars(store: store))
-        run(for: 0.05)
+        runLoopUntilQuiet { hosting.layouts }
         let layouts = hosting.layouts
         run(for: 0.2)
         #expect(hosting.layouts == layouts)

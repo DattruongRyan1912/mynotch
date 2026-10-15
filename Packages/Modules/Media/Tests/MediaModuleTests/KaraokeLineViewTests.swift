@@ -478,7 +478,7 @@ import Testing
     @Test func theLineSweepsInAViewOfItsOwnInsideTheHostingView() throws {
         let store = playingStore()
         let (hosting, window) = host(KaraokeLine(line: line, store: store, style: style).frame(height: 16))
-        run(for: 0.05)
+        #expect(runLoop { karaokeView(in: hosting)?.isAnimating == true }, "the line never started to sweep")
         let view = try #require(karaokeView(in: hosting))
         #expect(view.isAnimating)
         window.contentView = nil
@@ -488,7 +488,8 @@ import Testing
     @Test func aLineMountedInTheHostingViewIsBuiltOnce() throws {
         let store = playingStore()
         let (hosting, window) = host(KaraokeLine(line: line, store: store, style: style).frame(width: 300, height: 16))
-        run(for: 0.05)
+        #expect(runLoop { karaokeView(in: hosting)?.isAnimating == true }, "the line never started to sweep")
+        runLoopUntilQuiet { hosting.layouts }
         let view = try #require(karaokeView(in: hosting))
         // Not at the width of 0 it is made at, and not again for what SwiftUI hands it unchanged.
         #expect(view.buildCount == 1)
@@ -498,7 +499,8 @@ import Testing
     @Test func theSweepNeverLaysTheHostingViewOutAgain() throws {
         let store = playingStore()
         let (hosting, window) = host(KaraokeLine(line: line, store: store, style: style).frame(height: 16))
-        run(for: 0.05)
+        #expect(runLoop { karaokeView(in: hosting)?.isAnimating == true }, "the line never started to sweep")
+        runLoopUntilQuiet { hosting.layouts }
         let layouts = hosting.layouts
         run(for: 0.3)
         #expect(hosting.layouts == layouts)
@@ -509,25 +511,23 @@ import Testing
     @Test func aPauseReachesTheLayerAndTakesTheAnimationAway() throws {
         let store = playingStore()
         let (hosting, window) = host(KaraokeLine(line: line, store: store, style: style).frame(height: 16))
-        run(for: 0.05)
+        #expect(runLoop { karaokeView(in: hosting)?.isAnimating == true }, "the line never started to sweep")
         let view = try #require(karaokeView(in: hosting))
         store.apply(line: AdapterLines.playing(false), receivedAt: Date())
-        run(for: 0.1)
-        #expect(!view.isAnimating)
+        #expect(runLoop { !view.isAnimating }, "the pause did not take the animation away")
         store.apply(line: AdapterLines.playing(true), receivedAt: Date())
-        run(for: 0.1)
-        #expect(view.isAnimating)
+        #expect(runLoop { view.isAnimating }, "playing again did not bring the animation back")
         window.contentView = nil
     }
 
     @Test func aSeekReachesTheLayer() throws {
         let store = playingStore(elapsed: 1.2)
         let (hosting, window) = host(KaraokeLine(line: line, store: store, style: style).frame(height: 16))
-        run(for: 0.05)
+        #expect(runLoop { karaokeView(in: hosting)?.sweep != nil }, "the line never started to sweep")
         let view = try #require(karaokeView(in: hosting))
         let before = try #require(view.sweep).start
         store.apply(line: AdapterLines.position(2.6), receivedAt: Date())
-        run(for: 0.1)
+        #expect(runLoop { (view.sweep?.start ?? before) > before }, "the seek did not reach the layer")
         #expect(try #require(view.sweep).start > before)
         window.contentView = nil
     }
@@ -535,7 +535,8 @@ import Testing
     @Test func aHiddenNotchStopsTheAnimation() throws {
         let store = playingStore()
         let (hosting, window) = host(KaraokeLine(line: line, store: store, style: style).frame(height: 16).environment(\.notchIsOnScreen, false))
-        run(for: 0.05)
+        #expect(runLoop { karaokeView(in: hosting) != nil }, "the line was never mounted")
+        runLoopUntilQuiet { hosting.layouts }
         let view = try #require(karaokeView(in: hosting))
         #expect(!view.isAnimating)
         window.contentView = nil
