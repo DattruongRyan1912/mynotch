@@ -78,6 +78,22 @@ public final class FakeHotkeyBackend: HotkeyBackend {
     }
 }
 
+/// The default collisions a harness's hotkey registry reported, instead of the log line the app gets.
+public final class DefaultCollisionLog {
+    public struct Report: Equatable {
+        public let new: String
+        public let existing: String
+
+        public init(new: String, existing: String) {
+            self.new = new
+            self.existing = existing
+        }
+    }
+
+    public internal(set) var reports: [Report] = []
+    public init() {}
+}
+
 /// Wires a `ModuleRegistry` with in-memory collaborators.
 public struct RegistryHarness {
     public let settings = SettingsStore(defaults: makeIsolatedDefaults())
@@ -87,6 +103,9 @@ public struct RegistryHarness {
     /// Where `hotkeys` keeps its shortcuts; `hotkeyBackend.trigger("clipboard_openClipboard")` presses one.
     public let hotkeyBackend = FakeHotkeyBackend()
     public let hotkeys: HotkeyRegistry
+    /// Every registration whose default combination was already another one's, so a module's test can check that its own
+    /// shortcuts do not clash.
+    public let defaultCollisions = DefaultCollisionLog()
     public let services: ServiceRegistry
     /// Unique per harness under the temporary directory and removed when the test process exits; nothing exists on
     /// disk until a module calls `ensureDirectories()`.
@@ -99,7 +118,10 @@ public struct RegistryHarness {
     public let registry: ModuleRegistry
 
     public init(_ modules: [any FeatureModule]) {
-        hotkeys = HotkeyRegistry(backend: hotkeyBackend)
+        let collisions = defaultCollisions
+        hotkeys = HotkeyRegistry(backend: hotkeyBackend) { new, existing in
+            collisions.reports.append(DefaultCollisionLog.Report(new: new.id, existing: existing.id))
+        }
         services = ServiceRegistry(scheduler: scheduler)
         activities = ActivityCenter(scheduler: scheduler)
         registry = ModuleRegistry(

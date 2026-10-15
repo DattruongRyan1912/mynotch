@@ -93,6 +93,34 @@ import MyNotchTestSupport
         #expect(registry.registrations.map(\.id) == ["battery_openTab", "clipboard_paste"])
     }
 
+    /// The reaction nobody injects is a log line: the app, `RegistryHarness` and a user's Debug build must never stop on it.
+    @Test func withoutAnInjectedReactionAClashingDefaultStillRegistersAndBothKeepWorking() throws {
+        var presses: [String] = []
+        registry.register("openTab", title: "Open", owner: "battery", initial: Self.controlOptionV) { presses.append("open") }
+        registry.register("paste", title: "Paste", owner: "clipboard", initial: Self.controlOptionV) { presses.append("paste") }
+
+        #expect(registry.registrations.map(\.id) == ["battery_openTab", "clipboard_paste"])
+        #expect(backend.trigger("battery_openTab"))
+        #expect(backend.trigger("clipboard_paste"))
+        #expect(presses == ["open", "paste"])
+
+        // The user can still sort it out in Settings: moving one frees the combination.
+        let paste = try #require(registry.registrations.last)
+        backend.setShortcut(Self.controlOptionT, for: paste.name)
+        #expect(registry.conflicts().isEmpty)
+    }
+
+    @Test func theHarnessRecordsCollisionsForAModulesOwnTests() {
+        let harness = RegistryHarness([])
+        #expect(harness.defaultCollisions.reports.isEmpty)
+        harness.hotkeys.register("a", title: "A", owner: "one", initial: Self.controlOptionV) {}
+        harness.hotkeys.register("b", title: "B", owner: "two", initial: Self.controlOptionT) {}
+        #expect(harness.defaultCollisions.reports.isEmpty)
+
+        harness.hotkeys.register("c", title: "C", owner: "three", initial: Self.controlOptionV) {}
+        #expect(harness.defaultCollisions.reports == [.init(new: "three_c", existing: "one_a")])
+    }
+
     @Test func differentDefaultsAndRegistrationsWithoutOneAreNotReported() {
         let collisions = Collisions()
         let registry = recordingRegistry(collisions)

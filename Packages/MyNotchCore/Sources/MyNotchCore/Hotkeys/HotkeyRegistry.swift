@@ -27,8 +27,9 @@ public final class HotkeyRegistry {
     @ObservationIgnored private let onDefaultCollision: ((_ new: Registration, _ existing: Registration) -> Void)?
 
     /// `onDefaultCollision` hears of a registration whose default is already another one's. A collision is a bug in
-    /// whoever registers (two handlers on one key press), not something the user did, so without one it is logged and,
-    /// in a debug build, stops the app where the second one registers. Tests that provoke one pass their own.
+    /// whoever registers (two handlers on one key press), not something the user did, so without one it is logged as a
+    /// fault. It never stops the app, in a debug build or any other: both shortcuts stay registered, and the user can
+    /// rebind either in Settings, which already lists clashing keys. Tests that provoke or check for one pass their own.
     public init(
         backend: any HotkeyBackend,
         onDefaultCollision: ((_ new: Registration, _ existing: Registration) -> Void)? = nil
@@ -83,12 +84,11 @@ public final class HotkeyRegistry {
             .sorted { $0[0].id < $1[0].id }
     }
 
-    /// The default reaction: a fault in the log, and in a debug build a stop, so a collision is found when the app starts
-    /// instead of when a user presses the key. Names only; titles and shortcuts are not user content but are not needed.
+    /// The default reaction: a fault in the log, naming both registrations. Their ids only, which are fixed strings of the
+    /// code that registers them, so nothing the user typed or copied is in it.
     static func reportDefaultCollision(_ new: Registration, _ existing: Registration) {
         let message = "Shortcuts \(new.id) and \(existing.id) have the same default key combination"
         Log.logger(category: "hotkeys").fault("\(message, privacy: .public)")
-        assertionFailure(message)
     }
 
     static func qualifiedName(_ localName: String, owner: ModuleID?) -> String {

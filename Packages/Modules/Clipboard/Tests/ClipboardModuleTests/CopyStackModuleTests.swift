@@ -44,9 +44,10 @@ extension ClipboardModuleTests {
         #expect(harness.hotkeyBackend.getShortcut(for: toggle.name) == KeyboardShortcuts.Shortcut(.c, modifiers: [.control, .option]))
         #expect(harness.hotkeyBackend.getShortcut(for: paste.name) == KeyboardShortcuts.Shortcut(.v, modifiers: [.control, .option, .command]))
         #expect(harness.hotkeys.registrations.count == 5)
-        // Only this module's five: ⌃⌥V already opens the history, and two handlers on one key would both fire. Across modules
-        // the guarantee is the registry's (it reports a second registration with the same default, and stops a debug
-        // build), so a collision with another module fails wherever both are running, not in this test.
+        // Only this module's five: ⌃⌥V already opens the history, and two handlers on one key would both fire. The registry
+        // reports a second registration with the same default to the harness's recorder (the app logs it instead), and sees
+        // other modules' too wherever they run together, so a collision with one of them is the registry's to report.
+        #expect(harness.defaultCollisions.reports.isEmpty)
         #expect(harness.hotkeys.conflicts().isEmpty)
     }
 
