@@ -58,7 +58,7 @@ struct TodoRow: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .background(Color.white.opacity(isHovering ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 6))
+        .background(NotchTokens.fill(isHovering ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 6))
         .onHover { isHovering = $0 }
         .accessibilityElement(children: .contain)
     }
@@ -83,7 +83,7 @@ struct TodoRow: View {
                 .foregroundStyle(NotchTokens.primaryText)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(Color.white.opacity(0.14), in: Capsule())
+                .background(NotchTokens.fill(0.14), in: Capsule())
         }
         .buttonStyle(.plain)
     }

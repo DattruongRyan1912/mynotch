@@ -32,8 +32,8 @@ struct TodoTabView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // The notch is always black, whatever the system appearance.
-        .environment(\.colorScheme, .dark)
+        // The classic notch is black whatever the system appearance; on Liquid Glass the tab follows the glass.
+        .notchColorScheme()
         .onAppear(perform: actions.appeared)
         // While the hint shows, the tab watches for access: a grant elsewhere re-mounts nothing. Cancelled when it goes.
         .task(id: state.phase) {
@@ -80,7 +80,7 @@ private struct AccessHint: View {
                     .foregroundStyle(NotchTokens.primaryText)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(Color.white.opacity(0.14), in: Capsule())
+                    .background(NotchTokens.fill(0.14), in: Capsule())
             }
             .buttonStyle(.plain)
         }
@@ -104,7 +104,7 @@ private struct LoadFailedLine: View {
                     .foregroundStyle(NotchTokens.primaryText)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 2)
-                    .background(Color.white.opacity(0.14), in: Capsule())
+                    .background(NotchTokens.fill(0.14), in: Capsule())
             }
             .buttonStyle(.plain)
         }
@@ -165,7 +165,7 @@ struct TodoQuickAddField: View {
         // A click on the padding goes to the field too. Behind the field, so it never takes a click from the text.
         .background {
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(0.1))
+                .fill(NotchTokens.fill(0.1))
                 .contentShape(RoundedRectangle(cornerRadius: 8))
                 .onTapGesture { isFocused = true }
         }

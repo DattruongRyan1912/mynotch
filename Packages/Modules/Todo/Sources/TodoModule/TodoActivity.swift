@@ -61,7 +61,7 @@ struct TodoProgressRing: View {
 
     var body: some View {
         ZStack {
-            Circle().stroke(Color.white.opacity(0.25), lineWidth: 2.5)
+            Circle().stroke(NotchTokens.fill(0.25), lineWidth: 2.5)
             Circle()
                 .trim(from: 0, to: max(fraction, 0.04))
                 .stroke(accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
