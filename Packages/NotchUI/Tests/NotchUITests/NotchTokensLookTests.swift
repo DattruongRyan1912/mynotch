@@ -123,6 +123,26 @@ import Testing
         #expect(try tokenBrightness(glass: false, scheme: .light, onDark: true) > 0.7, "and the classic tokens are white anyway")
     }
 
+    /// A square filled with `Color.primary` (what a system control draws its text with), inside `.notchColorScheme()`, over mid
+    /// grey in `scheme`, read as its brightness.
+    func scheme(glass: Bool, in scheme: ColorScheme) throws -> Double {
+        try NotchLookState.$current.withValue(state(glass: glass)) {
+            let square = Rectangle().fill(Color.primary).frame(width: 8, height: 8).notchColorScheme()
+            let view = ZStack { Color(.sRGB, white: 0.5); square }.environment(\.colorScheme, scheme).frame(width: 12, height: 12)
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 1
+            let bitmap = NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
+            return Double(try #require(bitmap.colorAt(x: 6, y: 6)?.usingColorSpace(.sRGB)).redComponent)
+        }
+    }
+
+    @Test func theNotchColourSchemeIsDarkOnTheClassicNotchAndTheSystemsOnGlass() throws {
+        #expect(try scheme(glass: false, in: .light) > 0.7, "the black notch gives its controls the dark scheme in a light appearance")
+        #expect(try scheme(glass: false, in: .dark) > 0.7)
+        #expect(try scheme(glass: true, in: .light) < 0.35, "glass follows the appearance, as the text tokens do")
+        #expect(try scheme(glass: true, in: .dark) > 0.7)
+    }
+
     /// What an AppKit drawing gets when a module turns a token into an `NSColor`, in each appearance.
     func appKitBrightness(glass: Bool, appearance: NSAppearance.Name) -> Double {
         NotchLookState.$current.withValue(state(glass: glass)) {

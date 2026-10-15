@@ -52,4 +52,19 @@ extension View {
     public func notchOnDarkBackground() -> some View {
         environment(\.colorScheme, .dark)
     }
+
+    /// The colour scheme for the controls and default text of a module's tab: dark on the classic notch, which is black whatever
+    /// the system appearance is, and the system's own on Liquid Glass, so the controls and the text tokens follow the glass.
+    /// Use it where a tab used to set `.environment(\.colorScheme, .dark)`, which on glass would turn text white on light glass.
+    public func notchColorScheme() -> some View {
+        modifier(NotchColorScheme())
+    }
+}
+
+private struct NotchColorScheme: ViewModifier {
+    @Environment(\.colorScheme) private var system
+
+    func body(content: Content) -> some View {
+        content.environment(\.colorScheme, NotchLookState.current.isGlass ? system : .dark)
+    }
 }
