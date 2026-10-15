@@ -17,23 +17,42 @@ public final class NotchTheme {
     @ObservationIgnored private let systemAccent: () -> NotchAccent.RGB
     @ObservationIgnored private let notifications: NotificationCenter
     @ObservationIgnored private var observer: (any NSObjectProtocol)?
+    @ObservationIgnored private var lookFollower: Task<Void, Never>?
     /// What macOS told about its colours so far; a view that read the accent depends on it.
     private var systemColorChanges = 0
 
-    public init(
+    public convenience init(
         settings: SettingsStore,
         systemAccent: @escaping () -> NotchAccent.RGB = { SystemAccent.current() },
         notifications: NotificationCenter = .default
     ) {
+        self.init(settings: settings, systemAccent: systemAccent, notifications: notifications, lookState: nil)
+    }
+
+    /// With a `lookState`, which the theme keeps in step with the look setting, from now on: the app's theme does, so that the
+    /// text tokens follow the look. Any other theme (a test's, a preview's) leaves it alone.
+    init(
+        settings: SettingsStore,
+        systemAccent: @escaping () -> NotchAccent.RGB = { SystemAccent.current() },
+        notifications: NotificationCenter = .default,
+        lookState: NotchLookState?
+    ) {
         self.settings = settings
         self.systemAccent = systemAccent
         self.notifications = notifications
+        if let lookState {
+            lookState.isGlass = settings.value(InterfaceSettings.look) == .liquidGlass
+            lookFollower = Task { [settings] in
+                for await look in Observations({ settings.value(InterfaceSettings.look) }) { lookState.isGlass = look == .liquidGlass }
+            }
+        }
         observer = notifications.addObserver(forName: NSColor.systemColorsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.systemColorChanges += 1 }
         }
     }
 
     isolated deinit {
+        lookFollower?.cancel()
         observer.map(notifications.removeObserver)
     }
 

@@ -4,21 +4,18 @@ import SwiftUI
 public enum NotchTokens {
     public static let background = Color.black
     public static let accent = Color(red: 0.49, green: 0.36, blue: 1.0)
-    public static let primaryText = Color.white
-    public static let secondaryText = Color.white.opacity(0.6)
+    /// Text on the notch. White on the classic notch, which is black; on Liquid Glass the system's primary colour, which follows
+    /// the appearance, so text keeps its contrast on glass that is light or dark (see `NotchLookState`).
+    public static var primaryText: Color { NotchLookState.current.isGlass ? .primary : .white }
+    /// Secondary text, likewise: white at 0.6, or the system's secondary colour on glass.
+    public static var secondaryText: Color { NotchLookState.current.isGlass ? .secondary : .white.opacity(0.6) }
     /// Inner padding of the open notch; `nonisolated` because the geometry's maths reads it.
     nonisolated public static let padding: CGFloat = 14
     /// Opacity of the accent behind the selected tab; `nonisolated` because the accent's legibility on black is worked out from it.
     nonisolated public static let selectionOpacity: CGFloat = 0.32
-    /// The same on Liquid Glass, which is lighter than black, so the capsule needs more of the accent to show (see
-    /// `NotchSurface.selectionOpacity`).
-    nonisolated public static let glassSelectionOpacity: CGFloat = 0.45
-    /// The black laid over the Liquid Glass, under the content and clipped to the shape, so text keeps its contrast whatever is
-    /// behind the notch. See `NotchBackdrop`.
-    nonisolated static let glassScrimOpacity: CGFloat = 0.25
-    /// How much of the primary label the notch's own secondary text keeps on glass: a little over what every module's secondary
-    /// text (white at 0.6) is, where the system's plain secondary style (0.55 of white) would be a little under it.
-    nonisolated static let glassSecondaryOpacity: Double = 0.72
+    /// On Liquid Glass the selected tab's capsule also has a rim of the primary label colour at this opacity (black on light glass,
+    /// white on dark), so an accent as light as the glass (yellow, orange, green on a bright wallpaper) still marks the selection.
+    nonisolated public static let glassSelectionRim: CGFloat = 0.3
     /// How much of the accent tints the Liquid Glass when the user asks for it: a hint of it, not a coat.
     nonisolated public static let glassTintOpacity: CGFloat = 0.25
     /// Space left and right of an activity's strip under the collapsed notch, inside the notch's body.

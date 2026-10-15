@@ -52,12 +52,6 @@ import Testing
         #expect(NotchSurface.material.foreground == .fixed)
     }
 
-    @Test func glassHasTheDarkSchemeSoContentThatStillAssumesLightOnDarkStaysReadable() {
-        #expect(NotchSurface.liquidGlass(tinted: false).colorScheme == .dark)
-        #expect(NotchSurface.solid.colorScheme == nil)
-        #expect(NotchSurface.material.colorScheme == nil)
-    }
-
     /// The brightest-or-darkest pixel of the first tab of a tab bar drawn on mid grey (the tab is not selected, so only its
     /// icon differs from the grey): a positive number is lighter than the grey, a negative one darker.
     func iconTone(surface: NotchSurface, scheme: ColorScheme) throws -> Double {
@@ -101,102 +95,37 @@ import Testing
         (max(first, second) + 0.05) / (min(first, second) + 0.05)
     }
 
-    @Test func theSelectedTabShowsOnGlassForEveryAccentOverTheLightestAndTheUsualGlass() {
-        // Dark regular glass over a bright wallpaper reads about as light as a 35 % grey, over most things as a 20 % one. These
-        // two grey levels are estimates, not measurements (nothing is captured here); the capsule has to hold on both.
-        // (name, accent, lowest contrast of the capsule against the lightest glass). The ordinary accents hold 1.2 there. A custom
-        // pick of black or a deep blue is lifted only as far as a black notch needs (`legibleOnBlack`), which is a dark grey or
-        // blue: it still shows against the usual glass, and against the lightest only a little. That is the limit of a dark
-        // accent on a mid-grey surface, and the icon's own colour still tells the selected tab from the others.
-        let ordinary: [(String, RGB, Double)] = NotchAccent.Palette.allCases.map { ($0.rawValue, NotchAccent.palette($0).resolved(system: $0.rgb), 1.2) }
-            + [("system", NotchAccent.system.resolved(system: RGB(red: 10, green: 132, blue: 255)), 1.2)]
-        let dark: [(String, RGB, Double)] = [
-            ("black", NotchAccent.custom(RGB(red: 0, green: 0, blue: 0)).resolved(system: RGB(red: 0, green: 0, blue: 0)), 1.1),
-            ("deep blue", NotchAccent.custom(RGB(red: 0, green: 0, blue: 102)).resolved(system: RGB(red: 0, green: 0, blue: 0)), 1.1),
-        ]
-        let opacity = Double(NotchTokens.glassSelectionOpacity)
-        for glassFloor in [0.2, 0.35] {
-            // What the glass reads as once the scrim over it has darkened it.
-            let floor = glassFloor * (1 - Double(NotchTokens.glassScrimOpacity))
-            for (name, rgb, lightest) in ordinary + dark {
+    @Test func theSelectedTabShowsOnLightAndOnDarkGlassForEveryAccent() {
+        // The glass is whatever the system makes of what is behind it: light over a bright wallpaper, dark over a dark one. These
+        // grey levels are estimates, not measurements (nothing is captured here). The capsule is the accent at the classic
+        // notch's opacity with a rim of the primary label colour (black on light glass, white on dark), and the icon is the
+        // primary label colour. An accent as light as the glass (yellow on a bright wallpaper) leaves the capsule's fill nearly
+        // invisible, so it is the rim that marks the selection, whatever the accent is.
+        let accents: [(String, RGB)] = NotchAccent.Palette.allCases.map { ($0.rawValue, NotchAccent.palette($0).resolved(system: $0.rgb)) }
+            + [
+                ("system", NotchAccent.system.resolved(system: RGB(red: 10, green: 132, blue: 255))),
+                ("black", NotchAccent.custom(RGB(red: 0, green: 0, blue: 0)).resolved(system: RGB(red: 0, green: 0, blue: 0))),
+                ("deep blue", NotchAccent.custom(RGB(red: 0, green: 0, blue: 102)).resolved(system: RGB(red: 0, green: 0, blue: 0))),
+            ]
+        let label = 0.85
+        let opacity = Double(NotchTokens.selectionOpacity)
+        let rim = Double(NotchTokens.glassSelectionRim) * label
+        // (glass grey, label colour: 0 black on light glass, 1 white on dark glass)
+        for (floor, ink) in [(0.9, 0.0), (0.7, 0.0), (0.2, 1.0), (0.35, 1.0)] {
+            let rimmed = rim * ink + (1 - rim) * floor
+            #expect(contrast(luminance(rimmed, rimmed, rimmed), luminance(floor, floor, floor)) >= 1.5, "the rim against \(floor) grey")
+            for (name, rgb) in accents {
                 func mixed(_ channel: UInt8) -> Double { opacity * Double(channel) / 255 + (1 - opacity) * floor }
                 let capsule = luminance(mixed(rgb.red), mixed(rgb.green), mixed(rgb.blue))
-                #expect(contrast(1, capsule) >= 3, "white icon on the \(name) capsule over \(glassFloor) grey")
-                let against = contrast(luminance(floor, floor, floor), capsule)
-                #expect(against >= (glassFloor == 0.35 ? lightest : 1.2), "the \(name) capsule against \(glassFloor) grey is \(against)")
+                func iconed(_ channel: UInt8) -> Double { label * ink + (1 - label) * mixed(channel) }
+                let icon = luminance(iconed(rgb.red), iconed(rgb.green), iconed(rgb.blue))
+                #expect(contrast(icon, capsule) >= 3, "the icon on the \(name) capsule over \(floor) grey")
             }
         }
     }
 
-    // MARK: text on glass
-
-    /// `ImageRenderer` hands its pixels back lighter than the colours it was given, by a power of 0.8 (an opaque sRGB grey of
-    /// 0.5 reads as 0.574), so a pixel is raised to 1.25 to be compared with a colour. That is applied to white drawn over
-    /// black only, to read how much of white a style is: it gives the 0.55 and 0.85 that macOS defines for the system's
-    /// secondary and primary label in a dark appearance. Everything else here is plain arithmetic on those alphas.
-    static let rendererCurve = 1.25
-
-    /// How much of white `style` is, drawn over black in the dark scheme the notch has on glass.
-    func effectiveAlpha(of style: AnyShapeStyle) throws -> Double {
-        let view = ZStack { Color.black; Rectangle().fill(style).frame(width: 8, height: 8) }
-            .environment(\.colorScheme, .dark).frame(width: 12, height: 12)
-        let renderer = ImageRenderer(content: view)
-        renderer.scale = 1
-        let bitmap = NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
-        return pow(Double(try #require(bitmap.colorAt(x: 6, y: 6)?.usingColorSpace(.sRGB)).redComponent), Self.rendererCurve)
-    }
-
-    @Test func theMeasurementOfAStylesWhiteReadsKnownAlphasBack() throws {
-        for alpha in [0.25, 0.6, 1.0] {
-            let read = try effectiveAlpha(of: AnyShapeStyle(Color.white.opacity(alpha)))
-            #expect(abs(read - alpha) < 0.02, "white at \(alpha) read as \(read): the renderer's tone curve may have changed")
-        }
-    }
-
-    /// WCAG contrast of text of `alpha` of white over what the glass reads as, `glassGrey` (an estimate: nothing is
-    /// captured here), after the scrim has darkened it by `scrim`.
-    func textContrast(alpha: Double, glassGrey: Double, scrim: Double) -> Double {
-        let background = glassGrey * (1 - scrim)
-        let text = alpha + (1 - alpha) * background
-        return contrast(luminance(text, text, text), luminance(background, background, background))
-    }
-
-    @Test func textOnGlassReadsAtFourAndAHalfToOneOverTheGlassFloorsOfTheReport() throws {
-        // 12 pt text needs 4.5:1. The two floors are the report's estimates of the lightest and the usual glass; the module
-        // text is white at 0.6 (every module draws with it), the notch's own rows are the glass's secondary style.
-        let glass = NotchSurface.liquidGlass(tinted: false)
-        let scrim = Double(NotchTokens.glassScrimOpacity)
-        let moduleSecondary = try effectiveAlpha(of: AnyShapeStyle(NotchTokens.secondaryText))
-        let ownSecondary = try effectiveAlpha(of: glass.secondaryStyle)
-        let modulePrimary = try effectiveAlpha(of: AnyShapeStyle(NotchTokens.primaryText))
-        let ownPrimary = try effectiveAlpha(of: glass.primaryStyle)
-        for floor in [0.2, 0.35] {
-            #expect(textContrast(alpha: moduleSecondary, glassGrey: floor, scrim: scrim) >= 4.5, "module text over \(floor) grey")
-            #expect(textContrast(alpha: ownSecondary, glassGrey: floor, scrim: scrim) >= 4.5, "the notch's own secondary text over \(floor) grey")
-            #expect(textContrast(alpha: modulePrimary, glassGrey: floor, scrim: scrim) >= 7, "module primary text over \(floor) grey")
-            #expect(textContrast(alpha: ownPrimary, glassGrey: floor, scrim: scrim) >= 7, "the notch's own primary text over \(floor) grey")
-        }
-    }
-
-    @Test func theNotchsOwnSecondaryTextOnGlassIsAsStrongAsTheModulesAndStillTheSystemsStyle() throws {
-        let glass = NotchSurface.liquidGlass(tinted: false)
-        // The system's plain secondary label (0.55 of white) would be weaker than the 0.6 every module draws with.
-        #expect(try effectiveAlpha(of: glass.secondaryStyle) >= effectiveAlpha(of: AnyShapeStyle(NotchTokens.secondaryText)) - 0.01)
-        #expect(try effectiveAlpha(of: AnyShapeStyle(.secondary)) < effectiveAlpha(of: AnyShapeStyle(NotchTokens.secondaryText)))
-    }
-
-    @Test func withoutTheScrimTheModuleTextWouldNotReadOnTheLightestGlass() throws {
-        let alpha = try effectiveAlpha(of: AnyShapeStyle(NotchTokens.secondaryText))
-        #expect(textContrast(alpha: alpha, glassGrey: 0.35, scrim: 0) < 4.5)
-        #expect(textContrast(alpha: alpha, glassGrey: 0.35, scrim: Double(NotchTokens.glassScrimOpacity)) >= 4.5)
-    }
-
-    @Test func theScrimIsAHintOfBlackNotACoatOfIt() {
-        #expect(NotchTokens.glassScrimOpacity > 0 && NotchTokens.glassScrimOpacity <= 0.35)
-    }
-
-    /// The red of the selected tab's capsule, drawn over black with a red accent: its opacity.
-    func capsuleStrength(on surface: NotchSurface) throws -> Double {
+    /// The pixel of the selected tab's capsule at (x, middle), drawn over mid grey with a red accent in `scheme`: its green.
+    func capsuleGreen(on surface: NotchSurface, scheme: ColorScheme, x: Int) throws -> Double {
         let tabs = [
             NotchTab(id: "a", title: "A", systemImage: "circle", content: AnyView(EmptyView())),
             NotchTab(id: "b", title: "B", systemImage: "square", content: AnyView(EmptyView())),
@@ -204,27 +133,53 @@ import Testing
         let view = TabBar(tabs: tabs, selected: "a") { _ in }
             .environment(\.notchAccent, Color(.sRGB, red: 1, green: 0, blue: 0))
             .environment(\.notchSurface, surface)
-            .background(Color.black)
+            .environment(\.colorScheme, scheme)
+            .background(Color(.sRGB, white: 0.5))
         let renderer = ImageRenderer(content: view)
         renderer.scale = 1
         let bitmap = NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
-        // Left of the icon, inside the capsule.
-        return Double(try #require(bitmap.colorAt(x: 4, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.sRGB)).redComponent)
+        return Double(try #require(bitmap.colorAt(x: x, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.sRGB)).greenComponent)
     }
 
-    @Test func theTabBarDrawsItsSelectionAtTheStrengthOfTheSurface() throws {
-        // Measured through SwiftUI's own blending, so only the order and the sameness are compared, not the numbers.
-        let classic = try capsuleStrength(on: .solid)
-        #expect(classic > 0.2, "the capsule is drawn")
-        #expect(try capsuleStrength(on: .material) == classic)
-        #expect(try capsuleStrength(on: .liquidGlass(tinted: false)) > classic + 0.08, "glass takes more of the accent")
+    @Test func onGlassTheSelectedCapsuleHasARimThatFollowsTheSchemeAndTheClassicOneHasNone() throws {
+        let glass = NotchSurface.liquidGlass(tinted: false)
+        // The capsule's fill is the accent alone on every surface; its leftmost pixel is the rim on glass.
+        for scheme in [ColorScheme.light, .dark] {
+            #expect(try capsuleGreen(on: glass, scheme: scheme, x: 4) == capsuleGreen(on: .solid, scheme: scheme, x: 4), "the fill is the same")
+        }
+        let classicDark = try capsuleGreen(on: .solid, scheme: .dark, x: 0)
+        #expect(try capsuleGreen(on: .solid, scheme: .light, x: 0) == classicDark, "the classic capsule has no rim, in any scheme")
+        #expect(try capsuleGreen(on: .material, scheme: .dark, x: 0) == classicDark)
+        #expect(try capsuleGreen(on: glass, scheme: .dark, x: 0) > classicDark + 0.02, "a light rim on dark glass")
+        #expect(try capsuleGreen(on: glass, scheme: .light, x: 0) < classicDark - 0.02, "a dark rim on light glass")
     }
 
-    @Test func glassMarksASelectionMoreStronglyThanTheClassicNotchDoes() {
-        #expect(NotchSurface.liquidGlass(tinted: false).selectionOpacity == NotchTokens.glassSelectionOpacity)
-        #expect(NotchSurface.solid.selectionOpacity == NotchTokens.selectionOpacity)
-        #expect(NotchSurface.material.selectionOpacity == NotchTokens.selectionOpacity)
-        #expect(NotchTokens.glassSelectionOpacity > NotchTokens.selectionOpacity)
+    @Test func theRimIsAHairlineOfTheLabelColour() {
+        #expect(NotchTokens.glassSelectionRim > 0 && NotchTokens.glassSelectionRim <= 0.5)
+    }
+
+    // MARK: text on glass
+
+    /// A square drawn with `style` over mid grey in `scheme`: its pixel.
+    func swatch(_ style: AnyShapeStyle, scheme: ColorScheme) throws -> NSColor {
+        let view = ZStack { Color(.sRGB, white: 0.5); Rectangle().fill(style).frame(width: 8, height: 8) }
+            .environment(\.colorScheme, scheme).frame(width: 12, height: 12)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 1
+        let bitmap = NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
+        return try #require(bitmap.colorAt(x: 6, y: 6)?.usingColorSpace(.sRGB))
+    }
+
+    @Test func theNotchsOwnTextOnGlassIsTheSystemsPrimaryAndSecondaryStyleNotAColourOfOurs() throws {
+        let glass = NotchSurface.liquidGlass(tinted: false)
+        for scheme in [ColorScheme.light, .dark] {
+            #expect(try swatch(glass.primaryStyle, scheme: scheme) == swatch(AnyShapeStyle(.primary), scheme: scheme), "\(scheme)")
+            #expect(try swatch(glass.secondaryStyle, scheme: scheme) == swatch(AnyShapeStyle(.secondary), scheme: scheme), "\(scheme)")
+        }
+        // And the classic notch's are the fixed ones, whatever the scheme.
+        for scheme in [ColorScheme.light, .dark] {
+            #expect(try swatch(NotchSurface.solid.primaryStyle, scheme: scheme) == swatch(AnyShapeStyle(NotchTokens.primaryText), scheme: scheme))
+        }
     }
 
     // MARK: drawn offscreen
@@ -371,8 +326,8 @@ import Testing
         window.contentView = nil
     }
 
-    /// The scheme a toast's content reads in a root view hosted in a window of the light appearance.
-    func schemeOfContent(look: NotchLook) -> Bool? {
+    /// The scheme a toast's content reads (true for dark) in a root view hosted in a window of `appearance`.
+    func schemeOfContent(look: NotchLook, appearance: NSAppearance.Name) -> Bool? {
         struct Probe: View {
             let seen: Seen
             @Environment(\.colorScheme) private var scheme
@@ -386,16 +341,18 @@ import Testing
         model.showToast(AnyView(Probe(seen: seen)), duration: .seconds(60))
         let hosting = NSHostingView(rootView: rootView(model: model, theme: theme(look)))
         let window = NSWindow(contentRect: CGRect(origin: .zero, size: geometry.panelSize), styleMask: .borderless, backing: .buffered, defer: true)
-        window.appearance = NSAppearance(named: .aqua)
+        window.appearance = NSAppearance(named: appearance)
         window.contentView = hosting
         hosting.layoutSubtreeIfNeeded()
         window.contentView = nil
         return seen.values.last
     }
 
-    @Test func contentOnGlassIsDarkEvenInALightWindowAndClassicContentIsLeftAsItIs() {
-        #expect(schemeOfContent(look: .liquidGlass) == true)
-        #expect(schemeOfContent(look: .classic) == false)
+    @Test func contentOnGlassKeepsTheSchemeOfItsWindowAsTheClassicNotchDoes() {
+        for look in [NotchLook.liquidGlass, .classic] {
+            #expect(schemeOfContent(look: look, appearance: .aqua) == false, "\(look) in a light window")
+            #expect(schemeOfContent(look: look, appearance: .darkAqua) == true, "\(look) in a dark window")
+        }
     }
 
     func makeController(theme: NotchTheme?, captureHiding: CaptureHiding = .never) -> NotchWindowController {
@@ -417,21 +374,13 @@ import Testing
         return condition()
     }
 
-    @Test func theGlassPanelIsDarkSoAppKitControlsAndTheGlassAgreeWithTheContentAndClassicIsLeftAlone() async {
-        let settings = SettingsStore(defaults: makeIsolatedDefaults())
-        let controller = makeController(theme: theme(.classic, settings: settings))
-        defer { controller.close() }
-        #expect(controller.appearance == nil)
-        settings.set(.liquidGlass, for: InterfaceSettings.look)
-        #expect(await eventually { controller.appearance?.name == .darkAqua })
-        settings.set(.classic, for: InterfaceSettings.look)
-        #expect(await eventually { controller.appearance == nil })
-    }
-
-    @Test func aPanelThatStartsOnGlassIsDarkFromTheFirstFrame() {
-        let controller = makeController(theme: theme(.liquidGlass))
-        defer { controller.close() }
-        #expect(controller.appearance?.name == .darkAqua)
+    @Test func thePanelKeepsTheSystemsAppearanceOnGlassAsOnTheClassicNotch() {
+        // Glass in a panel that is forced dark reads as dark frosted glass, not as the system's; nothing is forced.
+        for look in [NotchLook.liquidGlass, .classic] {
+            let controller = makeController(theme: theme(look))
+            defer { controller.close() }
+            #expect(controller.appearance == nil, "\(look)")
+        }
     }
 
     @Test func hidingFromCaptureStillAppliesOnGlass() {
@@ -467,57 +416,52 @@ import Testing
         return NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
     }
 
-    @Test func theSurfaceModifierFillsWithBlackInTheClassicLookAndHasAScrimOnGlassInTheOther() throws {
+    @Test func theSurfaceModifierFillsWithBlackInTheClassicLookAndLeavesTheGlassToTheWindowServerInTheOther() throws {
         // The 60 x 40 box sits at (10, 10) in the 80 x 60 image: (20, 20) is inside its rounded corner, (11, 11) outside it.
         let classic = try draw(.solid)
         let inside = try #require(classic.colorAt(x: 20, y: 20))
         #expect(inside.alphaComponent == 1 && inside.redComponent == 0)
         #expect(try #require(classic.colorAt(x: 11, y: 11)).alphaComponent == 0, "inside its shape only")
 
-        // On glass the shape holds the window server's glass, which offscreen is nothing, and under the content a scrim: black
-        // at `glassScrimOpacity`, clipped to the shape like the content, and under what is drawn on it.
+        // On glass the shape holds the window server's glass, which offscreen is nothing: no black of ours, no scrim.
         let glass = try draw(.liquidGlass(tinted: false))
-        let scrim = try #require(glass.colorAt(x: 20, y: 20)?.usingColorSpace(.sRGB))
-        #expect(abs(scrim.alphaComponent - NotchTokens.glassScrimOpacity) < 0.02)
-        #expect(scrim.redComponent == 0 && scrim.greenComponent == 0 && scrim.blueComponent == 0)
-        #expect(try #require(glass.colorAt(x: 11, y: 11)).alphaComponent == 0, "the scrim is clipped to the shape")
+        #expect(try #require(glass.colorAt(x: 20, y: 20)).alphaComponent == 0)
         #expect(try #require(glass.colorAt(x: 40, y: 30)).alphaComponent == 1, "what is drawn on it is still drawn")
     }
 
-    @Test func theSurfaceModifierGivesGlassContentTheDarkSchemeAndLeavesTheClassicOneAsItIs() throws {
-        let classic = Seen()
-        _ = try draw(.solid, seen: classic)
-        #expect(classic.values.last == false, "the light scheme of the window is kept")
-        let glass = Seen()
-        _ = try draw(.liquidGlass(tinted: false), seen: glass)
-        #expect(glass.values.last == true)
+    @Test func theSurfaceModifierLeavesTheSchemeOfItsContentAlone() throws {
+        for surface in [NotchSurface.solid, .liquidGlass(tinted: false)] {
+            let seen = Seen()
+            _ = try draw(surface, seen: seen)
+            #expect(seen.values.last == false, "the light scheme of the window is kept for \(surface)")
+        }
     }
 
-    // MARK: the scrim
+    // MARK: no scrim
 
-    func alpha(of view: some View, at point: CGPoint, size: CGSize) throws -> NSColor {
+    func pixel(of view: some View, at point: CGPoint, size: CGSize) throws -> NSColor {
         let renderer = ImageRenderer(content: view.frame(width: size.width, height: size.height))
         renderer.scale = 1
         let bitmap = NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
         return try #require(bitmap.colorAt(x: Int(point.x), y: Int(point.y))?.usingColorSpace(.sRGB))
     }
 
-    @Test func theBackdropIsAScrimOnGlassAndExactlyWhatItWasOtherwise() throws {
+    @Test func theBackdropIsNothingOnGlassAndExactlyWhatItWasOtherwise() throws {
         let size = CGSize(width: 40, height: 40)
         let middle = CGPoint(x: 20, y: 20)
-        let black = try alpha(of: NotchBackdrop(surface: .solid, bodyHeight: 10), at: middle, size: size)
+        let black = try pixel(of: NotchBackdrop(surface: .solid, bodyHeight: 10), at: middle, size: size)
         #expect(black.alphaComponent == 1 && black.redComponent == 0 && black.greenComponent == 0 && black.blueComponent == 0)
-        let scrim = try alpha(of: NotchBackdrop(surface: .liquidGlass(tinted: false), bodyHeight: 10), at: middle, size: size)
-        #expect(abs(scrim.alphaComponent - NotchTokens.glassScrimOpacity) < 0.02)
-        #expect(scrim.redComponent == 0 && scrim.greenComponent == 0 && scrim.blueComponent == 0)
-        let tintedScrim = try alpha(of: NotchBackdrop(surface: .liquidGlass(tinted: true), bodyHeight: 10), at: middle, size: size)
-        #expect(tintedScrim.alphaComponent == scrim.alphaComponent, "the scrim is black whatever the tint")
+        // No black over the glass: it is the system's glass alone, which a dark scrim made look like dark frosted glass.
+        for tinted in [false, true] {
+            let clear = try pixel(of: NotchBackdrop(surface: .liquidGlass(tinted: tinted), bodyHeight: 10), at: middle, size: size)
+            #expect(clear.alphaComponent == 0, "tinted \(tinted)")
+        }
         // The classic blur keeps its solid strip at the top.
-        let strip = try alpha(of: NotchBackdrop(surface: .material, bodyHeight: 10), at: CGPoint(x: 20, y: 3), size: size)
+        let strip = try pixel(of: NotchBackdrop(surface: .material, bodyHeight: 10), at: CGPoint(x: 20, y: 3), size: size)
         #expect(strip.alphaComponent == 1 && strip.redComponent == 0)
     }
 
-    @Test func aBubbleOnGlassHasTheSameScrimAndOnTheClassicNotchIsStillBlack() throws {
+    @Test func aBubbleOnGlassIsTheGlassAloneAndOnTheClassicNotchIsStillBlack() throws {
         let center = ActivityCenter(scheduler: ManualScheduler())
         for index in 1...2 {
             center.set(LiveActivity(id: "a\(index)", leading: AnyView(Color.clear), trailing: AnyView(Color.clear), summary: "\(index)"), from: "m")
@@ -529,10 +473,8 @@ import Testing
             ActivityBubbles(slots: slots, geometry: geometry, label: { $0.id }, activate: { _ in }).environment(\.notchSurface, surface)
         }
         let size = CGSize(width: geometry.panelSize.width, height: geometry.bubbleDiameter)
-        let classic = try alpha(of: bubbles(.solid), at: point, size: size)
+        let classic = try pixel(of: bubbles(.solid), at: point, size: size)
         #expect(classic.alphaComponent == 1 && classic.redComponent == 0)
-        let glass = try alpha(of: bubbles(.liquidGlass(tinted: false)), at: point, size: size)
-        #expect(abs(glass.alphaComponent - NotchTokens.glassScrimOpacity) < 0.02)
-        #expect(glass.redComponent == 0 && glass.greenComponent == 0 && glass.blueComponent == 0)
+        #expect(try pixel(of: bubbles(.liquidGlass(tinted: false)), at: point, size: size).alphaComponent == 0)
     }
 }

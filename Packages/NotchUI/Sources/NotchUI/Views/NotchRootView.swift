@@ -116,16 +116,15 @@ struct NotchRootView: View {
                 bubbles
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.notchIsOnScreen, model.isOnScreen)
         // The accent for the notch's own controls and for a tab's marks, and the tint of the system controls in a tab.
         .environment(\.notchAccent, accent)
         .tint(accent)
-        // What the notch is drawn on, for its own views' foreground; the glass's dark scheme for everything inside it.
+        // What the notch is drawn on, for its own views' foreground. Nothing is forced on the content: on glass it keeps the
+        // colour scheme the window has, which is the system's.
         .environment(\.notchSurface, surface)
         .environment(\.notchGlassNamespace, surface.isLiquidGlass ? glassNamespace : nil)
         .environment(\.notchGlassPlan, plan)
-        .notchColorScheme(surface.colorScheme)
     }
 
     /// The bubbles of the other live activities, beside the collapsed notch only. They appear and go with the pill's

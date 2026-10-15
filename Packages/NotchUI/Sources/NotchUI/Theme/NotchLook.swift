@@ -32,7 +32,7 @@ nonisolated public enum NotchSurface: Equatable, Sendable {
 }
 
 /// Which foreground the notch's own text and glyphs use: the fixed white of the black notch, or the system's styles, which
-/// are vibrant on glass and follow the colour scheme instead of assuming what is behind them.
+/// are vibrant on glass and follow the appearance instead of assuming what is behind them.
 nonisolated enum NotchForeground: Equatable, Sendable {
     case fixed
     case vibrant
@@ -40,26 +40,17 @@ nonisolated enum NotchForeground: Equatable, Sendable {
 
 nonisolated extension NotchSurface {
     var foreground: NotchForeground { isLiquidGlass ? .vibrant : .fixed }
-
-    /// The scheme the content of the surface is drawn in. Glass is the dark one: the notch is a dark shape that joins the
-    /// hardware cutout, and the tabs' content still draws light-on-dark (`NotchTokens.primaryText`). Nil leaves the
-    /// environment's scheme alone, as the classic look always did.
-    var colorScheme: ColorScheme? { isLiquidGlass ? .dark : nil }
-
-    /// The opacity of the accent behind the selected tab. Glass is lighter than black, so it takes more.
-    var selectionOpacity: CGFloat { isLiquidGlass ? NotchTokens.glassSelectionOpacity : NotchTokens.selectionOpacity }
 }
 
 extension NotchSurface {
-    /// The style of the notch's own primary text and glyphs: white on black, the system's primary on glass.
+    /// The style of the notch's own primary text and glyphs: white on black, the system's primary style on glass. It is the
+    /// system's hierarchical style, so it follows the appearance and keeps the vibrancy glass gives it.
     public var primaryStyle: AnyShapeStyle {
         foreground == .vibrant ? AnyShapeStyle(.primary) : AnyShapeStyle(NotchTokens.primaryText)
     }
 
-    /// The same for secondary text and glyphs. On glass it is the primary style at `glassSecondaryOpacity`, which stays the
-    /// system's (vibrant, following the colour scheme) but is as strong as the modules' secondary text rather than a little
-    /// weaker, as the system's own `.secondary` is.
+    /// The same for secondary text and glyphs.
     public var secondaryStyle: AnyShapeStyle {
-        foreground == .vibrant ? AnyShapeStyle(.primary.opacity(NotchTokens.glassSecondaryOpacity)) : AnyShapeStyle(NotchTokens.secondaryText)
+        foreground == .vibrant ? AnyShapeStyle(.secondary) : AnyShapeStyle(NotchTokens.secondaryText)
     }
 }

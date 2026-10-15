@@ -103,11 +103,6 @@ extension View {
         }
     }
 
-    /// Gives the content `scheme`, or leaves the environment's alone when it is nil.
-    @ViewBuilder func notchColorScheme(_ scheme: ColorScheme?) -> some View {
-        if let scheme { environment(\.colorScheme, scheme) } else { self }
-    }
-
     /// Draws the view on the notch's own surface in `shape`: black in the classic look, Liquid Glass in the other, whichever the
     /// `notchSurface` of its environment says (the notch's root view sets it). For a window or view of MyNotch that wants to
     /// look like the notch, a floating panel for one, which hosts SwiftUI on its own and so has to put the look in itself:
@@ -117,8 +112,9 @@ extension View {
     ///         .environment(\.notchAccent, interface.accent)
     ///         .notchSurface(in: RoundedRectangle(cornerRadius: 18))
     ///
-    /// On glass the content is drawn in the dark colour scheme. Read `notchSurface` for the `primaryStyle` and `secondaryStyle`
-    /// that stay readable on both. The glass is drawn by the window server, which needs a window that is not opaque.
+    /// Nothing is forced on the content: on glass it keeps the window's colour scheme, as the glass itself follows the system's
+    /// appearance. Read `notchSurface` for the `primaryStyle` and `secondaryStyle` that stay readable on both looks. The glass is
+    /// drawn by the window server, which needs a window that is not opaque.
     public func notchSurface(in shape: some Shape) -> some View {
         modifier(NotchSurfaceModifier(shape: shape))
     }
@@ -131,7 +127,6 @@ private struct NotchSurfaceModifier<S: Shape>: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .notchColorScheme(surface.colorScheme)
             .background(NotchBackdrop(surface: surface, bodyHeight: 0))
             .clipShape(shape)
             .notchGlass(NotchGlassPlan(surface: surface, bubbleIDs: [], accent: accent).notch, in: shape)
@@ -139,7 +134,12 @@ private struct NotchSurfaceModifier<S: Shape>: ViewModifier {
 }
 
 /// Wraps the notch and its bubbles in the container that lets their glass blend and morph as one family, when the plan says
-/// so. In the classic look it adds nothing: the content is exactly what it was.
+/// so. In the classic look it adds nothing but the frame.
+///
+/// The content is always as big as the space it is given (the panel), with what it holds at the top centre, in every state. A
+/// glass container places each glass shape from the layout of its content, and a notch that is the only thing in it is as big
+/// as the notch, which animates: the glass then grew from the content's right edge instead of about the notch's centre. A
+/// bubble row as wide as the panel hid this whenever a bubble was there.
 struct NotchGlassFamily<Content: View>: View {
     let plan: NotchGlassPlan
     let content: Content
@@ -150,10 +150,11 @@ struct NotchGlassFamily<Content: View>: View {
     }
 
     var body: some View {
+        let framed = content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         if let spacing = plan.containerSpacing {
-            GlassEffectContainer(spacing: spacing) { content }
+            GlassEffectContainer(spacing: spacing) { framed }
         } else {
-            content
+            framed
         }
     }
 }

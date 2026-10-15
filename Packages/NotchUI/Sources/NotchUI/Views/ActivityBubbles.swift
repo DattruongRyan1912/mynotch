@@ -37,8 +37,8 @@ struct ActivityBubbles: View {
             HStack(spacing: NotchGeometry.bubbleGap) {
                 ForEach(slots) { slot in
                     ActivityBubble(slot: slot, diameter: geometry.bubbleDiameter, label: label, activate: activate)
-                        // On glass the shape itself comes out of the notch and melts back into it (the glass transition of
-                        // `ActivityBubble`), so only what is drawn on it fades.
+                        // On glass the shape materializes where it is (the glass transition of `ActivityBubble`), so only what is
+                        // drawn on it fades.
                         .transition(
                             surface.isLiquidGlass
                                 ? .opacity : .scale(scale: NotchTokens.bubbleAppearScale, anchor: .leading).combined(with: .opacity)
@@ -65,8 +65,8 @@ private struct ActivityBubble: View {
     var body: some View {
         Button { activate(slot) } label: {
             ZStack {
-                // Black; on glass the circle is the glass, with the same scrim under its icon as the notch has.
-                Circle().fill(NotchTokens.background.opacity(surface.isLiquidGlass ? NotchTokens.glassScrimOpacity : 1))
+                // Black, or nothing: on glass the circle is the glass.
+                if !surface.isLiquidGlass { Circle().fill(NotchTokens.background) }
                 switch slot {
                 case .activity(let entry):
                     ActivityIcon(activity: entry.activity, size: diameter, minimalSize: NotchTokens.bubbleIconSize)
@@ -92,8 +92,10 @@ private struct ActivityBubble: View {
 }
 
 private extension View {
-    /// A bubble's glass comes out of the shapes next to it (the notch) and melts back into them, rather than fading.
+    /// A bubble's glass materializes where it is and dematerializes there. It does not morph into the shapes next to it: the
+    /// bubbles leave when the notch opens, and a morph then would pull them into the notch while it grows (and back out of it as
+    /// it closes), which the classic notch's open and close never does.
     @ViewBuilder func glassBubbleTransition(_ surface: NotchSurface) -> some View {
-        if surface.isLiquidGlass { glassEffectTransition(.matchedGeometry) } else { self }
+        if surface.isLiquidGlass { glassEffectTransition(.materialize) } else { self }
     }
 }

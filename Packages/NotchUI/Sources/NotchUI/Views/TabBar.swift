@@ -8,6 +8,15 @@ struct TabBar: View {
     @Environment(\.notchAccent) private var accent
     @Environment(\.notchSurface) private var surface
 
+    /// The accent behind the selected tab; on glass also a rim of the primary label colour, so that an accent as light as the
+    /// glass still marks it.
+    private var selection: some View {
+        Capsule().fill(accent.opacity(NotchTokens.selectionOpacity))
+            .overlay {
+                if surface.isLiquidGlass { Capsule().strokeBorder(.primary.opacity(NotchTokens.glassSelectionRim), lineWidth: 1) }
+            }
+    }
+
     var body: some View {
         HStack(spacing: 6) {
             ForEach(tabs) { tab in
@@ -17,7 +26,7 @@ struct TabBar: View {
                         .font(.system(size: 13, weight: .semibold))
                         .frame(width: 30, height: 24)
                         .foregroundStyle(tab.id == selected ? surface.primaryStyle : surface.secondaryStyle)
-                        .background(tab.id == selected ? accent.opacity(surface.selectionOpacity) : .clear, in: Capsule())
+                        .background { if tab.id == selected { selection } }
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
