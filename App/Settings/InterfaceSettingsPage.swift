@@ -11,18 +11,23 @@ struct InterfaceSettingsPage: View {
                 Picker("Màn hình", selection: settings.binding(InterfaceSettings.displayMode)) {
                     Text("Tất cả màn hình").tag(DisplayMode.all)
                     Text("Màn hình chính").tag(DisplayMode.main)
-                    Text("Màn hình có con trỏ").tag(DisplayMode.cursor)
+                    Text("Màn hình đang dùng").tag(DisplayMode.cursor)
                 }
+                Text("Màn hình đang dùng: notch chuyển sang màn hình khác khi con trỏ ở lại đó khoảng 0,3 giây.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle("Ẩn khi app đang fullscreen", isOn: settings.binding(InterfaceSettings.hideInFullscreen))
             }
-            Section("Notch ảo (màn hình không có notch)") {
+            Section("Kích thước notch ảo (màn hình không có notch)") {
                 slider("Chiều rộng", InterfaceSettings.virtualNotchWidth, 120...300, unit: "pt")
                 Toggle("Cao bằng menu bar", isOn: settings.binding(InterfaceSettings.virtualNotchMatchesMenuBar))
                 slider("Chiều cao", InterfaceSettings.virtualNotchHeight, 24...40, unit: "pt")
                     .disabled(settings.value(InterfaceSettings.virtualNotchMatchesMenuBar))
             }
             Section("Khi mở rộng") {
-                slider("Chiều rộng", InterfaceSettings.openWidth, 480...720, unit: "pt")
+                slider("Chiều rộng", InterfaceSettings.openWidth, 480...900, unit: "pt")
+                slider("Chiều cao tối đa", InterfaceSettings.maxOpenHeight, 200...400, unit: "pt")
+                Text("Notch cao theo nội dung từng trang, không quá mức này.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Stepper("Trễ khi mở: \(settings.value(InterfaceSettings.openDelayMs)) ms",
                         value: settings.binding(InterfaceSettings.openDelayMs), in: 0...1000, step: 50)
                 Stepper("Trễ khi đóng: \(settings.value(InterfaceSettings.closeDelayMs)) ms",

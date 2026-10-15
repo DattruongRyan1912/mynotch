@@ -10,7 +10,8 @@ public final class ScreenManager {
     private let interface: NotchInterface
     private var controllers: [String: NotchWindowController] = [:]
     private var fullscreenDisplays: Set<CGDirectDisplayID> = []
-    private var cursorDisplay: CGDirectDisplayID?
+    /// The display the user is working on, for the display mode that follows them.
+    private lazy var activeDisplay = ActiveDisplay(scheduler: scheduler) { [weak self] in self?.activeDisplayChanged() }
     /// Refreshed on every screen sync so pointer routing never queries `NSScreen.screens` per event.
     private var screenFrames: [(displayID: CGDirectDisplayID, frame: CGRect)] = []
     private var observers: [NSObjectProtocol] = []
@@ -51,7 +52,6 @@ public final class ScreenManager {
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.syncScreens() }
         })
-        cursorDisplay = NSScreen.screens.first { $0.frame.containsMouseLocation(NSEvent.mouseLocation) }?.displayID
         // Before the notches exist and before the modules start, so none of them reads a stale setting.
         interface.follow(settings)
         syncScreens()
@@ -98,20 +98,24 @@ public final class ScreenManager {
             controller.close()
             controllers[uuid] = nil
         }
+        activeDisplay.displaysChanged(screenFrames.map(\.displayID), pointerOn: DisplaySelection.display(at: NSEvent.mouseLocation, in: screenFrames))
         applyVisibility()
+    }
+
+    private func activeDisplayChanged() {
+        NotchLog.record("active display -> \(activeDisplay.current.map(String.init) ?? "-")")
+        if settings.value(InterfaceSettings.displayMode) == .cursor { applyVisibility() }
     }
 
     private func applyVisibility() {
         let mode = settings.value(InterfaceSettings.displayMode)
         let hideInFullscreen = settings.value(InterfaceSettings.hideInFullscreen)
-        let mainID = NSScreen.screens.first?.displayID
+        let shownByMode = DisplaySelection.shown(
+            mode: mode, displays: NSScreen.screens.compactMap(\.displayID), active: activeDisplay.current
+        )
         for controller in controllers.values {
             let id = controller.displayID
-            let allowedByMode = switch mode {
-            case .all: true
-            case .main: id == mainID
-            case .cursor: id == (cursorDisplay ?? mainID)
-            }
+            let allowedByMode = shownByMode.contains(id)
             let hiddenByFullscreen = hideInFullscreen && fullscreenDisplays.contains(id)
             let visible = allowedByMode && !isHiddenByUser && !hiddenByFullscreen
             if visible != controller.isVisible {
@@ -126,11 +130,7 @@ public final class ScreenManager {
     }
 
     private func pointerMoved(to point: CGPoint, dragTypes: [String]) {
-        let display = screenFrames.first { $0.frame.containsMouseLocation(point) }?.displayID
-        if display != cursorDisplay {
-            cursorDisplay = display
-            if settings.value(InterfaceSettings.displayMode) == .cursor { applyVisibility() }
-        }
+        activeDisplay.pointerMoved(onto: DisplaySelection.display(at: point, in: screenFrames))
         controllers.values.forEach { $0.pointerMoved(to: point, dragTypes: dragTypes) }
     }
 

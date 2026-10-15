@@ -28,6 +28,18 @@ private final class TabModule: FeatureModule {
         #expect(harness.registry.contentHeight(for: .closed, tabUnderToast: nil) == NotchTab.defaultHeight)
     }
 
+    @Test func aTabThatAsksForMoreThanTheDefaultCapIsReportedAsAskedSoTheMaxHeightSettingDecides() async {
+        let harness = RegistryHarness([TabModule("huge", height: 380)])
+        await harness.registry.bootstrap()
+        #expect(harness.registry.contentHeight(for: .open("huge"), tabUnderToast: nil) == 380)
+        let tall = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig(maxContentHeight: 400))
+        let capped = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig())
+        let asked = harness.registry.contentHeight(for: .open("huge"), tabUnderToast: nil)
+        let notch: CGFloat = 32
+        #expect(tall.shapeSize(for: .open("huge"), contentHeight: asked).height == notch + 380)
+        #expect(capped.shapeSize(for: .open("huge"), contentHeight: asked).height == notch + 300)
+    }
+
     @Test func aToastKeepsTheHeightOfTheTabItCovers() async {
         let harness = RegistryHarness([TabModule("tall", height: 280)])
         await harness.registry.bootstrap()

@@ -21,6 +21,12 @@ import Testing
         #expect(narrow.contentFrame(height: 50, in: NotchGeometryTests.macBook14.frame).width == CGFloat(480) - sides)
         let wide = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig(openWidth: 9999))
         #expect(wide.contentFrame(height: 50, in: NotchGeometryTests.macBook14.frame).width == NotchGeometry.maxOpenWidth - sides)
+        #expect(NotchGeometry.maxOpenWidth == 900)
+        let widest = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig(openWidth: 900))
+        let frame = widest.contentFrame(height: 50, in: NotchGeometryTests.macBook14.frame)
+        #expect(frame.width == 856)
+        // Still centred on the notch (1.5 pt left of the screen's middle).
+        #expect(frame.midX == 754.5)
     }
 
     @Test func staysOnAScreenWhoseOriginIsNotZeroAndUsesItsOwnNotchHeight() {
@@ -65,6 +71,8 @@ import Testing
             (NotchGeometryTests.macBook14, NotchLayoutConfig()),
             (NotchGeometryTests.macBook14, NotchLayoutConfig(openWidth: 480)),
             (NotchGeometryTests.external, NotchLayoutConfig(virtualNotchWidth: 240, openWidth: 700)),
+            (NotchGeometryTests.macBook14, NotchLayoutConfig(openWidth: 900, maxContentHeight: 400)),
+            (NotchGeometryTests.external, NotchLayoutConfig(virtualNotchWidth: 240, openWidth: 800, maxContentHeight: 200)),
         ] {
             let geometry = NotchGeometry(screen: screen, config: config)
             let measured = try measuredContent(of: geometry, screen: screen)

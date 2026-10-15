@@ -13,8 +13,9 @@ import Testing
         NotchGeometry(screen: screen, config: config)
     }
 
-    /// The widest compact pill and the tallest notch the settings allow: the second bubble no longer fits the panel.
-    static let crowded = NotchLayoutConfig(virtualNotchWidth: 300, virtualNotchHeight: 40, compactSideWidth: 120, openWidth: 720)
+    /// A pill so wide (the widest notch with 230 pt on each side, 772 pt) and a notch so tall that the second bubble no
+    /// longer fits the 900 pt panel.
+    static let crowded = NotchLayoutConfig(virtualNotchWidth: 300, virtualNotchHeight: 40, compactSideWidth: 230, openWidth: 720)
 
     // MARK: Frames
 
@@ -108,7 +109,7 @@ import Testing
         let geometry = geometry(macBook)
         #expect(geometry.shapeSize(for: .compact) == CGSize(width: 325, height: 32))
         #expect(geometry.shapeSize(for: .compact, bottomHeight: 0) == geometry.shapeSize(for: .compact))
-        #expect(geometry.panelSize == CGSize(width: 720, height: 332))
+        #expect(geometry.panelSize == CGSize(width: 900, height: 432))
     }
 
     /// A bubble appears from a fraction of its size on the notch's spring (which overshoots a little) and leaves the

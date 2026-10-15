@@ -119,7 +119,8 @@ import Testing
         (0..<bitmap.pixelsHigh).flatMap { y in xs.map { x in bitmap.colorAt(x: x, y: y)?.alphaComponent ?? -1 } }
     }
 
-    let middle: CGFloat = 360
+    /// The middle of the panel, which is 900 pt wide.
+    let middle: CGFloat = 450
 
     @Test func bubblesAreDrawnBesideThePillAndLeaveItAsItWas() throws {
         let alone = makeModel()
