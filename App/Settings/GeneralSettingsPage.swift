@@ -40,6 +40,7 @@ struct GeneralSettingsPage: View {
                 Text("Khi ẩn icon, mở lại MyNotch từ Finder để vào Settings.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            MenuBarHiderSettingsSection(settings: settings)
             Section("Quay và chia sẻ màn hình") {
                 Picker("Ẩn MyNotch khi quay hoặc chia sẻ màn hình", selection: settings.binding(InterfaceSettings.hideFromCapture)) {
                     Text("Không ẩn").tag(CaptureHiding.never)

@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var settingsWindow = SettingsWindowController(
         settings: settings, registry: registry, permissions: permissions, overview: permissionOverview, hotkeys: hotkeys
     )
+    private lazy var menuBarHider = MenuBarHiderController(settings: settings, scheduler: scheduler)
     private var statusItem: StatusItemController?
     #if DEBUG
     private var debugActivities: DebugActivityTrigger?
@@ -44,8 +45,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "toggleNotch", title: "Mở/đóng notch", owner: nil,
             initial: KeyboardShortcuts.Shortcut(.n, modifiers: [.control, .option])
         ) { [weak self] in self?.coordinator.toggle() }
+        hotkeys.register(
+            "toggleMenuBarIcons", title: "Hiện/ẩn icon menu bar", owner: nil
+        ) { [weak self] in self?.menuBarHider.toggle() }
         statusItem = StatusItemController(
-            settings: settings, registry: registry, screens: screens, overview: permissionOverview,
+            settings: settings, registry: registry, screens: screens, overview: permissionOverview, hider: menuBarHider,
             openSettings: { [weak self] in self?.settingsWindow.show() },
             openPermissions: { [weak self] in self?.settingsWindow.show(page: .permissions) }
         )

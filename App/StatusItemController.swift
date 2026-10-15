@@ -8,10 +8,13 @@ final class StatusItemController: NSObject {
     private let registry: ModuleRegistry
     private let screens: ScreenManager
     private let overview: PermissionOverview
+    private let hider: MenuBarHiderController
     private let openSettings: () -> Void
     private let openPermissions: () -> Void
     private var item: NSStatusItem?
+    private var menu: NSMenu?
     private var visibilityItem: NSMenuItem?
+    private var hiderItem: NSMenuItem?
     private var pauseItem: NSMenuItem?
     private var permissionItem: NSMenuItem?
     /// The red dot on the icon while a required permission is missing.
@@ -21,17 +24,19 @@ final class StatusItemController: NSObject {
 
     init(
         settings: SettingsStore, registry: ModuleRegistry, screens: ScreenManager, overview: PermissionOverview,
-        openSettings: @escaping () -> Void, openPermissions: @escaping () -> Void
+        hider: MenuBarHiderController, openSettings: @escaping () -> Void, openPermissions: @escaping () -> Void
     ) {
         self.settings = settings
         self.registry = registry
         self.screens = screens
         self.overview = overview
+        self.hider = hider
         self.openSettings = openSettings
         self.openPermissions = openPermissions
         super.init()
         observeVisibility()
         observePermissions()
+        observeHider()
     }
 
     private func observeVisibility() {
@@ -51,19 +56,81 @@ final class StatusItemController: NSObject {
         }
     }
 
+    /// With the menu-bar hider on, a click on the icon shows or hides the icons and the menu moves to a right-click.
+    private func observeHider() {
+        Task { [weak self, settings] in
+            for await _ in Observations({ settings.value(MenuBarHiderSettings.enabled) }) {
+                self?.applyClickBehaviour()
+                self?.updateHiderEntry()
+            }
+        }
+    }
+
     private func setVisible(_ visible: Bool) {
         if visible, item == nil {
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+            // A fixed name, so macOS keeps where the user dragged the icon, and the hider's separator can be told to sit on its left.
+            item.autosaveName = "MyNotchIcon"
             item.button?.image = NSImage(systemSymbolName: "rectangle.topthird.inset.filled", accessibilityDescription: "MyNotch")
-            item.menu = makeMenu()
+            menu = makeMenu()
             self.item = item
+            applyClickBehaviour()
             addMissingDot(to: item.button)
             updatePermissionNudge()
+            // After the icon exists, so the separator is made after it.
+            hider.setToggleItem(item)
         } else if !visible, let item {
+            hider.setToggleItem(nil)
             NSStatusBar.system.removeStatusItem(item)
             self.item = nil
+            menu = nil
             missingDot = nil
         }
+    }
+
+    /// The menu opens on a click, or, with the hider on, on a right-click or control-click while a plain click toggles.
+    private func applyClickBehaviour() {
+        guard let button = item?.button else { return }
+        if hider.isEnabled {
+            item?.menu = nil
+            button.target = self
+            button.action = #selector(statusButtonClicked)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            // Pressing the button with VoiceOver is a plain click, so the menu needs a way of its own.
+            button.setAccessibilityCustomActions([
+                NSAccessibilityCustomAction(name: "Mở menu MyNotch") { [weak self] in
+                    self?.showMenu()
+                    return true
+                },
+            ])
+        } else {
+            button.target = nil
+            button.action = nil
+            button.setAccessibilityCustomActions(nil)
+            item?.menu = menu
+        }
+    }
+
+    @objc private func statusButtonClicked() {
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
+            showMenu()
+        } else {
+            hider.toggle()
+        }
+    }
+
+    /// The menu is attached only for the click that opens it, which keeps the plain click free for the hider.
+    private func showMenu() {
+        guard let item, let menu else { return }
+        item.menu = menu
+        item.button?.performClick(nil)
+        item.menu = nil
+    }
+
+    private func updateHiderEntry() {
+        hiderItem?.isHidden = !hider.isEnabled
+        hiderItem?.title = hider.isCollapsed ? "Hiện icon đã ẩn" : "Ẩn bớt icon menu bar"
     }
 
     private func addMissingDot(to button: NSStatusBarButton?) {
@@ -103,6 +170,10 @@ final class StatusItemController: NSObject {
         let visibilityItem = menu.addItem(withTitle: "Hide Notch", action: #selector(toggleNotchVisibility), keyEquivalent: "")
         visibilityItem.target = self
         self.visibilityItem = visibilityItem
+        let hiderItem = menu.addItem(withTitle: "Ẩn bớt icon menu bar", action: #selector(toggleHiddenIcons), keyEquivalent: "")
+        hiderItem.target = self
+        hiderItem.isHidden = !hider.isEnabled
+        self.hiderItem = hiderItem
         let pauseItem = menu.addItem(withTitle: "Pause All Modules", action: #selector(togglePause), keyEquivalent: "")
         pauseItem.target = self
         self.pauseItem = pauseItem
@@ -114,6 +185,8 @@ final class StatusItemController: NSObject {
     @objc private func openSettingsAction() { openSettings() }
 
     @objc private func openPermissionsAction() { openPermissions() }
+
+    @objc private func toggleHiddenIcons() { hider.toggle() }
 
     @objc private func toggleNotchVisibility() { screens.isHiddenByUser.toggle() }
 
@@ -153,6 +226,7 @@ extension StatusItemController: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         visibilityItem?.title = screens.isHiddenByUser ? "Show Notch" : "Hide Notch"
         pauseItem?.state = registry.isPaused ? .on : .off
+        updateHiderEntry()
         // Granting happens in System Settings, so the count is read again each time the menu opens.
         overview.refresh()
         updatePermissionNudge()
