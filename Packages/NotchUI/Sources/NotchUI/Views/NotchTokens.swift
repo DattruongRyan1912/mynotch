@@ -13,6 +13,12 @@ public enum NotchTokens {
     /// The same on Liquid Glass, which is lighter than black, so the capsule needs more of the accent to show (see
     /// `NotchSurface.selectionOpacity`).
     nonisolated public static let glassSelectionOpacity: CGFloat = 0.45
+    /// The black laid over the Liquid Glass, under the content and clipped to the shape, so text keeps its contrast whatever is
+    /// behind the notch. See `NotchBackdrop`.
+    nonisolated static let glassScrimOpacity: CGFloat = 0.25
+    /// How much of the primary label the notch's own secondary text keeps on glass: a little over what every module's secondary
+    /// text (white at 0.6) is, where the system's plain secondary style (0.55 of white) would be a little under it.
+    nonisolated static let glassSecondaryOpacity: Double = 0.72
     /// How much of the accent tints the Liquid Glass when the user asks for it: a hint of it, not a coat.
     nonisolated public static let glassTintOpacity: CGFloat = 0.25
     /// Space left and right of an activity's strip under the collapsed notch, inside the notch's body.

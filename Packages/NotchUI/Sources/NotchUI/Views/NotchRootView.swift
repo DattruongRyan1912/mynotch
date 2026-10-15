@@ -89,7 +89,10 @@ struct NotchRootView: View {
         let shape = NotchShape(topRadius: radii.top, bottomRadius: radii.bottom)
         let accent = theme?.accent ?? NotchTokens.accent
         let surface = surface
-        NotchGlassFamily(surface) {
+        // The bubbles are only drawn, and so only planned, beside the collapsed notch.
+        let slots = surface.isLiquidGlass && state == .compact ? ActivitySlot.bubbles(of: activities, capacity: geometry.bubbleCapacity) : []
+        let plan = NotchGlassPlan(surface: surface, bubbleIDs: slots.map(\.id), accent: accent)
+        NotchGlassFamily(plan) {
             ZStack(alignment: .top) {
                 NotchBackdrop(surface: surface, bodyHeight: geometry.notchSize.height)
                     .overlay(alignment: .top) {
@@ -100,10 +103,7 @@ struct NotchRootView: View {
                     .clipShape(shape)
                     .frame(width: size.width, height: size.height)
                     // Above the animation below, so the glass takes its shape and size from the same spring as the notch.
-                    .notchGlass(
-                        surface, in: shape, accent: accent, interactive: state.wantsInteractiveGlass,
-                        identity: (NotchGlassID.notch(in: state), glassNamespace)
-                    )
+                    .notchGlass(plan.notch, in: shape, namespace: glassNamespace)
                     .contentShape(shape)
                     // Once open, taps belong to the tab content; the root tap only opens the notch.
                     .gesture(TapGesture().onEnded { model.click() }, including: isOpen ? .subviews : .all)
@@ -124,6 +124,7 @@ struct NotchRootView: View {
         // What the notch is drawn on, for its own views' foreground; the glass's dark scheme for everything inside it.
         .environment(\.notchSurface, surface)
         .environment(\.notchGlassNamespace, surface.isLiquidGlass ? glassNamespace : nil)
+        .environment(\.notchGlassPlan, plan)
         .notchColorScheme(surface.colorScheme)
     }
 

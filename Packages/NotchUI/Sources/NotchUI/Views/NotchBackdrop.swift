@@ -3,7 +3,8 @@ import SwiftUI
 /// What the notch's shape is filled with. Black, which is also what the hardware notch is, so the two join. As the classic look's
 /// blur (the open notch only, when the user asks) it is a blur of what is behind the window under a veil of black, except the
 /// strip the notch's own body takes at the top, which stays solid so there is no seam where it meets the cutout. As Liquid
-/// Glass it is nothing: the glass is drawn behind the whole notch by `View.notchGlass`, once the shape has its size.
+/// Glass it is a light scrim of black over the glass, which `View.notchGlass` draws behind the whole notch once the shape has
+/// its size.
 struct NotchBackdrop: View {
     let surface: NotchSurface
     let bodyHeight: CGFloat
@@ -15,7 +16,9 @@ struct NotchBackdrop: View {
         ZStack(alignment: .top) {
             switch surface {
             case .liquidGlass:
-                Color.clear
+                // A scrim, not the glass: the glass is drawn behind the whole notch by `View.notchGlass`. The scrim is above it,
+                // under the content, so light text keeps its contrast over a bright wallpaper.
+                NotchTokens.background.opacity(NotchTokens.glassScrimOpacity)
             case .material:
                 Rectangle().fill(.ultraThinMaterial)
                 NotchTokens.background.opacity(Self.veilOpacity)

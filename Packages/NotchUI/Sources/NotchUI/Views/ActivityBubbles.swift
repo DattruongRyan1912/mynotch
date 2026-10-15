@@ -59,14 +59,14 @@ private struct ActivityBubble: View {
     let label: (ActivityCenter.Entry) -> String
     let activate: (ActivitySlot) -> Void
     @Environment(\.notchSurface) private var surface
-    @Environment(\.notchAccent) private var accent
+    @Environment(\.notchGlassPlan) private var plan
     @Environment(\.notchGlassNamespace) private var namespace
 
     var body: some View {
         Button { activate(slot) } label: {
             ZStack {
-                // Black, or nothing: on glass the circle is the glass.
-                if !surface.isLiquidGlass { Circle().fill(NotchTokens.background) }
+                // Black; on glass the circle is the glass, with the same scrim under its icon as the notch has.
+                Circle().fill(NotchTokens.background.opacity(surface.isLiquidGlass ? NotchTokens.glassScrimOpacity : 1))
                 switch slot {
                 case .activity(let entry):
                     ActivityIcon(activity: entry.activity, size: diameter, minimalSize: NotchTokens.bubbleIconSize)
@@ -75,7 +75,7 @@ private struct ActivityBubble: View {
                 }
             }
             .frame(width: diameter, height: diameter)
-            .notchGlass(surface, in: Circle(), accent: accent, identity: namespace.map { (NotchGlassID(slot: slot), $0) })
+            .notchGlass(plan.bubble(id: slot.id), in: Circle(), namespace: namespace)
             .glassBubbleTransition(surface)
             .contentShape(Circle())
         }

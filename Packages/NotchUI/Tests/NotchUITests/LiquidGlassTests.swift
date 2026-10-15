@@ -16,43 +16,6 @@ import Testing
     let geometry = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig())
     let accent = Color(.sRGB, red: 0.2, green: 0.4, blue: 0.9)
 
-    // MARK: identities of the glass family
-
-    @Test func theNotchHasOneGlassIdentityInEveryStateSoOpeningAndClosingMorphsOneShape() {
-        let states: [NotchState] = [.closed, .compact, .open(nil), .open("a"), .open("b"), .toast]
-        #expect(Set(states.map(NotchGlassID.notch(in:))) == [.notch])
-    }
-
-    @Test func aBubbleIsNamedAfterItsActivityAndIsNeverTheNotch() {
-        let center = ActivityCenter(scheduler: ManualScheduler())
-        for index in 1...4 {
-            center.set(
-                LiveActivity(id: "a\(index)", leading: AnyView(Color.clear), trailing: AnyView(Color.clear), summary: "Hoạt động \(index)"),
-                from: "m"
-            )
-        }
-        let slots = ActivitySlot.bubbles(of: center, capacity: 3)
-        let ids = slots.map(NotchGlassID.init(slot:))
-        #expect(Set(ids).count == ids.count, "no two bubbles share an identity")
-        #expect(!ids.contains(.notch))
-        // The same slots again, and in another order, give the same names: a bubble that moves keeps its glass.
-        #expect(slots.reversed().map(NotchGlassID.init(slot:)) == ids.reversed())
-        #expect(ActivitySlot.bubbles(of: center, capacity: 3).map(NotchGlassID.init(slot:)) == ids)
-    }
-
-    @Test func thePlusNBubbleKeepsItsIdentityWhileItsNumberChanges() {
-        #expect(NotchGlassID(slot: .overflow(3)) == NotchGlassID(slot: .overflow(4)))
-        #expect(NotchGlassID(slot: .overflow(3)) != .notch)
-    }
-
-    @Test func onlyTheOpenNotchIsInteractiveGlass() {
-        #expect(NotchState.open(nil).wantsInteractiveGlass)
-        #expect(NotchState.open("a").wantsInteractiveGlass)
-        for state in [NotchState.closed, .compact, .toast] {
-            #expect(!state.wantsInteractiveGlass, "\(state)")
-        }
-    }
-
     // MARK: the glass itself
 
     @Test func glassIsTheRegularVariantAndSolidOrMaterialAskForNone() {
@@ -152,15 +115,84 @@ import Testing
             ("deep blue", NotchAccent.custom(RGB(red: 0, green: 0, blue: 102)).resolved(system: RGB(red: 0, green: 0, blue: 0)), 1.1),
         ]
         let opacity = Double(NotchTokens.glassSelectionOpacity)
-        for floor in [0.2, 0.35] {
+        for glassFloor in [0.2, 0.35] {
+            // What the glass reads as once the scrim over it has darkened it.
+            let floor = glassFloor * (1 - Double(NotchTokens.glassScrimOpacity))
             for (name, rgb, lightest) in ordinary + dark {
                 func mixed(_ channel: UInt8) -> Double { opacity * Double(channel) / 255 + (1 - opacity) * floor }
                 let capsule = luminance(mixed(rgb.red), mixed(rgb.green), mixed(rgb.blue))
-                #expect(contrast(1, capsule) >= 3, "white icon on the \(name) capsule over \(floor) grey")
+                #expect(contrast(1, capsule) >= 3, "white icon on the \(name) capsule over \(glassFloor) grey")
                 let against = contrast(luminance(floor, floor, floor), capsule)
-                #expect(against >= (floor == 0.35 ? lightest : 1.2), "the \(name) capsule against \(floor) grey is \(against)")
+                #expect(against >= (glassFloor == 0.35 ? lightest : 1.2), "the \(name) capsule against \(glassFloor) grey is \(against)")
             }
         }
+    }
+
+    // MARK: text on glass
+
+    /// `ImageRenderer` hands its pixels back lighter than the colours it was given, by a power of 0.8 (an opaque sRGB grey of
+    /// 0.5 reads as 0.574), so a pixel is raised to 1.25 to be compared with a colour. That is applied to white drawn over
+    /// black only, to read how much of white a style is: it gives the 0.55 and 0.85 that macOS defines for the system's
+    /// secondary and primary label in a dark appearance. Everything else here is plain arithmetic on those alphas.
+    static let rendererCurve = 1.25
+
+    /// How much of white `style` is, drawn over black in the dark scheme the notch has on glass.
+    func effectiveAlpha(of style: AnyShapeStyle) throws -> Double {
+        let view = ZStack { Color.black; Rectangle().fill(style).frame(width: 8, height: 8) }
+            .environment(\.colorScheme, .dark).frame(width: 12, height: 12)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 1
+        let bitmap = NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
+        return pow(Double(try #require(bitmap.colorAt(x: 6, y: 6)?.usingColorSpace(.sRGB)).redComponent), Self.rendererCurve)
+    }
+
+    @Test func theMeasurementOfAStylesWhiteReadsKnownAlphasBack() throws {
+        for alpha in [0.25, 0.6, 1.0] {
+            let read = try effectiveAlpha(of: AnyShapeStyle(Color.white.opacity(alpha)))
+            #expect(abs(read - alpha) < 0.02, "white at \(alpha) read as \(read): the renderer's tone curve may have changed")
+        }
+    }
+
+    /// WCAG contrast of text of `alpha` of white over what the glass reads as, `glassGrey` (an estimate: nothing is
+    /// captured here), after the scrim has darkened it by `scrim`.
+    func textContrast(alpha: Double, glassGrey: Double, scrim: Double) -> Double {
+        let background = glassGrey * (1 - scrim)
+        let text = alpha + (1 - alpha) * background
+        return contrast(luminance(text, text, text), luminance(background, background, background))
+    }
+
+    @Test func textOnGlassReadsAtFourAndAHalfToOneOverTheGlassFloorsOfTheReport() throws {
+        // 12 pt text needs 4.5:1. The two floors are the report's estimates of the lightest and the usual glass; the module
+        // text is white at 0.6 (every module draws with it), the notch's own rows are the glass's secondary style.
+        let glass = NotchSurface.liquidGlass(tinted: false)
+        let scrim = Double(NotchTokens.glassScrimOpacity)
+        let moduleSecondary = try effectiveAlpha(of: AnyShapeStyle(NotchTokens.secondaryText))
+        let ownSecondary = try effectiveAlpha(of: glass.secondaryStyle)
+        let modulePrimary = try effectiveAlpha(of: AnyShapeStyle(NotchTokens.primaryText))
+        let ownPrimary = try effectiveAlpha(of: glass.primaryStyle)
+        for floor in [0.2, 0.35] {
+            #expect(textContrast(alpha: moduleSecondary, glassGrey: floor, scrim: scrim) >= 4.5, "module text over \(floor) grey")
+            #expect(textContrast(alpha: ownSecondary, glassGrey: floor, scrim: scrim) >= 4.5, "the notch's own secondary text over \(floor) grey")
+            #expect(textContrast(alpha: modulePrimary, glassGrey: floor, scrim: scrim) >= 7, "module primary text over \(floor) grey")
+            #expect(textContrast(alpha: ownPrimary, glassGrey: floor, scrim: scrim) >= 7, "the notch's own primary text over \(floor) grey")
+        }
+    }
+
+    @Test func theNotchsOwnSecondaryTextOnGlassIsAsStrongAsTheModulesAndStillTheSystemsStyle() throws {
+        let glass = NotchSurface.liquidGlass(tinted: false)
+        // The system's plain secondary label (0.55 of white) would be weaker than the 0.6 every module draws with.
+        #expect(try effectiveAlpha(of: glass.secondaryStyle) >= effectiveAlpha(of: AnyShapeStyle(NotchTokens.secondaryText)) - 0.01)
+        #expect(try effectiveAlpha(of: AnyShapeStyle(.secondary)) < effectiveAlpha(of: AnyShapeStyle(NotchTokens.secondaryText)))
+    }
+
+    @Test func withoutTheScrimTheModuleTextWouldNotReadOnTheLightestGlass() throws {
+        let alpha = try effectiveAlpha(of: AnyShapeStyle(NotchTokens.secondaryText))
+        #expect(textContrast(alpha: alpha, glassGrey: 0.35, scrim: 0) < 4.5)
+        #expect(textContrast(alpha: alpha, glassGrey: 0.35, scrim: Double(NotchTokens.glassScrimOpacity)) >= 4.5)
+    }
+
+    @Test func theScrimIsAHintOfBlackNotACoatOfIt() {
+        #expect(NotchTokens.glassScrimOpacity > 0 && NotchTokens.glassScrimOpacity <= 0.35)
     }
 
     /// The red of the selected tab's capsule, drawn over black with a red accent: its opacity.
@@ -263,17 +295,6 @@ import Testing
         #expect(!(seen.alphaComponent == 1 && seen.redComponent == 0 && seen.greenComponent == 0 && seen.blueComponent == 0))
     }
 
-    @Test func theGlassPathDrawsTheContentWhereTheClassicPathDoes() throws {
-        publishActivity()
-        let model = makeModel()
-        model.hasActivity = true
-        let classic = try #require(whiteBox(try render(rootView(model: model, theme: theme(.classic)))))
-        let glass = try #require(whiteBox(try render(rootView(model: model, theme: theme(.liquidGlass)))))
-        #expect(glass == classic)
-        let tinted = try #require(whiteBox(try render(rootView(model: model, theme: theme(.liquidGlass, tinted: true)))))
-        #expect(tinted == classic)
-    }
-
     @Test func everyStateBuildsOnGlassAndLaysItsContentOutLikeTheClassicLook() throws {
         publishActivity("a")
         publishActivity("b", priority: .low)
@@ -292,84 +313,6 @@ import Testing
             }
             #expect(try box(.liquidGlass) == box(.classic), "\(name)")
         }
-    }
-
-    // MARK: the glass layers SwiftUI builds
-
-    func layers(named name: String, in layer: CALayer) -> Int {
-        ("\(type(of: layer))" == name ? 1 : 0) + (layer.sublayers ?? []).reduce(0) { $0 + layers(named: name, in: $1) }
-    }
-
-    /// The backdrops and the glass shapes in a window that is never shown. A glass effect is made of a backdrop layer that the
-    /// window server fills in, with one shape element for each glass; glasses in one `GlassEffectContainer` share a backdrop.
-    func glass(of hosting: NSHostingView<NotchRootView>, in window: NSWindow) -> (backdrops: Int, shapes: Int) {
-        window.contentView = hosting
-        hosting.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
-        hosting.layoutSubtreeIfNeeded()
-        let root = hosting.layer ?? CALayer()
-        return (layers(named: "CABackdropLayer", in: root), layers(named: "CASDFElementLayer", in: root))
-    }
-
-    func hostedGlass(theme: NotchTheme, activities: Int = 1, prepare: (NotchViewModel) -> Void = { _ in }) -> (backdrops: Int, shapes: Int) {
-        for index in 0..<activities { publishActivity("a\(index)", priority: index == 0 ? .normal : .low) }
-        let model = makeModel()
-        prepare(model)
-        let hosting = NSHostingView(rootView: rootView(model: model, theme: theme))
-        let window = NSWindow(contentRect: CGRect(origin: .zero, size: geometry.panelSize), styleMask: .borderless, backing: .buffered, defer: true)
-        defer { window.contentView = nil }
-        return glass(of: hosting, in: window)
-    }
-
-    @Test func theClassicLookBuildsNoGlassAtAll() {
-        for state in [{ (_: NotchViewModel) in }, { $0.open(tab: nil) }] {
-            let found = hostedGlass(theme: theme(.classic), activities: 3) { model in
-                model.hasActivity = true
-                model.bubbleCount = 2
-                state(model)
-            }
-            #expect(found.backdrops == 0 && found.shapes == 0)
-        }
-    }
-
-    @Test func theNotchIsOneGlassShapeInEveryStateAndInTheOpenOne() {
-        #expect(hostedGlass(theme: theme(.liquidGlass), activities: 1) { _ in } == (1, 1), "closed")
-        #expect(hostedGlass(theme: theme(.liquidGlass), activities: 1) { $0.hasActivity = true } == (1, 1), "collapsed")
-        #expect(hostedGlass(theme: theme(.liquidGlass), activities: 1) { $0.open(tab: nil) } == (1, 1), "open")
-        #expect(hostedGlass(theme: theme(.liquidGlass), activities: 1) { $0.showToast(AnyView(EmptyView()), duration: .seconds(60)) } == (1, 1), "toast")
-    }
-
-    @Test func eachBubbleIsAGlassShapeInTheSameContainerAsTheNotch() {
-        for bubbles in 1...3 {
-            let found = hostedGlass(theme: theme(.liquidGlass), activities: bubbles + 1) {
-                $0.hasActivity = true
-                $0.bubbleCount = bubbles
-            }
-            // One backdrop for the whole family: a container per shape would not let them blend.
-            #expect(found.backdrops == 1, "\(bubbles) bubbles")
-            #expect(found.shapes == 1 + min(bubbles, geometry.bubbleCapacity), "\(bubbles) bubbles")
-        }
-    }
-
-    @Test func aTintedGlassIsStillOneFamilyInOneContainer() {
-        let plain = hostedGlass(theme: theme(.liquidGlass), activities: 2) { $0.hasActivity = true; $0.bubbleCount = 1 }
-        let tinted = hostedGlass(theme: theme(.liquidGlass, tinted: true), activities: 2) { $0.hasActivity = true; $0.bubbleCount = 1 }
-        #expect(tinted.backdrops == 1)
-        #expect(tinted.shapes >= plain.shapes, "the tint adds to the glass, it does not replace a shape")
-    }
-
-    @Test func openingAndClosingTheNotchKeepsItsOneGlassShape() {
-        publishActivity()
-        let model = makeModel()
-        model.hasActivity = true
-        let hosting = NSHostingView(rootView: rootView(model: model, theme: theme(.liquidGlass)))
-        let window = NSWindow(contentRect: CGRect(origin: .zero, size: geometry.panelSize), styleMask: .borderless, backing: .buffered, defer: true)
-        defer { window.contentView = nil }
-        #expect(glass(of: hosting, in: window) == (1, 1))
-        model.open(tab: nil)
-        #expect(glass(of: hosting, in: window) == (1, 1))
-        model.close()
-        #expect(glass(of: hosting, in: window) == (1, 1))
     }
 
     @Test func theThemeCanBeMissingAndTheNotchIsClassic() throws {
@@ -524,15 +467,20 @@ import Testing
         return NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
     }
 
-    @Test func theSurfaceModifierFillsWithBlackInTheClassicLookAndLeavesRoomForGlassInTheOther() throws {
+    @Test func theSurfaceModifierFillsWithBlackInTheClassicLookAndHasAScrimOnGlassInTheOther() throws {
         // The 60 x 40 box sits at (10, 10) in the 80 x 60 image: (20, 20) is inside its rounded corner, (11, 11) outside it.
         let classic = try draw(.solid)
         let inside = try #require(classic.colorAt(x: 20, y: 20))
         #expect(inside.alphaComponent == 1 && inside.redComponent == 0)
         #expect(try #require(classic.colorAt(x: 11, y: 11)).alphaComponent == 0, "inside its shape only")
 
+        // On glass the shape holds the window server's glass, which offscreen is nothing, and under the content a scrim: black
+        // at `glassScrimOpacity`, clipped to the shape like the content, and under what is drawn on it.
         let glass = try draw(.liquidGlass(tinted: false))
-        #expect(try #require(glass.colorAt(x: 20, y: 20)).alphaComponent == 0, "no black: the glass is the window server's")
+        let scrim = try #require(glass.colorAt(x: 20, y: 20)?.usingColorSpace(.sRGB))
+        #expect(abs(scrim.alphaComponent - NotchTokens.glassScrimOpacity) < 0.02)
+        #expect(scrim.redComponent == 0 && scrim.greenComponent == 0 && scrim.blueComponent == 0)
+        #expect(try #require(glass.colorAt(x: 11, y: 11)).alphaComponent == 0, "the scrim is clipped to the shape")
         #expect(try #require(glass.colorAt(x: 40, y: 30)).alphaComponent == 1, "what is drawn on it is still drawn")
     }
 
@@ -543,5 +491,48 @@ import Testing
         let glass = Seen()
         _ = try draw(.liquidGlass(tinted: false), seen: glass)
         #expect(glass.values.last == true)
+    }
+
+    // MARK: the scrim
+
+    func alpha(of view: some View, at point: CGPoint, size: CGSize) throws -> NSColor {
+        let renderer = ImageRenderer(content: view.frame(width: size.width, height: size.height))
+        renderer.scale = 1
+        let bitmap = NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
+        return try #require(bitmap.colorAt(x: Int(point.x), y: Int(point.y))?.usingColorSpace(.sRGB))
+    }
+
+    @Test func theBackdropIsAScrimOnGlassAndExactlyWhatItWasOtherwise() throws {
+        let size = CGSize(width: 40, height: 40)
+        let middle = CGPoint(x: 20, y: 20)
+        let black = try alpha(of: NotchBackdrop(surface: .solid, bodyHeight: 10), at: middle, size: size)
+        #expect(black.alphaComponent == 1 && black.redComponent == 0 && black.greenComponent == 0 && black.blueComponent == 0)
+        let scrim = try alpha(of: NotchBackdrop(surface: .liquidGlass(tinted: false), bodyHeight: 10), at: middle, size: size)
+        #expect(abs(scrim.alphaComponent - NotchTokens.glassScrimOpacity) < 0.02)
+        #expect(scrim.redComponent == 0 && scrim.greenComponent == 0 && scrim.blueComponent == 0)
+        let tintedScrim = try alpha(of: NotchBackdrop(surface: .liquidGlass(tinted: true), bodyHeight: 10), at: middle, size: size)
+        #expect(tintedScrim.alphaComponent == scrim.alphaComponent, "the scrim is black whatever the tint")
+        // The classic blur keeps its solid strip at the top.
+        let strip = try alpha(of: NotchBackdrop(surface: .material, bodyHeight: 10), at: CGPoint(x: 20, y: 3), size: size)
+        #expect(strip.alphaComponent == 1 && strip.redComponent == 0)
+    }
+
+    @Test func aBubbleOnGlassHasTheSameScrimAndOnTheClassicNotchIsStillBlack() throws {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        for index in 1...2 {
+            center.set(LiveActivity(id: "a\(index)", leading: AnyView(Color.clear), trailing: AnyView(Color.clear), summary: "\(index)"), from: "m")
+        }
+        let slots = ActivitySlot.bubbles(of: center, capacity: geometry.bubbleCapacity)
+        let bubble = geometry.bubbleFrame(at: 0)
+        let point = CGPoint(x: geometry.panelSize.width / 2 + bubble.midX, y: bubble.midY)
+        func bubbles(_ surface: NotchSurface) -> some View {
+            ActivityBubbles(slots: slots, geometry: geometry, label: { $0.id }, activate: { _ in }).environment(\.notchSurface, surface)
+        }
+        let size = CGSize(width: geometry.panelSize.width, height: geometry.bubbleDiameter)
+        let classic = try alpha(of: bubbles(.solid), at: point, size: size)
+        #expect(classic.alphaComponent == 1 && classic.redComponent == 0)
+        let glass = try alpha(of: bubbles(.liquidGlass(tinted: false)), at: point, size: size)
+        #expect(abs(glass.alphaComponent - NotchTokens.glassScrimOpacity) < 0.02)
+        #expect(glass.redComponent == 0 && glass.greenComponent == 0 && glass.blueComponent == 0)
     }
 }

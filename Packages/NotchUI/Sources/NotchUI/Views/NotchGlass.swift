@@ -9,31 +9,20 @@ extension EnvironmentValues {
     /// The namespace of the glass family: the notch and its bubbles name their shapes in it (`NotchGlassID`) so SwiftUI morphs
     /// the ones that keep their name. Nil outside the notch's root view and in the classic look.
     @Entry var notchGlassNamespace: Namespace.ID?
+
+    /// The glass the notch's root view asked for, which its bubbles draw from. Nothing outside the notch's root view.
+    @Entry var notchGlassPlan: NotchGlassPlan = .none
 }
 
 /// Names the glass shapes of the notch's family inside the root view's namespace. A shape that keeps its name is morphed by
 /// SwiftUI (the notch as it opens, closes and grows a strip, a bubble when the others around it come and go); a name that
 /// appears or disappears is a shape that comes out of its neighbours or melts back into them.
 nonisolated enum NotchGlassID: Hashable, Sendable {
+    /// The notch is one shape in every state: closed, collapsed with a strip or the list, open, a toast. So opening it is the
+    /// same glass growing, not one glass replaced by another.
     case notch
+    /// A bubble is named after its activity (`ActivitySlot.id`), and the "+N" bubble keeps its name while its number changes.
     case bubble(String)
-
-    /// The notch is one shape in every state: closed, collapsed with a strip or the list, open, a toast. So opening it is
-    /// the same glass growing, not one glass replaced by another.
-    static func notch(in state: NotchState) -> NotchGlassID { .notch }
-
-    /// A bubble is named after its activity, and the "+N" bubble keeps its name while its number changes (`ActivitySlot.id`).
-    @MainActor init(slot: ActivitySlot) {
-        self = .bubble(slot.id)
-    }
-}
-
-nonisolated extension NotchState {
-    /// Only the open notch is interactive glass: it is the one surface that is a control in itself, which lifts under the
-    /// pointer. The collapsed notch, a toast and the bubbles stay still.
-    var wantsInteractiveGlass: Bool {
-        if case .open = self { true } else { false }
-    }
 }
 
 nonisolated extension NotchSurface {
@@ -47,19 +36,66 @@ nonisolated extension NotchSurface {
     }
 }
 
+/// What glass the notch asks for, as a value: whether the notch and its bubbles share a container, and for each shape its name
+/// in the morph namespace and its `Glass`. The root view and the bubbles draw from it, so a test that reads it reads what is
+/// drawn. It does not depend on the notch's state: the notch is one shape whose glass is the same closed, collapsed, open or
+/// showing a toast, so nothing about it is rebuilt while it morphs.
+nonisolated struct NotchGlassPlan: Equatable, Sendable {
+    /// One glass shape: its name in the namespace and what it is made of.
+    struct Shape: Equatable, Sendable {
+        let id: NotchGlassID
+        let glass: Glass
+    }
+
+    /// No glass at all: the classic look.
+    static let none = NotchGlassPlan()
+
+    /// How close two glass shapes of the family have to be for them to melt into each other. Below the gap between a bubble and
+    /// what is beside it, and below the nearest the notch's top ear comes to its first bubble (about 2.5 pt on the smallest
+    /// notch), so at rest the shapes stay apart and they blend only while one moves to or from the other.
+    static let containerSpacing: CGFloat = 2
+
+    /// Whether the notch and its bubbles are wrapped in one `GlassEffectContainer`.
+    let usesContainer: Bool
+    let notch: Shape?
+    /// The bubbles' shapes, in the order of the bubbles.
+    let bubbles: [Shape]
+
+    var containerSpacing: CGFloat? { usesContainer ? Self.containerSpacing : nil }
+    var shapes: [Shape] { (notch.map { [$0] } ?? []) + bubbles }
+
+    private init() {
+        (usesContainer, notch, bubbles) = (false, nil, [])
+    }
+
+    /// The plan for `surface` with a bubble for each of `bubbleIDs` (the `ActivitySlot.id`s). The notch's glass is not
+    /// interactive: it is a surface that holds controls, not a control. A bubble is a button, so its glass is.
+    init(surface: NotchSurface, bubbleIDs: [String], accent: Color) {
+        guard let notchGlass = surface.glass(accent: accent, interactive: false), let bubbleGlass = surface.glass(accent: accent, interactive: true) else {
+            self = .none
+            return
+        }
+        usesContainer = true
+        notch = Shape(id: .notch, glass: notchGlass)
+        bubbles = bubbleIDs.map { Shape(id: .bubble($0), glass: bubbleGlass) }
+    }
+
+    /// The shape of the bubble of activity `id`, if the plan has one.
+    func bubble(id: String) -> Shape? {
+        bubbles.first { $0.id == .bubble(id) }
+    }
+}
+
 extension View {
-    /// Draws the Liquid Glass of `surface` in `shape` behind the view, as part of the glass family when `identity` is given;
-    /// the view itself for any other surface. Applied after the view's size is set, so the glass is as big as the view and
-    /// follows its animation.
-    @ViewBuilder func notchGlass<S: Shape>(
-        _ surface: NotchSurface, in shape: S, accent: Color, interactive: Bool = false,
-        identity: (id: NotchGlassID, namespace: Namespace.ID)? = nil
-    ) -> some View {
-        if let glass = surface.glass(accent: accent, interactive: interactive) {
-            if let identity {
-                glassEffect(glass, in: shape).glassEffectID(identity.id, in: identity.namespace)
+    /// Draws the glass `planned` in `shape` behind the view, with its name in `namespace` when there is one, so it takes part in
+    /// the family's morph; the view itself when nothing is planned. Applied after the view's size is set, so the glass is as big
+    /// as the view and follows its animation.
+    @ViewBuilder func notchGlass<S: Shape>(_ planned: NotchGlassPlan.Shape?, in shape: S, namespace: Namespace.ID? = nil) -> some View {
+        if let planned {
+            if let namespace {
+                glassEffect(planned.glass, in: shape).glassEffectID(planned.id, in: namespace)
             } else {
-                glassEffect(glass, in: shape)
+                glassEffect(planned.glass, in: shape)
             }
         } else {
             self
@@ -97,25 +133,24 @@ private struct NotchSurfaceModifier<S: Shape>: ViewModifier {
             .notchColorScheme(surface.colorScheme)
             .background(NotchBackdrop(surface: surface, bodyHeight: 0))
             .clipShape(shape)
-            .notchGlass(surface, in: shape, accent: accent)
+            .notchGlass(NotchGlassPlan(surface: surface, bubbleIDs: [], accent: accent).notch, in: shape)
     }
 }
 
-/// Wraps the notch and its bubbles in the container that lets their glass blend and morph as one family, when the surface is
-/// glass. Spacing is the gap between a bubble and what is next to it: shapes closer than that melt into each other while they
-/// come and go. In the classic look it adds nothing: the content is exactly what it was.
+/// Wraps the notch and its bubbles in the container that lets their glass blend and morph as one family, when the plan says
+/// so. In the classic look it adds nothing: the content is exactly what it was.
 struct NotchGlassFamily<Content: View>: View {
-    let surface: NotchSurface
+    let plan: NotchGlassPlan
     let content: Content
 
-    init(_ surface: NotchSurface, @ViewBuilder content: () -> Content) {
-        self.surface = surface
+    init(_ plan: NotchGlassPlan, @ViewBuilder content: () -> Content) {
+        self.plan = plan
         self.content = content()
     }
 
     var body: some View {
-        if surface.isLiquidGlass {
-            GlassEffectContainer(spacing: NotchGeometry.bubbleGap) { content }
+        if let spacing = plan.containerSpacing {
+            GlassEffectContainer(spacing: spacing) { content }
         } else {
             content
         }

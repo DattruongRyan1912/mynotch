@@ -33,21 +33,21 @@ nonisolated public enum NotchSurface: Equatable, Sendable {
 
 /// Which foreground the notch's own text and glyphs use: the fixed white of the black notch, or the system's styles, which
 /// are vibrant on glass and follow the colour scheme instead of assuming what is behind them.
-nonisolated public enum NotchForeground: Equatable, Sendable {
+nonisolated enum NotchForeground: Equatable, Sendable {
     case fixed
     case vibrant
 }
 
 nonisolated extension NotchSurface {
-    public var foreground: NotchForeground { isLiquidGlass ? .vibrant : .fixed }
+    var foreground: NotchForeground { isLiquidGlass ? .vibrant : .fixed }
 
     /// The scheme the content of the surface is drawn in. Glass is the dark one: the notch is a dark shape that joins the
     /// hardware cutout, and the tabs' content still draws light-on-dark (`NotchTokens.primaryText`). Nil leaves the
     /// environment's scheme alone, as the classic look always did.
-    public var colorScheme: ColorScheme? { isLiquidGlass ? .dark : nil }
+    var colorScheme: ColorScheme? { isLiquidGlass ? .dark : nil }
 
     /// The opacity of the accent behind the selected tab. Glass is lighter than black, so it takes more.
-    public var selectionOpacity: CGFloat { isLiquidGlass ? NotchTokens.glassSelectionOpacity : NotchTokens.selectionOpacity }
+    var selectionOpacity: CGFloat { isLiquidGlass ? NotchTokens.glassSelectionOpacity : NotchTokens.selectionOpacity }
 }
 
 extension NotchSurface {
@@ -56,8 +56,10 @@ extension NotchSurface {
         foreground == .vibrant ? AnyShapeStyle(.primary) : AnyShapeStyle(NotchTokens.primaryText)
     }
 
-    /// The same for secondary text and glyphs.
+    /// The same for secondary text and glyphs. On glass it is the primary style at `glassSecondaryOpacity`, which stays the
+    /// system's (vibrant, following the colour scheme) but is as strong as the modules' secondary text rather than a little
+    /// weaker, as the system's own `.secondary` is.
     public var secondaryStyle: AnyShapeStyle {
-        foreground == .vibrant ? AnyShapeStyle(.secondary) : AnyShapeStyle(NotchTokens.secondaryText)
+        foreground == .vibrant ? AnyShapeStyle(.primary.opacity(NotchTokens.glassSecondaryOpacity)) : AnyShapeStyle(NotchTokens.secondaryText)
     }
 }
