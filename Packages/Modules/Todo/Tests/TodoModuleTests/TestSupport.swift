@@ -29,11 +29,12 @@ func todo(
     due: DateComponents? = nil,
     priority: TodoPriority = .none,
     list: String = "inbox",
-    done: Date? = nil
+    done: Date? = nil,
+    repeats: Bool = false
 ) -> TodoReminder {
     TodoReminder(
         id: id, title: id, due: due, priority: priority, isCompleted: done != nil, completionDate: done,
-        listID: list, listTitle: list.capitalized, listColor: .gray
+        listID: list, listTitle: list.capitalized, listColor: .gray, isRecurring: repeats
     )
 }
 

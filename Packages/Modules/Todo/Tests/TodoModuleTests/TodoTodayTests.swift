@@ -199,4 +199,25 @@ import Testing
         let items = TodoToday.items(from: [reminder], rules: rules, now: now, calendar: calendar)
         #expect(items.map(\.overdueDays) == [0])
     }
+
+    @Test func aDayAloneIsTheSameDayInEveryZoneEvenIfItCarriesOne() throws {
+        // An all-day reminder is that day wherever it is read: in UTC-8 midnight UTC is still the evening before.
+        let losAngeles = fixedCalendar("America/Los_Angeles")
+        let now = losAngeles.on(14, at: 9)
+        var reminder = todo("allDay")
+        reminder.due = DateComponents(calendar: Calendar(identifier: .gregorian), timeZone: TimeZone(identifier: "UTC"), year: 2026, month: 10, day: 14)
+        let items = TodoToday.items(from: [reminder], rules: rules, now: now, calendar: losAngeles)
+        #expect(try #require(items.first).overdueDays == 0)
+        let tomorrow = TodoToday.items(from: [reminder], rules: rules, now: losAngeles.on(13, at: 9), calendar: losAngeles)
+        #expect(tomorrow.isEmpty)
+    }
+
+    @Test func theListIsTheSameInAnyCalendarTheUserLivesBy() {
+        var buddhist = Calendar(identifier: .buddhist)
+        buddhist.timeZone = calendar.timeZone
+        let reminders = [todo("today", due: due(14)), todo("yesterday", due: due(13, 10)), todo("later", due: due(15)), todo("idea")]
+        let gregorian = TodoToday.items(from: reminders, rules: rules, now: now, calendar: calendar)
+        let other = TodoToday.items(from: reminders, rules: rules, now: now, calendar: buddhist)
+        #expect(other == gregorian)
+    }
 }

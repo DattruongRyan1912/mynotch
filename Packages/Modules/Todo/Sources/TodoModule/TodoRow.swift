@@ -14,10 +14,28 @@ struct TodoRow: View {
 
     private var reminder: TodoReminder { item.reminder }
 
-    /// A time of today that has gone shows red: it is late, though the day is not over.
-    private var timePassed: Bool {
-        guard let due = reminder.due, due.hour != nil, let date = TodoReminder.dueDate(of: due, calendar: calendar) else { return false }
-        return date < now
+    /// What follows the title, left to right. A pure list so what a row says is checked without drawing it.
+    enum Detail: Equatable {
+        /// "hôm qua", "quá hạn 3 ngày".
+        case badge(String)
+        /// A time of today that has gone is late, though the day is not over; a time of an earlier day is the badge's business.
+        case time(String, isLate: Bool)
+        /// The reminder repeats.
+        case repeats
+        /// "!", "!!" or "!!!".
+        case priority(String)
+    }
+
+    static func details(of item: TodoItem, now: Date, calendar: Calendar) -> [Detail] {
+        var details: [Detail] = []
+        if let badge = TodoFormat.overdueBadge(days: item.overdueDays) { details.append(.badge(badge)) }
+        if let time = TodoFormat.time(of: item.reminder.due, calendar: calendar) {
+            let passed = item.reminder.due.flatMap { TodoReminder.dueDate(of: $0, calendar: calendar) }.map { $0 < now } ?? false
+            details.append(.time(time, isLate: passed && item.overdueDays == 0))
+        }
+        if item.reminder.isRecurring { details.append(.repeats) }
+        if item.reminder.priority != .none { details.append(.priority(item.reminder.priority.marks)) }
+        return details
     }
 
     var body: some View {
@@ -72,24 +90,30 @@ struct TodoRow: View {
 
     private var details: some View {
         HStack(spacing: 6) {
-            if let badge = TodoFormat.overdueBadge(days: item.overdueDays) {
-                Text(badge)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color.red)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(Color.red.opacity(0.18), in: Capsule())
-                    .lineLimit(1)
-            }
-            if let time = TodoFormat.time(of: reminder.due, calendar: calendar) {
-                Text(time)
-                    .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(timePassed && item.overdueDays == 0 ? Color.red : NotchTokens.secondaryText)
-            }
-            if reminder.priority != .none {
-                Text(reminder.priority.marks)
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Color.orange)
+            ForEach(Array(Self.details(of: item, now: now, calendar: calendar).enumerated()), id: \.offset) { _, detail in
+                switch detail {
+                case .badge(let text):
+                    Text(text)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.red)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Color.red.opacity(0.18), in: Capsule())
+                        .lineLimit(1)
+                case .time(let text, let isLate):
+                    Text(text)
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(isLate ? Color.red : NotchTokens.secondaryText)
+                case .repeats:
+                    Image(systemName: "repeat")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(NotchTokens.secondaryText)
+                        .accessibilityLabel("Lặp lại")
+                case .priority(let marks):
+                    Text(marks)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Color.orange)
+                }
             }
             Circle().fill(Color(reminder.listColor)).frame(width: 6, height: 6)
                 .accessibilityLabel(reminder.listTitle)

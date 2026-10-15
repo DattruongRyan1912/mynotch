@@ -39,22 +39,22 @@ actor TodoService: TodoDataSource {
         return store.calendars(for: .reminder).map { TodoListInfo($0, isDefault: $0.calendarIdentifier == defaultID) }
     }
 
-    func incomplete(dueBy end: Date, undatedIn listID: String?) async -> [TodoReminder] {
+    func incomplete(dueBy end: Date, undatedIn listID: String?) async throws -> [TodoReminder] {
         guard authorizationStatus() == .granted else { return [] }
-        var found = await fetch(store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: end, calendars: nil))
+        var found = try await fetch(store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: end, calendars: nil))
         if let listID, let list = store.calendar(withIdentifier: listID) {
             // With no range at all, EventKit also returns the reminders that have no date.
-            let all = await fetch(store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: [list]))
+            let all = try await fetch(store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: [list]))
             found += all.filter { $0.dueDateComponents == nil }
         }
         var seen: Set<String> = []
         return found.map(TodoReminder.init).filter { seen.insert($0.id).inserted }
     }
 
-    func completed(from start: Date, to end: Date) async -> [TodoReminder] {
+    func completed(from start: Date, to end: Date) async throws -> [TodoReminder] {
         guard authorizationStatus() == .granted else { return [] }
         let predicate = store.predicateForCompletedReminders(withCompletionDateStarting: start, ending: end, calendars: nil)
-        return await fetch(predicate).map(TodoReminder.init)
+        return try await fetch(predicate).map(TodoReminder.init)
     }
 
     func setCompleted(_ completed: Bool, reminderID: String) async throws {
@@ -62,6 +62,8 @@ actor TodoService: TodoDataSource {
         guard let reminder = store.calendarItem(withIdentifier: reminderID) as? EKReminder else {
             throw TodoServiceError.reminderNotFound
         }
+        // Apple: setting `isCompleted` to true sets `completionDate` to now, and to false clears it. For a repeating reminder the
+        // store hands over the next occurrence itself (see `TodoDataSource.setCompleted`).
         reminder.isCompleted = completed
         try store.save(reminder, commit: true)
     }
@@ -80,6 +82,10 @@ actor TodoService: TodoDataSource {
         reminder.title = new.title
         reminder.priority = new.priority.eventKit
         reminder.dueDateComponents = new.due
+        // A time with nothing to ring at it is only a deadline; see `TodoAlarm`.
+        if let fire = TodoAlarm.fireDate(for: new.due, timeZone: .current) {
+            reminder.addAlarm(EKAlarm(absoluteDate: fire))
+        }
         try store.save(reminder, commit: true)
     }
 
@@ -108,10 +114,12 @@ actor TodoService: TodoDataSource {
         }
     }
 
-    private func fetch(_ predicate: NSPredicate) async -> [EKReminder] {
+    /// EventKit answers a failed fetch with nil, which is not the same as no reminders: that is thrown, not turned into [].
+    private func fetch(_ predicate: NSPredicate) async throws -> [EKReminder] {
         let fetched = await withCheckedContinuation { continuation in
-            store.fetchReminders(matching: predicate) { continuation.resume(returning: FetchedReminders(reminders: $0 ?? [])) }
+            store.fetchReminders(matching: predicate) { continuation.resume(returning: $0.map { FetchedReminders(reminders: $0) }) }
         }
+        guard let fetched else { throw TodoServiceError.fetchFailed }
         return fetched.reminders
     }
 }

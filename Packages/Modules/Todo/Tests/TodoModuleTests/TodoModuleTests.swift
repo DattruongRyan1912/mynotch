@@ -156,6 +156,16 @@ import Testing
         #expect(f.harness.permissions.requested.isEmpty)
     }
 
+    @Test func openingTheTabBringsTheClockUpToDateWithoutReadingAgain() async {
+        await f.start()
+        let fetches = f.source.fetchCount
+        f.clock.now = f.calendar.on(14, at: 11, 30)
+        f.module.tabAppeared()
+        await letAnythingPending()
+        #expect(f.state.now == f.calendar.on(14, at: 11, 30))
+        #expect(f.source.fetchCount == fetches)
+    }
+
     @Test func theTabStaysAsItIsWhileAccessHoldsWhenItOpens() async {
         await f.start()
         let applied = f.module.appliedRefreshes
@@ -199,6 +209,76 @@ import Testing
         await f.module.requestAccess()
 
         #expect(f.harness.permissions.openedSettings.isEmpty)
+    }
+
+    @Test func theHintOfADeniedUserSaysSoAndTheOneOfANewUserDoesNot() async {
+        f.harness.permissions.statuses[.reminders] = .denied
+        await f.start()
+        #expect(f.state.phase == .needsAccess)
+        #expect(f.state.accessIsDenied)
+
+        f.harness.permissions.statuses[.reminders] = .notDetermined
+        await f.refreshed { f.module.tabAppeared() }
+        #expect(!f.state.accessIsDenied)
+
+        f.harness.permissions.statuses[.reminders] = .granted
+        await f.refreshed { f.module.tabAppeared() }
+        #expect(f.state.phase == .ready)
+        #expect(!f.state.accessIsDenied)
+    }
+
+    // MARK: A failed read
+
+    @Test func aFailedFirstReadSaysSoInsteadOfShowingAnEmptyList() async {
+        f.source.fetchFailure = TodoServiceError.fetchFailed
+        await f.start()
+        #expect(f.state.loadFailed)
+        #expect(f.state.phase == .ready)
+        #expect(f.state.items.isEmpty)
+    }
+
+    @Test func aFailedReadKeepsTheListAndTheNotchCountItHad() async {
+        await f.start()
+        f.settings.set(true, for: f.keys.showRemaining)
+        await settle { f.activityEntry != nil }
+        let items = f.state.items
+
+        f.source.fetchFailure = TodoServiceError.fetchFailed
+        await f.refreshed { f.source.emitChange() }
+
+        #expect(f.state.loadFailed)
+        #expect(f.state.items == items)
+        #expect(f.activityEntry?.activity.summary == "Còn 5 việc")
+    }
+
+    @Test func theNextGoodReadClearsTheError() async {
+        f.source.fetchFailure = TodoServiceError.fetchFailed
+        await f.start()
+        #expect(f.state.loadFailed)
+
+        f.source.fetchFailure = nil
+        await f.refreshed { f.source.emitChange() }
+
+        #expect(!f.state.loadFailed)
+        #expect(f.itemIDs.contains("report"))
+    }
+
+    @Test func openingTheTabReadsAgainAfterAFailedRead() async {
+        f.source.fetchFailure = TodoServiceError.fetchFailed
+        await f.start()
+        f.source.fetchFailure = nil
+        await f.refreshed { f.module.tabAppeared() }
+        #expect(!f.state.loadFailed)
+        #expect(f.state.items.count == 6)
+    }
+
+    @Test func theRetryButtonReadsAgain() async {
+        f.source.fetchFailure = TodoServiceError.fetchFailed
+        await f.start()
+        f.source.fetchFailure = nil
+        await f.refreshed { f.module.actions.retry() }
+        #expect(!f.state.loadFailed)
+        #expect(f.state.items.count == 6)
     }
 
     // MARK: The list

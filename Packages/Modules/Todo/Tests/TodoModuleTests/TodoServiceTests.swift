@@ -9,10 +9,10 @@ import Testing
 @Suite struct TodoServiceTests {
     let denied = TodoService(authorizationStatus: { .denied })
 
-    @Test func withoutAccessThereAreNoListsOrReminders() async {
+    @Test func withoutAccessThereAreNoListsOrReminders() async throws {
         #expect(await denied.lists().isEmpty)
-        #expect(await denied.incomplete(dueBy: .now, undatedIn: "inbox").isEmpty)
-        #expect(await denied.completed(from: .now, to: .now.addingTimeInterval(3_600)).isEmpty)
+        #expect(try await denied.incomplete(dueBy: .now, undatedIn: "inbox").isEmpty)
+        #expect(try await denied.completed(from: .now, to: .now.addingTimeInterval(3_600)).isEmpty)
     }
 
     @Test func completingWithoutAccessSaysAccessWasDenied() async {

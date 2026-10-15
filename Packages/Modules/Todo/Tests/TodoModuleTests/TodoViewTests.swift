@@ -22,7 +22,7 @@ import Testing
     }
 
     func actions() -> TodoActions {
-        TodoActions(complete: { _ in }, undo: { _ in }, add: { _ in true }, requestAccess: {}, appeared: {})
+        TodoActions(complete: { _ in }, undo: { _ in }, add: { _ in true }, requestAccess: {}, retry: {}, appeared: {})
     }
 
     func size<V: View>(of view: V) -> CGSize {
@@ -77,6 +77,30 @@ import Testing
         reminder.isCompleted = true
         let row = TodoRow(
             item: TodoItem(reminder: reminder, overdueDays: 0), isLingering: true, now: calendar.on(14, at: 9),
+            calendar: calendar, complete: {}, undo: {}
+        )
+        #expect(size(of: row).height <= 40)
+    }
+
+    @Test func theErrorLineAndTheNoticeStillLeaveTheListRoom() {
+        let state = state()
+        state.loadFailed = true
+        state.notice = "Không cập nhật được việc này."
+        let height = size(of: TodoTabView(state: state, actions: actions())).height
+        #expect(height <= Self.room - 40, "header, field, notice and error take \(height) pt of \(Self.room)")
+    }
+
+    @Test func theDeniedHintFits() {
+        let state = state(phase: .needsAccess)
+        state.accessIsDenied = true
+        #expect(size(of: TodoTabView(state: state, actions: actions())).height <= Self.room)
+    }
+
+    @Test func aRowWithTheRepeatGlyphAndEverythingElseStaysWithinTwoLines() {
+        var reminder = crowdedReminder
+        reminder.isRecurring = true
+        let row = TodoRow(
+            item: TodoItem(reminder: reminder, overdueDays: 40), isLingering: false, now: calendar.on(14, at: 9),
             calendar: calendar, complete: {}, undo: {}
         )
         #expect(size(of: row).height <= 40)

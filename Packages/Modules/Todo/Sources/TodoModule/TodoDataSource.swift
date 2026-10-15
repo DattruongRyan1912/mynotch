@@ -15,6 +15,8 @@ nonisolated enum TodoServiceError: Error, Equatable {
     case reminderNotFound
     /// Every list is read-only, so there is nowhere to put the reminder.
     case noWritableList
+    /// EventKit's fetch answered with nothing at all (not an empty list): the read failed.
+    case fetchFailed
 }
 
 /// Where the module gets reminders. A protocol so tests can fake it and EventKit stays in one type.
@@ -22,11 +24,15 @@ nonisolated protocol TodoDataSource: Sendable {
     /// The lists reminders live in, for the settings and for finding the default one. Empty without Reminders access.
     func lists() async -> [TodoListInfo]
     /// Incomplete reminders due by `end` (overdue ones included), from every list, and, when `undatedIn` names a list,
-    /// that list's reminders with no date. Empty without Reminders access.
-    func incomplete(dueBy end: Date, undatedIn listID: String?) async -> [TodoReminder]
-    /// Reminders completed from `start` up to `end`. Empty without Reminders access.
-    func completed(from start: Date, to end: Date) async -> [TodoReminder]
-    /// Ticks a reminder off, or takes the tick back. Throws without access, or for a reminder that is gone.
+    /// that list's reminders with no date. Empty without Reminders access; throws when the read itself fails, which is not
+    /// the same as nothing being due.
+    func incomplete(dueBy end: Date, undatedIn listID: String?) async throws -> [TodoReminder]
+    /// Reminders completed from `start` up to `end`. Empty without Reminders access; throws when the read fails.
+    func completed(from start: Date, to end: Date) async throws -> [TodoReminder]
+    /// Ticks a reminder off, or takes the tick back. Throws without access, or for a reminder that is gone. For a repeating
+    /// reminder this is all it takes: Apple documents that "only the first incomplete reminder of a recurring set is
+    /// obtainable ... When the reminder is completed, the next reminder in the recurrence set becomes available", so the
+    /// store brings the next occurrence itself and this ticks only the one on the list.
     func setCompleted(_ completed: Bool, reminderID: String) async throws
     /// Saves a new reminder. Throws without access or when no list can take it.
     func create(_ new: NewTodo) async throws
@@ -37,7 +43,8 @@ nonisolated protocol TodoDataSource: Sendable {
 /// Which list a new reminder goes to, and where the undated ones are read from.
 nonisolated enum TodoListChoice {
     /// The list chosen in Settings if it still exists and takes reminders, else the one the system uses for new
-    /// reminders, else the first that takes any. Nil when no list takes reminders (or none is known): the system decides.
+    /// reminders, else the first that takes any. Nil when no list takes reminders (or none is known); saving then fails
+    /// with `TodoServiceError.noWritableList`.
     static func resolve(chosenID: String?, in lists: [TodoListInfo]) -> TodoListInfo? {
         let writable = sorted(lists.filter(\.allowsModifications))
         return writable.first { $0.id == chosenID } ?? writable.first(where: \.isDefaultForNewReminders) ?? writable.first

@@ -10,9 +10,11 @@ nonisolated struct TodoDraft: Equatable, Sendable {
 
 /// Turns one line, in Vietnamese or English, into a reminder: "!! gọi khách 15h mai", "buy milk tomorrow 3pm". Rules only,
 /// kept small on purpose. Only these are read, and only what is plainly one: a leading "!", "!!" or "!!!"; a time written
-/// "15h", "15h30", "15:30", "3 giờ chiều", "3pm"; and "mai", "ngày mai", "tomorrow" or "hôm nay", "today" at the start or end
-/// of the line. A bare number is never a time, and a day word in the middle of a sentence ("hoa mai") is left alone. What is
-/// not read stays in the title, which is never emptied by it. Accents and capitals do not matter ("goi khach 3h chieu").
+/// "15h", "15h30", "15:30", "3 giờ chiều nay", "3pm"; and "mai", "ngày mai", "tomorrow" or "hôm nay", "today" at the start
+/// or end of the line. A bare number is never a time, and a day word in the middle of a sentence ("hoa mai") is left alone.
+/// What is not read stays in the title, which is never emptied by it, and when in doubt the words stay: "tôi" (I) is not
+/// "tối" (evening), so a part of the day is read by its accent ("tối"), and without accents ("toi", "chieu") only right after
+/// a time and only when nothing but a day word follows. Capitals and punctuation do not matter ("Tomorrow.").
 nonisolated enum TodoQuickAddParser {
     /// More than a line of the field ever holds; longer text is cut so a pasted page cannot slow typing down.
     static let maxLength = 500
@@ -30,14 +32,14 @@ nonisolated enum TodoQuickAddParser {
         if let day { tokens.removeSubrange(day.range) }
 
         var title = join(tokens)
-        var offset = day?.offset ?? 0
-        var due: (hour: Int, minute: Int)? = time.map { ($0.hour(in: day?.period), $0.minute) }
+        var offset = time?.dayAfter ?? day?.offset ?? 0
+        var clock: (hour: Int, minute: Int)? = time.map { ($0.hour(in: day?.period), $0.minute) }
         if title.isEmpty, !typed.isEmpty {
             // The whole line was a time or a day: that is what the reminder is called.
             title = typed.map(\.text).joined(separator: " ")
-            (offset, due) = (0, nil)
+            (offset, clock) = (0, nil)
         }
-        return TodoDraft(title: title, due: dueComponents(dayOffset: offset, clock: due, now: now, calendar: calendar), priority: priority)
+        return TodoDraft(title: title, due: dueComponents(dayOffset: offset, clock: clock, now: now, calendar: calendar), priority: priority)
     }
 
     // MARK: Priority
@@ -52,23 +54,52 @@ nonisolated enum TodoQuickAddParser {
 
     // MARK: Words
 
-    /// A word as typed, and as the patterns see it: lower case, no accents ("giờ" is "gio", "đêm" is "dem").
+    /// A word as typed, and as the patterns see it. Punctuation stuck to its ends ("tomorrow.", "15h,") is not part of it.
     private struct Token {
+        /// As typed, punctuation included: what goes back into the title.
         let text: String
+        /// As typed, without the punctuation: "mai" must be in lower case, "Mai" is a name.
+        let core: String
+        /// Lower case with its accents ("tối"), which tell "tối" (evening) from "tôi" (I).
+        let lower: String
+        /// Lower case without accents ("giờ" is "gio", "đêm" is "dem"): for the words that need no accent to be read.
         let folded: String
 
         init(_ text: Substring) {
             self.text = String(text)
-            folded = Self.fold(self.text)
-        }
-
-        private static func fold(_ text: String) -> String {
-            text.lowercased().replacingOccurrences(of: "đ", with: "d").folding(options: .diacriticInsensitive, locale: nil)
+            core = self.text.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?"))
+            lower = core.precomposedStringWithCanonicalMapping.lowercased()
+            folded = lower.replacingOccurrences(of: "đ", with: "d").folding(options: .diacriticInsensitive, locale: nil)
         }
     }
 
-    private enum Period: String {
+    private enum Period {
         case sang, trua, chieu, toi, dem, khuya
+
+        /// A part of the day typed with its accents. "tôi", "tới" and "tội" are not "tối".
+        init?(accented word: String) {
+            switch word {
+            case "sáng": self = .sang
+            case "trưa": self = .trua
+            case "chiều": self = .chieu
+            case "tối": self = .toi
+            case "đêm": self = .dem
+            case "khuya": self = .khuya
+            default: return nil
+            }
+        }
+
+        /// The same typed without accents: "toi" may be "tôi", "sang" may be the verb, "dem" may be "đem".
+        init?(bare word: String) {
+            switch word {
+            case "sang": self = .sang
+            case "trua": self = .trua
+            case "chieu": self = .chieu
+            case "toi": self = .toi
+            case "dem": self = .dem
+            default: return nil
+            }
+        }
 
         /// What the hour as written ("3" in "3 giờ chiều") means on a 24-hour clock.
         func hour(_ hour: Int) -> Int {
@@ -79,6 +110,22 @@ nonisolated enum TodoQuickAddParser {
             case .dem, .khuya: (6...11).contains(hour) ? hour + 12 : hour == 12 ? 0 : hour
             }
         }
+    }
+
+    /// 0 for "nay" (today) and 1 for "mai" (tomorrow, in lower case only).
+    private static func dayWord(_ token: Token) -> Int? {
+        if token.folded == "nay" { return 0 }
+        return token.core == "mai" ? 1 : nil
+    }
+
+    /// The part of the day `tokens[index]` is, when it is one. With its accents it always is. Without them it is only when
+    /// it ends the phrase: the line stops there, or the next word is a day word ("9h toi nay"). Anything else after it ("9h toi
+    /// can chuan bi") makes it a word of the sentence.
+    private static func period(at index: Int, in tokens: [Token]) -> Period? {
+        if let period = Period(accented: tokens[index].lower) { return period }
+        guard let period = Period(bare: tokens[index].lower) else { return nil }
+        let next = index + 1
+        return next == tokens.count || dayWord(tokens[next]) != nil ? period : nil
     }
 
     private static func join(_ tokens: [Token]) -> String {
@@ -94,6 +141,8 @@ nonisolated enum TodoQuickAddParser {
         /// Set when the time said am or pm: the hour is already on a 24-hour clock.
         var isExact: Bool
         var period: Period?
+        /// The day word that came with the part of the day: "3h chiều nay", "9h sáng mai".
+        var dayAfter: Int?
 
         /// `fallback` is the part of the day the line named elsewhere ("chiều mai 3h"), for an hour that names none.
         func hour(in fallback: Period?) -> Int {
@@ -105,9 +154,13 @@ nonisolated enum TodoQuickAddParser {
         for start in tokens.indices {
             guard var match = time(at: start, in: tokens) else { continue }
             let next = match.range.upperBound
-            if !match.isExact, next < tokens.count, let period = Period(rawValue: tokens[next].folded) {
+            if !match.isExact, next < tokens.count, let period = period(at: next, in: tokens) {
                 match.period = period
                 match.range = match.range.lowerBound ..< next + 1
+                if next + 1 < tokens.count, let day = dayWord(tokens[next + 1]) {
+                    match.dayAfter = day
+                    match.range = match.range.lowerBound ..< next + 2
+                }
             }
             match.range = includingConnector(before: match.range, in: tokens)
             return match
@@ -199,29 +252,31 @@ nonisolated enum TodoQuickAddParser {
         return nil
     }
 
-    /// "mai", "ngày mai", "tomorrow", "hôm nay", "today", or a part of the day before "mai" or "nay": "chiều mai", "tối nay".
-    /// "mai" must be typed in lower case: "Mai" is a name.
+    /// "mai", "ngày mai", "tomorrow", "hôm nay", "today", or a part of the day, with its accents, before "mai" or "nay":
+    /// "chiều mai", "tối nay". "mai" must be typed in lower case: "Mai" is a name.
     private static func day(in range: Range<Int>, of tokens: [Token]) -> DayMatch? {
         let words = tokens[range]
-        if range.count == 2, let period = Period(rawValue: words.first!.folded) {
-            let last = words.last!
-            if last.text == "mai" { return DayMatch(range: range, offset: 1, period: period) }
-            if last.folded == "nay" { return DayMatch(range: range, offset: 0, period: period) }
-            return nil
+        if range.count == 2, let period = Period(accented: words.first!.lower) {
+            guard let offset = dayWord(words.last!) else { return nil }
+            return DayMatch(range: range, offset: offset, period: period)
         }
         guard let offset = days[words.map(\.folded).joined(separator: " ")] else { return nil }
-        if words.last!.folded == "mai", words.last!.text != "mai", range.count == 1 { return nil }
+        if range.count == 1, words.first!.folded == "mai", words.first!.core != "mai" { return nil }
         return DayMatch(range: range, offset: offset, period: nil)
     }
 
     // MARK: Due date
 
+    /// Read in the Gregorian calendar whatever calendar the user lives by, since Reminders keeps Gregorian dates and refuses
+    /// others: in a Buddhist calendar the year would be 2569. Only the time zone, which says where the day begins, is theirs.
     private static func dueComponents(
         dayOffset: Int, clock: (hour: Int, minute: Int)?, now: Date, calendar: Calendar
     ) -> DateComponents {
-        let today = calendar.startOfDay(for: now)
-        let date = calendar.date(byAdding: .day, value: dayOffset, to: today) ?? today
-        let day = calendar.dateComponents([.year, .month, .day], from: date)
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = calendar.timeZone
+        let today = gregorian.startOfDay(for: now)
+        let date = gregorian.date(byAdding: .day, value: dayOffset, to: today) ?? today
+        let day = gregorian.dateComponents([.year, .month, .day], from: date)
         return DateComponents(
             calendar: Calendar(identifier: .gregorian), year: day.year, month: day.month, day: day.day,
             hour: clock?.hour, minute: clock?.minute

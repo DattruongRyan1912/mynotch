@@ -22,7 +22,8 @@ nonisolated extension TodoReminder {
             completionDate: reminder.completionDate,
             listID: reminder.calendar?.calendarIdentifier ?? "",
             listTitle: reminder.calendar?.title ?? "",
-            listColor: TodoColor(reminder.calendar?.color)
+            listColor: TodoColor(reminder.calendar?.color),
+            isRecurring: reminder.hasRecurrenceRules
         )
     }
 }

@@ -10,6 +10,8 @@ struct TodoActions {
     /// Return in the field: whether a reminder was saved, so the field knows to clear.
     var add: (String) async -> Bool
     var requestAccess: () -> Void
+    /// "Thử lại": the last read failed.
+    var retry: () -> Void
     /// The tab came on screen: access or the day may have changed while it was away.
     var appeared: () -> Void
 }
@@ -36,6 +38,9 @@ public final class TodoModule: FeatureModule {
     static let lingerDuration = Duration.seconds(2)
     /// How long the line under the field stays.
     static let noticeDuration = Duration.seconds(3)
+    /// How long the quick-add shortcut's request for the field waits for the tab to show it. A notch that never opened (a full
+    /// screen app, say) must not leave the request to be served by some later, unrelated open.
+    static let focusRequestLifetime = Duration.seconds(2)
     /// Waits for a burst of wakes and day changes to settle before reading again. Changes in Reminders need no wait here:
     /// the data source has already let them settle.
     static let refreshDebounce = Duration.seconds(1)
@@ -64,6 +69,7 @@ public final class TodoModule: FeatureModule {
     private var wantSerial = 0
     private var lingerTimers: [String: ScheduledAction] = [:]
     private var noticeTimer: ScheduledAction?
+    private var focusTimer: ScheduledAction?
     private var isAdding = false
     /// Number of reads whose result was applied, and of requests for one; tests wait on them.
     private(set) var appliedRefreshes = 0
@@ -128,6 +134,8 @@ public final class TodoModule: FeatureModule {
         lingerTimers = [:]
         noticeTimer?.cancel()
         noticeTimer = nil
+        focusTimer?.cancel()
+        focusTimer = nil
         context = nil
         refreshGeneration += 1
         wanted = [:]
@@ -161,6 +169,7 @@ public final class TodoModule: FeatureModule {
             undo: { [weak self] id in self?.context?.run { await self?.undo(id) } },
             add: { [weak self] text in await self?.add(text) ?? false },
             requestAccess: { [weak self] in self?.context?.run { await self?.requestAccess() } },
+            retry: { [weak self] in self?.startRefresh() },
             appeared: { [weak self] in self?.tabAppeared() }
         )
     }
@@ -172,10 +181,15 @@ public final class TodoModule: FeatureModule {
         context?.presenter.open()
     }
 
-    /// ⌃⌥⇧D: the tab opens, and its field takes the keyboard.
+    /// ⌃⌥⇧D: the tab opens, and its field takes the keyboard. Only this asks for it: a plain open never does.
     func openQuickAdd() {
         guard let context else { return }
-        state.focusRequest += 1
+        state.requestFocus()
+        focusTimer?.cancel()
+        focusTimer = context.scheduler.schedule(after: Self.focusRequestLifetime) { [weak self] in
+            self?.focusTimer = nil
+            self?.state.cancelFocusRequest()
+        }
         context.presenter.open()
     }
 
@@ -214,7 +228,8 @@ public final class TodoModule: FeatureModule {
             context?.logger.error("Could not save a reminder: \(String(describing: error), privacy: .public)")
             if wanted[id]?.serial == request {
                 wanted[id] = nil
-                cancelLinger(id)
+                // A tick that failed has nothing to undo; an undo that failed leaves the row ticked, with its undo to try again.
+                if completed { cancelLinger(id) } else { startLinger(id) }
             }
             showNotice("Không cập nhật được việc này.")
             await refresh()
@@ -287,16 +302,23 @@ public final class TodoModule: FeatureModule {
     }
 
     /// Nothing tells the module when access changes in System Settings or a midnight passed while it was asleep, so it
-    /// checks when the tab opens and when the app becomes active (coming back from System Settings).
+    /// checks when the tab opens and when the app becomes active (coming back from System Settings). The clock the rows judge a
+    /// time that has gone by is brought up to date too, with no read: it is the clock, not the reminders, that moved.
     func tabAppeared() {
+        let now = clock()
+        if state.phase != .loading, calendar.isDate(state.now, inSameDayAs: now), state.now < now { state.now = now }
         refreshIfStale()
     }
 
-    /// Reads again only if the list shows the wrong thing for the access there is now, or for the day it is now.
+    /// Reads again only if the list shows the wrong thing for the access there is now, or for the day it is now, or the last
+    /// read failed.
     private func refreshIfStale() {
         guard let context, state.phase != .loading else { return }
-        let granted = context.permissions.status(of: .reminders) == .granted
-        guard (state.phase == .ready) != granted || !calendar.isDate(state.now, inSameDayAs: clock()) else { return }
+        let status = context.permissions.status(of: .reminders)
+        let granted = status == .granted
+        let accessChanged = (state.phase == .ready) != granted || (!granted && (status == .denied) != state.accessIsDenied)
+        let newDay = !calendar.isDate(state.now, inSameDayAs: clock())
+        guard accessChanged || newDay || state.loadFailed else { return }
         startRefresh()
     }
 
@@ -309,15 +331,30 @@ public final class TodoModule: FeatureModule {
         let now = clock()
         let settings = TodoSettings(context.settings)
         usedSettings = settings
-        guard context.permissions.status(of: .reminders) == .granted else {
+        let status = context.permissions.status(of: .reminders)
+        guard status == .granted else {
+            state.accessIsDenied = status == .denied
             apply(read: [], rules: TodoRules(), now: now, phase: .needsAccess)
             return
         }
+        state.accessIsDenied = false
         let lists = await dataSource.lists()
         let defaultList = settings.includeUndated ? TodoListChoice.resolve(chosenID: settings.defaultListID, in: lists)?.id : nil
         let day = calendar.dateInterval(of: .day, for: now) ?? DateInterval(start: calendar.startOfDay(for: now), duration: 86_400)
-        let incomplete = await dataSource.incomplete(dueBy: day.end, undatedIn: defaultList)
-        let completed = await dataSource.completed(from: day.start, to: day.end)
+        let incomplete: [TodoReminder]
+        let completed: [TodoReminder]
+        do {
+            incomplete = try await dataSource.incomplete(dueBy: day.end, undatedIn: defaultList)
+            completed = try await dataSource.completed(from: day.start, to: day.end)
+        } catch {
+            guard generation == refreshGeneration, self.context === context else { return }
+            // Nothing read is not "nothing to do": the list stays as it was, with a line saying it could not be read.
+            context.logger.error("Could not read reminders: \(String(describing: error), privacy: .public)")
+            if state.phase == .loading { state.phase = .ready }
+            state.loadFailed = true
+            appliedRefreshes += 1
+            return
+        }
         guard generation == refreshGeneration, self.context === context else { return }
         let rules = TodoRules(hiddenListIDs: Set(settings.hiddenListIDs), includeUndated: settings.includeUndated, defaultListID: defaultList)
         apply(read: incomplete + completed, rules: rules, now: now, phase: .ready)
@@ -327,6 +364,7 @@ public final class TodoModule: FeatureModule {
         self.read = read
         self.rules = rules
         readAt = now
+        if state.loadFailed { state.loadFailed = false }
         if state.phase != phase { state.phase = phase }
         if state.now != now { state.now = now }
         rebuild()

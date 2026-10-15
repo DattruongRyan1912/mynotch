@@ -99,6 +99,35 @@ import Testing
         #expect(signals.value == 2)
     }
 
+    @Test func changesAfterTheQuietPeriodSignalAgain() async {
+        let (source, input) = AsyncStream<Void>.makeStream()
+        var iterator = ChangeCoalescer.coalescing(source, quietPeriod: quiet, clock: clock).makeAsyncIterator()
+
+        await change(input, takenCalls: 1)
+        clock.advance(by: quiet)
+        #expect(await iterator.next() != nil)
+        input.yield()
+        await change(input, takenCalls: 3)
+        clock.advance(by: quiet)
+        #expect(await iterator.next() != nil)
+        input.finish()
+        #expect(await iterator.next() == nil)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func aStreamNobodyIteratesReleasesItsSourceWhenDropped() async {
+        let (source, input) = AsyncStream<Void>.makeStream()
+        let (released, markReleased) = AsyncStream<Void>.makeStream()
+        input.onTermination = { _ in markReleased.yield() }
+
+        var output: AsyncStream<Void>? = ChangeCoalescer.coalescing(source, quietPeriod: quiet)
+        #expect(output != nil)
+        output = nil
+
+        var iterator = released.makeAsyncIterator()
+        #expect(await iterator.next() != nil)
+    }
+
     @Test(.timeLimit(.minutes(1)))
     func stoppingTheConsumerReleasesTheSource() async {
         let (source, input) = AsyncStream<Void>.makeStream()

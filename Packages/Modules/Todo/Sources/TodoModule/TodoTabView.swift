@@ -18,7 +18,7 @@ struct TodoTabView: View {
             header
             switch state.phase {
             case .needsAccess:
-                AccessHint(actions: actions)
+                AccessHint(isDenied: state.accessIsDenied, actions: actions)
             case .loading, .ready:
                 TodoQuickAddField(state: state, actions: actions)
                 if let notice = state.notice {
@@ -27,6 +27,7 @@ struct TodoTabView: View {
                         .foregroundStyle(NotchTokens.secondaryText)
                         .lineLimit(1)
                 }
+                if state.loadFailed { LoadFailedLine(actions: actions) }
                 TodoList(state: state, actions: actions)
             }
         }
@@ -54,22 +55,51 @@ struct TodoTabView: View {
     }
 }
 
-/// Without Reminders access: what is missing and the one button that asks.
+/// Without Reminders access: what is missing and the one button that asks. After a refusal only System Settings can change
+/// the answer, so the button says that is where it goes.
 private struct AccessHint: View {
+    let isDenied: Bool
     let actions: TodoActions
+
+    static let notAsked = "Cần quyền truy cập Lời nhắc để hiện và thêm việc cần làm."
+    static let denied = "\(notAsked) \(Permission.reminders.instruction)"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Cần quyền truy cập Lời nhắc để hiện và thêm việc cần làm.")
+            Text(isDenied ? Self.denied : Self.notAsked)
                 .font(.system(size: 12))
                 .foregroundStyle(NotchTokens.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Button(action: actions.requestAccess) {
-                Label("Cho phép truy cập Lời nhắc", systemImage: "checklist")
+                Label(isDenied ? "Mở Cài đặt hệ thống" : "Cho phép truy cập Lời nhắc", systemImage: isDenied ? "gearshape" : "checklist")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(NotchTokens.primaryText)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
+                    .background(Color.white.opacity(0.14), in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
+/// Reminders answered with nothing, which is not the same as having nothing to do: the list below, if any, is what was read
+/// before, and the button reads again.
+private struct LoadFailedLine: View {
+    let actions: TodoActions
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Label("Không đọc được Lời nhắc.", systemImage: "exclamationmark.triangle")
+                .font(.system(size: 11))
+                .foregroundStyle(Color.orange)
+                .lineLimit(1)
+            Button(action: actions.retry) {
+                Text("Thử lại")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(NotchTokens.primaryText)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
                     .background(Color.white.opacity(0.14), in: Capsule())
             }
             .buttonStyle(.plain)
@@ -88,7 +118,6 @@ struct TodoQuickAddField: View {
     /// Set by the quick-add shortcut and held for a moment: the panel may only become the key window after the field was
     /// asked for focus, and SwiftUI drops a request made in the pass that creates the field.
     @State private var wantsFocus = false
-    @State private var servedRequest = 0
     @FocusState private var isFocused: Bool
     @Environment(\.notch) private var notch
     @Environment(\.notchAccent) private var accent
@@ -118,7 +147,8 @@ struct TodoQuickAddField: View {
                 .tint(accent)
                 .focused($isFocused)
                 .onSubmit(submit)
-                .onExitCommand { text = "" }
+                // Esc clears a line; with nothing to clear it closes the notch, so the shortcut's focused field is no trap.
+                .onExitCommand { if text.isEmpty { notch.close() } else { text = "" } }
             if let hint {
                 Text(hint)
                     .font(.system(size: 11, weight: .medium).monospacedDigit())
@@ -135,10 +165,10 @@ struct TodoQuickAddField: View {
                 .contentShape(RoundedRectangle(cornerRadius: 8))
                 .onTapGesture { isFocused = true }
         }
-        .onAppear {
-            if state.focusRequest != servedRequest { requestFocus() }
-        }
-        .onChange(of: state.focusRequest) { requestFocus() }
+        // Only the quick-add shortcut asks for focus, and the request is served once: the field mounts again whenever the notch
+        // opens, and that must not take the keyboard.
+        .onAppear { if state.takeFocusRequest() { requestFocus() } }
+        .onChange(of: state.pendingFocus) { if state.takeFocusRequest() { requestFocus() } }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             if wantsFocus { isFocused = true }
         }
@@ -148,7 +178,6 @@ struct TodoQuickAddField: View {
     }
 
     private func requestFocus() {
-        servedRequest = state.focusRequest
         wantsFocus = true
         isFocused = true
         Task { @MainActor in
@@ -179,10 +208,13 @@ private struct TodoList: View {
         if state.phase == .loading {
             Spacer(minLength: 0)
         } else if rows.isEmpty {
-            Label(state.items.isEmpty ? "Hôm nay chưa có việc nào" : "Đã xong hết việc hôm nay", systemImage: "checkmark.circle")
-                .font(.system(size: 12))
-                .foregroundStyle(NotchTokens.secondaryText)
-                .padding(.vertical, 4)
+            // A list that could not be read is not an empty one, and the line above already says so.
+            if !state.loadFailed {
+                Label(state.items.isEmpty ? "Hôm nay chưa có việc nào" : "Đã xong hết việc hôm nay", systemImage: "checkmark.circle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(NotchTokens.secondaryText)
+                    .padding(.vertical, 4)
+            }
             Spacer(minLength: 0)
         } else {
             ScrollView {

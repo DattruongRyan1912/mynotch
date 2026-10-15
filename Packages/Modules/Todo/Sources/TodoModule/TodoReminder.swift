@@ -43,13 +43,21 @@ nonisolated struct TodoReminder: Equatable, Sendable, Identifiable {
     var listID: String
     var listTitle: String
     var listColor: TodoColor
+    /// Whether it repeats. Completing one hands the next occurrence over, which EventKit does (see `TodoDataSource.setCompleted`);
+    /// the row only tells the user it repeats.
+    var isRecurring = false
 
     /// The components are read in the calendar they were written in (EventKit stamps Gregorian ones, whatever the
-    /// user's calendar is), and in `calendar`'s time zone unless they name their own.
+    /// user's calendar is), and in `calendar`'s time zone unless they name their own. A day alone is that day wherever it
+    /// is read, so it never takes a zone of its own: midnight UTC would otherwise be the evening before in the Americas.
     static func dueDate(of due: DateComponents, calendar: Calendar) -> Date? {
         var dueCalendar = due.calendar ?? calendar
-        if due.timeZone == nil { dueCalendar.timeZone = calendar.timeZone }
-        return dueCalendar.date(from: due)
+        var components = due
+        if due.timeZone == nil || due.hour == nil {
+            dueCalendar.timeZone = calendar.timeZone
+            components.timeZone = nil
+        }
+        return dueCalendar.date(from: components)
     }
 }
 

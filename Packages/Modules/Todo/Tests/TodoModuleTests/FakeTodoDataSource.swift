@@ -21,6 +21,9 @@ nonisolated final class FakeTodoDataSource: TodoDataSource {
         var creationFailure: (any Error)?
         var createGate: (@Sendable () async -> Void)?
         var fetchCount = 0
+        var fetchFailure: (any Error)?
+        /// A completed repeating reminder's id and the id of the occurrence that took its place.
+        var successors: [String: String] = [:]
         var undatedLists: [String?] = []
         var observers: [AsyncStream<Void>.Continuation] = []
     }
@@ -69,6 +72,12 @@ nonisolated final class FakeTodoDataSource: TodoDataSource {
         set { state.withLock { $0.completionGate = newValue } }
     }
 
+    /// Makes the reads throw, like EventKit's fetch answering with nothing.
+    var fetchFailure: (any Error)? {
+        get { state.withLock { $0.fetchFailure } }
+        set { state.withLock { $0.fetchFailure = newValue } }
+    }
+
     var creationFailure: (any Error)? {
         get { state.withLock { $0.creationFailure } }
         set { state.withLock { $0.creationFailure = newValue } }
@@ -90,10 +99,11 @@ nonisolated final class FakeTodoDataSource: TodoDataSource {
     }
 
     /// Like EventKit's predicate: due on or before `end`; reminders with no date only come from `undatedIn`.
-    func incomplete(dueBy end: Date, undatedIn listID: String?) async -> [TodoReminder] {
-        state.withLock { state in
+    func incomplete(dueBy end: Date, undatedIn listID: String?) async throws -> [TodoReminder] {
+        try state.withLock { state in
             state.fetchCount += 1
             state.undatedLists.append(listID)
+            if let failure = state.fetchFailure { throw failure }
             return state.reminders.filter { reminder in
                 guard !reminder.isCompleted else { return false }
                 guard let due = reminder.due else { return reminder.listID == listID }
@@ -102,9 +112,10 @@ nonisolated final class FakeTodoDataSource: TodoDataSource {
         }
     }
 
-    func completed(from start: Date, to end: Date) async -> [TodoReminder] {
-        state.withLock { state in
-            state.reminders.filter { reminder in
+    func completed(from start: Date, to end: Date) async throws -> [TodoReminder] {
+        try state.withLock { state in
+            if let failure = state.fetchFailure { throw failure }
+            return state.reminders.filter { reminder in
                 reminder.isCompleted && (reminder.completionDate.map { $0 >= start && $0 < end } ?? false)
             }
         }
@@ -121,7 +132,36 @@ nonisolated final class FakeTodoDataSource: TodoDataSource {
             guard let index = state.reminders.firstIndex(where: { $0.id == reminderID }) else { throw TodoServiceError.reminderNotFound }
             state.reminders[index].isCompleted = completed
             state.reminders[index].completionDate = completed ? state.now : nil
+            advanceRecurrence(&state, at: index, completed: completed)
         }
+    }
+
+    /// What Apple documents for repeating reminders: "only the first incomplete reminder of a recurring set is obtainable ...
+    /// When the reminder is completed, the next reminder in the recurrence set becomes available." So completing one leaves it
+    /// done and brings the next occurrence (a day later here: the fake's rule is daily), and taking the tick back leaves
+    /// the set as it was, with that next occurrence gone again.
+    private func advanceRecurrence(_ state: inout State, at index: Int, completed: Bool) {
+        let reminder = state.reminders[index]
+        guard reminder.isRecurring else { return }
+        guard completed else {
+            if let successor = state.successors.removeValue(forKey: reminder.id) {
+                state.reminders.removeAll { $0.id == successor }
+            }
+            return
+        }
+        guard let due = reminder.due, let date = TodoReminder.dueDate(of: due, calendar: calendar),
+              let nextDate = calendar.date(byAdding: .day, value: 1, to: date)
+        else { return }
+        var next = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: nextDate)
+        if due.hour == nil { (next.hour, next.minute) = (nil, nil) }
+        next.calendar = Calendar(identifier: .gregorian)
+        var successor = reminder
+        successor.id = "\(reminder.id)#next"
+        successor.isCompleted = false
+        successor.completionDate = nil
+        successor.due = next
+        state.reminders.append(successor)
+        state.successors[reminder.id] = successor.id
     }
 
     /// Like the real one, a reminder saved shows up in the next read.

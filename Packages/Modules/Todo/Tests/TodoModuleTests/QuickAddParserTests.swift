@@ -22,7 +22,7 @@ nonisolated struct PhraseCase: Sendable, CustomTestStringConvertible {
         self.priority = priority
     }
 
-    static let table: [PhraseCase] = plain + times + vietnameseTimes + days + both + priorities + staysInTheTitle
+    static let table: [PhraseCase] = plain + times + vietnameseTimes + days + both + partsOfTheDay + pronouns + punctuation + priorities + staysInTheTitle
 
     static let plain: [PhraseCase] = [
         PhraseCase("mua sữa", "mua sữa"),
@@ -88,6 +88,56 @@ nonisolated struct PhraseCase: Sendable, CustomTestStringConvertible {
         PhraseCase("call Sam tomorrow 9am", "call Sam", day: 15, time: "09:00"),
         PhraseCase("call Sam tomorrow at 9:30am", "call Sam", day: 15, time: "09:30"),
         PhraseCase("tomorrow 3pm dentist", "dentist", day: 15, time: "15:00"),
+    ]
+
+    /// A part of the day and "nay" or "mai", in both orders: the day word goes with the time, not into the title.
+    static let partsOfTheDay: [PhraseCase] = [
+        PhraseCase("gọi khách 3h chiều nay", "gọi khách", time: "15:00"),
+        PhraseCase("họp 8h sáng nay", "họp", time: "08:00"),
+        PhraseCase("nộp báo cáo 8h tối nay", "nộp báo cáo", time: "20:00"),
+        PhraseCase("nộp báo cáo 5h chiều nay", "nộp báo cáo", time: "17:00"),
+        PhraseCase("họp 12h trưa nay", "họp", time: "12:00"),
+        PhraseCase("gọi khách 3 giờ chiều nay", "gọi khách", time: "15:00"),
+        PhraseCase("gọi khách 3:30 chiều nay", "gọi khách", time: "15:30"),
+        PhraseCase("họp chiều nay 3h", "họp", time: "15:00"),
+        PhraseCase("họp sáng nay 8h", "họp", time: "08:00"),
+        PhraseCase("họp 9h sáng mai", "họp", day: 15, time: "09:00"),
+        PhraseCase("họp 3h chiều mai với Lan", "họp với Lan", day: 15, time: "15:00"),
+        PhraseCase("họp 8h tối mai cần chuẩn bị", "họp cần chuẩn bị", day: 15, time: "20:00"),
+        PhraseCase("họp 9h sáng nay nhớ mang laptop", "họp nhớ mang laptop", time: "09:00"),
+        PhraseCase("Họp 9H SÁNG NAY", "Họp", time: "09:00"),
+    ]
+
+    /// "tôi" (I) is not "tối" (evening): an accent decides, and what is in doubt stays in the title.
+    static let pronouns: [PhraseCase] = [
+        PhraseCase("họp 9h tôi cần chuẩn bị", "họp tôi cần chuẩn bị", time: "09:00"),
+        PhraseCase("nhắc tôi mai", "nhắc tôi", day: 15),
+        PhraseCase("gọi tôi mai", "gọi tôi", day: 15),
+        PhraseCase("nhắc tôi 9h", "nhắc tôi", time: "09:00"),
+        PhraseCase("tôi nay đi họp", "tôi nay đi họp"),
+        PhraseCase("họp 9h tối cần chuẩn bị", "họp cần chuẩn bị", time: "21:00"),
+        PhraseCase("họp 9h tối", "họp", time: "21:00"),
+        PhraseCase("họp 9h tới", "họp tới", time: "09:00"),
+        PhraseCase("họp 9h tội", "họp tội", time: "09:00"),
+        PhraseCase("họp 9h toi", "họp", time: "21:00"),
+        PhraseCase("họp 9h toi nay", "họp", time: "21:00"),
+        PhraseCase("họp 9h toi can chuan bi", "họp toi can chuan bi", time: "09:00"),
+        PhraseCase("nhac toi mai", "nhac toi", day: 15),
+        PhraseCase("hop 9h sang nha Lan", "hop sang nha Lan", time: "09:00"),
+        PhraseCase("hop 9h dem laptop", "hop dem laptop", time: "09:00"),
+        PhraseCase("goi khach 3h chieu mai", "goi khach", day: 15, time: "15:00"),
+        PhraseCase("tối nay 8h họp", "họp", time: "20:00"),
+        PhraseCase("họp toi nay 8h", "họp toi nay", time: "08:00"),
+    ]
+
+    /// Punctuation that sticks to a word does not hide it.
+    static let punctuation: [PhraseCase] = [
+        PhraseCase("buy milk tomorrow.", "buy milk", day: 15),
+        PhraseCase("call at 9am.", "call", time: "09:00"),
+        PhraseCase("15h, họp", "họp", time: "15:00"),
+        PhraseCase("họp 15h30, mang laptop", "họp mang laptop", time: "15:30"),
+        PhraseCase("mua sữa mai!", "mua sữa", day: 15),
+        PhraseCase("họp 3h chiều?", "họp", time: "15:00"),
     ]
 
     static let priorities: [PhraseCase] = [
@@ -181,6 +231,26 @@ nonisolated struct PhraseCase: Sendable, CustomTestStringConvertible {
         let draft = try #require(TodoQuickAddParser.parse("việc mai", now: lastDay, calendar: calendar))
         #expect(draft.due.month == 11)
         #expect(draft.due.day == 1)
+    }
+
+    @Test(arguments: [Calendar.Identifier.buddhist, .japanese, .islamicCivil, .hebrew, .persian])
+    func theDueDateIsGregorianWhateverCalendarTheUserLivesBy(_ identifier: Calendar.Identifier) throws {
+        // The Buddhist year is 2569 and the Japanese one is in single digits; Reminders keeps Gregorian ones.
+        var calendar = Calendar(identifier: identifier)
+        calendar.timeZone = TimeZone(identifier: "Asia/Ho_Chi_Minh")!
+        let today = try #require(TodoQuickAddParser.parse("việc 15h", now: now, calendar: calendar))
+        let tomorrow = try #require(TodoQuickAddParser.parse("việc mai", now: now, calendar: calendar))
+        #expect(today.due.calendar?.identifier == .gregorian)
+        #expect((today.due.year, today.due.month, today.due.day, today.due.hour) == (2026, 10, 14, 15))
+        #expect((tomorrow.due.year, tomorrow.due.month, tomorrow.due.day) == (2026, 10, 15))
+    }
+
+    @Test func tomorrowAcrossAGregorianNewYearInAnotherCalendar() throws {
+        var buddhist = Calendar(identifier: .buddhist)
+        buddhist.timeZone = TimeZone(identifier: "Asia/Ho_Chi_Minh")!
+        let newYearsEve = fixedCalendar().date(from: DateComponents(year: 2026, month: 12, day: 31, hour: 9))!
+        let draft = try #require(TodoQuickAddParser.parse("việc mai", now: newYearsEve, calendar: buddhist))
+        #expect((draft.due.year, draft.due.month, draft.due.day) == (2027, 1, 1))
     }
 
     @Test func aVeryLongLineIsCutSoTypingStaysQuick() throws {

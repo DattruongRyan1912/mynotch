@@ -150,6 +150,97 @@ import Testing
         #expect(f.source.completionCalls.map(\.completed) == [true, false])
     }
 
+    @Test func aFailedUndoKeepsTheRowTickedWithItsUndoAndSaysSo() async throws {
+        await f.start()
+        await f.module.complete("report")
+        f.source.completionFailure = TodoServiceError.reminderNotFound
+
+        await f.module.undo("report")
+
+        let row = try #require(f.state.rows.first { $0.id == "report" })
+        #expect(row.reminder.isCompleted)
+        #expect(f.state.lingering == ["report"])
+        #expect(f.state.notice == "Không cập nhật được việc này.")
+        #expect(f.state.progress.done == 2)
+
+        // Still undoable once the store answers again.
+        f.source.completionFailure = nil
+        await f.module.undo("report")
+        #expect(try #require(f.state.rows.first { $0.id == "report" }).reminder.isCompleted == false)
+    }
+
+    // MARK: Repeating reminders
+
+    /// A daily "uống thuốc" due today, and another that has been waiting since the 12th.
+    func withRepeating() -> ModuleFixture {
+        let fixture = ModuleFixture([todo("pills", due: due(14, 8), repeats: true), todo("water", due: due(12), repeats: true), todo("plain", due: due(14))])
+        return fixture
+    }
+
+    @Test func theItemsOfARepeatingReminderKnowTheyRepeat() async throws {
+        let f = withRepeating()
+        await f.start()
+        #expect(try #require(f.state.items.first { $0.id == "pills" }).reminder.isRecurring)
+        #expect(try #require(f.state.items.first { $0.id == "plain" }).reminder.isRecurring == false)
+    }
+
+    @Test func tickingARepeatingReminderDoneKeepsItOnTheListWithUndoAndCountsIt() async throws {
+        let f = withRepeating()
+        await f.start()
+        await f.module.complete("pills")
+
+        // Done today and counted; its next occurrence is tomorrow's, so it is not on today's list.
+        #expect(try #require(f.state.rows.first { $0.id == "pills" }).reminder.isCompleted)
+        #expect(f.state.lingering == ["pills"])
+        #expect(!f.itemIDs.contains("pills#next"))
+        #expect(f.source.reminders.first { $0.id == "pills#next" }?.due?.day == 15)
+        #expect(f.state.progress == TodoProgress(done: 1, total: 3))
+
+        f.harness.scheduler.advance(by: TodoModule.lingerDuration)
+        #expect(!f.rowIDs.contains("pills"))
+        #expect(f.state.progress == TodoProgress(done: 1, total: 3))
+    }
+
+    @Test func aRepeatingReminderThatWasLateComesBackAsItsNextOccurrence() async throws {
+        let f = withRepeating()
+        await f.start()
+        await f.module.complete("water")
+
+        // Its next occurrence (the 13th) is still late, and the list shows it where it belongs, whatever EventKit decided.
+        let next = try #require(f.state.items.first { $0.id == "water#next" })
+        #expect(next.overdueDays == 1)
+        #expect(next.reminder.isRecurring)
+        #expect(try #require(f.state.items.first { $0.id == "water" }).reminder.isCompleted)
+    }
+
+    @Test func undoPutsARepeatingReminderBackExactlyAsItWas() async throws {
+        let f = withRepeating()
+        await f.start()
+        let before = f.source.reminders
+        let itemsBefore = f.state.items
+
+        await f.module.complete("pills")
+        #expect(f.source.reminders != before)
+        await f.module.undo("pills")
+
+        #expect(f.source.reminders == before)
+        #expect(f.state.items == itemsBefore)
+        #expect(f.state.lingering.isEmpty)
+        #expect(f.source.completionCalls.map(\.completed) == [true, false])
+    }
+
+    @Test func aRowTellsWhenItRepeatsAndWhenItIsLate() {
+        let calendar = fixedCalendar()
+        func details(_ reminder: TodoReminder, overdueDays: Int = 0) -> [TodoRow.Detail] {
+            TodoRow.details(of: TodoItem(reminder: reminder, overdueDays: overdueDays), now: calendar.on(14, at: 9), calendar: calendar)
+        }
+        #expect(details(todo("a", due: due(14))) == [])
+        #expect(details(todo("a", due: due(14), repeats: true)) == [.repeats])
+        #expect(details(todo("a", due: due(14, 7), priority: .high, repeats: true)) == [.time("07:00", isLate: true), .repeats, .priority("!!!")])
+        #expect(details(todo("a", due: due(14, 17))) == [.time("17:00", isLate: false)])
+        #expect(details(todo("a", due: due(13, 17)), overdueDays: 1) == [.badge("hôm qua"), .time("17:00", isLate: false)])
+    }
+
     // MARK: Quick add
 
     @Test func returnCreatesAReminderDueTodayInTheDefaultList() async throws {
@@ -260,20 +351,56 @@ import Testing
         #expect(open.owner == "todo" && quick.owner == "todo")
     }
 
-    @Test func theFirstShortcutOpensTheTab() async {
+    @Test func theFirstShortcutOpensTheTabAndAsksForNoFocus() async {
         await f.start()
         #expect(f.harness.hotkeyBackend.trigger("todo_openTodo"))
         #expect(f.harness.presenter.openedTabs == ["todo"])
-        #expect(f.state.focusRequest == 0)
+        #expect(!f.state.pendingFocus)
+        #expect(!f.state.takeFocusRequest())
     }
 
     @Test func theSecondOpensTheTabAndAsksForTheFieldToBeFocused() async {
         await f.start()
         #expect(f.harness.hotkeyBackend.trigger("todo_quickAddTodo"))
         #expect(f.harness.presenter.openedTabs == ["todo"])
-        #expect(f.state.focusRequest == 1)
+        #expect(f.state.pendingFocus)
+        // Pressed again while the request waits, it is still one request.
         #expect(f.harness.hotkeyBackend.trigger("todo_quickAddTodo"))
-        #expect(f.state.focusRequest == 2)
+        #expect(f.state.takeFocusRequest())
+        #expect(!f.state.takeFocusRequest())
+    }
+
+    @Test func onlyTheFirstMountOfTheTabTakesTheFocusRequest() async {
+        await f.start()
+        // ⌃⌥⇧D, the notch opens, the field mounts and takes the request.
+        f.harness.hotkeyBackend.trigger("todo_quickAddTodo")
+        #expect(f.state.takeFocusRequest())
+
+        // The notch closes and opens again, as a tab click, a hover or ⌃⌥D do: the field mounts again and finds nothing to serve.
+        #expect(!f.state.takeFocusRequest())
+        f.harness.hotkeyBackend.trigger("todo_openTodo")
+        #expect(!f.state.takeFocusRequest())
+
+        // The next ⌃⌥⇧D is a new request.
+        f.harness.hotkeyBackend.trigger("todo_quickAddTodo")
+        #expect(f.state.takeFocusRequest())
+    }
+
+    @Test func aRequestTheNotchNeverAnsweredDoesNotWaitForALaterOpen() async {
+        await f.start()
+        f.harness.hotkeyBackend.trigger("todo_quickAddTodo")
+        f.harness.scheduler.advance(by: TodoModule.focusRequestLifetime - .milliseconds(1))
+        #expect(f.state.pendingFocus)
+        f.harness.scheduler.advance(by: .milliseconds(1))
+        #expect(!f.state.pendingFocus)
+        #expect(TodoModule.focusRequestLifetime == .seconds(2))
+    }
+
+    @Test func aFocusRequestGoesWithTheModule() async {
+        await f.start()
+        f.harness.hotkeyBackend.trigger("todo_quickAddTodo")
+        await f.harness.registry.setEnabled(false, for: "todo")
+        #expect(!f.state.pendingFocus)
     }
 
     @Test func aShortcutTheUserRebindKeepsItsHandler() async throws {
