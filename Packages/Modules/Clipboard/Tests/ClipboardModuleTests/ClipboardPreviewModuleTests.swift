@@ -9,14 +9,16 @@ final class FakePreviewWindow: ClipboardPreviewWindowing {
     private(set) var showCount = 0
     private(set) var closeCount = 0
     private(set) var hostFrame: CGRect?
+    private(set) var hostWindow: ObjectIdentifier?
     /// Runs when the preview closes, so a test can look at what had happened by then.
     var onClose: (() -> Void)?
     private var outsideClick: (() -> Void)?
 
-    func show(_ content: AnyView, hostFrame: CGRect?, onOutsideClick: @escaping () -> Void) {
+    func show(_ content: AnyView, hostFrame: CGRect?, hostWindow: ObjectIdentifier?, onOutsideClick: @escaping () -> Void) {
         showCount += 1
         isOpen = true
         self.hostFrame = hostFrame
+        self.hostWindow = hostWindow
         outsideClick = onOutsideClick
     }
 
@@ -56,6 +58,8 @@ extension ClipboardModuleTests {
         #expect(panelPreview.isOpen)
         #expect(panelPreview.showCount == 1)
         #expect(panelPreview.hostFrame == CGRect(x: 100, y: 200, width: 660, height: 420))
+        // Told which window its clicks are swallowed for.
+        #expect(panelPreview.hostWindow == ObjectIdentifier(panelWindow))
         #expect(!libraryPreview.isOpen)
     }
 
@@ -71,6 +75,7 @@ extension ClipboardModuleTests {
 
         #expect(libraryPreview.isOpen)
         #expect(libraryPreview.hostFrame == CGRect(x: 50, y: 60, width: 980, height: 640))
+        #expect(libraryPreview.hostWindow == ObjectIdentifier(libraryWindow))
         #expect(!panelPreview.isOpen)
     }
 
@@ -304,7 +309,8 @@ extension ClipboardModuleTests {
         let forbidden = [
             ".write(to", "createFile", "createDirectory", "copyItem", "moveItem", "temporaryDirectory", "NSTemporaryDirectory",
             "FileHandle(forWriting", "FileHandle(forUpdating", "NSSavePanel", "replaceItem", "atomically",
-            "mkstemp", "mkdtemp", "fopen(", "Darwin.open", "FileManager",
+            "mkstemp", "mkdtemp", "fopen(", "Darwin.open", "FileManager", "CGImageDestination", "saveBestRepresentation", "FileWrapper",
+            "NSFileCoordinator", "fwrite", "creat(", "NSSavePanel", "NSItemProvider", "registerFileRepresentation", "QLPreviewItem",
         ]
         for file in files {
             let text = try String(contentsOf: file, encoding: .utf8)

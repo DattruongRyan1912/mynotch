@@ -7,16 +7,20 @@ nonisolated enum ClipboardPreviewPlacement {
     /// window it belongs to still around it.
     static let share: CGFloat = 0.8
 
+    /// The largest the preview gets, in points: on a 4K display at 1x or an ultrawide, 80 % would be a window of 3000 points with
+    /// lines of text far too long to read and a blurred background to match. Each side is capped on its own.
+    static let maximumSize = CGSize(width: 1600, height: 1000)
+
     /// Centred on the display that has most of `host` (the library window or the floating panel), inside that display's
     /// visible frame, so the menu bar and the Dock stay clear. A host that is on no display, or none given, means the first
-    /// one. nil when there is no display at all.
+    /// one, and at most `maximumSize`. nil when there is no display at all.
     static func frame(host: CGRect?, screens: [ClipboardPanelPlacement.Screen]) -> CGRect? {
         guard let first = screens.first else { return nil }
         let screen = host.flatMap { host in
             screens.max { overlap(host, $0.frame) < overlap(host, $1.frame) }.flatMap { overlap(host, $0.frame) > 0 ? $0 : nil }
         } ?? first
         let area = screen.visibleFrame
-        let size = CGSize(width: area.width * share, height: area.height * share)
+        let size = CGSize(width: min(area.width * share, maximumSize.width), height: min(area.height * share, maximumSize.height))
         return CGRect(x: area.midX - size.width / 2, y: area.midY - size.height / 2, width: size.width, height: size.height)
     }
 

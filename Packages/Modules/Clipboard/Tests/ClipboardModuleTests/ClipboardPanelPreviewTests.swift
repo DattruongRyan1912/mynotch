@@ -120,6 +120,17 @@ import Testing
         #expect(model.isPreviewOpen)
     }
 
+    /// ↓ in an open `@` list moves the suggestion, not the item, so the Space that follows is a typed space.
+    @Test func spaceAfterAnArrowThatMovedTheSuggestionsTypesASpace() {
+        model.searchText = "chào @"
+        // The list is open and there is still an item to show, so only the arrow's memory could make Space the preview's.
+        #expect(model.suggestions.isOpen)
+        #expect(model.selectedItem?.id == text)
+        #expect(!press(down))
+        #expect(!press(space))
+        #expect(!model.isPreviewOpen)
+    }
+
     @Test func aTypedLetterEndsTheMovingThroughTheList() {
         model.searchText = "o"
         press(down)
@@ -203,6 +214,19 @@ import Testing
         #expect(model.isPreviewOpen)
     }
 
+    /// Nothing was moved to, so the first item only stands in for the selection; opening the preview on it makes it the user's.
+    @Test func aNewCopyWhileItIsOpenOnTheFirstItemKeepsShowingThatItemAndPastesIt() {
+        press(space)
+        #expect(model.previewedItem?.id == text)
+        let content = ClipboardContent.text("Mới chép")
+        state.history.add(content, hash: ClipboardContent.hash(of: content), source: (nil, nil), at: Self.start)
+        #expect(model.previewedItem?.id == text)
+        #expect(model.isPreviewOpen)
+
+        press(returnKey)
+        #expect(actions.activated == [text])
+    }
+
     @Test func anItemOfALockedBoardIsNeverShown() {
         var history = state.history
         let board = history.createBoard(name: "Két")
@@ -241,6 +265,17 @@ import Testing
         #expect(!press(escape))
         #expect(model.handleKey(.close))
         #expect(closeCount == 1)
+    }
+
+    @Test func tabClosesOnlyThePreviewAndIsTakenWhileItIsOpen() {
+        let tab = key(48, "\t")
+        #expect(!press(tab))
+        press(space)
+        #expect(press(tab))
+        #expect(!model.isPreviewOpen)
+        #expect(closeCount == 0)
+        // Closed, it is the field's again (it completes an `@` word).
+        #expect(!press(tab))
     }
 
     @Test func theFieldsOwnEscapeAndThePanelsCancelAlsoCloseOnlyThePreview() {

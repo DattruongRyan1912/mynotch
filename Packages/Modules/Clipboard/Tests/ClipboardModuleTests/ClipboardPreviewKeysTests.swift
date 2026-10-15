@@ -129,6 +129,29 @@ import Testing
         #expect(Keys.command(for: Self.escape, in: Self.cards()) == nil)
     }
 
+    /// Tab would leave the field for the next control, and nothing there could close the preview: with it open, Tab closes it.
+    @Test func tabClosesAnOpenPreviewWhereverTheKeyboardIs() {
+        let tab = Keys.Key(keyCode: 48, characters: "\t", modifiers: [])
+        let backTab = Keys.Key(keyCode: 48, characters: "\u{19}", modifiers: .shift)
+        for key in [tab, backTab] {
+            #expect(Keys.command(for: key, in: Self.field(open: true)) == .close)
+            #expect(Keys.command(for: key, in: Self.cards(open: true)) == .close)
+            // Closed, Tab is the window's.
+            #expect(Keys.command(for: key, in: Self.field()) == nil)
+            #expect(Keys.command(for: key, in: Self.cards()) == nil)
+        }
+    }
+
+    @Test func tabBelongsToTheSuggestionsAndTheInputMethodAndOtherShortcuts() {
+        let tab = Keys.Key(keyCode: 48, characters: "\t", modifiers: [])
+        #expect(Keys.command(for: tab, in: Self.field(open: true, suggestions: true)) == nil)
+        #expect(Keys.command(for: tab, in: Self.field(open: true, marked: true)) == nil)
+        for modifiers: NSEvent.ModifierFlags in [.command, .option, .control] {
+            let other = Keys.Key(keyCode: 48, characters: "\t", modifiers: modifiers)
+            #expect(Keys.command(for: other, in: Self.field(open: true)) == nil, "\(modifiers)")
+        }
+    }
+
     @Test func returnPastesOnlyWhileThePreviewIsOpen() {
         #expect(Keys.command(for: Self.returnKey, in: Self.field(open: true)) == .activate)
         #expect(Keys.command(for: Self.returnKey, in: Self.cards(open: true)) == .activate)

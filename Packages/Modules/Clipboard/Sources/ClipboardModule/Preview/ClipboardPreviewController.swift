@@ -6,8 +6,8 @@ import SwiftUI
 /// monitors. Mouse monitors need no Accessibility permission.
 struct ClipboardPreviewClickMonitor {
     /// Starts watching and returns what `stop` needs; nil when AppKit refused. `handler` gets the identity of the window that
-    /// was clicked (nil for a click in another app) and answers whether the click is swallowed: a click in one of MyNotch's own
-    /// windows that closes the preview must not also press the card or row under it.
+    /// was clicked (nil for a click in another app) and answers whether the click is swallowed: a click on the window the preview
+    /// belongs to that closes the preview must not also press the card or row under it.
     var start: (@escaping @MainActor @Sendable (ObjectIdentifier?) -> Bool) -> Any?
     var stop: (Any) -> Void
 
@@ -67,6 +67,8 @@ final class ClipboardPreviewController: NSObject, ClipboardPreviewWindowing {
     private let orderFront: (ClipboardPreviewPanel) -> Void
     private var panel: ClipboardPreviewPanel?
     private var onOutsideClick: (() -> Void)?
+    /// The window the preview belongs to, whose clicks are swallowed while it closes the preview.
+    private var hostWindow: ObjectIdentifier?
     /// Keeps it out of recordings the way the user asked, while it exists.
     private var captureFollower: CaptureHidingFollower?
     private var clickToken: Any?
@@ -92,13 +94,14 @@ final class ClipboardPreviewController: NSObject, ClipboardPreviewWindowing {
         self.orderFront = orderFront
     }
 
-    func show(_ content: AnyView, hostFrame: CGRect?, onOutsideClick: @escaping () -> Void) {
+    func show(_ content: AnyView, hostFrame: CGRect?, hostWindow: ObjectIdentifier?, onOutsideClick: @escaping () -> Void) {
         close()
         guard let frame = ClipboardPreviewPlacement.frame(host: hostFrame, screens: screens()) else { return }
         let panel = makePanel(frame: frame)
         panel.contentView = makeContentView(content, size: frame.size)
         self.panel = panel
         self.onOutsideClick = onOutsideClick
+        self.hostWindow = hostWindow
         watch()
         // Never `makeKey`: the keyboard stays where it was.
         orderFront(panel)
@@ -108,6 +111,7 @@ final class ClipboardPreviewController: NSObject, ClipboardPreviewWindowing {
         guard let panel else { return }
         self.panel = nil
         onOutsideClick = nil
+        hostWindow = nil
         stopWatching()
         stopFollowingSetting()
         panel.orderOut(nil)
@@ -137,8 +141,9 @@ final class ClipboardPreviewController: NSObject, ClipboardPreviewWindowing {
         stopWatching()
         clickToken = clickMonitor.start { [weak self] window in
             guard let self, let panel = self.panel, window != ObjectIdentifier(panel) else { return false }
+            let swallowed = window != nil && window == self.hostWindow
             self.outside()
-            return window != nil
+            return swallowed
         }
         resignObserver = center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.outside() }

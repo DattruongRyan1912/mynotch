@@ -153,8 +153,8 @@ struct ClipboardColorValues: Equatable, Sendable {
 
 /// What the preview asks the file system about a file already on disk. A value of one closure, so tests answer for fake paths and
 /// nothing reads a real one. It only asks: nothing in the preview creates, copies or writes a file.
-struct ClipboardFileFacts {
-    struct Look: Equatable {
+nonisolated struct ClipboardFileFacts: Sendable {
+    struct Look: Equatable, Sendable {
         var isDirectory: Bool
         /// A folder that Finder treats as one thing, like an app.
         var isPackage = false
@@ -164,7 +164,7 @@ struct ClipboardFileFacts {
     }
 
     /// nil when there is no such file any more.
-    var look: (URL) -> Look?
+    var look: @Sendable (URL) -> Look?
 
     static let none = ClipboardFileFacts { _ in nil }
 
@@ -184,7 +184,7 @@ struct ClipboardFileFacts {
     }
 }
 
-struct ClipboardPreviewFiles: Equatable, Sendable {
+nonisolated struct ClipboardPreviewFiles: Equatable, Sendable {
     struct Entry: Equatable, Sendable {
         let url: URL
         let name: String
@@ -205,6 +205,7 @@ struct ClipboardPreviewFiles: Equatable, Sendable {
     /// Files beyond the limit, not listed.
     let omittedCount: Int
 
+    /// Asks about each file where it is called.
     init(_ urls: [URL], facts: ClipboardFileFacts) {
         entries = urls.prefix(Self.entryLimit).map { url in
             let look = facts.look(url)
@@ -216,6 +217,12 @@ struct ClipboardPreviewFiles: Equatable, Sendable {
             )
         }
         omittedCount = max(urls.count - Self.entryLimit, 0)
+    }
+
+    /// The same, asked off the main actor: a file on a network mount that does not answer, or one that iCloud has yet to download,
+    /// can take seconds, which the main actor must never wait for.
+    @concurrent static func load(_ urls: [URL], facts: ClipboardFileFacts = .system) async -> ClipboardPreviewFiles {
+        ClipboardPreviewFiles(urls, facts: facts)
     }
 
     /// The file Quick Look is asked to draw: a single one that is there and is not a plain folder.

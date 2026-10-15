@@ -58,6 +58,30 @@ import Testing
         #expect(frame.maxY <= 70 + 806)
     }
 
+    @Test func aLargeDisplayDoesNotGetAWindowWiderThanItIsReadableAt() throws {
+        let frame = try #require(ClipboardPreviewPlacement.frame(host: Self.desktop.frame, screens: [Self.desktop]))
+        #expect(frame.width == ClipboardPreviewPlacement.maximumSize.width)
+        #expect(frame.height == ClipboardPreviewPlacement.maximumSize.height)
+        #expect(ClipboardPreviewPlacement.maximumSize == CGSize(width: 1600, height: 1000))
+        // Still centred, and still inside the visible frame.
+        #expect(frame.midX == Self.desktop.visibleFrame.midX)
+        #expect(frame.midY == Self.desktop.visibleFrame.midY)
+        #expect(Self.desktop.visibleFrame.contains(frame))
+    }
+
+    @Test func eachSideIsCappedOnItsOwnSoATallNarrowDisplayKeepsItsShare() throws {
+        let tall = Screen(frame: CGRect(x: 0, y: 0, width: 1000, height: 3000), visibleFrame: CGRect(x: 0, y: 0, width: 1000, height: 3000))
+        let frame = try #require(ClipboardPreviewPlacement.frame(host: nil, screens: [tall]))
+        #expect(frame.width == 1000 * ClipboardPreviewPlacement.share)
+        #expect(frame.height == ClipboardPreviewPlacement.maximumSize.height)
+    }
+
+    @Test func aDisplayThatIsSmallEnoughIsNotAffectedByTheCap() throws {
+        let frame = try #require(ClipboardPreviewPlacement.frame(host: nil, screens: [Self.laptop]))
+        #expect(frame.width == 1440 * ClipboardPreviewPlacement.share)
+        #expect(frame.height == 806 * ClipboardPreviewPlacement.share)
+    }
+
     @Test func noDisplayMeansNoPreview() {
         #expect(ClipboardPreviewPlacement.frame(host: nil, screens: []) == nil)
     }

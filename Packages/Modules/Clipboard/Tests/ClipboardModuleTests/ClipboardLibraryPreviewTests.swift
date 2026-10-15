@@ -98,6 +98,18 @@ import Testing
         #expect(model.isPreviewOpen)
     }
 
+    /// ↓ in an open `@` list moves the suggestion, not the card, so the Space that follows is a typed space.
+    @Test func spaceAfterAnArrowThatMovedTheSuggestionsTypesASpace() {
+        model.select(text, mode: .replace)
+        model.searchText = "chào @"
+        // The list is open and the card is still there, so only the arrow's memory could make Space the preview's.
+        #expect(model.suggestions.isOpen)
+        #expect(model.focusID == text)
+        #expect(!press(key(125, nil, modifiers: [.numericPad, .function]), target: .searchField))
+        #expect(!press(space, target: .searchField))
+        #expect(!model.isPreviewOpen)
+    }
+
     @Test func spaceDuringACompositionIsTheInputMethods() {
         model.select(text, mode: .replace)
         #expect(!press(space, target: .searchField, marked: true))
@@ -215,6 +227,17 @@ import Testing
 
         // Closed, Esc is the library's own (clearing the selection) again.
         #expect(!press(escape))
+    }
+
+    @Test func tabClosesOnlyThePreviewAndKeepsTheSelection() {
+        let tab = key(48, "\t")
+        model.select(link, mode: .replace)
+        #expect(!press(tab))
+        press(space)
+        #expect(press(tab, target: .searchField))
+        #expect(!model.isPreviewOpen)
+        #expect(model.selectedIDs == [link])
+        #expect(!press(tab))
     }
 
     @Test func returnClosesThePreviewThenUsesTheFocusedCard() {

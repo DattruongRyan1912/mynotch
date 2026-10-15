@@ -26,11 +26,40 @@ enum ClipboardPreviewImage {
         return max(1, min(Int(ceil(longest)), pixelCap))
     }
 
-    /// nil when the bytes are not a picture or the file is not there. Off the main actor; only reads.
-    @concurrent static func load(_ source: Source, maxPixelSize: Int) async -> CGImage? {
+    /// How long a picture waits, once it is selected, before it is decoded. Holding ↓ over big pictures selects each for a moment and
+    /// replaces it; with the wait, the views that go cancel their tasks before any decode is started.
+    nonisolated static let pause: Duration = .milliseconds(80)
+
+    /// nil when the bytes are not a picture or the file is not there, or when the task was cancelled before the decode began (a
+    /// decode that has begun runs to its end, so it is the start that is guarded). Off the main actor; only reads.
+    @concurrent static func load(_ source: Source, maxPixelSize: Int, decoder: ClipboardPreviewImageDecoder = .system) async -> CGImage? {
+        guard !Task.isCancelled else { return nil }
         switch source {
-        case .file(let url): await ClipboardThumbnailCache.decode(url, maxPixelSize: maxPixelSize)
-        case .memory(let data): await ClipboardThumbnailCache.decode(data, maxPixelSize: maxPixelSize)
+        case .file(let url): return await decoder.file(url, maxPixelSize)
+        case .memory(let data): return await decoder.memory(data, maxPixelSize)
         }
     }
+
+    /// `load` after `pause`, which a cancellation cuts short: what the preview's pane asks for. `sleep` is how the pause is waited
+    /// out, a parameter so a test can hold the tasks in it without a clock.
+    @concurrent static func loadAfterPause(
+        _ source: Source, maxPixelSize: Int, pause: Duration = ClipboardPreviewImage.pause,
+        sleep: @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) },
+        decoder: ClipboardPreviewImageDecoder = .system
+    ) async -> CGImage? {
+        await sleep(pause)
+        return await load(source, maxPixelSize: maxPixelSize, decoder: decoder)
+    }
+}
+
+/// The two ways a picture is decoded, as a value so a test counts the decodes instead of making them.
+nonisolated struct ClipboardPreviewImageDecoder: Sendable {
+    var file: @Sendable (URL, Int) async -> CGImage?
+    var memory: @Sendable (Data, Int) async -> CGImage?
+
+    /// ImageIO at the size asked for, the call the thumbnails use.
+    static let system = ClipboardPreviewImageDecoder(
+        file: { await ClipboardThumbnailCache.decode($0, maxPixelSize: $1) },
+        memory: { await ClipboardThumbnailCache.decode($0, maxPixelSize: $1) }
+    )
 }

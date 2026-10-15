@@ -26,7 +26,7 @@ final class ClipboardPreviewState {
 
     /// What `key` means for the preview, and the memory of it. A key the preview takes leaves "moving through the list"
     /// as it was, so Space twice after an arrow opens and closes; any other key ends it, so a Space typed after a letter
-    /// is a space.
+    /// is a space. ↑ and ↓ in the `@` suggestions move their highlight, not the selection, so they do not start it.
     func command(
         for key: Keys.Key, target: Keys.Target, hasMarkedText: Bool, searchIsEmpty: Bool, suggestionsAreOpen: Bool, hasItem: Bool
     ) -> Keys.Command? {
@@ -34,7 +34,7 @@ final class ClipboardPreviewState {
             target: target, searchIsEmpty: searchIsEmpty, lastKeyWasVerticalArrow: lastKeyWasVerticalArrow, hasMarkedText: hasMarkedText,
             suggestionsAreOpen: suggestionsAreOpen, previewIsOpen: isOpen, hasItem: hasItem
         ))
-        if command == nil { lastKeyWasVerticalArrow = Keys.isVerticalArrow(key) }
+        if command == nil { lastKeyWasVerticalArrow = !suggestionsAreOpen && Keys.isVerticalArrow(key) }
         return command
     }
 }

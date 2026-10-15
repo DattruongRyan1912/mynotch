@@ -7,6 +7,8 @@ protocol ClipboardLibraryWindowing: AnyObject {
     var isFrontmost: Bool { get }
     /// The window's frame while it is open, which tells the large preview which display to appear on.
     var frame: CGRect? { get }
+    /// Which window the library is, for the preview to know whose clicks to swallow.
+    var windowIdentity: ObjectIdentifier? { get }
     /// Opens the window with `content`. The window asks `model` what the large preview makes of a key press. `onClose` runs once
     /// when it closes, whoever closes it.
     func show(_ content: AnyView, model: ClipboardLibraryModel, onClose: @escaping () -> Void)

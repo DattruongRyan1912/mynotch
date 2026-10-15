@@ -26,13 +26,23 @@ struct ClipboardPreviewView: View {
 struct ClipboardPreviewItemView: View {
     let item: ClipboardItem
     let imageSource: ClipboardPreviewImageSource?
-    private let content: ClipboardPreviewContent
+    /// Worked out once, the first time it is needed: the view is made again at every change of the history while it is open, and the
+    /// cut of a 2 MB text should not be.
+    @State private var cache = ContentCache()
 
-    init(item: ClipboardItem, imageSource: ClipboardPreviewImageSource?) {
-        self.item = item
-        self.imageSource = imageSource
-        content = ClipboardPreviewContent(item: item)
+    final class ContentCache {
+        private var content: ClipboardPreviewContent?
+
+        func content(for item: ClipboardItem) -> ClipboardPreviewContent {
+            if let content { return content }
+            // The files' facts are left to the files pane, which asks off the main actor.
+            let made = ClipboardPreviewContent(item: item, facts: .none)
+            content = made
+            return made
+        }
     }
+
+    private var content: ClipboardPreviewContent { cache.content(for: item) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -49,8 +59,12 @@ struct ClipboardPreviewItemView: View {
         case .image(let info): ClipboardPreviewImagePane(info: info, source: imageSource)
         case .color(let values): ClipboardPreviewColorPane(values: values)
         case .link(let link): ClipboardPreviewLinkPane(link: link)
-        case .files(let files): ClipboardPreviewFilesPane(files: files)
+        case .files: ClipboardPreviewFilesPane(urls: filesOf(item))
         }
+    }
+
+    private func filesOf(_ item: ClipboardItem) -> [URL] {
+        if case .files(let urls) = item.content { urls } else { [] }
     }
 
     // MARK: Footer
@@ -80,7 +94,7 @@ struct ClipboardPreviewItemView: View {
         switch content {
         case .image(let info): "\(info.dimensionsText) · \(info.sizeText)"
         case .text(let text): ClipboardPreviewFormat.size(text.byteCount)
-        case .files(let files): files.entries.count > 1 ? "\(files.entries.count + files.omittedCount) file" : nil
+        case .files: filesOf(item).count > 1 ? "\(filesOf(item).count) file" : nil
         case .color, .link: nil
         }
     }
@@ -155,7 +169,8 @@ struct ClipboardPreviewImagePane: View {
                 let pixels = ClipboardPreviewImage.maxPixelSize(
                     display: geometry.size, scale: scale, pixelWidth: info.pixelWidth, pixelHeight: info.pixelHeight
                 )
-                let decoded = await ClipboardPreviewImage.load(source, maxPixelSize: pixels)
+                // After a short wait, so a picture the user is only passing is cancelled before it is decoded.
+                let decoded = await ClipboardPreviewImage.loadAfterPause(source, maxPixelSize: pixels)
                 guard !Task.isCancelled else { return }
                 image = decoded
                 failed = decoded == nil
@@ -236,9 +251,25 @@ struct ClipboardPreviewLinkPane: View {
 // MARK: Files
 
 struct ClipboardPreviewFilesPane: View {
-    let files: ClipboardPreviewFiles
+    let urls: [URL]
+    @State private var files: ClipboardPreviewFiles?
 
     var body: some View {
+        Group {
+            if let files {
+                loaded(files)
+            } else {
+                ProgressView()
+            }
+        }
+        // Asked off the main actor, since a file on a network mount can take its time to answer.
+        .task {
+            let found = await ClipboardPreviewFiles.load(urls)
+            if !Task.isCancelled { files = found }
+        }
+    }
+
+    @ViewBuilder private func loaded(_ files: ClipboardPreviewFiles) -> some View {
         if let url = files.quickLookURL, let entry = files.entries.first {
             VStack(spacing: 0) {
                 row(entry, iconSize: 40)

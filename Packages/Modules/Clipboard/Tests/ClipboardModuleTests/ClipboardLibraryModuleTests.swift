@@ -9,6 +9,7 @@ final class FakeLibraryWindow: ClipboardLibraryWindowing {
     var isOpen = false
     var isFrontmost = false
     var frame: CGRect? = CGRect(x: 80, y: 80, width: 980, height: 640)
+    var windowIdentity: ObjectIdentifier? { isOpen ? ObjectIdentifier(self) : nil }
     private(set) var showCount = 0
     private(set) var frontCount = 0
     private(set) var yieldCount = 0

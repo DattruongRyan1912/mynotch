@@ -347,7 +347,7 @@ public final class ClipboardModule: FeatureModule {
         }
         model.thumbnails.openImages = openImages
         library = model
-        attachPreview(to: model, window: libraryPreviewWindow) { [weak libraryWindow] in libraryWindow?.frame }
+        attachPreview(to: model, window: libraryPreviewWindow) { [weak libraryWindow] in (libraryWindow?.frame, libraryWindow?.windowIdentity) }
         libraryWindow.show(AnyView(ClipboardLibraryView(module: self, model: model)), model: model, onClose: { [weak self] in
             self?.libraryClosed(model)
         })
@@ -376,7 +376,7 @@ public final class ClipboardModule: FeatureModule {
         model.onMove = { origin in settings.set(ClipboardPanelPosition(origin), for: keys.panelPosition) }
         model.thumbnails.openImages = openImages
         panel = model
-        attachPreview(to: model, window: panelPreviewWindow) { [weak panelWindow] in panelWindow?.frame }
+        attachPreview(to: model, window: panelPreviewWindow) { [weak panelWindow] in (panelWindow?.frame, panelWindow?.windowIdentity) }
         // Only a pinned panel is where it was left; an unpinned one is always beside the pointer.
         let restoredOrigin = pinned ? settings.value(keys.panelPosition)?.point : nil
         panelWindow.show(AnyView(ClipboardPanelView(module: self, model: model)), model: model, restoringOrigin: restoredOrigin) { [weak self] in
@@ -731,16 +731,20 @@ public final class ClipboardModule: FeatureModule {
         if library === model { library = nil }
     }
 
-    /// Shows the preview in `window` while `host` has it open, over the display of `hostFrame()`, and takes it away when the host
-    /// closes it or the user clicks anywhere but on it. The window is told nothing else: what it draws follows the host.
-    private func attachPreview(to host: some ClipboardPreviewHosting, window: (any ClipboardPreviewWindowing)?, hostFrame: @escaping () -> CGRect?) {
+    /// Shows the preview in `window` while `host` has it open, over the display of the host window's frame, and takes it away when the
+    /// host closes it or the user clicks anywhere but on it. `hostWindow()` is the host window's frame and identity, asked for each time
+    /// it opens. The window is told nothing else: what it draws follows the host.
+    private func attachPreview(
+        to host: some ClipboardPreviewHosting, window: (any ClipboardPreviewWindowing)?, hostWindow: @escaping () -> (frame: CGRect?, id: ObjectIdentifier?)
+    ) {
         guard let window else { return }
         host.onPreviewChange = { [weak self, weak host, weak window] open in
             guard open, let self, let host else {
                 window?.close()
                 return
             }
-            window?.show(AnyView(ClipboardPreviewView(host: host, module: self)), hostFrame: hostFrame()) { [weak host] in
+            let hostWindow = hostWindow()
+            window?.show(AnyView(ClipboardPreviewView(host: host, module: self)), hostFrame: hostWindow.frame, hostWindow: hostWindow.id) { [weak host] in
                 host?.closePreview()
             }
         }

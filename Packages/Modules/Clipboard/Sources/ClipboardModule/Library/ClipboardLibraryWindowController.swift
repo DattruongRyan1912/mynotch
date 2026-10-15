@@ -26,6 +26,8 @@ final class ClipboardLibraryWindowController: NSObject, ClipboardLibraryWindowin
 
     var frame: CGRect? { window?.frame }
 
+    var windowIdentity: ObjectIdentifier? { window.map(ObjectIdentifier.init) }
+
     func show(_ content: AnyView, model: ClipboardLibraryModel, onClose: @escaping () -> Void) {
         guard window == nil else {
             bringToFront()

@@ -37,7 +37,8 @@ nonisolated enum ClipboardPreviewKeys {
     enum Command: Equatable {
         /// Space and ⌘Y: open the preview, or close it.
         case toggle
-        /// Esc while the preview is open: closes only the preview.
+        /// Esc, or Tab, while the preview is open: closes only the preview. (Tab would take the keyboard to the next control, and
+        /// nothing there could close it.)
         case close
         /// Return while the preview is open: pastes the selected item, the preview going first.
         case activate
@@ -59,6 +60,9 @@ nonisolated enum ClipboardPreviewKeys {
             guard situation.target == .cards || situation.searchIsEmpty || situation.lastKeyWasVerticalArrow else { return nil }
             return toggle(key)
         case 53 where flags.isEmpty:
+            guard situation.previewIsOpen, !situation.suggestionsAreOpen else { return nil }
+            return .close
+        case 48 where flags.isEmpty || flags == .shift:
             guard situation.previewIsOpen, !situation.suggestionsAreOpen else { return nil }
             return .close
         case 36 where flags.isEmpty, 76 where flags.isEmpty:

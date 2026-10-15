@@ -99,4 +99,132 @@ import UniformTypeIdentifiers
         let missing = URL(fileURLWithPath: "/definitely/not/here-\(UUID().uuidString).png")
         #expect(await Preview.load(.file(missing), maxPixelSize: 500) == nil)
     }
+
+    // MARK: Fast scrolling
+
+    /// Counts the decodes asked of it, from whichever thread they come.
+    final class FakeDecoder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        private(set) var sizes: [Int] = []
+
+        var calls: Int { lock.withLock { count } }
+
+        var decoder: ClipboardPreviewImageDecoder {
+            ClipboardPreviewImageDecoder(
+                file: { [self] _, size in await decode(size) },
+                memory: { [self] _, size in await decode(size) }
+            )
+        }
+
+        private func decode(_ size: Int) async -> CGImage? {
+            lock.withLock {
+                count += 1
+                sizes.append(size)
+            }
+            return CGContext(
+                data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )?.makeImage()
+        }
+    }
+
+    @Test func aTaskThatWasCancelledNeverStartsTheDecode() async {
+        let fake = FakeDecoder()
+        let task = Task { await Preview.load(.memory(Data("x".utf8)), maxPixelSize: 100, decoder: fake.decoder) }
+        task.cancel()
+        #expect(await task.value == nil)
+        #expect(fake.calls == 0)
+
+        let file = Task { await Preview.load(.file(URL(fileURLWithPath: "/tmp/none.png")), maxPixelSize: 100, decoder: fake.decoder) }
+        file.cancel()
+        #expect(await file.value == nil)
+        #expect(fake.calls == 0)
+    }
+
+    @Test func aTaskThatIsNotCancelledDecodesOnceAtTheSizeAsked() async {
+        let fake = FakeDecoder()
+        #expect(await Preview.load(.memory(Data("x".utf8)), maxPixelSize: 640, decoder: fake.decoder) != nil)
+        #expect(await Preview.load(.file(URL(fileURLWithPath: "/tmp/none.png")), maxPixelSize: 320, decoder: fake.decoder) != nil)
+        #expect(fake.sizes == [640, 320])
+    }
+
+    /// Stands in for the pause: every task that sleeps in it waits until the test lets it go or the task is cancelled, as a real sleep
+    /// would be cut short, so the test needs no clock.
+    nonisolated final class PauseGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var waiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+        private var cancelledBeforeWaiting: Set<UUID> = []
+
+        var waiting: Int { lock.withLock { waiters.count } }
+
+        func sleep(_ pause: Duration) async {
+            let id = UUID()
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    let early = lock.withLock { () -> Bool in
+                        if cancelledBeforeWaiting.remove(id) != nil { return true }
+                        waiters[id] = continuation
+                        return false
+                    }
+                    if early { continuation.resume() }
+                }
+            } onCancel: {
+                let continuation = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+                    if let waiting = waiters.removeValue(forKey: id) { return waiting }
+                    cancelledBeforeWaiting.insert(id)
+                    return nil
+                }
+                continuation?.resume()
+            }
+        }
+
+        /// The pause is over for everyone still in it.
+        func releaseAll() {
+            let all = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+                defer { waiters = [:] }
+                return Array(waiters.values)
+            }
+            for continuation in all { continuation.resume() }
+        }
+    }
+
+    func eventually(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<2000 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return condition()
+    }
+
+    /// Holding ↓ over big pictures: each one is selected for a moment and then replaced, so only the one the user stops on is decoded.
+    /// The earlier ones are all waiting out the pause (they have started) when they are cancelled, which is what the wait is for.
+    @Test func holdingTheArrowDecodesOnlyThePictureTheUserStopsOn() async {
+        let fake = FakeDecoder()
+        let gate = PauseGate()
+        let tasks = (0..<6).map { _ in
+            Task { await Preview.loadAfterPause(.memory(Data("x".utf8)), maxPixelSize: 100, sleep: { await gate.sleep($0) }, decoder: fake.decoder) }
+        }
+        #expect(await eventually { gate.waiting == 6 })
+
+        // The next picture comes before the pause is over: the views of the earlier ones go, and their tasks are cancelled.
+        for task in tasks.dropLast() { task.cancel() }
+        for task in tasks.dropLast() { #expect(await task.value == nil) }
+        #expect(fake.calls == 0)
+
+        // The last one stays, and its pause ends.
+        gate.releaseAll()
+        #expect(await tasks[5].value != nil)
+        #expect(fake.calls == 1)
+    }
+
+    @Test func aPictureThatStaysIsDecodedOnceAfterThePause() async {
+        let fake = FakeDecoder()
+        #expect(await Preview.loadAfterPause(.memory(Data("x".utf8)), maxPixelSize: 100, pause: .milliseconds(5), decoder: fake.decoder) != nil)
+        #expect(fake.calls == 1)
+    }
+
+    @Test func thePanesPauseIsShortEnoughToFeelInstantAndLongEnoughToSkipPictures() {
+        #expect(Preview.pause == .milliseconds(80))
+    }
 }

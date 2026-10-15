@@ -227,15 +227,56 @@ import Testing
         #expect(files.omittedCount == 7)
     }
 
+    /// Remembers what it was asked and where, from whichever thread that was.
+    nonisolated final class AskedLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var names: [String] = []
+        private var threads: [Bool] = []
+
+        func record(_ url: URL) {
+            lock.withLock {
+                names.append(url.lastPathComponent)
+                threads.append(Thread.isMainThread)
+            }
+        }
+
+        var asked: [String] { lock.withLock { names } }
+        var askedOnMain: [Bool] { lock.withLock { threads } }
+
+        var facts: ClipboardFileFacts {
+            ClipboardFileFacts { [self] url in
+                record(url)
+                return nil
+            }
+        }
+    }
+
     @Test func thePreviewOnlyEverReadsFactsNeverWritesThem() {
         // The facts are a pure question about a URL; the value type has nothing to write with.
-        var asked: [String] = []
-        let facts = ClipboardFileFacts { url in
-            asked.append(url.lastPathComponent)
-            return nil
-        }
-        _ = Self.content(.files([URL(fileURLWithPath: "/tmp/a.txt")]), facts: facts)
-        #expect(asked == ["a.txt"])
+        let log = AskedLog()
+        _ = Self.content(.files([URL(fileURLWithPath: "/tmp/a.txt")]), facts: log.facts)
+        #expect(log.asked == ["a.txt"])
+    }
+
+    // MARK: Off the main actor
+
+    /// A file on a dead network mount or a dataless iCloud file can take seconds to answer: the preview asks off the main actor.
+    @Test func theFilesAreAskedAboutOffTheMainActorWithTheSameAnswersAsAskingHere() async {
+        let urls = ["báo cáo.pdf", "ảnh.png", "đã xoá.txt"].map { URL(fileURLWithPath: "/Users/me/\($0)") }
+        let log = AskedLog()
+        let loaded = await ClipboardPreviewFiles.load(urls, facts: log.facts)
+
+        #expect(log.asked == ["báo cáo.pdf", "ảnh.png", "đã xoá.txt"])
+        #expect(log.askedOnMain == [false, false, false])
+        #expect(loaded == ClipboardPreviewFiles(urls, facts: .none))
+        #expect(await ClipboardPreviewFiles.load(urls, facts: Self.facts) == ClipboardPreviewFiles(urls, facts: Self.facts))
+    }
+
+    @Test func aLongListIsStillCutWhenLoadedOffTheMainActor() async {
+        let urls = (0..<ClipboardPreviewFiles.entryLimit + 4).map { URL(fileURLWithPath: "/tmp/f\($0).txt") }
+        let loaded = await ClipboardPreviewFiles.load(urls, facts: .none)
+        #expect(loaded.entries.count == ClipboardPreviewFiles.entryLimit)
+        #expect(loaded.omittedCount == 4)
     }
 
     // MARK: The system's facts

@@ -272,7 +272,10 @@ final class ClipboardPanelModel: ClipboardPreviewHosting {
     func togglePreview() {
         if preview.isOpen {
             preview.close()
-        } else if !isClosed, previewableSelection != nil {
+        } else if !isClosed, let item = previewableSelection {
+            // The first item only stands in for a selection nobody made; a copy that arrives while the preview is open must not
+            // move the preview (or Return) to it.
+            chosenID = item.id
             preview.open()
         }
     }

@@ -122,7 +122,7 @@ import Testing
         let presented = Presented()
         let controller = makeController(monitor: fake.monitor, presented: presented)
 
-        controller.show(AnyView(Text("x")), hostFrame: CGRect(x: 100, y: 300, width: 660, height: 420)) {}
+        controller.show(AnyView(Text("x")), hostFrame: CGRect(x: 100, y: 300, width: 660, height: 420), hostWindow: nil) {}
 
         let panel = try #require(presented.panels.first)
         #expect(controller.isOpen)
@@ -140,7 +140,7 @@ import Testing
         let fake = FakeClickMonitor()
         let presented = Presented()
         let controller = makeController(monitor: fake.monitor, screens: [], presented: presented)
-        controller.show(AnyView(Text("x")), hostFrame: nil) {}
+        controller.show(AnyView(Text("x")), hostFrame: nil, hostWindow: nil) {}
         #expect(!controller.isOpen)
         #expect(presented.panels.isEmpty)
         #expect(fake.started == 0)
@@ -150,10 +150,10 @@ import Testing
         let fake = FakeClickMonitor()
         let presented = Presented()
         let controller = makeController(monitor: fake.monitor, presented: presented)
-        controller.show(AnyView(Text("a")), hostFrame: nil) {}
+        controller.show(AnyView(Text("a")), hostFrame: nil, hostWindow: nil) {}
         let first = try #require(presented.panels.first)
 
-        controller.show(AnyView(Text("b")), hostFrame: nil) {}
+        controller.show(AnyView(Text("b")), hostFrame: nil, hostWindow: nil) {}
         #expect(presented.panels.count == 2)
         #expect(presented.panels[1] !== first)
         #expect(!first.isVisible)
@@ -165,7 +165,7 @@ import Testing
         let fake = FakeClickMonitor()
         let presented = Presented()
         let controller = makeController(monitor: fake.monitor, presented: presented)
-        controller.show(AnyView(Text("x")), hostFrame: nil) {}
+        controller.show(AnyView(Text("x")), hostFrame: nil, hostWindow: nil) {}
         let panel = try #require(presented.panels.first)
 
         controller.close()
@@ -179,7 +179,7 @@ import Testing
         var stopped = 0
         let monitor = ClipboardPreviewClickMonitor(start: { _ in nil }, stop: { _ in stopped += 1 })
         let controller = makeController(monitor: monitor)
-        controller.show(AnyView(Text("x")), hostFrame: nil) {}
+        controller.show(AnyView(Text("x")), hostFrame: nil, hostWindow: nil) {}
         controller.close()
         #expect(stopped == 0)
     }
@@ -190,21 +190,45 @@ import Testing
         let fake = FakeClickMonitor()
         let controller = makeController(monitor: fake.monitor)
         var outside = 0
-        controller.show(AnyView(Text("x")), hostFrame: nil) { outside += 1 }
+        controller.show(AnyView(Text("x")), hostFrame: nil, hostWindow: nil) { outside += 1 }
 
         #expect(fake.handler?(nil) == false)
         #expect(outside == 1)
     }
 
-    @Test func aClickInAnotherWindowOfMyNotchClosesItAndIsNotPassedOn() {
+    /// A click on the window the preview belongs to is swallowed, so a click that closes the preview does not also press the row or
+    /// card under it (which would paste).
+    @Test func aClickOnTheHostWindowClosesItAndIsNotPassedOn() {
         let fake = FakeClickMonitor()
         let controller = makeController(monitor: fake.monitor)
         var outside = 0
-        let otherWindow = NSWindow()
-        controller.show(AnyView(Text("x")), hostFrame: nil) { outside += 1 }
+        let host = NSWindow()
+        controller.show(AnyView(Text("x")), hostFrame: nil, hostWindow: ObjectIdentifier(host)) { outside += 1 }
 
-        // Swallowed, so a click that closes the preview does not also paste the row under it.
-        #expect(fake.handler?(ObjectIdentifier(otherWindow)) == true)
+        #expect(fake.handler?(ObjectIdentifier(host)) == true)
+        #expect(outside == 1)
+    }
+
+    /// Any other window of MyNotch (Settings, a title bar's close button, the notch) closes it too but gets its click.
+    @Test func aClickInAnotherWindowOfMyNotchClosesItAndIsPassedOn() {
+        let fake = FakeClickMonitor()
+        let controller = makeController(monitor: fake.monitor)
+        var outside = 0
+        let host = NSWindow(), other = NSWindow()
+        controller.show(AnyView(Text("x")), hostFrame: nil, hostWindow: ObjectIdentifier(host)) { outside += 1 }
+
+        #expect(fake.handler?(ObjectIdentifier(other)) == false)
+        #expect(outside == 1)
+    }
+
+    @Test func withNoHostWindowNoClickIsSwallowed() {
+        let fake = FakeClickMonitor()
+        let controller = makeController(monitor: fake.monitor)
+        var outside = 0
+        let other = NSWindow()
+        controller.show(AnyView(Text("x")), hostFrame: nil, hostWindow: nil) { outside += 1 }
+
+        #expect(fake.handler?(ObjectIdentifier(other)) == false)
         #expect(outside == 1)
     }
 
@@ -213,7 +237,7 @@ import Testing
         let presented = Presented()
         let controller = makeController(monitor: fake.monitor, presented: presented)
         var outside = 0
-        controller.show(AnyView(Text("x")), hostFrame: nil) { outside += 1 }
+        controller.show(AnyView(Text("x")), hostFrame: nil, hostWindow: nil) { outside += 1 }
 
         #expect(fake.handler?(ObjectIdentifier(try #require(presented.panels.first))) == false)
         #expect(outside == 0)
@@ -221,9 +245,10 @@ import Testing
 
     @Test func theApplicationLosingTheFrontClosesIt() {
         let center = NotificationCenter()
-        let controller = makeController(center: center)
+        // A fake monitor, so no real event monitor is installed in the test process.
+        let controller = makeController(monitor: FakeClickMonitor().monitor, center: center)
         var outside = 0
-        controller.show(AnyView(Text("x")), hostFrame: nil) { outside += 1 }
+        controller.show(AnyView(Text("x")), hostFrame: nil, hostWindow: nil) { outside += 1 }
 
         center.post(name: NSApplication.didResignActiveNotification, object: nil)
         #expect(outside == 1)
@@ -237,7 +262,7 @@ import Testing
         let fake = FakeClickMonitor()
         let controller = makeController(monitor: fake.monitor)
         var outside = 0
-        controller.show(AnyView(Text("x")), hostFrame: nil) { outside += 1 }
+        controller.show(AnyView(Text("x")), hostFrame: nil, hostWindow: nil) { outside += 1 }
         controller.close()
 
         #expect(fake.handler?(nil) == false)

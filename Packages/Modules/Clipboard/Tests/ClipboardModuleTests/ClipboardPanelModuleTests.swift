@@ -13,6 +13,7 @@ final class FakePanelWindow: ClipboardPanelWindowing {
     /// Where the panel is while open.
     var origin: CGPoint? = CGPoint(x: 120, y: 340)
     var frame: CGRect? = CGRect(x: 120, y: 340, width: 660, height: 420)
+    var windowIdentity: ObjectIdentifier? { isOpen ? ObjectIdentifier(self) : nil }
     private(set) var showCount = 0
     private(set) var focusCount = 0
     private(set) var keyboardReturnCount = 0

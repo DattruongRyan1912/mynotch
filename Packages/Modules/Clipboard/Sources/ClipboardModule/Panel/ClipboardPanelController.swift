@@ -44,6 +44,8 @@ final class ClipboardPanelController: NSObject, ClipboardPanelWindowing {
 
     var frame: CGRect? { panel?.frame }
 
+    var windowIdentity: ObjectIdentifier? { panel.map(ObjectIdentifier.init) }
+
     /// `interface` is where the "hide from screen recording" setting comes from: the app's shared one, or a test's own.
     init(
         interface: NotchInterface = .shared,
