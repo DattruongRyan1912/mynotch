@@ -10,6 +10,7 @@ import ShelfModule
 import ShortcutsModule
 import SystemActivitiesModule
 import TimerModule
+import TodoModule
 import TranslationModule
 import WindowLayoutModule
 
@@ -21,6 +22,7 @@ enum ModuleList {
             MediaModule(adapterScript: MediaAdapterLocation.scriptURL, adapterFramework: MediaAdapterLocation.frameworkURL),
             TranslationModule(),
             CalendarModule(),
+            TodoModule(),
             ScreenshotModule(),
             AIAgentsModule(),
             BatteryModule(),

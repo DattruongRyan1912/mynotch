@@ -48,6 +48,8 @@ packages:
     path: Packages/Modules/SystemActivities
   TimerModule:
     path: Packages/Modules/Timer
+  TodoModule:
+    path: Packages/Modules/Todo
   TranslationModule:
     path: Packages/Modules/Translation
   WindowLayoutModule:
@@ -87,6 +89,7 @@ targets:
       - package: ShortcutsModule
       - package: SystemActivitiesModule
       - package: TimerModule
+      - package: TodoModule
       - package: TranslationModule
       - package: WindowLayoutModule
       - package: KeyboardShortcuts
