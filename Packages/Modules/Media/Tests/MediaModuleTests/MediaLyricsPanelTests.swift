@@ -146,6 +146,16 @@ import Testing
         #expect(!store.lyricsPanelShown)
     }
 
+    @Test func closingFromThePanelItselfTurnsTheSettingOffAndTakesItDown() async throws {
+        harness.settings.set(true, for: keys.lyricsPanel)
+        await start()
+        let container = try #require(module.lyricsPanelController?.panel?.contentView as? LyricsPanelContainer)
+        container.closeButton.performClick(nil)
+        #expect(!harness.settings.value(keys.lyricsPanel))
+        #expect(module.lyricsPanelController?.isShown == false)
+        #expect(!store.lyricsPanelShown)
+    }
+
     @Test func sizeOpacityAndClickThroughReachThePanelWhileItIsUp() async throws {
         harness.settings.set(true, for: keys.lyricsPanel)
         await start()

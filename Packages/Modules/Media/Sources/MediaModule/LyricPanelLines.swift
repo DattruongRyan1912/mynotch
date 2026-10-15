@@ -5,6 +5,11 @@ nonisolated struct LyricPanelLines: Equatable, Sendable {
     var current: LyricLine?
     var next: LyricLine?
 
+    /// What VoiceOver reads: the lines, never the note.
+    var spoken: String {
+        [previous, current, next].compactMap { $0?.text }.joined(separator: ", ")
+    }
+
     /// `position` nil is a clock that knows no elapsed time yet: nothing is shown then.
     init(lines: [LyricLine], position: Double?) {
         guard let position, let index = lines.indexOfLine(at: position) else {

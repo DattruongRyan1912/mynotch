@@ -1,3 +1,4 @@
+import AppKit
 import Testing
 @testable import MediaModule
 
@@ -179,14 +180,78 @@ import Testing
         #expect(KaraokeSweep.edge(forFill: 0, width: 0, feather: 8) == 0)
     }
 
+    // MARK: the fill of a line whose edges do not run left to right
+
+    @Test func edgesThatDoNotNeverDecreaseLeaveTheWholeLineFilledAndNothingMoving() {
+        // Right-to-left text measures its word starts from the right: the fill would run backwards.
+        let backwards: [Double] = [103.4, 72.6, 35.8, 103.4]
+        for position in [0.0, 1.5, 2.5, 99] {
+            let sweep = KaraokeSweep.make(words: words, edges: backwards, position: position, rate: 1)
+            #expect(sweep == KaraokeSweep(start: 103.4, steps: []))
+        }
+        #expect(KaraokeSweep.make(words: words, edges: [0, 40, 30, 130], position: 1.5, rate: 1).steps.isEmpty)
+        #expect(KaraokeSweep.make(words: words, edges: [0, .nan, 80, 130], position: 1.5, rate: 1).steps.isEmpty)
+    }
+
+    @Test func edgesThatRunLeftToRightAreNeverMistakenForBackwardsOnes() {
+        #expect(!sweep(at: 1.5).steps.isEmpty)
+        // Two words that start at the same place (one with no width) are fine.
+        let equal = KaraokeSweep.make(words: [word("a", 1, 2), word("b", 2, 3)], edges: [0, 0, 10], position: 0, rate: 1)
+        #expect(!equal.steps.isEmpty)
+    }
+
     // MARK: fitting a line in a row
 
-    @Test func aLineThatFitsKeepsItsSizeAndOneThatDoesNotShrinksDownToALimit() {
-        #expect(KaraokeFit.scale(textWidth: 200, available: 300) == 1)
-        #expect(KaraokeFit.scale(textWidth: 300, available: 300) == 1)
-        #expect(KaraokeFit.scale(textWidth: 400, available: 300) == 0.75)
-        #expect(KaraokeFit.scale(textWidth: 1000, available: 300) == KaraokeFit.minimumScale)
-        #expect(KaraokeFit.scale(textWidth: 0, available: 300) == 1)
-        #expect(KaraokeFit.scale(textWidth: 200, available: 0) == KaraokeFit.minimumScale)
+    /// Wider than the size says, the smaller it gets: the way a font's tracking behaves.
+    func tight(_ size: Double) -> Double { size * (10 + 0.05 * (20 - size)) }
+
+    @Test func aLineThatFitsKeepsItsSize() {
+        #expect(KaraokeFit.size(base: 12, available: 300) { $0 * 10 } == 12)
+        #expect(KaraokeFit.size(base: 12, available: 121) { $0 * 10 } == 12)
+    }
+
+    @Test func aLineTooWideIsShrunkUntilItFitsAsMeasuredAtThatSize() {
+        // Linear: one step.
+        #expect(KaraokeFit.size(base: 20, available: 131) { $0 * 10 } == 13)
+        // Wider at a smaller size: the size is found by measuring again, not by scaling the first measurement.
+        let size = KaraokeFit.size(base: 20, available: 131, measure: tight)
+        #expect(size < 20 && size >= 20 * KaraokeFit.minimumScale)
+        #expect(tight(size) <= 130.5)
+        // What scaling the first measurement would give does not fit.
+        #expect(tight(20 * 130.0 / tight(20)) > 131)
+    }
+
+    @Test func aLineThatFitsByAHairIsShrunkAHair() {
+        // A text layer may measure a little wider than CoreText, so it is given a point of room.
+        let size = KaraokeFit.size(base: 12, available: 120.5) { $0 * 10 }
+        #expect(size < 12)
+        #expect(size * 10 <= 119.5 + 1e-9)
+    }
+
+    @Test func nothingShrinksBelowTheLimitAndAnEmptyRowGetsTheLimit() {
+        #expect(KaraokeFit.size(base: 20, available: 10) { $0 * 10 } == 20 * KaraokeFit.minimumScale)
+        #expect(KaraokeFit.size(base: 20, available: 0) { $0 * 10 } == 20 * KaraokeFit.minimumScale)
+        #expect(KaraokeFit.size(base: 20, available: -5) { $0 * 10 } == 20 * KaraokeFit.minimumScale)
+    }
+
+    @Test func aSizeIsFoundInAFewMeasurements() {
+        var measurements = 0
+        _ = KaraokeFit.size(base: 20, available: 131) { size in
+            measurements += 1
+            return tight(size)
+        }
+        #expect(measurements <= 5)
+    }
+
+    // MARK: direction
+
+    @Test(arguments: ["مرحبا بالعالم الجميل", "שלום עולם", "hello مرحبا world", "hello שלום", "שלום hello", "ٱلْحَمْدُ لِلَّٰهِ"])
+    func aLineWithARightToLeftRunIsFound(text: String) {
+        #expect(KaraokeFit.hasRightToLeftRun(text, font: .systemFont(ofSize: 12)))
+    }
+
+    @Test(arguments: ["one two three", "Tôi yêu em người ơi", "こんにちは 世界", "한국어 가사", "1, 2, 3: go!", "", " "])
+    func aLeftToRightLineIsNotMistakenForOne(text: String) {
+        #expect(!KaraokeFit.hasRightToLeftRun(text, font: .systemFont(ofSize: 12)))
     }
 }

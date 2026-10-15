@@ -53,4 +53,11 @@ import Testing
         let sung = [LyricLine(time: 1, words: [LyricWord(text: "la ", begin: 1, end: 2), LyricWord(text: "la", begin: 2, end: 3)])]
         #expect(LyricPanelLines(lines: sung, position: 1.5).current?.words?.count == 2)
     }
+
+    @Test func whatIsReadAloudIsTheLinesAndNeverTheNote() {
+        #expect(lines(at: 11).spoken == "a, b, c")
+        #expect(lines(at: 6).spoken == "a, b")
+        #expect(lines(at: 16).spoken == "b, c")
+        #expect(lines(at: nil).spoken == "")
+    }
 }

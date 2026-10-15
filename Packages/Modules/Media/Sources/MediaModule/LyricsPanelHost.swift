@@ -23,6 +23,7 @@ final class LyricsPanelHost {
             scheduler: scheduler, placement: settings.value(keys.lyricsPanelFrames), displays: displays, present: present,
             onPlacementChange: { settings.set($0, for: keys.lyricsPanelFrames) }
         )
+        controller.onCloseRequested = { [weak self] in self?.setShown(false) }
     }
 
     /// Makes the panel what the settings say. Safe to call again whatever changed: a panel that is up is not brought forward.
@@ -32,7 +33,9 @@ final class LyricsPanelHost {
         let isShown = settings.value(keys.lyricsPanel)
         store.setLyricsPanelShown(isShown)
         if isShown {
-            if !controller.isShown { controller.show(content: AnyView(LyricsPanelView(store: store, model: model))) }
+            if !controller.isShown {
+                controller.show(content: AnyView(LyricsPanelView(store: store, model: model, presence: controller.presence)))
+            }
         } else {
             controller.hide()
         }
@@ -40,7 +43,12 @@ final class LyricsPanelHost {
 
     /// The button and the hotkey: the setting flips, and the panel follows it at once.
     func toggle() {
-        settings.set(!settings.value(keys.lyricsPanel), for: keys.lyricsPanel)
+        setShown(!settings.value(keys.lyricsPanel))
+    }
+
+    /// The setting says whether the panel is up, and the panel follows it at once.
+    private func setShown(_ isShown: Bool) {
+        settings.set(isShown, for: keys.lyricsPanel)
         apply()
     }
 

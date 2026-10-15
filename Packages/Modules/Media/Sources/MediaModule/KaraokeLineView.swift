@@ -56,7 +56,8 @@ struct KaraokeLine: View {
         }
 
         func sizeThatFits(_ proposal: ProposedViewSize, nsView view: KaraokeLineView, context: Context) -> CGSize? {
-            CGSize(width: proposal.width ?? 200, height: proposal.height ?? style.lineHeight)
+            // Nothing here has a width of its own: an unbounded proposal gets a modest one, never an infinite one.
+            CGSize(width: proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? 200, height: proposal.height ?? style.lineHeight)
         }
     }
 }
@@ -147,11 +148,16 @@ final class KaraokeLineView: NSView {
         self.clock = clock
         self.style = style
         if let isOnScreen { onScreen = isOnScreen }
+        // One element that reads the line: its layers say nothing to VoiceOver.
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityLabel(line.text)
         refresh()
     }
 
     private func refresh() {
-        guard let line, let clock, let style else { return }
+        // A view with no width yet (SwiftUI makes it before it lays it out) has nothing to build.
+        guard let line, let clock, let style, bounds.width > 0 else { return }
         let inputs = Inputs(line: line, clock: clock, style: style, width: bounds.width, onScreen: onScreen)
         guard inputs != shown else { return }
         shown = inputs
@@ -171,44 +177,59 @@ final class KaraokeLineView: NSView {
         CATransaction.commit()
     }
 
-    /// Sets the text of both layers, centred and scaled to fit the row, and works out where each word starts. The line's words
-    /// when it has them and they add up to its text.
+    /// Sets the text of both layers, centred, at the font size that fits the row as CoreText measures the line at that size, and
+    /// works out where each word starts in that same line, so the fill follows the glyphs that are drawn. Returns the line's
+    /// words when it has them, they add up to its text and the text runs left to right.
     private func placeText(_ line: LyricLine, _ style: KaraokeStyle) -> [LyricWord]? {
-        let font = style.font
-        let ctLine = CTLineCreateWithAttributedString(NSAttributedString(string: line.text, attributes: [.font: font]))
-        var ascent: CGFloat = 0
-        var descent: CGFloat = 0
-        var leading: CGFloat = 0
-        let width = CTLineGetTypographicBounds(ctLine, &ascent, &descent, &leading)
-        let scale = CGFloat(KaraokeFit.scale(textWidth: width, available: bounds.width))
-        let scaledWidth = width * scale
+        let available = bounds.width
+        let size = CGFloat(KaraokeFit.size(base: Double(style.fontSize), available: Double(available)) { size in
+            Self.metrics(of: line.text, size: CGFloat(size), weight: style.weight).width
+        })
+        let font = NSFont.systemFont(ofSize: size, weight: style.weight)
+        let drawn = Self.metrics(of: line.text, size: size, weight: style.weight)
 
-        let height = min(ceil((ascent + descent + leading) * scale), bounds.height)
-        let boxWidth = min(ceil(scaledWidth) + 1, bounds.width)
-        let frame = CGRect(x: (bounds.width - boxWidth) / 2, y: (bounds.height - height) / 2, width: boxWidth, height: height)
+        let height = min(ceil(drawn.ascent + drawn.descent + drawn.leading), bounds.height)
+        let boxWidth = min(ceil(drawn.width) + 1, available)
+        let frame = CGRect(x: (available - boxWidth) / 2, y: (bounds.height - height) / 2, width: boxWidth, height: height)
         for (text, color) in [(dimLayer, style.dim), (litLayer, style.lit)] {
             text.string = line.text
             text.font = font
-            text.fontSize = style.fontSize * scale
+            text.fontSize = size
             text.foregroundColor = color.cgColor
             text.frame = frame
         }
 
         var words: [LyricWord]?
-        if let timed = line.words, timed.map({ $0.text.utf16.count }).reduce(0, +) == line.text.utf16.count { words = timed }
+        if let timed = line.words, timed.map({ $0.text.utf16.count }).reduce(0, +) == line.text.utf16.count,
+           !KaraokeFit.hasRightToLeftRun(line.text, font: font) {
+            words = timed
+        }
         var starts: [Double] = []
         var index = 0
         for word in words ?? [] {
-            starts.append(Double(CTLineGetOffsetForStringIndex(ctLine, index, nil) * scale))
+            starts.append(Double(CTLineGetOffsetForStringIndex(drawn.line, index, nil)))
             index += word.text.utf16.count
         }
-        edges = starts + [Double(scaledWidth)]
+        edges = starts + [Double(drawn.width)]
+        // Word starts that run backwards are no fill to follow: the line is shown whole.
+        if (1..<edges.count).contains(where: { edges[$0] < edges[$0 - 1] }) { words = nil }
 
         let feather = KaraokeStyle.feather
-        let maskWidth = max(scaledWidth + feather, 1)
+        let maskWidth = max(drawn.width + feather, 1)
         fillMask.bounds = CGRect(x: 0, y: 0, width: maskWidth, height: height)
-        fillMask.locations = [0, NSNumber(value: Double(scaledWidth / maskWidth)), 1]
+        fillMask.locations = [0, NSNumber(value: Double(drawn.width / maskWidth)), 1]
         return words
+    }
+
+    /// The line as CoreText lays it out at `size`, and its measures.
+    private nonisolated static func metrics(of text: String, size: CGFloat, weight: NSFont.Weight) -> (line: CTLine, width: CGFloat, ascent: CGFloat, descent: CGFloat, leading: CGFloat) {
+        let font = NSFont.systemFont(ofSize: size, weight: weight)
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
+        var ascent: CGFloat = 0
+        var descent: CGFloat = 0
+        var leading: CGFloat = 0
+        let width = CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
+        return (line, width, ascent, descent, leading)
     }
 
     /// Puts the fill where the line is sung and, while the clock runs and the notch can be seen, animates it to the end of the
@@ -233,6 +254,8 @@ final class KaraokeLineView: NSView {
         animation.keyTimes = sweep.keyTimes.map { NSNumber(value: $0) }
         animation.duration = sweep.duration
         animation.calculationMode = .linear
+        // A fill at 60 frames a second is smooth, and the display need not run at its 120 or 144 for it.
+        animation.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
         fillMask.add(animation, forKey: Self.animationKey)
         isAnimating = true
     }

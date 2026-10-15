@@ -43,6 +43,9 @@ struct LyricsPanelView: View {
 
     let store: NowPlayingStore
     let model: LyricsPanelModel
+    /// Whether the panel can be seen; the views inside read it as `notchIsOnScreen`, as the notch's do, so their timeline stands
+    /// still and their sweep is taken away while it cannot.
+    let presence: LyricsPanelPresence
 
     /// The lines around the current one are smaller than it, but never too small to read.
     static func neighbourSize(for size: Double) -> Double {
@@ -55,8 +58,7 @@ struct LyricsPanelView: View {
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous).fill(Color.black.opacity(0.82)))
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Lời bài hát")
+            .environment(\.notchIsOnScreen, presence.isOnScreen)
     }
 }
 
@@ -67,8 +69,16 @@ private struct LyricsTimelineContent: View {
     var body: some View {
         LyricTimeline(store: store) { date in
             switch store.lyricsPanelContent(at: date) {
-            case .lines(let lines): rows(lines)
-            case .message(let text): message(text)
+            case .lines(let lines):
+                rows(lines)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Lời bài hát")
+                    .accessibilityValue(lines.spoken)
+            case .message(let text):
+                message(text)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Lời bài hát")
+                    .accessibilityValue(text)
             }
         }
     }

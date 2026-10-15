@@ -123,12 +123,3 @@ import Testing
         (view as? KaraokeLineView).map { [$0] } ?? view.subviews.flatMap { karaokeViews(in: $0) }
     }
 }
-
-/// The looks of the karaoke lines in the places they are shown.
-@Suite struct KaraokeStyleTests {
-    @Test func thePanelAndTheRowsShareOneStyleOfFill() {
-        #expect(KaraokeStyle.strip.fontSize == 12)
-        #expect(KaraokeStyle.row.fontSize == 11)
-        #expect(KaraokeStyle.strip.lit != KaraokeStyle.strip.dim)
-    }
-}

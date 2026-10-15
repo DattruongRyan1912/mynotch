@@ -1,3 +1,5 @@
+import AppKit
+import CoreText
 import Foundation
 
 /// How a line is filled while it is sung, as pure numbers: where the fill is now, in points from the left edge of the
@@ -42,9 +44,13 @@ nonisolated struct KaraokeSweep: Equatable, Sendable {
     /// The sweep of a line at `position` seconds into the track, the clock running `rate` times as fast as the track.
     /// `edges` holds where each word starts and, last, the width of the text: one more than there are words. The fill
     /// crosses a word evenly while it is sung and waits in the gaps. A rate that is zero or less (paused), or not a number,
-    /// leaves the fill where it is; a position that is not a number leaves the line empty.
+    /// leaves the fill where it is; a position that is not a number leaves the line empty. Edges that ever run backwards (or are
+    /// not numbers), which is what right-to-left text measures, can make no sweep: the whole line is filled and nothing moves.
     static func make(words: [LyricWord], edges: [Double], position: Double, rate: Double) -> KaraokeSweep {
         guard !words.isEmpty, edges.count == words.count + 1, !position.isNaN else { return KaraokeSweep(start: 0, steps: []) }
+        guard (1..<edges.count).allSatisfy({ edges[$0] >= edges[$0 - 1] }), edges[edges.count - 1].isFinite else {
+            return KaraokeSweep(start: edges.last.flatMap { $0.isFinite ? $0 : nil } ?? 0, steps: [])
+        }
         // Where the fill is, in media time: begin and end of each word, joined by waits.
         var points: [(time: Double, x: Double)] = []
         for (index, word) in words.enumerated() {
@@ -88,12 +94,34 @@ nonisolated struct KaraokeSweep: Equatable, Sendable {
 
 /// How a line is made to fit the row it is in.
 nonisolated enum KaraokeFit {
-    /// The smallest a line is scaled down to; what is still wider is cut off at its end.
-    static let minimumScale = 0.7
+    /// The smallest a line is shrunk to, as a share of its size; what is still wider is cut off at its end.
+    static let minimumScale = 0.6
+    /// Measurements made to find a size that fits: the first, then a step and a new measurement each.
+    static let maximumSteps = 4
 
-    /// 1 for a line that fits, else the share of its size that does, down to `minimumScale`.
-    static func scale(textWidth: Double, available: Double) -> Double {
-        guard textWidth > available else { return 1 }
-        return max(available / textWidth, minimumScale)
+    /// The font size at which a line fits `available` points, found by measuring the line at the size being tried: text is
+    /// not a fixed number of times as wide at a size that many times smaller (a font's tracking grows as it shrinks), so a
+    /// measurement made at the full size cannot be scaled. `measure` gives the line's width at a size. The line is kept a point
+    /// narrower than the row, since a text layer may measure a hair wider than CoreText does. The size is `base` for a line that
+    /// fits and never below `base * minimumScale`, where a line that still does not fit is cut off.
+    static func size(base: Double, available: Double, measure: (Double) -> Double) -> Double {
+        let target = available - 1
+        let smallest = base * minimumScale
+        var size = base
+        var width = measure(size)
+        for _ in 0..<maximumSteps {
+            guard width > target, size > smallest else { break }
+            size = max(size * target / width, smallest)
+            width = measure(size)
+        }
+        return size
+    }
+
+    /// Whether any part of `text` runs right to left (Arabic, Hebrew, and a mixed line that has some): the offsets CoreText
+    /// gives for such a line are positions from its right, which no left-to-right fill can follow.
+    static func hasRightToLeftRun(_ text: String, font: NSFont) -> Bool {
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
+        let runs = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
+        return runs.contains { CTRunGetStatus($0).contains(.rightToLeft) }
     }
 }

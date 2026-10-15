@@ -1,8 +1,9 @@
 import Foundation
 
 /// Lyrics already fetched: one JSON file per track in `directory`, named by `TrackKey.cacheKey`, so a track is
-/// asked for once. Holds results only, never the track's name. Entries are a few KB, so reads and writes stay
-/// on the caller's actor.
+/// asked for once. Holds results only, never the track's name. Entries are a few KB, tens of KB with the timing of
+/// every word, so reads and writes stay on the caller's actor. Files of an older `TrackKey.cacheVersion` are never
+/// asked for again and are not pruned.
 nonisolated struct LyricsCache: Sendable {
     /// "Not found" is asked again after this long: lrclib gains lyrics over time.
     static let notFoundLifetime: TimeInterval = 7 * 24 * 60 * 60

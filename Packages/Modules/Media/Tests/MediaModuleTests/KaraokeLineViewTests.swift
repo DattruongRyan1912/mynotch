@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import NotchUI
 import SwiftUI
 import Testing
@@ -66,6 +67,8 @@ import Testing
         let view = makeView(width: 200)
         view.show(line: long, clock: clock(elapsed: 0, playing: false), style: style)
         #expect(abs(view.litLayer.fontSize - 12 * KaraokeFit.minimumScale) < 1e-9)
+        // Cut at its end, the fill still never runs backwards and stays inside what is drawn.
+        #expect(zip(view.edges, view.edges.dropFirst()).allSatisfy { $0 <= $1 })
         #expect(view.litLayer.frame.width <= 200)
         #expect(view.litLayer.truncationMode == .end)
         // A little too wide is scaled to fit and not cut.
@@ -186,6 +189,221 @@ import Testing
         #expect(try #require(view.sweep).steps.last?.x == view.textWidth)
     }
 
+    // MARK: a line shrunk to fit is drawn whole, and the fill follows its glyphs
+
+    static let vietnamese = "Tôi yêu em người ơi, hãy ở lại với tôi đêm nay"
+
+    func vietnameseLine() -> LyricLine {
+        let texts = Self.vietnamese.split(separator: " ").map(String.init)
+        return LyricLine(time: 1, words: texts.enumerated().map { index, text in
+            LyricWord(text: index == texts.count - 1 ? text : text + " ", begin: 1 + Double(index), end: 2 + Double(index))
+        })
+    }
+
+    /// CoreText's own width of `text` in the style's font at `size`.
+    func coreTextWidth(_ text: String, size: CGFloat, weight: NSFont.Weight) -> Double {
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: size, weight: weight)]))
+        return CTLineGetTypographicBounds(line, nil, nil, nil)
+    }
+
+    /// The right edge of the ink of `layer`'s text as it is drawn (in points from the layer's left edge), found by drawing the layer
+    /// into a bitmap at two pixels to the point, which is how the notch is drawn on a Retina display.
+    func inkRightEdge(of layer: CATextLayer, width: CGFloat) -> Double {
+        let scale = 2
+        let height = Int(ceil(layer.bounds.height))
+        let pixelsWide = Int(ceil(width)) * scale
+        let space = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil, width: pixelsWide, height: height * scale, bitsPerComponent: 8, bytesPerRow: pixelsWide * 4, space: space,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ), let data = context.data else { return -1 }
+        context.scaleBy(x: CGFloat(scale), y: CGFloat(scale))
+        layer.contentsScale = CGFloat(scale)
+        layer.render(in: context)
+        let pixels = data.assumingMemoryBound(to: UInt8.self)
+        var right = -1
+        for x in stride(from: pixelsWide - 1, through: 0, by: -1) {
+            for y in 0..<(height * scale) where pixels[(y * pixelsWide + x) * 4 + 3] > 24 {
+                right = x
+                break
+            }
+            if right >= 0 { break }
+        }
+        return right < 0 ? -1 : Double(right + 1) / Double(scale)
+    }
+
+    /// A copy of the layer's text with all the room it can want, to see where it would end.
+    func naturalLayer(like layer: CATextLayer, width: CGFloat) -> CATextLayer {
+        let natural = CATextLayer()
+        natural.string = layer.string
+        natural.font = layer.font
+        natural.fontSize = layer.fontSize
+        natural.foregroundColor = CGColor(gray: 1, alpha: 1)
+        natural.alignmentMode = .left
+        natural.isWrapped = false
+        natural.truncationMode = .none
+        natural.frame = CGRect(x: 0, y: 0, width: width, height: layer.bounds.height)
+        return natural
+    }
+
+    nonisolated struct Fit: CustomTestStringConvertible, Sendable {
+        var name: String
+        var scale: Double
+        var testDescription: String { "\(name) at \(scale)" }
+    }
+
+    /// The strip's, the tab row's and a 22 pt bold panel's styles, each with a row 0.85 and 0.7 as wide as the line is.
+    nonisolated static let fits = [
+        Fit(name: "strip", scale: 0.85), Fit(name: "strip", scale: 0.7), Fit(name: "row", scale: 0.85), Fit(name: "row", scale: 0.7),
+        Fit(name: "panel", scale: 0.85), Fit(name: "panel", scale: 0.7),
+    ]
+
+    func style(of fit: Fit) -> KaraokeStyle {
+        switch fit.name {
+        case "strip": .strip
+        case "row": .row
+        default: KaraokeStyle(fontSize: 22, weight: .bold, lit: .white, dim: .gray)
+        }
+    }
+
+    @Test(arguments: fits)
+    func aLineShrunkToFitIsDrawnWholeWithNoEllipsis(fit: Fit) throws {
+        let line = vietnameseLine()
+        // A row `scale` as wide as the line is at its full size: the shrink the old code measured linearly.
+        let natural = coreTextWidth(line.text, size: style(of: fit).fontSize, weight: style(of: fit).weight)
+        let width = ceil(natural * fit.scale)
+        let view = makeView(width: width)
+        view.show(line: line, clock: clock(elapsed: 9_999, playing: false), style: style(of: fit))
+        let drawnSize = Double(view.litLayer.fontSize)
+        #expect(drawnSize < style(of: fit).fontSize && drawnSize >= style(of: fit).fontSize * KaraokeFit.minimumScale)
+        // What CoreText says the line is at the size it is drawn at fits the row, and the text layer's box holds it.
+        let measured = coreTextWidth(line.text, size: CGFloat(drawnSize), weight: style(of: fit).weight)
+        #expect(measured <= width, "\(measured) of \(width)")
+        #expect(abs(Double(view.textWidth) - measured) < 0.01)
+        #expect(Double(view.litLayer.frame.width) >= measured)
+        #expect(Double(view.litLayer.frame.width) <= width)
+        // Drawn: the ink of the line the view has reaches the end of the line (an ellipsis would stop short of it).
+        let drawn = inkRightEdge(of: view.dimLayer, width: width)
+        let wide = inkRightEdge(of: naturalLayer(like: view.dimLayer, width: width * 2), width: width * 2)
+        #expect(abs(drawn - wide) <= 1, "drawn \(drawn) against the whole line's \(wide)")
+        #expect(abs(drawn - measured) <= 1, "drawn \(drawn) against CoreText's \(measured)")
+        #expect(drawn <= Double(view.litLayer.frame.width) + 0.5)
+    }
+
+    @Test(arguments: fits)
+    func theFillsEdgesAreWhereTheGlyphsOfTheDrawnLineAre(fit: Fit) throws {
+        let line = vietnameseLine()
+        let natural = coreTextWidth(line.text, size: style(of: fit).fontSize, weight: style(of: fit).weight)
+        let view = makeView(width: ceil(natural * fit.scale))
+        view.show(line: line, clock: clock(elapsed: 3.5), style: style(of: fit))
+        let font = NSFont.systemFont(ofSize: view.litLayer.fontSize, weight: style(of: fit).weight)
+        let ctLine = CTLineCreateWithAttributedString(NSAttributedString(string: line.text, attributes: [.font: font]))
+        let words = try #require(line.words)
+        #expect(view.edges.count == words.count + 1)
+        var index = 0
+        for (word, edge) in zip(words, view.edges) {
+            let glyphs = Double(CTLineGetOffsetForStringIndex(ctLine, index, nil))
+            #expect(abs(edge - glyphs) <= 1, "\(word.text): edge \(edge) against glyphs at \(glyphs)")
+            index += word.text.utf16.count
+        }
+        #expect(abs((view.edges.last ?? 0) - CTLineGetTypographicBounds(ctLine, nil, nil, nil)) <= 1)
+        // The last word's end is the end of the drawn text, so the last word lights up fully.
+        #expect(abs((view.sweep?.finish ?? -1) - Double(view.textWidth)) <= 1)
+    }
+
+    @Test func aLineThatFitsIsMeasuredAndDrawnAtItsFullSizeAndItsEdgesAreItsGlyphs() throws {
+        let line = vietnameseLine()
+        let view = makeView(width: 400)
+        view.show(line: line, clock: clock(elapsed: 3.5, playing: false), style: style)
+        #expect(view.litLayer.fontSize == 12)
+        let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        let ctLine = CTLineCreateWithAttributedString(NSAttributedString(string: line.text, attributes: [.font: font]))
+        #expect(abs(Double(view.textWidth) - CTLineGetTypographicBounds(ctLine, nil, nil, nil)) < 0.01)
+        let drawn = inkRightEdge(of: view.dimLayer, width: 400)
+        #expect(abs(drawn - Double(view.textWidth)) <= 1)
+    }
+
+    @Test func aLineWiderThanEvenTheSmallestSizeIsCutAtItsEndAndTheFillStaysInside() throws {
+        let long = LyricLine(time: 1, words: (0..<30).map { LyricWord(text: "word\($0) ", begin: 1 + Double($0), end: 2 + Double($0)) })
+        let view = makeView(width: 200)
+        view.show(line: long, clock: clock(elapsed: 5), style: style)
+        #expect(abs(view.litLayer.fontSize - 12 * KaraokeFit.minimumScale) < 1e-9)
+        #expect(view.litLayer.frame.width <= 200)
+        #expect(view.litLayer.truncationMode == .end)
+        #expect(zip(view.edges, view.edges.dropFirst()).allSatisfy { $0 <= $1 })
+        let mask = Double(view.fillMask.position.x) + Double(view.fillMask.bounds.width)
+        #expect(mask.isFinite)
+    }
+
+    // MARK: right-to-left lines are shown whole
+
+    @Test(arguments: ["مرحبا بالعالم الجميل", "שלום עולם יפה", "hello مرحبا world", "hello שלום", "שלום hello"])
+    func aLineWithRightToLeftTextHasNoSweepAndIsLitWhole(text: String) throws {
+        let pieces = text.split(separator: " ").map(String.init)
+        let line = LyricLine(time: 1, words: pieces.enumerated().map { index, piece in
+            LyricWord(text: index == pieces.count - 1 ? piece : piece + " ", begin: 1 + Double(index), end: 2 + Double(index))
+        })
+        let view = makeView()
+        view.show(line: line, clock: clock(elapsed: 1.5), style: style)
+        #expect(view.sweep == nil)
+        #expect(view.litLayer.mask == nil)
+        #expect(view.dimLayer.isHidden)
+        #expect(!view.isAnimating)
+        #expect(animation(view) == nil)
+        #expect((view.litLayer.string as? String) == line.text)
+        #expect(view.litLayer.foregroundColor == NSColor.white.cgColor)
+    }
+
+    @Test func aLeftToRightLineWithNumbersAndPunctuationStillSweeps() throws {
+        let line = LyricLine(time: 1, words: [LyricWord(text: "Track 1: ", begin: 1, end: 2), LyricWord(text: "go!", begin: 2, end: 3)])
+        let view = makeView()
+        view.show(line: line, clock: clock(elapsed: 1.5), style: style)
+        #expect(view.sweep != nil)
+        #expect(view.isAnimating)
+    }
+
+    @Test func aLineThatLosesItsWordsToDirectionIsAWholeLineAgainWhenAnotherComes() throws {
+        let view = makeView()
+        let arabic = LyricLine(time: 1, words: [LyricWord(text: "مرحبا ", begin: 1, end: 2), LyricWord(text: "بالعالم", begin: 2, end: 3)])
+        view.show(line: arabic, clock: clock(elapsed: 1.5), style: style)
+        view.show(line: line, clock: clock(elapsed: 1.5), style: style)
+        #expect(view.litLayer.mask === view.fillMask)
+        #expect(view.sweep != nil)
+    }
+
+    // MARK: the sweep's cost
+
+    @Test func theAnimationIsAskedForAtMostSixtyFramesASecond() throws {
+        let view = makeView()
+        view.show(line: line, clock: clock(elapsed: 1.5), style: style)
+        let keyframes = try #require(animation(view))
+        #expect(keyframes.preferredFrameRateRange == CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60))
+    }
+
+    @Test func aViewWithNoWidthYetBuildsNothingAndTheFirstWidthBuildsOnce() {
+        let view = KaraokeLineView(now: { origin })
+        view.show(line: line, clock: clock(elapsed: 1.5), style: style)
+        #expect(view.buildCount == 0)
+        view.isOnScreen = true
+        view.isOnScreen = false
+        view.isOnScreen = true
+        #expect(view.buildCount == 0)
+        view.frame = CGRect(x: 0, y: 0, width: 300, height: 16)
+        #expect(view.buildCount == 1)
+        #expect(view.isAnimating)
+    }
+
+    // MARK: VoiceOver
+
+    @Test func theViewIsOneElementThatReadsTheLine() {
+        let view = makeView()
+        view.show(line: line, clock: clock(elapsed: 1.5), style: style)
+        #expect(view.isAccessibilityElement())
+        #expect(view.accessibilityLabel() == "one two three")
+        view.show(line: LyricLine(time: 6, text: "next"), clock: clock(elapsed: 6.5), style: style)
+        #expect(view.accessibilityLabel() == "next")
+    }
+
     // MARK: while the notch cannot be seen
 
     @Test func offScreenTheAnimationIsTakenAwayAndBackOnScreenItStartsAgainFromNow() {
@@ -267,6 +485,16 @@ import Testing
     }
 
     /// The point of the layer: the fill moves with no pass of SwiftUI's, so the notch never lays out for it.
+    @Test func aLineMountedInTheHostingViewIsBuiltOnce() throws {
+        let store = playingStore()
+        let (hosting, window) = host(KaraokeLine(line: line, store: store, style: style).frame(width: 300, height: 16))
+        run(for: 0.05)
+        let view = try #require(karaokeView(in: hosting))
+        // Not at the width of 0 it is made at, and not again for what SwiftUI hands it unchanged.
+        #expect(view.buildCount == 1)
+        window.contentView = nil
+    }
+
     @Test func theSweepNeverLaysTheHostingViewOutAgain() throws {
         let store = playingStore()
         let (hosting, window) = host(KaraokeLine(line: line, store: store, style: style).frame(height: 16))

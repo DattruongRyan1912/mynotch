@@ -27,6 +27,17 @@ import Testing
         return (hosting, window)
     }
 
+    /// A panel whose window is seen, awake and unlocked.
+    func visible() -> LyricsPanelPresence {
+        let presence = LyricsPanelPresence()
+        presence.setWindowVisible(true)
+        return presence
+    }
+
+    func run(for seconds: TimeInterval) {
+        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+    }
+
     func karaokeViews(in view: NSView) -> [KaraokeLineView] {
         (view as? KaraokeLineView).map { [$0] } ?? view.subviews.flatMap { karaokeViews(in: $0) }
     }
@@ -70,7 +81,7 @@ import Testing
 
     @Test func theCurrentLineIsFilledWordByWord() throws {
         let store = makeStore(elapsed: 11.5, lyrics: [timed, plain])
-        let (hosting, window) = host(LyricsPanelView(store: store, model: LyricsPanelModel(fontSize: 22)))
+        let (hosting, window) = host(LyricsPanelView(store: store, model: LyricsPanelModel(fontSize: 22), presence: visible()))
         let view = try #require(karaokeViews(in: hosting).first)
         #expect(karaokeViews(in: hosting).count == 1)
         #expect((view.litLayer.string as? String) == "one two three")
@@ -81,7 +92,7 @@ import Testing
     @Test func withKaraokeOffOrWithoutWordTimingTheLineIsPlainText() {
         for (elapsed, karaoke) in [(11.5, false), (21.0, true), (17.0, true)] {
             let store = makeStore(elapsed: elapsed, karaoke: karaoke, lyrics: [timed, pause, plain])
-            let (hosting, window) = host(LyricsPanelView(store: store, model: LyricsPanelModel(fontSize: 22)))
+            let (hosting, window) = host(LyricsPanelView(store: store, model: LyricsPanelModel(fontSize: 22), presence: visible()))
             #expect(karaokeViews(in: hosting).isEmpty, "\(elapsed) \(karaoke)")
             window.contentView = nil
         }
@@ -92,7 +103,7 @@ import Testing
         #expect(LyricsPanelView.neighbourSize(for: 12) == LyricsPanelView.minimumNeighbourSize)
         let store = makeStore(elapsed: 11.5, lyrics: [timed])
         let model = LyricsPanelModel(fontSize: 22)
-        let (hosting, window) = host(LyricsPanelView(store: store, model: model))
+        let (hosting, window) = host(LyricsPanelView(store: store, model: model, presence: visible()))
         model.fontSize = 30
         hosting.layoutSubtreeIfNeeded()
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
@@ -100,9 +111,37 @@ import Testing
         window.contentView = nil
     }
 
+    @Test func whileThePanelCannotBeSeenTheSweepStandsStillAndItComesBackWithThePanel() throws {
+        let store = makeStore(elapsed: 11.5, lyrics: [timed, plain])
+        let presence = LyricsPanelPresence()
+        let (hosting, window) = host(LyricsPanelView(store: store, model: LyricsPanelModel(fontSize: 22), presence: presence))
+        run(for: 0.1)
+        // The views are made again when the panel goes out of sight and comes back, so each step looks them up anew.
+        func isAnimating() throws -> Bool { try #require(karaokeViews(in: hosting).first).isAnimating }
+        // The window has not been seen yet.
+        #expect(try !isAnimating())
+        presence.setWindowVisible(true)
+        run(for: 0.1)
+        #expect(try isAnimating())
+        presence.apply(.screenLocked)
+        run(for: 0.1)
+        #expect(try !isAnimating())
+        presence.apply(.screenUnlocked)
+        run(for: 0.1)
+        #expect(try isAnimating())
+        presence.apply(.displaysSlept)
+        run(for: 0.1)
+        #expect(try !isAnimating())
+        presence.apply(.displaysWoke)
+        presence.setWindowVisible(false)
+        run(for: 0.1)
+        #expect(try !isAnimating())
+        window.contentView = nil
+    }
+
     @Test func thePanelFillsTheWindowItIsIn() {
         let store = makeStore(elapsed: 11.5, lyrics: [timed])
-        let (hosting, window) = host(LyricsPanelView(store: store, model: LyricsPanelModel(fontSize: 22)))
+        let (hosting, window) = host(LyricsPanelView(store: store, model: LyricsPanelModel(fontSize: 22), presence: visible()))
         #expect(hosting.frame.size == CGSize(width: 420, height: 130))
         window.contentView = nil
     }
