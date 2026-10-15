@@ -26,8 +26,8 @@ struct SettingsRootView: View {
             List(selection: $navigation.selection) {
                 Label("Quyền", systemImage: "lock.shield").tag(SettingsPage.permissions)
                     .badge(overview.missingRequiredCount)
-                Label("General", systemImage: "gearshape").tag(SettingsPage.general)
-                Label("Interface", systemImage: "rectangle.topthird.inset.filled").tag(SettingsPage.interface)
+                Label("Chung", systemImage: "gearshape").tag(SettingsPage.general)
+                Label("Giao diện", systemImage: "rectangle.topthird.inset.filled").tag(SettingsPage.interface)
                 Label("Trang trên notch", systemImage: "rectangle.3.group").tag(SettingsPage.tabs)
                 Section("Modules") {
                     ForEach(registry.modules, id: \.descriptor.id) { module in
@@ -36,7 +36,7 @@ struct SettingsRootView: View {
                     }
                 }
                 Section {
-                    Label("About", systemImage: "info.circle").tag(SettingsPage.about)
+                    Label("Giới thiệu", systemImage: "info.circle").tag(SettingsPage.about)
                 }
             }
             .navigationSplitViewColumnWidth(200)
