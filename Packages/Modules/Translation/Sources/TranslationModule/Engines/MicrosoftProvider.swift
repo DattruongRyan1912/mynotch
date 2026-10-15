@@ -32,7 +32,7 @@ nonisolated struct MicrosoftProvider: RemoteProvider {
         var headers = ["Ocp-Apim-Subscription-Key": key, "Content-Type": "application/json; charset=UTF-8"]
         let region = region.trimmingCharacters(in: .whitespacesAndNewlines)
         if !region.isEmpty { headers["Ocp-Apim-Subscription-Region"] = region }
-        return RemoteRequest.post(components?.url ?? Self.endpoint, headers: headers, body: [Item(text: text)], timeout: 30)
+        return RemoteRequest.post(components?.url ?? Self.endpoint, headers: headers, body: [Item(text: text)], timeout: 20)
     }
 
     func translation(from reply: HTTPReply) throws(RemoteFailure) -> String {

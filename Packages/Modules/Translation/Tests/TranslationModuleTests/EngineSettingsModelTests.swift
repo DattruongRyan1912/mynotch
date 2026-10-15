@@ -34,7 +34,7 @@ import Testing
         #expect(await model.save("  \(secret)\n", for: .google))
         #expect(keys.values == [.googleKey: secret])
         #expect(model.hasKey(.google))
-        #expect(model.saveError == nil)
+        #expect(model.keyError == nil)
     }
 
     @Test func eachEngineKeepsItsOwnKey() async {
@@ -62,7 +62,7 @@ import Testing
         let model = model()
         #expect(!(await model.save(secret, for: .google)))
         #expect(!model.hasKey(.google))
-        #expect(model.saveError == "Không lưu được key vào Keychain")
+        #expect(model.keyError == "Không lưu được key vào Keychain")
         #expect(!log.lines.isEmpty)
         #expect(!log.lines.joined().contains(secret))
     }
@@ -73,7 +73,7 @@ import Testing
         _ = await model.save(secret, for: .google)
         keys.failsToSave = false
         #expect(await model.save(secret, for: .google))
-        #expect(model.saveError == nil)
+        #expect(model.keyError == nil)
     }
 
     @Test func removingAKeyForgetsItAndItsCheck() async {
@@ -83,10 +83,60 @@ import Testing
         await model.refresh()
         await model.test(.google)
         #expect(model.checks[.google] == .ok)
-        await model.remove(.google)
+        #expect(await model.remove(.google))
         #expect(keys.values.isEmpty)
         #expect(!model.hasKey(.google))
         #expect(model.checks[.google] == nil)
+        #expect(model.keyError == nil)
+    }
+
+    /// The one promise a user cannot check by eye: a key that could not be deleted is still there, and the row says so.
+    @Test func aKeyThatCannotBeRemovedStaysSavedAndSaysSo() async {
+        _ = keys.save(secret, for: .googleKey)
+        transport.reply(Canned.google("Xin chào"))
+        let model = model()
+        await model.refresh()
+        await model.test(.google)
+        keys.failsToRemove = true
+        #expect(!(await model.remove(.google)))
+        #expect(keys.values == [.googleKey: secret])
+        #expect(model.hasKey(.google))
+        #expect(model.checks[.google] == .ok)
+        #expect(model.keyError == "Không xoá được key khỏi Keychain")
+        #expect(log.lines == ["Could not remove the Google Cloud Translation key from the Keychain"])
+        #expect(!log.lines.joined().contains(secret))
+        // The next look at the Keychain agrees with the row.
+        await model.refresh()
+        #expect(model.hasKey(.google))
+    }
+
+    @Test func aLaterRemovalThatWorksClearsTheError() async {
+        _ = keys.save(secret, for: .googleKey)
+        let model = model()
+        await model.refresh()
+        keys.failsToRemove = true
+        _ = await model.remove(.google)
+        keys.failsToRemove = false
+        #expect(await model.remove(.google))
+        #expect(model.keyError == nil)
+        #expect(!model.hasKey(.google))
+    }
+
+    @Test func removingAppleOrWhatIsNotSavedIsNotAnError() async {
+        let model = model()
+        #expect(!(await model.remove(.apple)))
+        #expect(model.keyError == nil)
+        #expect(await model.remove(.microsoft))
+    }
+
+    @Test func lookingForSavedKeysNeverReadsTheirValues() async {
+        _ = keys.save(secret, for: .googleKey)
+        _ = keys.save(secret, for: .openAIKey)
+        let model = model()
+        await model.refresh()
+        #expect(model.savedKeys == [.google, .openAI])
+        #expect(keys.loadCount == 0)
+        #expect(keys.containsCount == 3)
     }
 
     @Test func checkSendsOneRequestWithAFixedTextAndSaysOK() async throws {

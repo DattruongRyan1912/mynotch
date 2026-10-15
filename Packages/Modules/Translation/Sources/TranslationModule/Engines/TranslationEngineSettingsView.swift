@@ -65,7 +65,7 @@ struct TranslationEngineSettingsView: View {
                 }
             }
         }
-        if let error = model.saveError {
+        if let error = model.keyError {
             Text(error).foregroundStyle(.orange)
         }
     }

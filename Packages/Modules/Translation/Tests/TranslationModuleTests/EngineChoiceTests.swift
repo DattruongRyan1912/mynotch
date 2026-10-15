@@ -272,6 +272,105 @@ import Testing
         #expect(!fixture.engineLog.lines.joined().contains(text))
     }
 
+    /// A paid service should not get a request per pause, nor half a sentence: the wait before typing is translated is
+    /// longer, and each keystroke starts it again.
+    @Test func typingTranslatesWithAServiceOnlyAfterALongerPause() async throws {
+        _ = fixture.keyStore.save(secret, for: .googleKey)
+        fixture.transport.reply(Canned.google("Xin chào"))
+        let translator = try await startedTranslator(engine: .google)
+        #expect(Translator.remoteTypingDelay >= .milliseconds(800))
+        translator.edit(text)
+        fixture.harness.scheduler.advance(by: Translator.remoteTypingDelay - .milliseconds(1))
+        await settle()
+        #expect(fixture.transport.requests.isEmpty)
+        #expect(translator.translation == nil)
+        fixture.harness.scheduler.advance(by: .milliseconds(1))
+        await fixture.translated()
+        #expect(fixture.transport.requests.count == 1)
+        #expect(fixture.state.output == "Xin chào")
+        #expect(fixture.engine.requests.isEmpty)
+    }
+
+    @Test func eachKeystrokeStartsTheLongerWaitAgain() async throws {
+        _ = fixture.keyStore.save(secret, for: .googleKey)
+        fixture.transport.reply(Canned.google("Xin chào"))
+        let translator = try await startedTranslator(engine: .google)
+        translator.edit("Hello, how are")
+        fixture.harness.scheduler.advance(by: .milliseconds(700))
+        translator.edit(text)
+        fixture.harness.scheduler.advance(by: .milliseconds(700))
+        await settle()
+        // 1.4 s since the first keystroke, but only 0.7 s since the last: the half sentence went nowhere.
+        #expect(fixture.transport.requests.isEmpty)
+        fixture.harness.scheduler.advance(by: .milliseconds(300))
+        await fixture.translated()
+        #expect(fixture.transport.requests.count == 1)
+        let sent = try #require(fixture.transport.lastBody() as? [String: String])
+        #expect(sent["q"] == text)
+    }
+
+    @Test func returnTranslatesAtOnceWithAService() async throws {
+        _ = fixture.keyStore.save(secret, for: .googleKey)
+        fixture.transport.reply(Canned.google("Xin chào"))
+        let translator = try await startedTranslator(engine: .google)
+        translator.edit(text)
+        translator.submit(text)
+        await fixture.translated()
+        #expect(fixture.transport.requests.count == 1)
+        fixture.harness.scheduler.advance(by: .seconds(5))
+        await settle()
+        #expect(fixture.transport.requests.count == 1)
+    }
+
+    @Test func aSelectionIsTranslatedAtOnceWithAService() async throws {
+        _ = fixture.keyStore.save(secret, for: .googleKey)
+        fixture.transport.reply(Canned.google("Xin chào"))
+        fixture.set("google", for: \.engine)
+        await fixture.start()
+        fixture.accessibility.selections = [text]
+        await fixture.pressShortcutAndRead()
+        await fixture.translated()
+        #expect(fixture.transport.requests.count == 1)
+    }
+
+    @Test func appleKeepsItsShortWaitAndTheChoiceInSettingsDecidesWhichWaitApplies() async throws {
+        _ = fixture.keyStore.save(secret, for: .googleKey)
+        fixture.transport.reply(Canned.google("Xin chào"))
+        let translator = try await startedTranslator()
+        translator.edit(text)
+        fixture.harness.scheduler.advance(by: Translator.typingDelay)
+        await fixture.translated()
+        #expect(fixture.engine.requests.count == 1)
+
+        fixture.set("google", for: \.engine)
+        translator.edit("Good morning, my friend")
+        fixture.harness.scheduler.advance(by: Translator.typingDelay)
+        await settle()
+        #expect(fixture.transport.requests.isEmpty)
+        fixture.harness.scheduler.advance(by: Translator.remoteTypingDelay - Translator.typingDelay)
+        await fixture.translated()
+        #expect(fixture.transport.requests.count == 1)
+    }
+
+    /// The limit is the service's to enforce and the user's money to protect: a longer text is not sent, and Apple, which
+    /// has no such limit, is offered.
+    @Test func aTextOverTheLimitIsNotSentAndOffersApple() async throws {
+        _ = fixture.keyStore.save(secret, for: .googleKey)
+        fixture.transport.reply(Canned.google("Xin chào"))
+        let translator = try await startedTranslator(engine: .google)
+        let long = String(repeating: "word ", count: 1001)
+        await translate(translator, long)
+        #expect(fixture.state.error == "Đoạn chữ dài hơn 5.000 ký tự nên chưa gửi tới Google Cloud Translation. Chọn đoạn ngắn hơn, hoặc dịch bằng Apple.")
+        #expect(fixture.state.offersAppleFallback)
+        #expect(fixture.transport.requests.isEmpty)
+        #expect(fixture.engine.requests.isEmpty)
+
+        translator.translateWithApple()
+        await fixture.translated()
+        #expect(fixture.engine.requests.map(\.text) == [long])
+        #expect(fixture.state.error == nil)
+    }
+
     @Test func stoppingDropsTheOffer() async throws {
         let translator = try await startedTranslator(engine: .google)
         await translate(translator)

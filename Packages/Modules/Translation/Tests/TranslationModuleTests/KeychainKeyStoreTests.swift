@@ -21,13 +21,14 @@ import Testing
         #expect(store().load(.googleKey) == "google")
         #expect(store().load(.microsoftKey) == "microsoft")
         #expect(store().load(.openAIKey) == "openai")
-        store().remove(.microsoftKey)
+        #expect(store().remove(.microsoftKey))
         #expect(store().load(.microsoftKey) == nil)
         #expect(store().load(.googleKey) == "google")
     }
 
     @Test func nothingIsStoredYetSoNothingIsFound() {
         #expect(store().load(.googleKey) == nil)
+        #expect(!store().contains(.googleKey))
     }
 
     @Test func savingAgainReplacesTheKeyInPlace() {
@@ -60,8 +61,43 @@ import Testing
         #expect(store().load(.googleKey) == nil)
     }
 
-    @Test func removingWhatIsNotThereIsHarmless() {
-        store().remove(.googleKey)
+    @Test func removingWhatIsNotThereIsHarmlessAndSucceeds() {
+        #expect(store().remove(.googleKey))
         #expect(store().load(.googleKey) == nil)
+    }
+
+    @Test func removingAKeyDeletesTheItemAndSucceeds() {
+        _ = store().save("KEY", for: .googleKey)
+        #expect(store().remove(.googleKey))
+        #expect(keychain.stored.isEmpty)
+        #expect(store().load(.googleKey) == nil)
+    }
+
+    /// A refused delete (a locked keychain, a denied prompt) leaves the key where it was, and says so.
+    @Test(arguments: [errSecInteractionNotAllowed, errSecAuthFailed, errSecUserCanceled])
+    func aDeleteThatIsRefusedIsReportedAndTheKeyStays(_ status: OSStatus) {
+        _ = store().save("KEY", for: .googleKey)
+        keychain.failsToDelete = status
+        #expect(!store().remove(.googleKey))
+        #expect(store().load(.googleKey) == "KEY")
+    }
+
+    @Test func savedKeysAreFoundWithoutReadingTheirValues() {
+        _ = store().save("KEY", for: .googleKey)
+        #expect(store().contains(.googleKey))
+        #expect(!store().contains(.microsoftKey))
+        #expect(keychain.copyCount == 0)
+        #expect(keychain.existenceQueries.count == 2)
+        for query in keychain.existenceQueries {
+            #expect(query[kSecReturnData as String] == nil)
+            #expect(query[kSecReturnAttributes as String] as? Bool == true)
+            #expect(query[kSecAttrService as String] as? String == "io.lucasvu.mynotch.translation")
+        }
+    }
+
+    @Test func aKeychainThatCannotAnswerHasNoKeyToShow() {
+        _ = store().save("KEY", for: .googleKey)
+        keychain.failsToAnswer = errSecInteractionNotAllowed
+        #expect(!store().contains(.googleKey))
     }
 }

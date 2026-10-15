@@ -5,6 +5,9 @@ import MyNotchCore
 final class Translator {
     /// Typing translates once the user pauses this long.
     static let typingDelay = Duration.milliseconds(600)
+    /// With an engine that is a paid service, the pause is longer, so a request is not made for every pause and a
+    /// half-typed sentence does not leave the Mac. Return and text from a selection translate at once.
+    static let remoteTypingDelay = Duration.milliseconds(1000)
 
     let state: TranslationState
     /// The newest translation; tests await it.
@@ -75,7 +78,8 @@ final class Translator {
             translate()
             return
         }
-        pendingTyping = scheduler.schedule(after: Self.typingDelay) { [weak self] in self?.translate() }
+        let delay = chosenEngine == .apple ? Self.typingDelay : Self.remoteTypingDelay
+        pendingTyping = scheduler.schedule(after: delay) { [weak self] in self?.translate() }
     }
 
     /// Translates the input now (Return, a menu change, new text), superseding any translation in flight. A text that
@@ -102,7 +106,7 @@ final class Translator {
         }
         state.isTranslating = true
         let request = generation
-        let choice = override ?? EngineChoice(rawValue: settings.value(keys.engine)) ?? .apple
+        let choice = override ?? chosenEngine
         let engine = engines.engine(for: choice)
         // Most texts have no digit, and nothing to read: they are translated without waiting for anything.
         let readsQuantities = QuickConverter.mightHaveQuantities(text)
@@ -155,6 +159,11 @@ final class Translator {
             guard let self, request == generation, !Task.isCancelled else { return }
             state.dictionary = entry
         }
+    }
+
+    /// The engine chosen in Settings, read when it is needed, not when the module started.
+    private var chosenEngine: EngineChoice {
+        EngineChoice(rawValue: settings.value(keys.engine)) ?? .apple
     }
 
     /// Picks the direction for `text` and shows it, ready for the translation request.

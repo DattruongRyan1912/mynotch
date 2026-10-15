@@ -9,6 +9,9 @@ nonisolated final class FakeKeyStore: KeyStore, @unchecked Sendable {
     private var stored: [TranslationSecret: String] = [:]
     private var saves = 0
     private var failing = false
+    private var failingRemoval = false
+    private var loads = 0
+    private var checks = 0
 
     init(_ values: [TranslationSecret: String] = [:]) {
         stored = values
@@ -16,6 +19,14 @@ nonisolated final class FakeKeyStore: KeyStore, @unchecked Sendable {
 
     var values: [TranslationSecret: String] { lock.withLock { stored } }
     var saveCount: Int { lock.withLock { saves } }
+    /// How often a key's value was read, and how often only its existence was asked.
+    var loadCount: Int { lock.withLock { loads } }
+    var containsCount: Int { lock.withLock { checks } }
+    /// Makes every removal fail, like a Keychain that refuses to delete.
+    var failsToRemove: Bool {
+        get { lock.withLock { failingRemoval } }
+        set { lock.withLock { failingRemoval = newValue } }
+    }
     /// Makes every save fail, like a locked or unavailable Keychain.
     var failsToSave: Bool {
         get { lock.withLock { failing } }
@@ -23,7 +34,17 @@ nonisolated final class FakeKeyStore: KeyStore, @unchecked Sendable {
     }
 
     func load(_ secret: TranslationSecret) -> String? {
-        lock.withLock { stored[secret] }
+        lock.withLock {
+            loads += 1
+            return stored[secret]
+        }
+    }
+
+    func contains(_ secret: TranslationSecret) -> Bool {
+        lock.withLock {
+            checks += 1
+            return stored[secret] != nil
+        }
     }
 
     func save(_ value: String, for secret: TranslationSecret) -> Bool {
@@ -35,8 +56,12 @@ nonisolated final class FakeKeyStore: KeyStore, @unchecked Sendable {
         }
     }
 
-    func remove(_ secret: TranslationSecret) {
-        lock.withLock { stored[secret] = nil }
+    func remove(_ secret: TranslationSecret) -> Bool {
+        lock.withLock {
+            guard !failingRemoval else { return false }
+            stored[secret] = nil
+            return true
+        }
     }
 }
 
@@ -96,11 +121,27 @@ nonisolated final class FakeKeychain: KeychainAccess, @unchecked Sendable {
     private var adds = 0
     private var updates = 0
     private var addStatus: OSStatus = errSecSuccess
+    private var deleteStatus: OSStatus = errSecSuccess
+    private var answerStatus: OSStatus = errSecSuccess
+    private var copies = 0
+    private var existence: [[String: Any]] = []
 
     var addCount: Int { lock.withLock { adds } }
     var updateCount: Int { lock.withLock { updates } }
     var added: [[String: Any]] { lock.withLock { attributes } }
     var stored: [String: Data] { lock.withLock { items } }
+    /// How often a value was read, and the queries that only asked whether an item exists.
+    var copyCount: Int { lock.withLock { copies } }
+    var existenceQueries: [[String: Any]] { lock.withLock { existence } }
+    var failsToDelete: OSStatus {
+        get { lock.withLock { deleteStatus } }
+        set { lock.withLock { deleteStatus = newValue } }
+    }
+    /// Makes every lookup fail with this status.
+    var failsToAnswer: OSStatus {
+        get { lock.withLock { answerStatus } }
+        set { lock.withLock { answerStatus = newValue } }
+    }
     var failsToAdd: OSStatus {
         get { lock.withLock { addStatus } }
         set { lock.withLock { addStatus = newValue } }
@@ -108,8 +149,18 @@ nonisolated final class FakeKeychain: KeychainAccess, @unchecked Sendable {
 
     func copy(_ query: [CFString: Any]) -> (status: OSStatus, data: Data?) {
         lock.withLock {
+            copies += 1
+            guard answerStatus == errSecSuccess else { return (answerStatus, nil) }
             guard let data = items[Self.id(query)] else { return (errSecItemNotFound, nil) }
             return (errSecSuccess, data)
+        }
+    }
+
+    func exists(_ query: [CFString: Any]) -> OSStatus {
+        lock.withLock {
+            existence.append(Dictionary(uniqueKeysWithValues: query.map { ($0.key as String, $0.value) }))
+            guard answerStatus == errSecSuccess else { return answerStatus }
+            return items[Self.id(query)] == nil ? errSecItemNotFound : errSecSuccess
         }
     }
 
@@ -134,7 +185,10 @@ nonisolated final class FakeKeychain: KeychainAccess, @unchecked Sendable {
     }
 
     func delete(_ query: [CFString: Any]) -> OSStatus {
-        lock.withLock { items.removeValue(forKey: Self.id(query)) == nil ? errSecItemNotFound : errSecSuccess }
+        lock.withLock {
+            guard deleteStatus == errSecSuccess else { return deleteStatus }
+            return items.removeValue(forKey: Self.id(query)) == nil ? errSecItemNotFound : errSecSuccess
+        }
     }
 
     private static func id(_ query: [CFString: Any]) -> String {

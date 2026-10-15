@@ -17,8 +17,8 @@ final class EngineSettingsModel {
     private(set) var hasLoaded = false
     /// The latest "Kiểm tra" result of each engine, until its key changes.
     private(set) var checks: [EngineChoice: Check] = [:]
-    /// Why the last key could not be saved.
-    private(set) var saveError: String?
+    /// Why the last key could not be saved or removed.
+    private(set) var keyError: String?
 
     private let keys: any KeyStore
     private let engines: RemoteEngines
@@ -39,7 +39,7 @@ final class EngineSettingsModel {
     func refresh() async {
         var saved = Set<EngineChoice>()
         for choice in EngineChoice.allCases {
-            if let secret = choice.secret, await keys.savedKey(secret) != nil { saved.insert(choice) }
+            if let secret = choice.secret, await keys.hasSavedKey(secret) { saved.insert(choice) }
         }
         savedKeys = saved
         hasLoaded = true
@@ -50,21 +50,30 @@ final class EngineSettingsModel {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let secret = choice.secret, !key.isEmpty else { return false }
         guard await keys.keep(key, as: secret) else {
-            saveError = "Không lưu được key vào Keychain"
+            keyError = "Không lưu được key vào Keychain"
             log.write("Could not save the \(choice.name) key to the Keychain", level: .error)
             return false
         }
-        saveError = nil
+        keyError = nil
         savedKeys.insert(choice)
         checks[choice] = nil
         return true
     }
 
-    func remove(_ choice: EngineChoice) async {
-        guard let secret = choice.secret else { return }
-        await keys.discard(secret)
+    /// Deletes the key. If the Keychain refuses, the key is still there, so it stays marked as saved and the error says
+    /// so: "Xoá key" never claims what did not happen.
+    @discardableResult
+    func remove(_ choice: EngineChoice) async -> Bool {
+        guard let secret = choice.secret else { return false }
+        guard await keys.discard(secret) else {
+            keyError = "Không xoá được key khỏi Keychain"
+            log.write("Could not remove the \(choice.name) key from the Keychain", level: .error)
+            return false
+        }
+        keyError = nil
         savedKeys.remove(choice)
         checks[choice] = nil
+        return true
     }
 
     /// One real request with a fixed word, never the user's text, to see that the key and settings work.

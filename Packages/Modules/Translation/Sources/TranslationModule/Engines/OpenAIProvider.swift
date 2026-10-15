@@ -51,23 +51,26 @@ nonisolated struct OpenAIProvider: RemoteProvider {
     }
 
     /// `base` + `/chat/completions` (or `base` itself when it is already that). The key is only ever sent over https, or
-    /// over http to this Mac, where a local server such as Ollama or LM Studio listens.
+    /// over http to this Mac, where a local server such as Ollama or LM Studio listens. The address is only where to go: no
+    /// credentials, query or fragment (what is pasted there is stored in the clear and sent), and a real port.
     static func endpoint(from base: String) throws(RemoteFailure) -> URL {
         let base = base.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !base.isEmpty else { throw RemoteFailure.notConfigured("địa chỉ") }
         guard var components = URLComponents(string: base), let scheme = components.scheme?.lowercased(),
               let host = components.host?.lowercased(), !host.isEmpty,
-              scheme == "https" || (scheme == "http" && isLocal(host)) else { throw RemoteFailure.badAddress }
+              scheme == "https" || (scheme == "http" && isLocal(host)),
+              components.user == nil, components.password == nil, components.query == nil, components.fragment == nil,
+              components.port.map({ (1...65535).contains($0) }) ?? true else { throw RemoteFailure.badAddress }
         var path = components.path
         while path.hasSuffix("/") { path.removeLast() }
         if !path.hasSuffix("/chat/completions") { path += "/chat/completions" }
         components.path = path
-        components.fragment = nil
         guard let url = components.url else { throw RemoteFailure.badAddress }
         return url
     }
 
+    /// Only the names App Transport Security lets through over http: not a name under `.localhost`, which it refuses.
     private static func isLocal(_ host: String) -> Bool {
-        ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host) || host.hasSuffix(".localhost")
+        ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host)
     }
 }

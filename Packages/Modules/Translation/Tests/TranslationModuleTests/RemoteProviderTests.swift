@@ -78,6 +78,16 @@ private func json(_ request: URLRequest) throws -> Any {
         }
     }
 
+    @Test func aRedirectIsReportedNotRead() {
+        for status in [301, 302, 303, 307, 308] {
+            #expect(throws: RemoteFailure.redirected(status: status)) { try provider.translation(from: Canned.text(status, "moved")) }
+        }
+    }
+
+    @Test func aTranslationServiceMustAnswerWithinTwentySeconds() throws {
+        #expect(try provider.request(for: "Hello", from: .en, to: .vi).timeoutInterval == 20)
+    }
+
     @Test func quotaAndServerErrorsAreTold() {
         #expect(throws: RemoteFailure.quota) { try provider.translation(from: Canned.error(429, "Quota exceeded")) }
         #expect(throws: RemoteFailure.server(status: 503, detail: nil)) { try provider.translation(from: Canned.text(503, "<html>down</html>")) }
@@ -137,6 +147,14 @@ private func json(_ request: URLRequest) throws -> Any {
 
     @Test func quotaIsTold() {
         #expect(throws: RemoteFailure.quota) { try provider().translation(from: Canned.error(429, "Too many requests")) }
+    }
+
+    @Test func aRedirectIsReportedNotRead() {
+        #expect(throws: RemoteFailure.redirected(status: 308)) { try provider().translation(from: Canned.text(308, "moved")) }
+    }
+
+    @Test func aTranslationServiceMustAnswerWithinTwentySeconds() throws {
+        #expect(try provider().request(for: "Hello", from: .en, to: .vi).timeoutInterval == 20)
     }
 
     @Test func aReplyOfAnotherShapeIsUnreadable() {
@@ -200,9 +218,39 @@ private func json(_ request: URLRequest) throws -> Any {
     }
 
     /// A key must never cross the network in the clear.
-    @Test(arguments: ["http://api.openai.com/v1", "http://example.com/v1", "http://192.168.1.5:8000/v1", "ftp://example.com/v1", "example.com/v1", "https://", "not a url"])
+    @Test(arguments: [
+        "http://api.openai.com/v1", "http://example.com/v1", "http://192.168.1.5:8000/v1", "ftp://example.com/v1", "example.com/v1",
+        "https://", "not a url",
+        // Look like this Mac, are not: the host is what follows the last @, or a longer name.
+        "http://localhost.evil.com/v1", "http://127.0.0.1.nip.io/v1", "http://localhost@evil.com/v1",
+        "http://127.0.0.1:8080@evil.com/v1", "http://localhost%2eevil.com/v1", "http://localhost./v1",
+        "http://127.1/v1", "http://2130706433/v1", "http://127.0.0.2/v1", "http://0.0.0.0/v1", "http://[::ffff:127.0.0.1]/v1",
+        // A name under .localhost is one the system resolves itself, but App Transport Security refuses it.
+        "http://foo.localhost:11434/v1", "http://localhost.localhost/v1",
+    ])
     func refusesAnAddressThatWouldNotKeepTheKeyPrivate(_ base: String) {
         #expect(throws: RemoteFailure.badAddress) { try provider(base: base).request(for: "Hello", from: .en, to: .vi) }
+    }
+
+    /// Anything pasted into the address is stored in the clear and sent: no credentials, query or fragment, and a real port.
+    @Test(arguments: [
+        "http://evil.com@localhost:11434/v1", "http://user:pw@localhost:11434/v1", "https://user:pw@api.example.com/v1",
+        "https://token@api.example.com/v1", "https://api.example.com/v1?api_key=sk-123", "https://api.example.com/v1?",
+        "https://api.example.com/v1#frag", "http://localhost:11434/v1?x=1",
+        "http://localhost:99999/v1", "http://localhost:0/v1", "https://api.example.com:65536/v1", "http://localhost:-1/v1",
+        "https://api.example.com:abc/v1",
+    ])
+    func refusesAnAddressThatCarriesMoreThanWhereToGo(_ base: String) {
+        #expect(throws: RemoteFailure.badAddress) { try provider(base: base).request(for: "Hello", from: .en, to: .vi) }
+    }
+
+    @Test(arguments: [
+        ("http://LOCALHOST:11434/v1", "localhost:11434"), ("http://localhost:1/v1", "localhost:1"),
+        ("http://localhost:65535/v1", "localhost:65535"), ("https://api.example.com:8443/v1", "api.example.com:8443"),
+    ])
+    func acceptsARealPortOnAnAllowedHost(_ base: String, _ authority: String) throws {
+        let url = try #require(provider(base: base).request(for: "Hello", from: .en, to: .vi).url)
+        #expect(url.absoluteString.lowercased().contains("://\(authority)/"))
     }
 
     @Test func aBlankAddressOrModelIsNotConfigured() {
@@ -243,6 +291,14 @@ private func json(_ request: URLRequest) throws -> Any {
         #expect(throws: RemoteFailure.quota) { try provider().translation(from: Canned.error(429, "Rate limit reached")) }
     }
 
+    @Test func aRedirectIsReportedNotRead() {
+        #expect(throws: RemoteFailure.redirected(status: 307)) { try provider().translation(from: Canned.text(307, "moved")) }
+    }
+
+    @Test func aLanguageModelMayTakeLongerThanATranslationService() throws {
+        #expect(try provider().request(for: "Hello", from: .en, to: .vi).timeoutInterval == 90)
+    }
+
     @Test func aReplyOfAnotherShapeIsUnreadable() {
         let empty = Canned.reply(["choices": []])
         let blank = Canned.openAI("  \n ")
@@ -272,6 +328,8 @@ private func throwsFailure(_ body: () throws -> some Any) -> RemoteFailure? {
         #expect(RemoteFailure.rejected(status: 404, detail: nil).message(for: name) == "Google Cloud Translation từ chối yêu cầu (HTTP 404).")
         #expect(RemoteFailure.quota.message(for: name) == "Google Cloud Translation báo hết hạn mức hoặc nhận quá nhiều yêu cầu (HTTP 429). Thử lại sau.")
         #expect(RemoteFailure.server(status: 502, detail: nil).message(for: name) == "Google Cloud Translation đang lỗi (HTTP 502).")
+        #expect(RemoteFailure.redirected(status: 307).message(for: name) == "Máy chủ của Google Cloud Translation chuyển hướng — đã chặn để bảo vệ khoá.")
+        #expect(RemoteFailure.tooLong(limit: 5000).message(for: name) == "Đoạn chữ dài hơn 5.000 ký tự nên chưa gửi tới Google Cloud Translation. Chọn đoạn ngắn hơn, hoặc dịch bằng Apple.")
         #expect(RemoteFailure.unreadable.message(for: name) == "Không đọc được trả lời của Google Cloud Translation.")
         #expect(RemoteFailure.offline.message(for: name) == "Không có kết nối mạng.")
         #expect(RemoteFailure.timedOut.message(for: name) == "Google Cloud Translation trả lời quá lâu.")
@@ -284,6 +342,8 @@ private func throwsFailure(_ body: () throws -> some Any) -> RemoteFailure? {
         #expect(RemoteFailure.quota.logDescription == "quota (HTTP 429)")
         #expect(RemoteFailure.notConfigured("key").logDescription == "not configured")
         #expect(RemoteFailure.unreadable.logDescription == "unreadable reply")
+        #expect(RemoteFailure.redirected(status: 302).logDescription == "redirect refused (HTTP 302)")
+        #expect(RemoteFailure.tooLong(limit: 5000).logDescription == "text too long")
     }
 
     @Test func networkErrorsAreToldApartWithoutQuotingThem() {

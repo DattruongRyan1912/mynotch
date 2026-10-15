@@ -42,6 +42,34 @@ struct LeakyError: Error, LocalizedError {
         #expect(transport.requests.isEmpty)
     }
 
+    @Test func aRedirectIsToldAndNothingIsFollowed() async {
+        transport.reply(Canned.text(307, "moved"))
+        #expect(await translate(engine()) == .failure(.failed("Máy chủ của Google Cloud Translation chuyển hướng — đã chặn để bảo vệ khoá.")))
+        #expect(log.lines == ["Google Cloud Translation failed: redirect refused (HTTP 307)"])
+    }
+
+    @Test func aTextOfTheLimitIsSent() async {
+        transport.reply(Canned.google("ok"))
+        let text = String(repeating: "a", count: RemoteTranslationEngine.maxCharacters)
+        #expect(await translate(engine(), text) == .success("ok"))
+        #expect(transport.requests.count == 1)
+    }
+
+    /// A paid service, and a request size it limits: a longer text is not sent at all.
+    @Test func aLongerTextIsNotSentAndSaysWhy() async {
+        transport.reply(Canned.google("ok"))
+        let text = String(repeating: "a", count: RemoteTranslationEngine.maxCharacters + 1)
+        #expect(await translate(engine(), text) == .failure(.failed("Đoạn chữ dài hơn 5.000 ký tự nên chưa gửi tới Google Cloud Translation. Chọn đoạn ngắn hơn, hoặc dịch bằng Apple.")))
+        #expect(transport.requests.isEmpty)
+        #expect(log.lines == ["Google Cloud Translation failed: text too long"])
+    }
+
+    @Test func theLimitCountsCharactersNotBytes() async {
+        transport.reply(Canned.google("ok"))
+        let text = String(repeating: "ế", count: RemoteTranslationEngine.maxCharacters)
+        #expect(await translate(engine(), text) == .success("ok"))
+    }
+
     @Test func thereIsNoLanguagePackToInstall() async {
         #expect(await engine().status(from: .en, to: .vi) == .installed)
     }

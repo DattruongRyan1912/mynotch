@@ -32,7 +32,7 @@ nonisolated struct GoogleProvider: RemoteProvider {
             Self.endpoint,
             headers: ["X-goog-api-key": key, "Content-Type": "application/json; charset=utf-8"],
             body: Body(q: text, source: LanguageCodes.google(source), target: LanguageCodes.google(target)),
-            timeout: 30
+            timeout: 20
         )
     }
 

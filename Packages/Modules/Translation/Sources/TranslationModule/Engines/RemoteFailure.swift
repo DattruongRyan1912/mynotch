@@ -9,6 +9,10 @@ nonisolated enum RemoteFailure: Error, Equatable, Sendable {
     case rejected(status: Int, detail: String?)
     case quota
     case server(status: Int, detail: String?)
+    /// The server answered with a redirect, which is never followed: it would take the key and the text elsewhere.
+    case redirected(status: Int)
+    /// More text than a request may carry; nothing was sent.
+    case tooLong(limit: Int)
     /// A success whose body is not the shape the service documents.
     case unreadable
     case offline
@@ -32,6 +36,7 @@ nonisolated enum RemoteFailure: Error, Equatable, Sendable {
         switch reply.status {
         case 429: .quota
         case 401: .rejected(status: 401, detail: nil)
+        case 300..<400: .redirected(status: reply.status)
         case 400..<500: .rejected(status: reply.status, detail: detail(in: reply.body, hiding: key))
         default: .server(status: reply.status, detail: detail(in: reply.body, hiding: key))
         }
@@ -46,6 +51,9 @@ nonisolated enum RemoteFailure: Error, Equatable, Sendable {
             Self.sentence("\(engine) từ chối yêu cầu (HTTP \(status))", detail) + (status == 401 || status == 403 ? " Kiểm tra lại key." : "")
         case .quota: "\(engine) báo hết hạn mức hoặc nhận quá nhiều yêu cầu (HTTP 429). Thử lại sau."
         case .server(let status, let detail): Self.sentence("\(engine) đang lỗi (HTTP \(status))", detail)
+        case .redirected: "Máy chủ của \(engine) chuyển hướng — đã chặn để bảo vệ khoá."
+        case .tooLong(let limit):
+            "Đoạn chữ dài hơn \(limit.formatted(.number.locale(Locale(identifier: "vi_VN")))) ký tự nên chưa gửi tới \(engine). Chọn đoạn ngắn hơn, hoặc dịch bằng Apple."
         case .unreadable: "Không đọc được trả lời của \(engine)."
         case .offline: "Không có kết nối mạng."
         case .timedOut: "\(engine) trả lời quá lâu."
@@ -61,6 +69,8 @@ nonisolated enum RemoteFailure: Error, Equatable, Sendable {
         case .rejected(let status, _): "rejected (HTTP \(status))"
         case .quota: "quota (HTTP 429)"
         case .server(let status, _): "server error (HTTP \(status))"
+        case .redirected(let status): "redirect refused (HTTP \(status))"
+        case .tooLong: "text too long"
         case .unreadable: "unreadable reply"
         case .offline: "offline"
         case .timedOut: "timed out"
