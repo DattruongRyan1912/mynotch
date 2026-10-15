@@ -13,7 +13,7 @@ struct DialRing: View {
 
     var body: some View {
         ZStack {
-            Circle().stroke(Color.white.opacity(0.12), lineWidth: Self.lineWidth)
+            Circle().stroke(NotchTokens.fill(0.12), lineWidth: Self.lineWidth)
             Circle()
                 .trim(from: 0, to: fraction)
                 .stroke(tint, style: StrokeStyle(lineWidth: Self.lineWidth, lineCap: .round))
@@ -22,7 +22,7 @@ struct DialRing: View {
                 // A round cap on an arc of no length is a dot, so the knob needs no geometry of its own.
                 Circle()
                     .trim(from: max(fraction - 0.001, 0), to: max(fraction, 0.001))
-                    .stroke(Color.white, style: StrokeStyle(lineWidth: Self.lineWidth + 6, lineCap: .round))
+                    .stroke(NotchTokens.primaryText, style: StrokeStyle(lineWidth: Self.lineWidth + 6, lineCap: .round))
                     .rotationEffect(.degrees(-90))
             }
         }
