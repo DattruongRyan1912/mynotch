@@ -112,6 +112,13 @@ targets:
         codeSign: true
         copy:
           destination: executables
+      # Copied into Contents/MacOS, where ClipboardModule's ClipboardMCPHelperFile looks for the helper that AI agents run.
+      - target: mynotch-clipboard-mcp
+        embed: true
+        link: false
+        codeSign: true
+        copy:
+          destination: executables
     info:
       path: App/Info.plist
       properties:
@@ -207,6 +214,22 @@ targets:
       groups: [signing]
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch.hook
+        SKIP_INSTALL: YES
+        ENABLE_HARDENED_RUNTIME: YES
+  # The MCP server AI agents run to search the clipboard history (see Clipboard's ClipboardMCPHelperFile); it asks the running app
+  # over a socket in the user's private folder, and only while the user has turned it on.
+  mynotch-clipboard-mcp:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Tools/mynotch-clipboard-mcp
+    dependencies:
+      - package: ClipboardModule
+        product: ClipboardMCPKit
+    settings:
+      groups: [signing]
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch.clipboard-mcp
         SKIP_INSTALL: YES
         ENABLE_HARDENED_RUNTIME: YES
   # The helper Chrome starts for the YouTube captions extension (see Media's YouTubeBridgeInstaller); it only passes

@@ -52,6 +52,8 @@ struct ClipboardSettingKeys {
     /// Whether the stack is written to disk and comes back after a restart. Off by default: a stack is short-lived and
     /// may hold secrets.
     let stackPersist: SettingKey<Bool>
+    /// Whether AI agents may search the history through the MCP helper. Off by default: it hands out what the user copied.
+    let mcpEnabled: SettingKey<Bool>
 
     init(_ settings: ModuleSettings) {
         paused = settings.key("paused", default: false)
@@ -71,5 +73,6 @@ struct ClipboardSettingKeys {
         panelPosition = settings.key("panelPosition", default: ClipboardPanelPosition?.none)
         stackOrder = settings.key("stackOrder", default: .firstIn)
         stackPersist = settings.key("stackPersist", default: false)
+        mcpEnabled = settings.key("mcpEnabled", default: false)
     }
 }

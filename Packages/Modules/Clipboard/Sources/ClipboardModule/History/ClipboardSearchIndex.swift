@@ -72,6 +72,17 @@ nonisolated final class ClipboardSearchIndex {
         }
     }
 
+    /// Those of `items`, which are all in `history`, whose text holds every one of `words` (already folded). The words are taken
+    /// as they are: unlike the search field's text, an `@` in them is only a character. For callers whose words did not come
+    /// from the field, such as an agent's.
+    func filter(_ items: [ClipboardItem], words: [String], in history: ClipboardHistory) -> [ClipboardItem] {
+        update(history)
+        return items.filter { item in
+            guard let entry = entries[item.id] else { return false }
+            return words.allSatisfy { entry.text.range(of: $0, options: .literal) != nil }
+        }
+    }
+
     /// The source app name plus what the card shows: text, link (and its host when the URL spells it differently),
     /// color hex (and the rgb() or hsl() text it was copied as) or file names. Folders are left out so a common path
     /// such as "/Users" does not match every file.

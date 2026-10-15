@@ -33,6 +33,12 @@ public final class ClipboardModule: FeatureModule {
     private(set) var panel: ClipboardPanelModel?
     /// Set while running; tests wait for its writes.
     private(set) var store: ClipboardStore?
+    /// What Settings shows of the agents' access; it outlives the module's running.
+    let mcp = ClipboardMCPState()
+    let mcpSocketPath: (URL) -> String
+    let installMCPHelper: (URL) throws -> Void
+    /// Set while the feature is on and the module runs; see `ClipboardModule+MCP`.
+    var mcpServer: ClipboardMCPServer?
     private let pasteboard: any PasteboardAccess
     private let keystrokes: any KeystrokeSending
     private let frontmostApp: () -> ClipboardMonitor.SourceApp
@@ -44,8 +50,8 @@ public final class ClipboardModule: FeatureModule {
     private let libraryWindow: (any ClipboardLibraryWindowing)?
     /// nil in tests that never show it; the app passes the real panel.
     private let panelWindow: (any ClipboardPanelWindowing)?
-    private var context: ModuleContext?
-    private var keys: ClipboardSettingKeys?
+    private(set) var context: ModuleContext?
+    private(set) var keys: ClipboardSettingKeys?
     private var monitor: ClipboardMonitor?
     private var paster: ClipboardPaster?
     /// Closed on stop, so a ⌘V still waiting for the paste delay is never sent into whatever app is in front by then.
@@ -93,8 +99,12 @@ public final class ClipboardModule: FeatureModule {
         modifiers: any ModifierState,
         now: @escaping () -> Date = { .now },
         libraryWindow: (any ClipboardLibraryWindowing)? = nil,
-        panelWindow: (any ClipboardPanelWindowing)? = nil
+        panelWindow: (any ClipboardPanelWindowing)? = nil,
+        mcpSocketPath: @escaping (URL) -> String = ClipboardModule.defaultMCPSocketPath,
+        installMCPHelper: @escaping (URL) throws -> Void = ClipboardMCPHelperFile.installFromBundle
     ) {
+        self.mcpSocketPath = mcpSocketPath
+        self.installMCPHelper = installMCPHelper
         self.pasteboard = pasteboard
         self.keystrokes = keystrokes
         self.frontmostApp = frontmostApp
@@ -184,6 +194,13 @@ public final class ClipboardModule: FeatureModule {
             }
         }
         context.run { [weak self] in
+            // On opens the socket for the agents' helper; off closes it. The first value arrives at once, and is off unless the
+            // user turned it on in an earlier run.
+            for await enabled in Observations({ settings.value(keys.mcpEnabled) }) {
+                self?.applyMCP(enabled: enabled)
+            }
+        }
+        context.run { [weak self] in
             // Keeping or not keeping the stack takes effect at once: the file is written, or deleted.
             for await _ in Observations({ settings.value(keys.stackPersist) }) {
                 self?.writeStackFile()
@@ -193,6 +210,7 @@ public final class ClipboardModule: FeatureModule {
 
     /// Writes any unsaved change before returning, so quitting right after a copy keeps it.
     public func stop() async {
+        stopMCP()
         closeLibrary()
         closePanel()
         keystrokeGate?.isOpen = false
@@ -233,6 +251,17 @@ public final class ClipboardModule: FeatureModule {
             clear: { [weak self] range in await self?.clearHistory(range, directory: directory).value },
             pasteboardAccessBehavior: pasteboardAccessBehavior,
             canBackUp: environment.isRunning,
+            mcp: ClipboardMCPActions(
+                state: mcp, helperPath: ClipboardMCPHelperFile.destination(in: directory).path,
+                copy: { text in
+                    // Marked as MyNotch's own, so the history does not record the command the user just copied from it.
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(text, forType: .string)
+                    pasteboard.setData(Data(), forType: NSPasteboard.PasteboardType(ClipboardClassifier.ownWriteType))
+                },
+                turnOff: { [weak self] in self?.turnOffMCPNow(settings: environment.settings) }
+            ),
             // The module outlives its running, so a backup asked for after a stop says why it cannot be done.
             backupActions: ClipboardBackupActions(
                 export: { [weak self] options, url, progress in

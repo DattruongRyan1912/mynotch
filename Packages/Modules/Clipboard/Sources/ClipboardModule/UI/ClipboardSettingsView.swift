@@ -22,6 +22,7 @@ struct ClipboardSettingsView: View {
     let pasteboardAccessBehavior: () -> NSPasteboard.AccessBehavior
     /// Whether the module runs, which backup and restore need.
     let canBackUp: Bool
+    let mcp: ClipboardMCPActions
 
     @State private var diskUsage: ClipboardStorageUsage?
     /// Bumped after clearing, so the disk usage is read again.
@@ -32,7 +33,8 @@ struct ClipboardSettingsView: View {
 
     init(
         settings: ModuleSettings, keys: ClipboardSettingKeys, usage: ClipboardUsageSource, clear: @escaping (ClipboardClearRange) async -> Void,
-        pasteboardAccessBehavior: @escaping () -> NSPasteboard.AccessBehavior, canBackUp: Bool, backupActions: ClipboardBackupActions
+        pasteboardAccessBehavior: @escaping () -> NSPasteboard.AccessBehavior, canBackUp: Bool, mcp: ClipboardMCPActions,
+        backupActions: ClipboardBackupActions
     ) {
         self.settings = settings
         self.keys = keys
@@ -40,6 +42,7 @@ struct ClipboardSettingsView: View {
         self.clear = clear
         self.pasteboardAccessBehavior = pasteboardAccessBehavior
         self.canBackUp = canBackUp
+        self.mcp = mcp
         _backup = State(initialValue: ClipboardBackupModel(actions: backupActions))
     }
 
@@ -73,6 +76,7 @@ struct ClipboardSettingsView: View {
             excludedApps
             storage
             ClipboardBackupRows(backup: backup, isAvailable: canBackUp)
+            ClipboardMCPRows(isOn: settings.binding(keys.mcpEnabled), actions: mcp, isRunning: canBackUp)
             TimelineView(.periodic(from: .now, by: 2)) { _ in
                 pasteboardAccess(pasteboardAccessBehavior())
             }
