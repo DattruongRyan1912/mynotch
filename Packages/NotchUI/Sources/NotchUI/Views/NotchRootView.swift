@@ -10,13 +10,8 @@ struct NotchRootView: View {
     let geometry: NotchGeometry
     /// The user's accent and glass; nothing is the notch's own purple and no glass.
     var theme: NotchTheme?
-    /// How long the open notch keeps its own glass while it grows, before `tiles` replace it; a test makes it long or short.
-    var tilesDelay = NotchGlassPlan.tilesDelay
 
     @Namespace private var glassNamespace
-    /// With `tiles`, whether the open notch has grown enough to give way to them: false until `NotchGlassPlan.tilesDelay` after it
-    /// opens, and false again at once when it is not open.
-    @State private var tilesSettled = false
 
     private var state: NotchState { model.displayState }
 
@@ -84,17 +79,16 @@ struct NotchRootView: View {
     /// The user's two choices about the glass, read live.
     private var style: NotchGlassStyle { theme?.glassStyle ?? .default }
 
-    /// Whether the notch is to be tiles, which it is while open with that shape on Liquid Glass; on the classic look nothing is timed.
-    private var wantsTiles: Bool { isOpen && surface.isLiquidGlass && style.shape == .tiles }
+    /// Whether the open notch is made of tiles: that shape, on Liquid Glass.
+    private var usesTiles: Bool { surface.isLiquidGlass && style.shape == .tiles }
 
-    /// What glass the notch asks for in its state now: the bubbles beside the collapsed notch, and with `tiles` the open notch's tiles.
+    /// What glass the notch asks for in its state now: the bubbles beside the collapsed notch, and with `tiles` the capsule and the tile.
     private var glassPlan: NotchGlassPlan {
         let surface = surface
         // The bubbles are only drawn, and so only planned, beside the collapsed notch.
         let slots = surface.isLiquidGlass && state == .compact ? ActivitySlot.bubbles(of: activities, capacity: geometry.bubbleCapacity) : []
         return NotchGlassPlan(
-            surface: surface, bubbleIDs: slots.map(\.id), accent: theme?.accent ?? NotchTokens.accent, style: style, isOpen: isOpen,
-            tilesSettled: tilesSettled
+            surface: surface, bubbleIDs: slots.map(\.id), accent: theme?.accent ?? NotchTokens.accent, style: style, isOpen: isOpen
         )
     }
 
@@ -112,30 +106,30 @@ struct NotchRootView: View {
         let accent = theme?.accent ?? NotchTokens.accent
         let surface = surface
         let plan = glassPlan
+        let layout = Layout(state: state, bottom: bottom)
         NotchGlassFamily(plan) {
             ZStack(alignment: .top) {
-                NotchBackdrop(surface: surface, bodyHeight: geometry.notchSize.height, veil: plan.veil)
-                    .overlay(alignment: .top) {
-                        content(accessories)
-                            .padding(.horizontal, radii.top)
-                            .environment(\.notch, NotchHandle(model: model))
-                    }
-                    .clipShape(shape)
-                    .frame(width: size.width, height: size.height)
-                    // Above the animation below, so the glass takes its shape and size from the same spring as the notch.
-                    .notchGlass(plan.shape == .tiles ? nil : plan.notch, in: shape, namespace: glassNamespace)
-                    // With `tiles` the notch's glass is a layer behind the view instead: it gives way to the tiles' while the notch
-                    // is open, and the view, with the tab in it, must not be replaced when it does.
-                    .notchGlassLayer(plan.notch, in: shape, namespace: glassNamespace, enabled: plan.shape == .tiles)
-                    .contentShape(shape)
-                    // Once open, taps belong to the tab content; the root tap only opens the notch.
-                    .gesture(TapGesture().onEnded { model.click() }, including: isOpen ? .subviews : .all)
-                    .animation(NotchTokens.spring, value: Layout(state: state, bottom: bottom))
-                    // SwiftUI only reports targeting here. The window controller starts drag mode from the pointer, so
-                    // only the end of a drag is forwarded, and the getter just reflects the model.
-                    .onDrop(of: allDropTypes, isTargeted: Binding(get: { model.isDragging }, set: { if !$0 { model.setDragging(false) } })) { providers in
-                        drop(providers)
-                    }
+                if let tiles = plan.tiles {
+                    tilesNotch(plan: plan, tiles: tiles, size: size, radii: radii, accessories: accessories, layout: layout)
+                } else {
+                    NotchBackdrop(surface: surface, bodyHeight: geometry.notchSize.height, veil: plan.veil)
+                        .overlay(alignment: .top) {
+                            content(accessories)
+                                .padding(.horizontal, radii.top)
+                                .environment(\.notch, NotchHandle(model: model))
+                        }
+                        .clipShape(shape)
+                        .frame(width: size.width, height: size.height)
+                        // Above the animation below, so the glass takes its shape and size from the same spring as the notch.
+                        .notchGlass(plan.notch, in: shape, namespace: glassNamespace)
+                        .contentShape(shape)
+                        // Once open, taps belong to the tab content; the root tap only opens the notch.
+                        .gesture(TapGesture().onEnded { model.click() }, including: isOpen ? .subviews : .all)
+                        .animation(NotchTokens.spring, value: layout)
+                        // SwiftUI only reports targeting here. The window controller starts drag mode from the pointer, so
+                        // only the end of a drag is forwarded, and the getter just reflects the model.
+                        .onDrop(of: allDropTypes, isTargeted: dropTargeting) { providers in drop(providers) }
+                }
                 bubbles
             }
         }
@@ -148,16 +142,115 @@ struct NotchRootView: View {
         .environment(\.notchSurface, surface)
         .environment(\.notchGlassNamespace, surface.isLiquidGlass ? glassNamespace : nil)
         .environment(\.notchGlassPlan, plan)
-        // The open notch's glass gives way to the tiles once it has grown, and takes its place again the moment it is not open.
-        .task(id: wantsTiles) {
-            guard wantsTiles else {
-                tilesSettled = false
-                return
+    }
+
+    /// The drag targeting the notch reports: only the end of a drag is forwarded.
+    private var dropTargeting: Binding<Bool> {
+        Binding(get: { model.isDragging }, set: { if !$0 { model.setDragging(false) } })
+    }
+
+    /// The notch with `tiles`. Four layers in one wrapper, all in the family's container so their glass blends and morphs:
+    /// * the notch's **hit layer**, as big as the open notch whatever is drawn in it: it holds the faint veil that keeps the gaps between
+    ///   the tiles part of the window, and it sizes the wrapper;
+    /// * the notch's **own glass and content**: the collapsed notch's strip and a toast's content are inside the view that carries
+    ///   the glass, which is what draws them above it (content outside it is under the container's glass and comes out blurred). Its
+    ///   glass is `Glass.identity` while the notch is open, and then it is only as big as the collapsed notch, so that it is already
+    ///   the right size when it comes back and nothing of the open notch's size ever shows as glass on the way;
+    /// * the tab bar's **capsule** and the content's **tile**, which are not inside the notch's shape, so nothing clips their glass: they
+    ///   are the collapsed notch's body while the notch is not open, and spring from there to where the tab page puts them
+    ///   (`NotchTilesLayout`), and back. Their content is laid out at its final size and clipped by the tile's own shape, and fades in.
+    ///
+    /// The wrapper, whose size is the open notch's, carries the one hit shape, the one tap and the one drop target, as the slab's view
+    /// does: SwiftUI delivers a gesture to the hit view and its ancestors, and the strip, the toast and the tab are all its descendants,
+    /// and it targets one drop view at a time, so with a target on each of the layers a drag across the gap and a tile would report
+    /// "not targeted" on every crossing and end drag mode in the middle of it.
+    @ViewBuilder private func tilesNotch(
+        plan: NotchGlassPlan, tiles: NotchGlassPlan.Tiles, size: CGSize, radii: (top: CGFloat, bottom: CGFloat),
+        accessories: CompactAccessories, layout: Layout
+    ) -> some View {
+        let fullShape = NotchShape(topRadius: radii.top, bottomRadius: radii.bottom)
+        // The collapsed notch this one came from, and will go back to.
+        let collapsed: NotchState = model.hasActivity ? .compact : .closed
+        let collapsedRadii = geometry.cornerRadii(for: collapsed)
+        let collapsedSize = geometry.shapeSize(for: collapsed)
+        let glassSize = isOpen ? collapsedSize : size
+        let glassRadii = isOpen ? collapsedRadii : radii
+        let glassShape = NotchShape(topRadius: glassRadii.top, bottomRadius: glassRadii.bottom)
+        let showsTabs = isOpen || model.tabUnderToast != nil
+        let openRadii = geometry.cornerRadii(for: .open(nil))
+        let final = NotchTilesLayout.open(
+            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: contentHeight), notchHeight: geometry.notchSize.height,
+            topRadius: openRadii.top, tabCount: registry.tabs.count
+        )
+        let current = showsTabs
+            ? final : NotchTilesLayout.rest(collapsedSize: collapsedSize, topRadius: collapsedRadii.top, hasTabBar: final.tabBar != nil)
+        let inner = CGSize(
+            width: final.content.size.width - 2 * NotchGlassPlan.tilePadding, height: final.content.size.height - 2 * NotchGlassPlan.tilePadding
+        )
+
+        ZStack(alignment: .top) {
+            NotchBackdrop(surface: surface, bodyHeight: geometry.notchSize.height, veil: plan.veil)
+                .clipShape(fullShape)
+                .frame(width: size.width, height: size.height)
+                .animation(NotchTokens.spring, value: layout)
+
+            Color.clear
+                .overlay(alignment: .top) {
+                    content(accessories)
+                        .padding(.horizontal, radii.top)
+                        .environment(\.notch, NotchHandle(model: model))
+                }
+                .clipShape(glassShape)
+                .frame(width: glassSize.width, height: glassSize.height)
+                .notchGlass(plan.notch, in: glassShape, namespace: glassNamespace)
+                .animation(NotchTokens.spring, value: layout)
+
+            if registry.tabs.count >= 2, let bar = current.tabBar {
+                tile(bar, glass: tiles.tabBar, shape: Capsule(), key: current, showsTabs: showsTabs) {
+                    TabBar(tabs: registry.tabs, selected: shownTab?.id) { model.open(tab: $0) }
+                        .frame(width: TabBarMetrics.width(count: registry.tabs.count), height: TabBarMetrics.iconSize.height)
+                        .padding(.top, NotchGlassPlan.tabBarInset.height)
+                }
             }
-            try? await Task.sleep(for: tilesDelay)
-            guard !Task.isCancelled else { return }
-            withAnimation(NotchGlassPlan.tilesSwap) { tilesSettled = true }
+            tile(
+                current.content, glass: tiles.content, shape: RoundedRectangle(cornerRadius: concentricTileRadius, style: .continuous),
+                key: current, showsTabs: showsTabs
+            ) {
+                openContent
+                    .frame(width: max(inner.width, 0), height: max(inner.height, 0))
+                    .padding(.top, NotchGlassPlan.tilePadding)
+            }
         }
+        .contentShape(fullShape)
+        // Once open, taps belong to the tab content; the root tap only opens the notch.
+        .gesture(TapGesture().onEnded { model.click() }, including: isOpen ? .subviews : .all)
+        .onDrop(of: allDropTypes, isTargeted: dropTargeting) { providers in drop(providers) }
+    }
+
+    /// One tile: its glass in `shape`, which is `tile`'s size and distance from the top, with `content` inside, laid out at the size it
+    /// has when the notch is open, clipped by the tile's own shape and faded in while the tab is there. Frame and padding are layout,
+    /// so the glass follows them as they spring; `key` is what the spring is keyed on, so a tab of another height moves it too.
+    private func tile<S: Shape, Content: View>(
+        _ tile: NotchTilesLayout.Tile, glass: NotchGlassPlan.Shape, shape: S, key: NotchTilesLayout, showsTabs: Bool,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        Color.clear
+            .overlay(alignment: .top) {
+                if showsTabs {
+                    content()
+                        .environment(\.notch, NotchHandle(model: model))
+                        .opacity(isOpen ? 1 : 0)
+                        .allowsHitTesting(isOpen)
+                        .accessibilityHidden(!isOpen)
+                        .animation(NotchTokens.swap, value: isOpen)
+                        .transition(.asymmetric(insertion: .opacity.animation(NotchTokens.enter), removal: .opacity.animation(NotchTokens.leave)))
+                }
+            }
+            .clipShape(shape)
+            .frame(width: tile.size.width, height: tile.size.height)
+            .notchGlass(glass, in: shape, namespace: glassNamespace)
+            .padding(.top, tile.top)
+            .animation(NotchTokens.spring, value: key)
     }
 
     /// The bubbles of the other live activities, beside the collapsed notch only. They appear and go with the pill's
@@ -214,7 +307,8 @@ struct NotchRootView: View {
             // (search text, focus, scroll position): it stays alive underneath, invisible and inert.
             expanded {
                 ZStack {
-                    if isOpen || model.tabUnderToast != nil {
+                    // With `tiles` the tab bar and the tab are in the tiles, outside the notch's own shape.
+                    if !usesTiles, isOpen || model.tabUnderToast != nil {
                         tabPage
                             .opacity(isOpen ? 1 : 0)
                             .allowsHitTesting(isOpen)
@@ -231,41 +325,11 @@ struct NotchRootView: View {
     }
 
     private var tabPage: some View {
-        let plan = glassPlan
-        return VStack(spacing: 0) {
+        VStack(spacing: 0) {
             if registry.tabs.count >= 2 {
-                tabBar(plan)
+                TabBar(tabs: registry.tabs, selected: shownTab?.id) { model.open(tab: $0) }
+                    .padding(.bottom, 6)
             }
-            tabContent(plan)
-        }
-    }
-
-    /// The tab bar: with `tiles` in a glass capsule of its own, with the desktop showing around it; else on the notch's glass as it
-    /// always was.
-    @ViewBuilder private func tabBar(_ plan: NotchGlassPlan) -> some View {
-        let bar = TabBar(tabs: registry.tabs, selected: shownTab?.id) { model.open(tab: $0) }
-        if let tiles = plan.tiles {
-            bar
-                .padding(.horizontal, NotchGlassPlan.tabBarInset.width)
-                .padding(.vertical, NotchGlassPlan.tabBarInset.height)
-                .notchGlass(tiles.tabBar, in: Capsule(), namespace: glassNamespace)
-                .padding(.bottom, NotchGlassPlan.tileGap)
-        } else {
-            bar.padding(.bottom, 6)
-        }
-    }
-
-    /// The open tab: with `tiles` in one glass tile with a concentric corner radius, which the tab swaps its content
-    /// inside (and so does the empty notch's line of text, which would be unreadable straight on the desktop); else straight on the
-    /// notch's glass as it always was.
-    @ViewBuilder private func tabContent(_ plan: NotchGlassPlan) -> some View {
-        if let tiles = plan.tiles {
-            openContent
-                .padding(NotchGlassPlan.tilePadding)
-                .notchGlass(
-                    tiles.content, in: RoundedRectangle(cornerRadius: concentricTileRadius, style: .continuous), namespace: glassNamespace
-                )
-        } else {
             openContent
         }
     }

@@ -39,6 +39,13 @@ struct ActiveGlassAppearance: Equatable {
         implementation(of: acquireName, on: windowClass) != nil && implementation(of: resignName, on: windowClass) != nil
     }
 
+    /// Whether `window` has the key appearance, as AppKit's window theme says; nil if this macOS has no such method. For the log: it
+    /// tells a notch that is soft because the flag was dropped from one that is soft for another reason.
+    static func hasAppearance(_ window: NSWindow) -> Bool? {
+        guard window.responds(to: NSSelectorFromString("hasKeyAppearance")) else { return nil }
+        return window.value(forKey: "hasKeyAppearance") as? Bool
+    }
+
     /// Gives `window` the key appearance. False, and nothing done, if the method is missing.
     @discardableResult
     func acquire(on window: NSWindow) -> Bool {

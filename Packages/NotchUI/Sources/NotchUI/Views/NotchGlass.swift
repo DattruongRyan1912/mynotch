@@ -43,9 +43,12 @@ nonisolated extension NotchSurface {
 
 /// What glass the notch asks for, as a value: whether the notch and its bubbles share a container, and for each shape its name
 /// in the morph namespace and its `Glass`. The root view and the bubbles draw from it, so a test that reads it reads what is
-/// drawn. With the usual shape (`slab`) it does not depend on the notch's state: the notch is one shape whose glass is the same
-/// closed, collapsed, open or showing a toast, so nothing about it is rebuilt while it morphs. With `tiles` the open notch is made
-/// of other shapes instead (`tiles`), and only then.
+/// drawn. The notch's own shape is glass in every state and in every shape, because only what is inside a view that carries the
+/// glass is drawn above it: the collapsed notch's text and a toast's content are inside it, and with the glass behind the view
+/// instead they sat under the glass and were blurred. With the usual shape (`slab`) it does not depend on the notch's state, so
+/// nothing about it is rebuilt while it morphs. With `tiles` the open notch's own glass is `Glass.identity` (nothing) and the
+/// tab bar's capsule and the content's tile, which are glass in every state and sit inside the collapsed notch while it is not
+/// open, come out of it.
 nonisolated struct NotchGlassPlan: Equatable, Sendable {
     /// One glass shape: its name in the namespace and what it is made of.
     struct Shape: Equatable, Sendable {
@@ -53,15 +56,14 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
         let glass: Glass
     }
 
-    /// The open notch with `tiles`: the tab bar's capsule and the tile that holds the tab's content. Their glass is `Glass.identity`,
-    /// which draws nothing, until the open notch has grown (`NotchGlassPlan.tilesDelay`) and again once it is not open (a toast over
-    /// a tab keeps the tab's views alive and hidden), so the views and what they hold keep their identity as the notch opens and
-    /// closes, and are glass only when the notch's own glass is not.
+    /// With `tiles`: the tab bar's capsule and the tile that holds the tab's content. Their glass is the notch's in every state, so
+    /// the views, and what they hold, are the same ones as the notch opens and closes; whether they are out of the notch or inside
+    /// it is a matter of their frames (`NotchTilesLayout`).
     struct Tiles: Equatable, Sendable {
         let tabBar: Shape
         let content: Shape
-        /// The notch's glass is `Glass.identity` and these are real glass.
-        let isShown: Bool
+        /// The notch is open: its own glass is `Glass.identity`, and the tiles are where they were made to be.
+        let isOpen: Bool
     }
 
     /// No glass at all: the classic look.
@@ -88,13 +90,6 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
     /// the gaps part of the window.
     static let hitOpacity = 0.01
 
-    /// How long the open notch keeps its own glass while it grows, before it gives way to the tiles: about as long as its spring takes
-    /// to come to rest. So the glass never goes while the notch is still growing, which left a stretch with no glass at all.
-    static let tilesDelay = Duration.milliseconds(300)
-
-    /// The animation of the notch's glass giving way to the tiles.
-    static let tilesSwap = Animation.easeInOut(duration: 0.2)
-
     /// The radius of a shape inside another one that is `inset` away from its edge: the outer radius less that gap, so the two
     /// curves are concentric. Never below 0.
     static func concentricRadius(outer: CGFloat, inset: CGFloat) -> CGFloat {
@@ -104,14 +99,14 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
     let shape: NotchGlassShape
     /// Whether the notch and its bubbles are wrapped in one `GlassEffectContainer`.
     let usesContainer: Bool
-    /// The notch's own shape: nil in the classic look. With `tiles` its glass is `Glass.identity` while the tiles are shown.
+    /// The notch's own shape: nil only in the classic look. With `tiles` its glass is `Glass.identity` while the notch is open.
     let notch: Shape?
     /// The bubbles' shapes, in the order of the bubbles.
     let bubbles: [Shape]
-    /// The open notch's tiles; nil unless the shape is `tiles`.
+    /// The tab bar's capsule and the content's tile; nil unless the shape is `tiles`.
     let tiles: Tiles?
-    /// The black layer the notch's backdrop draws inside its whole shape: with `tiles` and the notch open, the faint veil that keeps
-    /// the gaps part of the window; nothing otherwise.
+    /// The black layer under the open notch, inside its whole shape: with `tiles` and the notch open, the faint veil that keeps the
+    /// gaps part of the window; nothing otherwise.
     let veil: Double
 
     var containerSpacing: CGFloat? { usesContainer ? Self.containerSpacing : nil }
@@ -126,11 +121,8 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
 
     /// The plan for `surface` with a bubble for each of `bubbleIDs` (the `ActivitySlot.id`s), in `style`, for the notch open or not.
     /// The notch's glass is not interactive: it is a surface that holds controls, not a control. A bubble is a button, so its glass
-    /// is. With `tiles` the open notch shows them once `tilesSettled` (the root view says so `tilesDelay` after it opens).
-    init(
-        surface: NotchSurface, bubbleIDs: [String], accent: Color, style: NotchGlassStyle = .default, isOpen: Bool = false,
-        tilesSettled: Bool = true
-    ) {
+    /// is.
+    init(surface: NotchSurface, bubbleIDs: [String], accent: Color, style: NotchGlassStyle = .default, isOpen: Bool = false) {
         guard let notchGlass = surface.glass(accent: accent, interactive: false, clarity: style.clarity),
               let bubbleGlass = surface.glass(accent: accent, interactive: true, clarity: style.clarity)
         else {
@@ -141,11 +133,9 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
         usesContainer = true
         bubbles = bubbleIDs.map { Shape(id: .bubble($0), glass: bubbleGlass) }
         if style.shape == .tiles {
-            let shown = isOpen && tilesSettled
-            notch = Shape(id: .notch, glass: shown ? .identity : notchGlass)
+            notch = Shape(id: .notch, glass: isOpen ? .identity : notchGlass)
             tiles = Tiles(
-                tabBar: Shape(id: .tabBar, glass: shown ? notchGlass : .identity),
-                content: Shape(id: .content, glass: shown ? notchGlass : .identity), isShown: shown
+                tabBar: Shape(id: .tabBar, glass: notchGlass), content: Shape(id: .content, glass: notchGlass), isOpen: isOpen
             )
             veil = isOpen ? Self.hitOpacity : 0
         } else {
@@ -172,20 +162,6 @@ extension View {
             } else {
                 glassEffect(planned.glass, in: shape)
             }
-        } else {
-            self
-        }
-    }
-
-    /// The notch's own glass drawn behind the view, as a layer of its own, for `tiles`: its glass gives way to the tiles' and comes back,
-    /// and the view above it, with the whole notch's content, must not be swapped for another one when it does, as glass that is a
-    /// modifier of the view would swap it. `enabled` is constant for a notch (the shape is `tiles`); the glass inside is
-    /// `Glass.identity` while the tiles are shown. The view itself, with nothing added, when not enabled.
-    @ViewBuilder func notchGlassLayer<S: Shape>(
-        _ planned: NotchGlassPlan.Shape?, in shape: S, namespace: Namespace.ID?, enabled: Bool
-    ) -> some View {
-        if enabled {
-            background { Color.clear.notchGlass(planned, in: shape, namespace: namespace) }
         } else {
             self
         }

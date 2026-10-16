@@ -13,10 +13,8 @@ import Testing
     let glass = NotchSurface.liquidGlass(tinted: false)
     let tinted = NotchSurface.liquidGlass(tinted: true)
 
-    func plan(
-        _ surface: NotchSurface, _ style: NotchGlassStyle = .default, bubbles: [String] = [], open: Bool = false, settled: Bool = true
-    ) -> NotchGlassPlan {
-        NotchGlassPlan(surface: surface, bubbleIDs: bubbles, accent: accent, style: style, isOpen: open, tilesSettled: settled)
+    func plan(_ surface: NotchSurface, _ style: NotchGlassStyle = .default, bubbles: [String] = [], open: Bool = false) -> NotchGlassPlan {
+        NotchGlassPlan(surface: surface, bubbleIDs: bubbles, accent: accent, style: style, isOpen: open)
     }
 
     // MARK: the settings
@@ -163,7 +161,6 @@ import Testing
             let style = NotchGlassStyle(clarity: clarity, shape: .slab)
             let closed = plan(glass, style, bubbles: ["a"], open: false)
             #expect(closed == plan(glass, style, bubbles: ["a"], open: true), "the slab does not depend on the state")
-            #expect(closed == plan(glass, style, bubbles: ["a"], open: true, settled: false))
             #expect(closed.notch?.id == .notch)
             #expect(closed.tiles == nil)
             #expect(closed.panelHasGlass)
@@ -174,45 +171,48 @@ import Testing
 
     // MARK: the tiles
 
-    @Test func withTilesTheOpenNotchHasNoGlassOfItsOwnOnceSettledAndOneShapeEachForTheTabBarAndTheContent() throws {
-        let plan = plan(glass, NotchGlassStyle(shape: .tiles), open: true, settled: true)
-        #expect(plan.shape == .tiles)
-        #expect(!plan.panelHasGlass, "no glass on the panel itself")
-        #expect(plan.notch?.glass == Glass.identity)
-        let tiles = try #require(plan.tiles)
-        #expect(tiles.isShown)
-        #expect(tiles.tabBar == .init(id: .tabBar, glass: Glass.regular))
-        #expect(tiles.content == .init(id: .content, glass: Glass.regular))
-        #expect(plan.shapes.map(\.id) == [.notch, .tabBar, .content])
-        #expect(plan.usesContainer, "they are in the notch's family, which is what lets them morph with its shape")
-        #expect(plan.containerSpacing == NotchGlassPlan.containerSpacing)
+    @Test func withTilesTheNotchKeepsItsGlassShapeInEveryStateAndItIsNothingOnlyWhileOpen() throws {
+        // The shape is there in every state (content is only drawn above glass when it is inside the view that carries it), and
+        // its glass is the identity, which draws nothing, only while the notch is open and the tiles have come out of it.
+        for clarity in NotchGlassClarity.allCases {
+            let style = NotchGlassStyle(clarity: clarity, shape: .tiles)
+            let closed = plan(glass, style, bubbles: ["a"], open: false)
+            let open = plan(glass, style, bubbles: ["a"], open: true)
+            #expect(closed.notch?.id == .notch && open.notch?.id == .notch)
+            #expect(closed.notch?.glass == clarity.glass)
+            #expect(closed.panelHasGlass)
+            #expect(open.notch?.glass == Glass.identity)
+            #expect(!open.panelHasGlass, "no glass of its own while the tiles are out")
+        }
     }
 
-    @Test func whileTheOpenNotchGrowsItKeepsItsOwnGlassSoThereIsNoStretchWithNoGlassAtAll() throws {
-        let growing = plan(glass, NotchGlassStyle(shape: .tiles), open: true, settled: false)
-        #expect(growing.panelHasGlass)
-        #expect(growing.notch?.glass == Glass.regular)
-        let tiles = try #require(growing.tiles)
-        #expect(!tiles.isShown)
-        #expect(tiles.tabBar.glass == Glass.identity && tiles.content.glass == Glass.identity)
-        // At every moment of the opening one of the two is real glass: the notch's, then the tiles'.
-        let settled = plan(glass, NotchGlassStyle(shape: .tiles), open: true, settled: true)
-        #expect(growing.panelHasGlass != (settled.tiles?.isShown == false))
-        #expect(growing.panelHasGlass || settled.tiles?.isShown == true)
-        #expect(NotchGlassPlan.tilesDelay >= .milliseconds(200) && NotchGlassPlan.tilesDelay <= .milliseconds(500), "about the notch's spring")
-        #expect(growing.veil == NotchGlassPlan.hitOpacity, "the gaps are part of the window from the first moment")
+    @Test func theTilesAreGlassInEveryStateAndSoAreTheSameViewsWhetherOrNotTheNotchIsOpen() throws {
+        for open in [false, true] {
+            let plan = plan(glass, NotchGlassStyle(shape: .tiles), open: open)
+            let tiles = try #require(plan.tiles)
+            #expect(tiles.isOpen == open)
+            #expect(tiles.tabBar == .init(id: .tabBar, glass: Glass.regular), "open: \(open)")
+            #expect(tiles.content == .init(id: .content, glass: Glass.regular), "open: \(open)")
+            #expect(plan.shapes.map(\.id) == [.notch, .tabBar, .content])
+            #expect(plan.shape == .tiles)
+            #expect(plan.usesContainer, "they are in the notch's family, which is what lets them blend and split with its shape")
+            #expect(plan.containerSpacing == NotchGlassPlan.containerSpacing)
+        }
     }
 
-    @Test func whenTheNotchIsNotOpenTheNotchsGlassIsBackAndTheTilesDrawNothing() throws {
+    @Test func theSlabAndTheClassicLookHaveNoTilesAtAll() {
+        for open in [false, true] {
+            #expect(plan(glass, NotchGlassStyle(shape: .slab), open: open).tiles == nil)
+            #expect(plan(.solid, NotchGlassStyle(shape: .tiles), open: open).tiles == nil)
+        }
+    }
+
+    @Test func whenTheNotchIsNotOpenItsGlassAndTheBubblesAreTheSlabsAndTheTilesAreUnderIt() throws {
         let closed = plan(glass, NotchGlassStyle(clarity: .clear, shape: .tiles), bubbles: ["a"], open: false)
         let slab = plan(glass, NotchGlassStyle(clarity: .clear, shape: .slab), bubbles: ["a"], open: false)
-        #expect(closed.notch == slab.notch, "collapsed notch: unchanged")
+        #expect(closed.notch == slab.notch, "collapsed notch: its own glass is the slab's")
         #expect(closed.bubbles == slab.bubbles, "bubbles: unchanged")
         #expect(closed.veil == 0)
-        let tiles = try #require(closed.tiles)
-        #expect(!tiles.isShown)
-        #expect(tiles.tabBar.glass == Glass.identity, "a tab kept alive under a toast has no glass")
-        #expect(tiles.content.glass == Glass.identity)
     }
 
     @Test func theTilesTakeTheClarityAndTheTintLikeTheNotchDoes() {
@@ -233,7 +233,7 @@ import Testing
         #expect(Set(ids).count == 4)
         for open in [false, true] {
             let tiles = plan(glass, NotchGlassStyle(shape: .tiles), bubbles: ["a"], open: open).tiles
-            #expect(tiles?.tabBar.id == .tabBar && tiles?.content.id == .content, "the same names whether shown or not, so the views keep them")
+            #expect(tiles?.tabBar.id == .tabBar && tiles?.content.id == .content, "the same names open or not, so the views keep them")
         }
     }
 
@@ -307,20 +307,68 @@ import Testing
         #expect(settings.value(InterfaceSettings.glassShape) == .slab)
     }
 
-    @Test func noSourceFileNamesADebugGlassKeyButTheSupportOne() throws {
-        // A guard on the source: a `debug.glass.*` key read from the defaults would be a spike switch again.
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let sources = root.appending(path: "Sources")
-        let files = try #require(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
-        let pattern = try Regex("debug\\.glass\\.([A-Za-z]+)")
-        var names: Set<String> = []
-        var count = 0
-        for case let url as URL in files where url.pathExtension == "swift" {
-            count += 1
-            let text = try String(contentsOf: url, encoding: .utf8)
-            for match in text.matches(of: pattern) { names.insert(String(match.output[1].substring ?? "")) }
+    @Test func theGlassIsDrawnActiveUnlessTheSwitchSaysOtherwise() {
+        // The positive meaning, which `ScreenManager` hands every notch it makes: an inverted `!` there would flip the whole feature.
+        func draws(_ value: Any?) -> Bool {
+            let defaults = makeIsolatedDefaults()
+            if let value { defaults.set(value, forKey: NotchGlassSupport.inactiveKey) }
+            return NotchGlassSupport.drawsActiveGlass(defaults)
         }
-        #expect(count > 30, "the sources were found")
+        #expect(draws(nil))
+        #expect(draws(0) && draws("no") && draws("") && draws(2))
+        #expect(!draws(1) && !draws("true") && !draws(true) && !draws("yes"))
+        #expect(NotchGlassSupport.drawsActiveGlass(makeIsolatedDefaults()) == !NotchGlassSupport.keepsGlassInactive(makeIsolatedDefaults()))
+    }
+
+    /// Every Swift source of the app and of its packages (not the tests, not what is built or checked out): the repository's `App`, and
+    /// each `Sources` of `Packages/*` and `Packages/Modules/*`. A root that is not there (a copy of one package) is skipped.
+    func sourceFiles() throws -> (all: [URL], notchUI: Int) {
+        let packages = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let manager = FileManager.default
+        var roots = [packages.appending(path: "NotchUI/Sources"), packages.deletingLastPathComponent().appending(path: "App")]
+        for group in [packages, packages.appending(path: "Modules")] {
+            for name in (try? manager.contentsOfDirectory(atPath: group.path)) ?? [] where name != "Modules" {
+                roots.append(group.appending(path: "\(name)/Sources"))
+            }
+        }
+        var files: [URL] = []
+        var notchUI = 0
+        for root in Set(roots) where manager.fileExists(atPath: root.path) {
+            guard let enumerator = manager.enumerator(at: root, includingPropertiesForKeys: nil) else { continue }
+            for case let url as URL in enumerator where url.pathExtension == "swift" && !url.path.contains("/.build/") {
+                files.append(url)
+                if root.path.hasSuffix("NotchUI/Sources") { notchUI += 1 }
+            }
+        }
+        return (files, notchUI)
+    }
+
+    @Test func noSourceFileOfTheAppNamesADebugGlassKeyButTheSupportOneOrBuildsOne() throws {
+        // A guard on the source: a `debug.glass.*` key read from the defaults would be a spike switch again, in NotchUI, in the App or in
+        // a module, and one built by interpolation would not even be found by name.
+        let (files, notchUI) = try sourceFiles()
+        #expect(notchUI > 30, "NotchUI's sources were found")
+        let named = try Regex("debug\\.glass\\.([A-Za-z]+)")
+        let interpolated = try Regex("debug\\.glass\\.\\\\\\(")
+        var names: Set<String> = []
+        for url in files {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            for match in text.matches(of: named) { names.insert(String(match.output[1].substring ?? "")) }
+            #expect(text.matches(of: interpolated).isEmpty, "\(url.lastPathComponent) builds a debug.glass key")
+        }
         #expect(names == ["inactive"], "\(names)")
+        #expect(files.count > notchUI, "more than NotchUI was read (the App and the modules)")
+    }
+
+    @Test func theNotchsGlassIsNeverDrawnInALayerBehindItsContentAgain() throws {
+        // Content is only drawn above glass when it is inside the view that carries the glass; a `background { … glassEffect … }`
+        // layer put it under the glass and blurred the collapsed notch's text.
+        let (files, _) = try sourceFiles()
+        for url in files where url.path.contains("/NotchUI/Sources/") {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            #expect(!text.contains("notchGlassLayer"), "\(url.lastPathComponent)")
+            #expect(text.matches(of: try Regex("background\\s*\\{[^}]*glassEffect")).isEmpty, "\(url.lastPathComponent)")
+        }
     }
 }

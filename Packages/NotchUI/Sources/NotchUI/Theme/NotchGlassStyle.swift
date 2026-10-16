@@ -22,8 +22,9 @@ nonisolated public enum NotchGlassShape: String, Codable, Sendable, CaseIterable
     /// One piece of glass behind everything. The default.
     case slab
     /// No glass on the panel itself: the tab bar sits in one glass capsule and the module's content in one glass tile, with the
-    /// desktop showing in the gap between them (as Control Center's tiles sit on the wallpaper). Only while the notch is open: the
-    /// collapsed notch, a toast and the bubbles are glass as before.
+    /// desktop showing in the gap between them (as Control Center's tiles sit on the wallpaper). They come straight out of the
+    /// collapsed notch as it opens, and merge back into it as it closes. Only while the notch is open: the collapsed notch, a toast
+    /// and the bubbles are glass as before.
     case tiles
 }
 
@@ -45,6 +46,12 @@ nonisolated struct NotchGlassStyle: Equatable, Sendable {
 /// It is read once, when a notch is made, and is not shown in the settings. It is the only `debug.glass.*` key read.
 nonisolated enum NotchGlassSupport {
     static let inactiveKey = "debug.glass.inactive"
+
+    /// Whether the notch's glass is to be drawn as an active window's: the positive meaning of the switch, which is what `ScreenManager`
+    /// hands every notch it makes. True unless the key says otherwise.
+    static func drawsActiveGlass(_ defaults: UserDefaults) -> Bool {
+        !keepsGlassInactive(defaults)
+    }
 
     /// Whether `defaults` asks for the glass to stay subdued: 1, true or yes, as a number or a string. Anything else, and a missing
     /// key, is no.

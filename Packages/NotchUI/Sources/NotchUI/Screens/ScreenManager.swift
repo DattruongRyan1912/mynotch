@@ -113,7 +113,7 @@ public final class ScreenManager {
                     },
                     theme: theme,
                     // Once for this notch: the glass is drawn as an active window's unless support turned that off.
-                    drawsActiveGlass: !NotchGlassSupport.keepsGlassInactive(.standard),
+                    drawsActiveGlass: NotchGlassSupport.drawsActiveGlass(.standard),
                     feel: { [interface] in interface.feel($0) }
                 )
             }

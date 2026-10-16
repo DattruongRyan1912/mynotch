@@ -57,10 +57,9 @@ private struct OpenNotch {
     let model: NotchViewModel
     let settings: SettingsStore
 
-    /// Builds it and lays it out. `tilesDelay` is how long the open notch keeps its own glass before the tiles replace it.
+    /// Builds it and lays it out.
     static func make(
-        look: NotchLook, clarity: NotchGlassClarity = .balanced, shape: NotchGlassShape = .slab, tinted: Bool = false, tabs: Int = 1,
-        tilesDelay: Duration = NotchGlassPlan.tilesDelay
+        look: NotchLook, clarity: NotchGlassClarity = .balanced, shape: NotchGlassShape = .slab, tinted: Bool = false, tabs: Int = 1
     ) async throws -> OpenNotch {
         let geometry = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig())
         let frame = ProbeFrame()
@@ -79,27 +78,37 @@ private struct OpenNotch {
         model.open(tab: "probe")
         try #require(model.displayState == .open("probe"))
         let hosting = NSHostingView(
-            rootView: NotchRootView(
-                model: model, activities: harness.activities, registry: harness.registry, geometry: geometry, theme: theme, tilesDelay: tilesDelay
-            )
+            rootView: NotchRootView(model: model, activities: harness.activities, registry: harness.registry, geometry: geometry, theme: theme)
         )
         let window = NSWindow(contentRect: CGRect(origin: .zero, size: geometry.panelSize), styleMask: .borderless, backing: .buffered, defer: true)
         window.appearance = NSAppearance(named: .aqua)
         window.contentView = hosting
-        for _ in 0..<50 where frame.value == nil {
-            hosting.layoutSubtreeIfNeeded()
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        hosting.layoutSubtreeIfNeeded()
-        return OpenNotch(hosting: hosting, window: window, frame: frame, geometry: geometry, model: model, settings: harness.settings)
+        let notch = OpenNotch(hosting: hosting, window: window, frame: frame, geometry: geometry, model: model, settings: harness.settings)
+        try await notch.wait("the tab was laid out") { frame.value != nil }
+        return notch
     }
 
     func close() { window.contentView = nil }
 
-    /// Lets the run loop turn so SwiftUI applies what changed, then lays the view out.
-    func settle(_ milliseconds: Int = 150) async throws {
-        try await Task.sleep(for: .milliseconds(milliseconds))
+    /// Waits for `condition`, which is polled every 10 ms (the main actor is free while it sleeps, so SwiftUI applies what changed), and
+    /// lays the view out each time; up to ten seconds. Every positive assertion waits for what it expects, never for a stretch of the
+    /// clock.
+    func wait(_ what: String, _ condition: () -> Bool) async throws {
+        for _ in 0..<1000 {
+            hosting.layoutSubtreeIfNeeded()
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
         hosting.layoutSubtreeIfNeeded()
+        try #require(condition(), "gave up waiting: \(what)")
+    }
+
+    /// Lets the run loop turn a few times, for an assertion that nothing happened (it follows a wait for what was to happen).
+    func turn() async throws {
+        for _ in 0..<5 {
+            try await Task.sleep(for: .milliseconds(10))
+            hosting.layoutSubtreeIfNeeded()
+        }
     }
 
     /// The same point on the screen of `NotchGeometryTests.macBook14`, which is what the pointer tracking works in.
@@ -171,65 +180,59 @@ private struct OpenNotch {
         #expect(notch.frame.plan?.notch?.glass == Glass.regular)
 
         notch.settings.set(.clear, for: InterfaceSettings.glassClarity)
-        try await notch.settle()
-        #expect(notch.frame.plan?.notch?.glass == Glass.clear, "the clarity, live")
-        #expect(try #require(notch.frame.value) == slab, "and nothing moved")
+        try await notch.wait("the clear glass") { notch.frame.plan?.notch?.glass == Glass.clear }
+        #expect(try #require(notch.frame.value) == slab, "the clarity, live, and nothing moved")
 
         notch.settings.set(.tiles, for: InterfaceSettings.glassShape)
-        try await notch.settle()
-        #expect(notch.frame.plan?.shape == .tiles)
+        try await notch.wait("the tiles") { notch.frame.plan?.shape == .tiles && notch.frame.value?.minX != slab.minX }
         let tiled = try #require(notch.frame.value)
         #expect(abs(tiled.minX - (slab.minX + pad)) < 0.01, "the content is in its tile now: \(tiled)")
 
         notch.settings.set(.slab, for: InterfaceSettings.glassShape)
-        try await notch.settle()
-        #expect(notch.frame.plan?.tiles == nil)
+        try await notch.wait("the slab again") { notch.frame.plan?.tiles == nil && notch.frame.value == slab }
         #expect(try #require(notch.frame.value) == slab, "and back")
     }
 
-    // MARK: the open notch's glass gives way to the tiles once it has grown
+    // MARK: the glass is the notch's in every state, and the tiles come out of it
 
-    @Test func theOpenNotchKeepsItsOwnGlassWhileItGrows() async throws {
-        // A delay no run of the test comes near: the notch is still "growing" however loaded the machine is.
-        let notch = try await OpenNotch.make(look: .liquidGlass, shape: .tiles, tabs: 2, tilesDelay: .seconds(30))
+    @Test func theOpenNotchHasNoGlassOfItsOwnFromTheStartAndTheTilesAreGlass() async throws {
+        let notch = try await OpenNotch.make(look: .liquidGlass, shape: .tiles, tabs: 2)
         defer { notch.close() }
-        try await notch.settle(300)
-        #expect(notch.frame.plan?.tiles?.isShown == false, "growing: not the tiles yet")
-        #expect(notch.frame.plan?.panelHasGlass == true, "the notch's own glass")
-        #expect(notch.frame.plan?.veil == NotchGlassPlan.hitOpacity)
+        // No delay: the plan the tab sees, the first one, already has the notch's glass gone and the tiles in.
+        let plan = try #require(notch.frame.plan)
+        #expect(plan.tiles?.isOpen == true)
+        #expect(!plan.panelHasGlass)
+        #expect(plan.tiles?.tabBar.glass == Glass.regular && plan.tiles?.content.glass == Glass.regular)
+        #expect(plan.veil == NotchGlassPlan.hitOpacity)
     }
 
-    @Test func onceItHasGrownTheTilesTakeOver() async throws {
-        let notch = try await OpenNotch.make(look: .liquidGlass, shape: .tiles, tabs: 2, tilesDelay: .milliseconds(30))
-        defer { notch.close() }
-        var shown = false
-        for _ in 0..<100 where !shown {
-            try await notch.settle(30)
-            shown = notch.frame.plan?.tiles?.isShown == true
-        }
-        #expect(shown, "grown: the tiles")
-        #expect(notch.frame.plan?.panelHasGlass == false)
-    }
-
-    @Test func theNotchsGlassIsBackTheMomentItIsNotOpenAndTheTabIsNotRebuilt() async throws {
+    @Test func theNotchsGlassIsBackTheMomentAToastCoversTheTabAndTheTabIsNotRebuilt() async throws {
         for shape in NotchGlassShape.allCases {
-            let notch = try await OpenNotch.make(look: .liquidGlass, shape: shape, tabs: 2, tilesDelay: .milliseconds(20))
+            let notch = try await OpenNotch.make(look: .liquidGlass, shape: shape, tabs: 2)
             defer { notch.close() }
-            try await notch.settle(600)
-            if shape == .tiles { #expect(notch.frame.plan?.panelHasGlass == false, "settled tiles") }
             #expect(notch.frame.appeared == 1, "\(shape): it appeared once")
             // A toast covers the tab, which stays alive under it, hidden.
             notch.model.showToast(AnyView(Color.clear), duration: .seconds(60))
-            try await notch.settle()
-            #expect(notch.model.displayState == .toast)
-            #expect(notch.frame.plan?.panelHasGlass == true, "\(shape): the notch's glass is back for the toast")
-            #expect(notch.frame.plan?.tiles?.isShown != true)
+            try await notch.wait("the toast's glass") { notch.model.displayState == .toast && notch.frame.plan?.panelHasGlass == true }
+            #expect(notch.frame.plan?.tiles?.isOpen != true)
             notch.model.open(tab: "probe")
-            try await notch.settle(800)
-            #expect(notch.model.displayState == .open("probe"))
+            try await notch.wait("the open notch again") { notch.model.displayState == .open("probe") && notch.frame.plan?.tiles?.isOpen != false }
+            if shape == .tiles { try await notch.wait("no glass of its own") { notch.frame.plan?.panelHasGlass == false } }
+            try await notch.turn()
             #expect(notch.frame.appeared == 1, "\(shape): the toast and back did not rebuild the tab (\(notch.frame.appeared))")
-            if shape == .tiles { #expect(notch.frame.plan?.tiles?.isShown == true, "and the tiles are back once it has grown") }
         }
+    }
+
+    @Test func theTabsKeepTheirViewsWhateverTheNotchIsDoingWithTiles() async throws {
+        let notch = try await OpenNotch.make(look: .liquidGlass, shape: .tiles, tabs: 2)
+        defer { notch.close() }
+        // A look change and back (what the glass settings are next to) is the one thing that rebuilds; a clarity change is not.
+        notch.settings.set(.clear, for: InterfaceSettings.glassClarity)
+        try await notch.wait("clear") { notch.frame.plan?.tiles?.content.glass == Glass.clear }
+        notch.settings.set(.balanced, for: InterfaceSettings.glassClarity)
+        try await notch.wait("balanced") { notch.frame.plan?.tiles?.content.glass == Glass.regular }
+        try await notch.turn()
+        #expect(notch.frame.appeared == 1, "a change of clarity does not rebuild the tab")
     }
 
     // MARK: the gaps are part of the notch
@@ -281,5 +284,102 @@ private struct OpenNotch {
         let classic = try await OpenNotch.make(look: .classic, clarity: .clear, shape: .tiles, tabs: 2)
         defer { classic.close() }
         #expect(try alpha(classic, at: gapPoint(classic)) > 0.99)
+    }
+}
+
+/// Where the tiles are, as numbers (`NotchTilesLayout`): the collapsed notch's body when the notch is not open, the tab page's rects
+/// when it is, and the tab bar's width that the capsule is made from.
+@Suite struct NotchTilesLayoutMathTests {
+    let geometry = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig())
+
+    var openSize: CGSize { geometry.shapeSize(for: .open(nil), contentHeight: NotchTab.defaultHeight) }
+
+    func open(tabs: Int) -> NotchTilesLayout {
+        NotchTilesLayout.open(
+            shapeSize: openSize, notchHeight: geometry.notchSize.height, topRadius: geometry.cornerRadii(for: .open(nil)).top, tabCount: tabs
+        )
+    }
+
+    func rest(_ state: NotchState, hasTabBar: Bool = true) -> NotchTilesLayout {
+        NotchTilesLayout.rest(collapsedSize: geometry.shapeSize(for: state), topRadius: geometry.cornerRadii(for: state).top, hasTabBar: hasTabBar)
+    }
+
+    // MARK: open
+
+    @Test func theOpenTilesAreTheTabPagesRectsWithTheCapsuleOverTheTile() {
+        let pad = NotchTokens.padding, gap = NotchGlassPlan.tileGap
+        let layout = open(tabs: 3)
+        let bar = layout.tabBar
+        #expect(bar?.size == CGSize(width: TabBarMetrics.width(count: 3) + 16, height: 30))
+        #expect(bar?.top == geometry.notchSize.height, "under the notch's body")
+        #expect(layout.content.top == geometry.notchSize.height + 30 + gap)
+        #expect(layout.content.size.width == openSize.width - 2 * (8 + pad), "inside the ears and the padding")
+        #expect(layout.content.top + layout.content.size.height == openSize.height - pad, "the padding above the notch's bottom")
+        // Concentric corners, so the tile's radius is the notch's less the padding.
+        #expect(NotchGlassPlan.concentricRadius(outer: geometry.cornerRadii(for: .open(nil)).bottom, inset: pad) == 10)
+    }
+
+    @Test func withOneTabThereIsNoCapsuleAndTheTileStartsUnderTheNotchsBody() {
+        let layout = open(tabs: 1)
+        #expect(layout.tabBar == nil)
+        #expect(layout.content.top == geometry.notchSize.height)
+        #expect(layout.content.size.height == openSize.height - NotchTokens.padding - geometry.notchSize.height)
+        #expect(open(tabs: 0).tabBar == nil)
+    }
+
+    @Test func theCapsuleIsAsWideAsTheRealTabBarPlusItsInset() async throws {
+        for count in [2, 3, 5, 8] {
+            let tabs = (0..<count).map { NotchTab(id: ModuleID(stringLiteral: "t\($0)"), title: "T", systemImage: "circle", content: AnyView(EmptyView())) }
+            let hosting = NSHostingView(rootView: TabBar(tabs: tabs, selected: nil) { _ in })
+            #expect(abs(hosting.fittingSize.width - TabBarMetrics.width(count: count)) < 0.5, "\(count) tabs")
+            #expect(abs(hosting.fittingSize.height - TabBarMetrics.iconSize.height) < 0.5)
+        }
+    }
+
+    // MARK: rest
+
+    @Test func theRestingTilesAreTheBodyOfTheCollapsedNotchOfEachStateWithTheCapsuleKept() {
+        for state in [NotchState.closed, .compact] {
+            let collapsed = geometry.shapeSize(for: state)
+            let ears = 2 * geometry.cornerRadii(for: state).top
+            let layout = rest(state)
+            let body = NotchTilesLayout.Tile(size: CGSize(width: collapsed.width - ears, height: collapsed.height), top: 0)
+            #expect(layout.content == body, "\(state)")
+            #expect(layout.tabBar == body, "the capsule starts from the same body")
+            #expect(rest(state, hasTabBar: false).tabBar == nil)
+        }
+    }
+
+    @Test func theRestingTilesAreInsideTheCollapsedNotchSoTheirGlassIsInsideItsOwn() {
+        for state in [NotchState.closed, .compact] {
+            let collapsed = geometry.shapeSize(for: state)
+            for tile in [rest(state).content, rest(state).tabBar!] {
+                #expect(tile.size.width <= collapsed.width && tile.size.height <= collapsed.height)
+                #expect(tile.top >= 0 && tile.top + tile.size.height <= collapsed.height)
+            }
+        }
+        // With a hardware notch the closed notch's body is the cutout's width, which is where the tiles start.
+        #expect(rest(.closed).content.size.width == geometry.notchSize.width)
+    }
+
+    @Test func theTilesStartAtTheCollapsedNotchAndEndAtTheTabPagesRects() {
+        // What the spring runs between: the layout before the notch opens and the one after, on the same tiles.
+        let start = rest(.compact), end = open(tabs: 2)
+        #expect(start != end)
+        #expect(start.content.size.width < end.content.size.width && start.content.size.height < end.content.size.height)
+        #expect(start.content.top == 0 && end.content.top > 0)
+        #expect(start.tabBar?.size.width ?? 0 > end.tabBar?.size.width ?? .infinity, "the capsule narrows as it comes out")
+    }
+
+    @Test func aTabOfAnotherHeightMovesTheFinalRectsSoTheSpringFollowsIt() {
+        let tall = NotchTilesLayout.open(
+            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 240), notchHeight: geometry.notchSize.height, topRadius: 8, tabCount: 2
+        )
+        let short = NotchTilesLayout.open(
+            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 120), notchHeight: geometry.notchSize.height, topRadius: 8, tabCount: 2
+        )
+        #expect(tall != short, "the animation is keyed on the layout, which differs")
+        #expect(tall.content.size.height - short.content.size.height == 120)
+        #expect(tall.tabBar == short.tabBar)
     }
 }

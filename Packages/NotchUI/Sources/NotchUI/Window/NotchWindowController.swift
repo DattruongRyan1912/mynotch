@@ -44,6 +44,10 @@ final class NotchWindowController {
     private var lastFocus = false
     /// Hands the keyboard back to the app in front; see `KeyboardReturn`.
     private let keyboardHandBack = KeyboardHandBack()
+    /// Whether the last observation saw the notch open, so that only the moment it opens is logged.
+    private var wasOpen = false
+    /// Whether the log already said that the active glass is wanted but this macOS has no way to give it.
+    private var loggedActiveGlassUnavailable = false
     /// Strip height seen by the last observation, so only a show or hide is logged.
     private var lastStripHeight: CGFloat = 0
     /// Which activities were primary and in bubbles at the last observation, so only a change is logged.
@@ -78,6 +82,7 @@ final class NotchWindowController {
         self.swipeToOpen = swipeToOpen
         self.theme = theme
         self.drawsActiveGlass = drawsActiveGlass
+        NotchLog.record("activeGlass support drawsActiveGlass=\(drawsActiveGlass) display=\(displayID)")
         self.feel = feel
         screenFrame = screen.frame
         geometry = NotchGeometry(screen: screen, config: config)
@@ -277,9 +282,25 @@ final class NotchWindowController {
     /// the running macOS has not got the AppKit method the appearance is made of.
     private func applyActiveGlass(_ wanted: Bool) {
         let appearance = wanted ? ActiveGlassAppearance.detect() : nil
+        if wanted, appearance == nil, !loggedActiveGlassUnavailable {
+            // Wanted and not possible: say so once, since nothing else in the log would.
+            loggedActiveGlassUnavailable = true
+            NotchLog.record("activeGlass wanted but unavailable on this macOS: the glass stays subdued")
+        }
         guard appearance != panel.activeGlass else { return }
         NotchLog.record("activeGlass \(wanted ? "on" : "off") available=\(appearance != nil) isKey=\(panel.isKeyWindow)")
         panel.activeGlass = appearance
+    }
+
+    /// When the notch opens by hover, what the panel's key appearance is: if the notch then looks soft and this says `false`, the flag was
+    /// dropped (a Space switch, a lock, a sleep); if it says `true`, only what is drawn was. Debug builds only (`NotchLog`); states and
+    /// flags, nothing of a tab's content.
+    private func logKeyAppearance(opening state: NotchState, onPurpose: Bool) {
+        let isOpen: Bool = if case .open = state { true } else { false }
+        defer { wasOpen = isOpen }
+        guard isOpen, !wasOpen, !onPurpose else { return }
+        let flag = ActiveGlassAppearance.hasAppearance(panel).map(String.init(describing:)) ?? "n/a"
+        NotchLog.record("opened by hover hook=\(panel.activeGlass != nil) hasKeyAppearance=\(flag) isKey=\(panel.isKeyWindow) display=\(displayID)")
     }
 
     private func orderOut(_ reason: String) {
@@ -400,6 +421,7 @@ final class NotchWindowController {
                 if !observed.isDragging { self.dragTypes = [] }
                 self.applySharingType(observed.sharingType)
                 self.applyActiveGlass(observed.drawsActiveGlass)
+                self.logKeyAppearance(opening: state, onPurpose: self.model.isOpenedOnPurpose)
                 self.refreshHitTesting()
                 self.updateKeyboard(wants: observed.wantsKeyboard, focuses: observed.focusesKeyboard)
             }
