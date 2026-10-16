@@ -3,7 +3,8 @@ import MyNotchCore
 
 /// The separator status items ‹ (and, when switched on, ‹‹ for the always-hidden zone) and what drives them: the settings, a
 /// click on them and the pointer on the menu bar. The rules (lengths, timers, what is refused) are `MenuBarHider`'s; this
-/// only owns the real items and the event monitors.
+/// only owns the real items and the event monitors, and the bar under the menu bar (`MenuBarItemsBarController`) that a click
+/// opens instead of showing the hidden icons in place.
 final class MenuBarHiderController {
     /// Nothing collapses by itself for this long after the user turns the hider on: they are placing icons.
     private static let arrangingGrace: Duration = .seconds(60)
@@ -18,6 +19,8 @@ final class MenuBarHiderController {
     private var alwaysItem: NSStatusItem?
     private var separator: StatusItemSeparator?
     private let hover = MenuBarHoverMonitor()
+    /// The bar under the menu bar for the icons the notch hides; made once the rest of the controller exists.
+    private(set) var itemsBar: MenuBarItemsBarController!
     /// Whether the setting was on at the last look, so only a switch-on gets the arranging grace, not a launch.
     private var wasEnabled: Bool
     /// ⌘-dragging "‹" off the menu bar clears its `isVisible`, which is mirrored into the setting.
@@ -39,6 +42,17 @@ final class MenuBarHiderController {
         hider.onForcedExpand = { [weak self] in
             self?.notice.show("Biểu tượng MyNotch bị che nên các icon đã ẩn được hiện lại.")
         }
+        itemsBar = MenuBarItemsBarController(
+            settings: settings, scheduler: scheduler, hider: hider, notice: notice,
+            anchor: { [weak self] in self?.toggleItem?.button?.window?.frame },
+            ownFrames: { [weak self] in
+                // The separators' windows count only while they have their normal length; a long one's is not on the bar.
+                guard let self else { return [] }
+                let layout = hider.layout
+                return [toggleItem?.button?.window?.frame, layout?.hiddenSeparator, layout?.alwaysHiddenSeparator].compactMap { $0 }
+            }
+        )
+        hider.onLevelChanged = { [weak self] in self?.itemsBar.sectionsChanged() }
         observeSettings()
         observeQuitting()
     }
@@ -53,8 +67,19 @@ final class MenuBarHiderController {
         sync()
     }
 
-    /// A click on the MyNotch icon or the shortcut: hides, or shows the hidden zone.
-    func toggle() { run(hider.toggle) }
+    /// Whether a click on the MyNotch icon or ‹ opens the bar under the menu bar instead of showing the hidden icons in place.
+    var opensBar: Bool { itemsBar.isAvailable }
+
+    /// The shortcut: opens or closes the bar, or, where the bar is off, hides or shows the hidden zone.
+    func toggle() {
+        if opensBar { itemsBar.toggle() } else { toggleInPlace() }
+    }
+
+    /// A plain click: opens or closes the bar.
+    func toggleBar() { itemsBar.toggle() }
+
+    /// Hides, or shows the hidden zone in the menu bar itself: the old click, the menu entry, and the click where there is no bar.
+    func toggleInPlace() { run(hider.toggle) }
 
     /// An ⌥-click or the menu entry: shows the always-hidden zone too, or puts it away again.
     func toggleAll() { run(hider.toggleAll) }
@@ -84,10 +109,12 @@ final class MenuBarHiderController {
         Task { [weak self, settings] in
             for await _ in Observations({
                 (settings.value(MenuBarHiderSettings.enabled), settings.value(MenuBarHiderSettings.autoCollapseSeconds),
-                 settings.value(MenuBarHiderSettings.revealOnHover), settings.value(MenuBarHiderSettings.alwaysHiddenSection))
+                 settings.value(MenuBarHiderSettings.revealOnHover), settings.value(MenuBarHiderSettings.alwaysHiddenSection),
+                 settings.value(MenuBarHiderSettings.itemsBar))
             }) {
                 self?.sync()
                 self?.hider.settingsChanged()
+                self?.itemsBar.settingsChanged()
             }
         }
     }
@@ -96,10 +123,16 @@ final class MenuBarHiderController {
     /// saved, but the wait for the modules to stop can last seconds.
     private func observeQuitting() {
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.hider.revealAll() }
+            MainActor.assumeIsolated {
+                self?.itemsBar.close()
+                self?.hider.revealAll()
+            }
         }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willPowerOffNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.hider.revealAll() }
+            MainActor.assumeIsolated {
+                self?.itemsBar.close()
+                self?.hider.revealAll()
+            }
         }
     }
 
@@ -150,6 +183,8 @@ final class MenuBarHiderController {
     }
 
     private func removeSeparator() {
+        // The bar is for the icons the separators hide: with no separator there is nothing to open it from.
+        itemsBar.close()
         visibilityObservation = nil
         alwaysVisibilityObservation = nil
         stopObservingLayout()
@@ -240,9 +275,14 @@ final class MenuBarHiderController {
         layoutObservers.removeAll()
     }
 
-    /// A click on ‹ toggles like the MyNotch icon; with ⌥ the always-hidden zone too.
+    /// A click on ‹ does what a click on the MyNotch icon does: opens the bar, or, with ⌥, shows the icons in place.
     @objc private func separatorClicked() {
-        NSApp.currentEvent?.modifierFlags.contains(.option) == true ? toggleAll() : toggle()
+        let hasOption = NSApp.currentEvent?.modifierFlags.contains(.option) == true
+        switch MenuBarIcon.separatorAction(hasOption: hasOption, barInsteadOfExpanding: opensBar) {
+        case .toggleBar: toggleBar()
+        case .toggleAllIcons: toggleAll()
+        case .toggleHiddenIcons, .openMenu: toggleInPlace()
+        }
     }
 
     @objc private func alwaysSeparatorClicked() { toggleAll() }
@@ -289,10 +329,15 @@ private final class StatusItemSeparator: MenuBarSeparator {
 }
 
 extension MenuBarScreen {
-    /// The displays' menu bars as they are now. A display with a notch has a taller bar than the standard one.
+    /// The displays' menu bars as they are now. A display with a notch has a taller bar than the standard one, and a gap the notch covers.
     static func current() -> [MenuBarScreen] {
         NSScreen.screens.map {
-            MenuBarScreen(frame: $0.frame, barHeight: max($0.safeAreaInsets.top, NSStatusBar.system.thickness))
+            MenuBarScreen(
+                frame: $0.frame, barHeight: max($0.safeAreaInsets.top, NSStatusBar.system.thickness),
+                notchGap: $0.safeAreaInsets.top > 0
+                    ? MenuBarScreen.notchGap(frame: $0.frame, leftWidth: $0.auxiliaryTopLeftArea?.width, rightWidth: $0.auxiliaryTopRightArea?.width)
+                    : nil
+            )
         }
     }
 }

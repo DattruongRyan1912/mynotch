@@ -18,7 +18,7 @@ nonisolated public enum MenuBarOrder {
     }
 
     /// The first display whose bar the frame is on: its centre inside the display's width and its height touching the bar.
-    private static func screenIndex(of frame: CGRect, in screens: [MenuBarScreen]) -> Int? {
+    static func screenIndex(of frame: CGRect, in screens: [MenuBarScreen]) -> Int? {
         guard !frame.isNull, frame.width > 0, frame.height > 0 else { return nil }
         return screens.firstIndex { screen in
             let display = screen.frame

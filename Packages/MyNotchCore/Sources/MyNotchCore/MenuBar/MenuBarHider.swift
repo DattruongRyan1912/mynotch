@@ -12,6 +12,9 @@ public enum MenuBarHiderSettings {
     public static let alwaysHiddenSection = SettingKey("app.menuBarHider.alwaysHiddenEnabled", default: false)
     /// Hide when MyNotch starts instead of showing everything until the auto-collapse.
     public static let startCollapsed = SettingKey("app.menuBarHider.startCollapsed", default: false)
+    /// A click on the MyNotch icon, ‹ or the shortcut opens a bar under the menu bar with the icons the notch hides, instead of
+    /// showing the hidden section in the menu bar. ⌥-click keeps showing it in place. Needs Accessibility to list the icons.
+    public static let itemsBar = SettingKey("app.menuBarHider.itemsBar", default: true)
     /// The delays the picker offers (seconds, 0 = never). A stored value outside the list is kept and shown as well.
     public static let autoCollapseChoices = [0, 5, 10, 15, 30]
 }
@@ -69,6 +72,8 @@ public final class MenuBarHider {
     public var isCollapsed: Bool { level == .collapsed }
     /// Called after the hider showed everything by itself because the MyNotch icon was no longer on the bar.
     public var onForcedExpand: (() -> Void)?
+    /// Called after a section was shown or put away, by whatever caused it (a click, a timer, the pointer).
+    public var onLevelChanged: (() -> Void)?
 
     private let settings: SettingsStore
     private let scheduler: any Scheduler
@@ -166,6 +171,24 @@ public final class MenuBarHider {
     public func revealAll() {
         guard separator != nil else { return }
         commit(.all)
+    }
+
+    /// Where the displays and the separators are now, for the bar to tell which icons are in which zone. A separator's window counts
+    /// only while it has its normal length. Nil without a separator.
+    public var layout: MenuBarLayout? {
+        guard let separator else { return nil }
+        return MenuBarLayout(
+            screens: separator.screens,
+            hiddenSeparator: level == .collapsed ? nil : separator.separatorFrame,
+            alwaysHiddenSeparator: separator.hasAlwaysHiddenSection && level == .all ? separator.alwaysHiddenFrame : nil
+        )
+    }
+
+    /// Goes back to `target`, as the bar does after it showed the sections for a moment. Refused (false) under the same rule as
+    /// `collapse()`; being there already is a success.
+    @discardableResult
+    public func restore(to target: Level) -> Bool {
+        move(to: target)
     }
 
     /// Hides both zones. Refused (false) unless the separators are in order on one menu bar (`MenuBarOrder`).
@@ -284,6 +307,7 @@ public final class MenuBarHider {
             separator.alwaysHiddenLength = target == .all ? Self.expandedLength : Self.collapsedLength
         }
         level = target
+        onLevelChanged?()
     }
 
     private func revealByPointer() {

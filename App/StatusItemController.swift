@@ -66,7 +66,8 @@ final class StatusItemController: NSObject {
     private func observeHider() {
         Task { [weak self, settings] in
             for await _ in Observations({
-                (settings.value(MenuBarHiderSettings.enabled), settings.value(MenuBarHiderSettings.alwaysHiddenSection))
+                (settings.value(MenuBarHiderSettings.enabled), settings.value(MenuBarHiderSettings.alwaysHiddenSection),
+                 settings.value(MenuBarHiderSettings.itemsBar))
             }) {
                 self?.applyClickBehaviour()
                 self?.updateHiderEntry()
@@ -138,8 +139,8 @@ final class StatusItemController: NSObject {
         }
     }
 
-    /// Only a left click toggles (with ⌥ the always-hidden zone too); a key press, VoiceOver, a right or control click and
-    /// anything else opens the menu.
+    /// Only a left click toggles: the bar under the menu bar where there is one, otherwise the hidden icons in place, and with ⌥
+    /// always in place (the always-hidden zone too). A key press, VoiceOver, a right or control click and anything else opens the menu.
     @objc private func statusButtonClicked() {
         let event = NSApp.currentEvent
         let action = MenuBarIcon.action(
@@ -147,10 +148,12 @@ final class StatusItemController: NSObject {
             hasControl: event?.modifierFlags.contains(.control) == true,
             hasOption: event?.modifierFlags.contains(.option) == true,
             eventAge: event.map { ProcessInfo.processInfo.systemUptime - $0.timestamp } ?? .infinity,
-            isOnButton: event != nil && event?.window === item?.button?.window
+            isOnButton: event != nil && event?.window === item?.button?.window,
+            barInsteadOfExpanding: hider.opensBar
         )
         switch action {
-        case .toggleHiddenIcons: hider.toggle()
+        case .toggleBar: hider.toggleBar()
+        case .toggleHiddenIcons: hider.toggleInPlace()
         case .toggleAllIcons: hider.toggleAll()
         case .openMenu: showMenu()
         }
@@ -194,7 +197,7 @@ final class StatusItemController: NSObject {
         missingDot?.isHidden = title == nil
         item?.button?.toolTip = MenuBarIcon.toolTip(
             permissionNudge: title, hiderIsOn: hider.isEnabled,
-            alwaysHiddenSection: settings.value(MenuBarHiderSettings.alwaysHiddenSection)
+            alwaysHiddenSection: settings.value(MenuBarHiderSettings.alwaysHiddenSection), barInsteadOfExpanding: hider.opensBar
         )
         permissionItem?.title = title ?? ""
         permissionItem?.isHidden = title == nil
@@ -231,7 +234,7 @@ final class StatusItemController: NSObject {
 
     @objc private func openPermissionsAction() { openPermissions() }
 
-    @objc private func toggleHiddenIcons() { hider.toggle() }
+    @objc private func toggleHiddenIcons() { hider.toggleInPlace() }
 
     @objc private func toggleAllHiddenIcons() { hider.toggleAll() }
 

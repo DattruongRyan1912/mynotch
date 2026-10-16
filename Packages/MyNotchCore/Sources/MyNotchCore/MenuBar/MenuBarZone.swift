@@ -5,10 +5,23 @@ import CoreGraphics
 nonisolated public struct MenuBarScreen: Equatable, Sendable {
     public let frame: CGRect
     public let barHeight: CGFloat
+    /// The stretch of the display's width the notch covers, in the same x coordinates as `frame`; nil without a notch. macOS draws
+    /// no status item there, so nothing in it can be seen or clicked.
+    public let notchGap: ClosedRange<CGFloat>?
 
-    public init(frame: CGRect, barHeight: CGFloat) {
+    public init(frame: CGRect, barHeight: CGFloat, notchGap: ClosedRange<CGFloat>? = nil) {
         self.frame = frame
         self.barHeight = barHeight
+        self.notchGap = notchGap
+    }
+
+    /// The notch's gap from the widths of the two areas beside it (`auxiliaryTopLeftArea`, `auxiliaryTopRightArea`), which are the
+    /// same on every display whatever the coordinates of the areas themselves. Nil when either is missing or they leave no gap.
+    public static func notchGap(frame: CGRect, leftWidth: CGFloat?, rightWidth: CGFloat?) -> ClosedRange<CGFloat>? {
+        guard let leftWidth, let rightWidth, leftWidth > 0, rightWidth > 0 else { return nil }
+        let lower = frame.minX + leftWidth
+        let upper = frame.maxX - rightWidth
+        return lower < upper ? lower...upper : nil
     }
 }
 
