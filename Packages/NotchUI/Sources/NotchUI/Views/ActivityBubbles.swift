@@ -79,6 +79,8 @@ private struct ActivityBubble: View {
             }
             .frame(width: diameter, height: diameter)
             .notchGlass(planned, in: Circle(), namespace: namespace)
+            // The same material as the notch's, under the bubble's glass, for the clear one.
+            .background { if plan.blursUnder && planned != nil { Circle().fill(NotchGlassPlan.blurMaterial) } }
             .glassBubbleTransition(planned: planned != nil)
             .contentShape(Circle())
         }

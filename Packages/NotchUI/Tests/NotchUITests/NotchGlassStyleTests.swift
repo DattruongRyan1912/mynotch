@@ -357,8 +357,12 @@ import Testing
             for match in text.matches(of: named) { names.insert(String(match.output[1].substring ?? "")) }
             #expect(text.matches(of: interpolated).isEmpty, "\(url.lastPathComponent) builds a debug.glass key")
         }
-        // `clearRecipe` and `clearTint` are the temporary candidates of U3g step 1 (`NotchClearGlassRecipe.swift`); step 2 removes them.
-        #expect(names == ["inactive", "clearRecipe", "clearTint", "clearMaterial"], "\(names)")
+        // The candidates for the clear glass (U3g) were keys for a while (`clearRecipe`, `clearTint`, `clearMaterial`); the chosen one is
+        // the glass now, and none is read.
+        #expect(names == ["inactive"], "\(names)")
+        for removed in ["clearRecipe", "clearTint", "clearMaterial", "NotchClearRecipe"] {
+            for url in files { #expect(!(try String(contentsOf: url, encoding: .utf8)).contains(removed), "\(url.lastPathComponent) names \(removed)") }
+        }
         #expect(files.count > notchUI, "more than NotchUI was read (the App and the modules)")
     }
 

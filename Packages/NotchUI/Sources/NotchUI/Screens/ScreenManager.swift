@@ -10,8 +10,7 @@ public final class ScreenManager {
     private let scheduler: any Scheduler
     private let interface: NotchInterface
     /// The accent and look every notch is drawn with. It also keeps the text tokens in step with the look (`NotchLookState`).
-    // Temporary (U3g): the candidates for "Trong vắt" are read from the defaults once, when the app makes its theme.
-    private lazy var theme = NotchTheme(settings: settings, lookState: .shared, clearRecipe: NotchClearRecipeSwitch(reading: .standard))
+    private lazy var theme = NotchTheme(settings: settings, lookState: .shared)
     private var controllers: [String: NotchWindowController] = [:]
     private var fullscreenDisplays: Set<CGDirectDisplayID> = []
     /// The display the user is working on, for the display mode that follows them.

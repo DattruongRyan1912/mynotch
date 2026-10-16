@@ -37,18 +37,14 @@ struct NotchTilesLayerCanaryTests {
     }
 
     func rig(
-        shape: NotchGlassShape, bubbles: Int = 0, clarity: NotchGlassClarity = .balanced, recipe: NotchClearRecipeSwitch = .default,
-        window appearance: NSAppearance.Name? = nil
+        shape: NotchGlassShape, bubbles: Int = 0, clarity: NotchGlassClarity = .balanced, window appearance: NSAppearance.Name? = nil
     ) async throws -> Rig {
         let harness = RegistryHarness([TabModule("a", order: 0), TabModule("b", order: 1)])
         await harness.registry.bootstrap()
         harness.settings.set(.liquidGlass, for: InterfaceSettings.look)
         harness.settings.set(shape, for: InterfaceSettings.glassShape)
         harness.settings.set(clarity, for: InterfaceSettings.glassClarity)
-        let theme = NotchTheme(
-            settings: harness.settings, systemAccent: { NotchAccent.Palette.blue.rgb }, notifications: NotificationCenter(), lookState: nil,
-            clearRecipe: recipe
-        )
+        let theme = NotchTheme(settings: harness.settings, systemAccent: { NotchAccent.Palette.blue.rgb }, notifications: NotificationCenter())
         let model = NotchViewModel(scheduler: harness.scheduler, availableTabs: { ["a", "b"] }, delays: { (.zero, .zero) })
         model.hasActivity = true
         harness.activities.set(
@@ -397,69 +393,66 @@ struct NotchTilesLayerCanaryTests {
         }
     }
 
-    // MARK: the candidates for the clear glass (U3g, temporary) reach the glass layers
+    // MARK: the clear glass has a material under it
 
-    /// What the window server is given for the glass: the `glassBackground` filter's blur radius and face colour matrix (the white and
-    /// black points the blurred backdrop is mapped to), whether a tint fill layer is there, and the blur radius of every material
-    /// backdrop (a `gaussianBlur` filter) under it.
-    func glassFacts(_ hosting: NSView) -> (blur: Double, white: Double, black: Double, fills: Int, materials: [Double]) {
-        var facts = (blur: -1.0, white: -1.0, black: -1.0, fills: 0, materials: [Double]())
-        _ = layers(hosting.layer) { layer in
-            let name = NSStringFromClass(type(of: layer))
-            if name == "CABackdropLayer" {
-                for case let filter as NSObject in layer.filters ?? [] {
-                    switch filter.value(forKey: "name") as? String {
-                    case "glassBackground":
-                        facts.blur = (filter.value(forKey: "inputBlurRadius") as? Double) ?? -1
-                        facts.white = (filter.value(forKey: "inputFaceColorMatrixWhite") as? Double) ?? -1
-                        facts.black = (filter.value(forKey: "inputFaceColorMatrixBlack") as? Double) ?? -1
-                    case "gaussianBlur": facts.materials.append((filter.value(forKey: "inputRadius") as? Double) ?? -1)
-                    default: break
-                    }
-                }
-            }
-            if name == "CASDFLayer", let effect = layer.value(forKey: "effect") as? NSObject, NSStringFromClass(type(of: effect)) == "CASDFFillEffect" {
-                facts.fills += 1
-            }
-            return false
+    /// The blur radius of every material (a `gaussianBlur` backdrop) in the tree, and their opacities as drawn.
+    func materials(_ hosting: NSView) -> [(radius: Double, opacity: Float)] {
+        layers(hosting.layer) { layer in
+            NSStringFromClass(type(of: layer)) == "CABackdropLayer"
+                && (layer.filters ?? []).contains { ($0 as? NSObject)?.value(forKey: "name") as? String == "gaussianBlur" }
+        }.map { layer in
+            let filter = (layer.filters ?? []).compactMap { $0 as? NSObject }.first { $0.value(forKey: "name") as? String == "gaussianBlur" }
+            return ((filter?.value(forKey: "inputRadius") as? Double) ?? -1, (layer.presentation() ?? layer).opacity)
         }
-        return facts
     }
 
-    @Test func eachCandidateForTheClearGlassReachesTheGlassTheWayItIsMeant() async throws {
-        func facts(_ clarity: NotchGlassClarity, _ recipe: NotchClearRecipe, tint: Double = 0.12, shape: NotchGlassShape = .slab) async throws -> (blur: Double, white: Double, black: Double, fills: Int, materials: [Double]) {
-            let rig = try await rig(
-                shape: shape, clarity: clarity, recipe: NotchClearRecipeSwitch(recipe: recipe, tint: tint), window: .darkAqua
-            )
-            defer { rig.window.contentView = nil }
-            if shape == .tiles {
-                rig.model.open(tab: nil, onPurpose: false)
-                try await poll("the tiles, with a material under each and the notch's own gone") { glassFacts(rig.hosting).materials.count == 2 }
+    /// The glass of Trong vắt is `Glass.clear` with a material under each of its shapes, and Cân bằng has none. The numbers are the glass
+    /// filter's (the regular glass's radius is 2 at a quarter resolution, the clear glass's 5 at a half; every material's is 60).
+    @Test func trongVangHasAMaterialUnderEveryShapeAndCanBangNone() async throws {
+        for shape in NotchGlassShape.allCases {
+            for bubbles in [0, 2] {
+                let balanced = try await rig(shape: shape, bubbles: bubbles, clarity: .balanced)
+                defer { balanced.window.contentView = nil }
+                #expect(materials(balanced.hosting).isEmpty, "\(shape), \(bubbles) bubbles: Cân bằng has no material")
+
+                let clear = try await rig(shape: shape, bubbles: bubbles, clarity: .clear)
+                defer { clear.window.contentView = nil }
+                // The notch's own and each bubble's.
+                #expect(materials(clear.hosting).map(\.radius) == Array(repeating: 60, count: 1 + bubbles), "\(shape), \(bubbles) bubbles, collapsed")
+                if shape == .tiles {
+                    clear.model.open(tab: nil, onPurpose: false)
+                    // Open: the capsule's and the tile's (the notch's own view is not in the tree), and the bubbles' while they are.
+                    try await poll("a material under each tile") { materials(clear.hosting).filter { $0.radius == 60 }.count >= 2 }
+                    try await poll("the notch's own material gone") { materials(clear.hosting).count == 2 }
+                    try await closed(clear)
+                    try await poll("the tiles' materials gone") { materials(clear.hosting).count == 1 + bubbles }
+                }
             }
-            let found = glassFacts(rig.hosting)
-            print("CANARY recipe \(clarity) \(recipe) \(shape): blur \(found.blur), white/black \(found.white)/\(found.black), fills \(found.fills), materials \(found.materials)")
-            return found
         }
-        let balanced = try await facts(.balanced, .regularLight)
-        let raw = try await facts(.clear, .raw)
-        let light = try await facts(.clear, .regularLight)
-        let tint = try await facts(.clear, .regularTint)
-        let over = try await facts(.clear, .clearOverBlur)
-        let regularOver = try await facts(.clear, .regularOverBlur)
-        // The numbers depend on the size of the glass (the open notch's are about twice these), so they are compared, not fixed. Balanced
-        // is regular glass in a dark window whatever recipe is set; today's clear glass keeps more contrast (a lower black point and a
-        // higher white point) and has a larger nominal blur radius at twice the resolution.
-        #expect(balanced.fills == 0 && balanced.materials.isEmpty && raw.fills == 0 && raw.materials.isEmpty)
-        #expect(raw.black < balanced.black && raw.white > balanced.white && raw.blur > balanced.blur)
-        // Forced light reaches the glass: the same blur, a lighter map (the window is dark).
-        #expect(light.blur == balanced.blur && light.black > balanced.black && light.white > balanced.white && light.materials.isEmpty)
-        // The tint is a fill on top of the regular glass's own map.
-        #expect(tint.blur == balanced.blur && tint.black == balanced.black && tint.white == balanced.white && tint.fills > balanced.fills)
-        // The blur recipes put a material (radius 60) under the glass and keep the glass of their own kind.
-        #expect(over.materials == [60] && over.blur == raw.blur && over.black == raw.black && over.white == raw.white)
-        #expect(regularOver.materials == [60] && regularOver.blur == balanced.blur && regularOver.black == balanced.black)
-        // The tiles carry it too: one material under each tile's glass.
-        let tiles = try await facts(.clear, .clearOverBlur, shape: .tiles)
-        #expect(tiles.materials.count == 2 && tiles.materials.allSatisfy { $0 == 60 }, "\(tiles.materials)")
+    }
+
+    /// While the tiles merge into the notch their materials fade, so that two are not one over the other where they meet: by the time
+    /// the tiles are inside the notch, theirs are gone, and the notch's own is whole from the first frame.
+    @Test func theTilesMaterialsFadeAsTheyMergeIntoTheNotchsOwn() async throws {
+        let rig = try await rig(shape: .tiles, clarity: .clear)
+        defer { rig.window.contentView = nil }
+        try await opened(rig)
+        try await poll("a material under each tile") { materials(rig.hosting).count == 2 }
+        let before = materials(rig.hosting).map(\.opacity)
+        #expect(before.allSatisfy { $0 == 1 }, "whole while open: \(before)")
+        rig.model.close()
+        let start = Date()
+        var peak = 0, faded = false
+        var firstPill: Float?
+        while Date().timeIntervalSince(start) < 1.2 {
+            try await Task.sleep(for: .milliseconds(4))
+            let now = materials(rig.hosting)
+            peak = max(peak, now.count)
+            if now.count == 3, firstPill == nil { firstPill = now.map(\.opacity).max() }
+            if now.count == 3, now.map(\.opacity).min() ?? 1 < 0.3 { faded = true }
+        }
+        #expect(peak == 3, "the notch's and the two tiles' while they merge")
+        #expect(faded, "a tile's material is mostly gone before the tile is taken out")
+        #expect(materials(rig.hosting).count == 1, "the notch's own is left")
     }
 }

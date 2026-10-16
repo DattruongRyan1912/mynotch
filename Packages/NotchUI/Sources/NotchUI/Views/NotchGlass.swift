@@ -33,9 +33,9 @@ nonisolated enum NotchGlassID: Hashable, Sendable {
 nonisolated extension NotchSurface {
     /// The `Glass` this surface draws, nil for the black and the classic blur: the balanced (regular) one, which adapts to what is
     /// behind it, or the clear one when the user chose it, tinted with `accent` at low strength when the user asks for it.
-    func glass(accent: Color, interactive: Bool, clarity: NotchGlassClarity = .balanced, recipe: NotchClearRecipeSwitch = .default) -> Glass? {
+    func glass(accent: Color, interactive: Bool, clarity: NotchGlassClarity = .balanced) -> Glass? {
         guard case .liquidGlass(let tinted) = self else { return nil }
-        var glass = clarity.glass(under: recipe)
+        var glass = clarity.glass
         if tinted { glass = glass.tint(accent.opacity(NotchTokens.glassTintOpacity)) }
         return interactive ? glass.interactive() : glass
     }
@@ -113,10 +113,13 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
     /// The black layer under the open notch, inside its whole shape: with `tiles` and the notch open, the faint veil that keeps the
     /// gaps part of the window; nothing otherwise.
     let veil: Double
-    /// Temporary (U3g): the colour scheme the notch is forced to (only by a candidate for the clear glass), and the material drawn under
-    /// the notch's and the tiles' glass. Nil for everything else.
-    let forcedScheme: ColorScheme?
-    let materialUnder: NotchBlurMaterial?
+    /// Whether a material is drawn under every shape of the family (the notch, the tiles, the bubbles): with "Trong vắt", whose glass is
+    /// the clear one and gets its blur from it.
+    let blursUnder: Bool
+
+    /// The material under the clear glass. Every SwiftUI material blurs with the same radius (60, measured in the layer tree, against 2 to
+    /// 4 in the regular glass's own filter); they differ in the saturation and the grey they add, and this is the thinnest of them.
+    static var blurMaterial: Material { .ultraThinMaterial }
 
     var containerSpacing: CGFloat? { usesContainer ? Self.containerSpacing : nil }
     var shapes: [Shape] { (notch.map { [$0] } ?? []) + bubbles + (tiles.map { [$0.tabBar, $0.content] } ?? []) }
@@ -126,24 +129,22 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
 
     private init() {
         (shape, usesContainer, notch, bubbles, tiles, veil) = (.slab, false, nil, [], nil, 0)
-        (forcedScheme, materialUnder) = (nil, nil)
+        blursUnder = false
     }
 
     /// The plan for `surface` with a bubble for each of `bubbleIDs` (the `ActivitySlot.id`s), in `style`, for the notch open or not.
     /// The notch's glass is not interactive: it is a surface that holds controls, not a control. A bubble is a button, so its glass
     /// is.
     init(surface: NotchSurface, bubbleIDs: [String], accent: Color, style: NotchGlassStyle = .default, isOpen: Bool = false) {
-        guard let notchGlass = surface.glass(accent: accent, interactive: false, clarity: style.clarity, recipe: style.clearRecipe),
-              let bubbleGlass = surface.glass(accent: accent, interactive: true, clarity: style.clarity, recipe: style.clearRecipe)
+        guard let notchGlass = surface.glass(accent: accent, interactive: false, clarity: style.clarity),
+              let bubbleGlass = surface.glass(accent: accent, interactive: true, clarity: style.clarity)
         else {
             self = .none
             return
         }
         shape = style.shape
         usesContainer = true
-        // Only "Trong vắt" has candidates.
-        forcedScheme = style.clarity == .clear ? style.clearRecipe.forcedScheme : nil
-        materialUnder = style.clarity == .clear ? style.clearRecipe.materialUnder : nil
+        blursUnder = style.clarity.blursBehind
         bubbles = bubbleIDs.map { Shape(id: .bubble($0), glass: bubbleGlass) }
         if style.shape == .tiles {
             notch = Shape(id: .notch, glass: isOpen ? .identity : notchGlass)

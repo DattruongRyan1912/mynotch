@@ -5,19 +5,20 @@ import SwiftUI
 nonisolated public enum NotchGlassClarity: String, Codable, Sendable, CaseIterable {
     /// `Glass.regular`: it adapts its tint and its text to what is behind it, so it reads on any background. The default.
     case balanced
-    /// `Glass.clear`: the wallpaper shows through almost unblurred, as in Control Center. What is behind shows sharply, so on a light
-    /// page full of text the notch's own text is hard to read; opt-in.
+    /// `Glass.clear` over a thin material (`NotchGlassPlan.blurMaterial`) drawn under it, as in Control Center: the glass keeps its clear
+    /// look (its rim and lens, and a map that keeps the backdrop's contrast), and the material blurs what is behind it, which clear glass
+    /// alone barely does. Opt-in.
     case clear
 
-    var glass: Glass { glass(under: .default) }
-
-    /// The glass under `recipe`, the temporary candidates for the clear one (U3g); the balanced glass does not read it.
-    func glass(under recipe: NotchClearRecipeSwitch) -> Glass {
+    var glass: Glass {
         switch self {
         case .balanced: .regular
-        case .clear: recipe.clearGlass
+        case .clear: .clear
         }
     }
+
+    /// Whether a material is drawn under the glass to blur what is behind it.
+    var blursBehind: Bool { self == .clear }
 }
 
 /// What the open notch's glass is made of (`interface.glassShape`).
@@ -35,8 +36,6 @@ nonisolated public enum NotchGlassShape: String, Codable, Sendable, CaseIterable
 nonisolated struct NotchGlassStyle: Equatable, Sendable {
     var clarity = NotchGlassClarity.balanced
     var shape = NotchGlassShape.slab
-    /// Temporary (U3g): what "Trong vắt" is made of. Only read when `clarity` is `clear`.
-    var clearRecipe = NotchClearRecipeSwitch.default
 
     static let `default` = NotchGlassStyle()
 }
@@ -48,8 +47,7 @@ nonisolated struct NotchGlassStyle: Equatable, Sendable {
 ///
 ///     defaults write io.lucasvu.mynotch debug.glass.inactive -int 1
 ///
-/// It is read once, when a notch is made, and is not shown in the settings. Apart from the temporary candidates for the clear glass
-/// (`NotchClearRecipe`, U3g, which step 2 removes) it is the only `debug.glass.*` key read.
+/// It is read once, when a notch is made, and is not shown in the settings. It is the only `debug.glass.*` key read.
 nonisolated enum NotchGlassSupport {
     static let inactiveKey = "debug.glass.inactive"
 
