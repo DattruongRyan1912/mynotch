@@ -6,7 +6,7 @@
 - **Commit:** `480c470` (module + móc NotchUI), `e45493e` (panel màn hình khoá theo cài đặt ẩn khỏi quay), `17fa6f7` (cửa sổ từ chối cỡ vẫn nằm trên màn hình), `302e735` (WL1: xếp cạnh hàng xóm, log), `f2b8b75` (sửa WL1: một lần hỏi, bỏ qua cửa sổ ẩn), `3c48d9c` (theo màu nhấn, rung), `964c4e7` (WL2: tạm dừng chế độ trợ năng nâng cao của app khi đặt cửa sổ).
 - **Test tự động:** 205 test ở `964c4e7`, ba lần chạy, 0 cảnh báo (95 ở `480c470`, 111 sau `17fa6f7`, 121 sau `3c48d9c`, 188 sau `302e735`, 198 sau `f2b8b75`). Mọi test dùng cửa sổ giả, không cửa sổ thật nào bị di chuyển, không sự kiện thật nào được gửi. Các lệnh Accessibility thật, bộ theo dõi chuột và phím thật và cửa sổ khung xem trước thật **chỉ được biên dịch, chưa chạy**.
 - **Kiểm thử tay:** [nhóm Chia cửa sổ trong checklist gộp](../../manual-test-checklist-all.html#window-layout). Cần quyền Accessibility.
-- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: ba chỗ `.white` của khung ô (S2 `bff89e7`; mục 9). WindowLayout 208 test. Cổ điển giữ nguyên từng điểm ảnh; cổng `verify.sh` chưa chạy cho commit này (xanh gần nhất ở `6077497`, trước nhiều commit S2). Chưa ai thấy trên kính thật.
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: ba chỗ `.white` của khung ô (S2 `bff89e7`; mục 9). WindowLayout 208 test. Cổ điển giữ nguyên từng điểm ảnh; các commit này nằm trong cổng `verify.sh` xanh ở `6077497` (17 package cộng app). Chưa ai thấy trên kính thật.
 
 ## 1. Đã xây gì
 

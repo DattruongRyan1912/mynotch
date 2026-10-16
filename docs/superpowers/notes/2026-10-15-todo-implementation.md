@@ -6,7 +6,7 @@
 - **Commit:** `463ba0a` (module), `943d82c` (quyền Lời nhắc thành tuỳ chọn, tab hiện trước khi có quyền), `b33834b` (sửa review: việc lặp, focus, hai lỗi đọc tiếng Việt), `af22a1d` (nhận ra quyền vừa cấp: mục 8).
 - **Test tự động:** 188 test trong 12 suite ở `af22a1d` (172 trong 11 suite ở `b33834b`, 142 sau `943d82c`, 138 ở `463ba0a`), ba lần chạy sạch, 0 cảnh báo. Mọi test dùng nguồn dữ liệu giả; **đường đọc và ghi EventKit thật chưa được test tự động nào chạm tới**, và cơ sở dữ liệu Lời nhắc thật không bị đụng.
 - **Kiểm thử tay:** [nhóm Việc cần làm trong checklist gộp](../../manual-test-checklist-all.html#todo). Quyền: Lời nhắc (đặt lại bằng `tccutil reset Reminders io.lucasvu.mynotch`).
-- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: sáu chỗ `.white` và scheme tối ép của tab (S2 `cf04f16`, `59ad5bd`; mục 9). Todo 191 test. Cổ điển giữ nguyên từng điểm ảnh; cổng `verify.sh` chưa chạy cho commit này (xanh gần nhất ở `6077497`, trước nhiều commit S2). Chưa ai thấy trên kính thật.
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: sáu chỗ `.white` và scheme tối ép của tab (S2 `cf04f16`, `59ad5bd`; mục 9). Todo 191 test. Cổ điển giữ nguyên từng điểm ảnh; các commit này nằm trong cổng `verify.sh` xanh ở `6077497` (17 package cộng app). Chưa ai thấy trên kính thật.
 
 ## 1. Đã xây gì
 

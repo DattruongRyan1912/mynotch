@@ -6,7 +6,7 @@
 - **Commit chính:** `09a2548` điểm nối thả file (H1), `378c5d5` sửa H1, `48430fc` Khay (H2), `e2d8575` sửa Khay vòng 1, `a21e9a6` sửa Khay vòng 2 (nguồn kéo AppKit, cache URL), `4097fe8` sửa NotchUI (kết thúc kéo khi ẩn), `e2b0586` gắn vào app.
 - **Test tự động:** Shelf 62 test (báo cáo `H2-fix2-report`), NotchUI 77 (báo cáo L1); `verify.sh` qua sau mỗi đợt sửa. Phiên kéo thật của AppKit và hit testing dưới chuột thật không chạy được trong test, nên phần đó chỉ kiểm bằng tay. Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Khay trong checklist gộp](../../manual-test-checklist-all.html#shelf)
-- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối, và đọc được trên notch Cổ điển khi macOS ở giao diện sáng (S2 `a60412f`, `58ce563`, `e2516cf`; mục 9). Shelf 254 test. Cổ điển giữ nguyên từng điểm ảnh; cổng `verify.sh` chưa chạy cho commit này (xanh gần nhất ở `6077497`, trước nhiều commit S2). Chưa ai thấy trên kính thật.
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối, và đọc được trên notch Cổ điển khi macOS ở giao diện sáng (S2 `a60412f`, `58ce563`, `e2516cf`; mục 9). Shelf 254 test. Cổ điển giữ nguyên từng điểm ảnh; các commit này nằm trong cổng `verify.sh` xanh ở `6077497` (17 package cộng app). Chưa ai thấy trên kính thật.
 - **Cập nhật sau `156f02d` (2026-10-15):** hành động với file trên khay: đổi định dạng, đổi kích thước, nén, tách nền, nhận chữ, PDF (`8793a3a`, `00b8859`, `6e5c545`) (mục 7 và 8). Shelf 251 test. Chưa chạy trong notch.
 
 ## 1. Đã xây gì so với spec

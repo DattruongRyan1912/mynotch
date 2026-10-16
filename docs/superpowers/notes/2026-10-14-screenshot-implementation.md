@@ -6,7 +6,7 @@
 - **Commit chính:** `e0ce3a0` hình học, `31cc797` lưu trữ và OCR, `d6e8710` model và trình sửa, `c25a867` chụp, overlay, module, `611348c` sửa ảnh, `0bd2692` sửa lỗi lưu, `33bbe96` gắn vào app, `75ccd69` sửa thumbnail. Phụ: `b4f009a`, `d57cc9d`, `118d3d5` (chỉ mục ảnh an toàn hơn).
 - **Test tự động:** 217 test theo báo cáo `S-fix-report` và báo cáo L1 (`verify.sh` qua ở `8a2b842`). Có OCR thật trên ảnh tổng hợp (Vision, chạy cục bộ). Mọi thứ chạm hệ thống (ScreenCaptureKit, overlay, pasteboard, phím tắt, hộp thoại quyền) đều dùng bản giả. Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Ảnh chụp trong checklist gộp](../../manual-test-checklist-all.html#screenshot)
-- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: chỗ giữ ảnh của thẻ (S2 `489bef2`, `44d0dd2`; mục 9). Screenshot 329 test. Cổ điển giữ nguyên từng điểm ảnh; cổng `verify.sh` chưa chạy cho commit này (xanh gần nhất ở `6077497`, trước nhiều commit S2). Chưa ai thấy trên kính thật.
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: chỗ giữ ảnh của thẻ (S2 `489bef2`, `44d0dd2`; mục 9). Screenshot 329 test. Cổ điển giữ nguyên từng điểm ảnh; các commit này nằm trong cổng `verify.sh` xanh ở `6077497` (17 package cộng app). Chưa ai thấy trên kính thật.
 - **Cập nhật sau `156f02d` (2026-10-15):** đánh số bước, kính lúp, thước đo, xoá thông minh và canvas tự mở rộng (`00cb437`, `d6e83ef`) (mục 7 và 8). Screenshot 326 test (`d6e83ef`). Chưa ai nhìn bằng mắt.
 
 ## 1. Đã xây gì so với spec

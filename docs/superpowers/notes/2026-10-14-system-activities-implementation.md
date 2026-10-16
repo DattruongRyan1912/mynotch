@@ -6,7 +6,7 @@
 - **Commit chính:** `7bc718c` các monitor và nhận biết tải xong, `4aad00f` module, `956f5fb` sửa sau review (tải nhỏ, đọc lại pin), `e2b0586` gắn vào app (cùng Shortcuts, Timer, Shelf), `5552a84` đầu dò quyền Downloads và Bluetooth chạy ngoài main thread.
 - **Test tự động:** 83 test theo báo cáo vòng sửa cuối (`fix-report`, `verify.sh` qua). Không chạm Bluetooth, CoreAudio hay thư mục Downloads thật trong test (có một thử nghiệm FSEvents thật trong thư mục tạm, đã xoá). Phần gọi IOBluetooth thật không có test tự động. Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Hệ thống trong checklist gộp](../../manual-test-checklist-all.html#system-activities)
-- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: activity không còn truyền `.white` lúc publish (S2 `a62ec60`; mục 9). SystemActivities 218 test. Cổ điển giữ nguyên từng điểm ảnh; cổng `verify.sh` chưa chạy cho commit này (xanh gần nhất ở `6077497`, trước nhiều commit S2). Chưa ai thấy trên kính thật.
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: activity không còn truyền `.white` lúc publish (S2 `a62ec60`; mục 9). SystemActivities 218 test. Cổ điển giữ nguyên từng điểm ảnh; các commit này nằm trong cổng `verify.sh` xanh ở `6077497` (17 package cộng app). Chưa ai thấy trên kính thật.
 - **Cập nhật sau `156f02d` (2026-10-15):** thay HUD âm lượng, độ sáng và đèn bàn phím của macOS (`679ff00`, `1d2de52`) (mục 8). SystemActivities 215 test. Chưa tạo event tap thật và chưa nhìn bằng mắt.
 
 ## 1. Đã xây gì so với spec

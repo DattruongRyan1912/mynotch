@@ -6,7 +6,7 @@
 - **Commit chính:** `3376513` module, `45e4419` giới hạn output, `e2b0586` gắn vào app, `9f2d14b` Core: huỷ phím tắt theo tên, `a8025b2` bộ chạy `posix_spawn` và huỷ phím tắt của mục bỏ ưa thích.
 - **Test tự động:** Shortcuts 52 test và MyNotchCore 119 (báo cáo `H3-fix2-report`, `verify.sh` qua); review lại vòng H3-fix2 (`re-review-H3-fix2.md`) **Approved**, không có Critical hay Important, đã chạy lại hai package (52 và 119, ba lần, 0 cảnh báo) cùng thí nghiệm riêng cho bộ chạy (fd, process group, 300 vòng huỷ đua, trạng thái thoát). Test không bao giờ chạy `/usr/bin/shortcuts` thật (bộ chạy thật chỉ được thử với `/bin/echo`, `/usr/bin/false`, `/bin/sleep`, `/usr/bin/head`, `/bin/sh` và một đường dẫn không tồn tại). Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Shortcuts trong checklist gộp](../../manual-test-checklist-all.html#shortcuts)
-- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: một chỗ `.white` (S2 `ceef34f`; mục 7). Shortcuts 55 test. Cổ điển giữ nguyên từng điểm ảnh; cổng `verify.sh` chưa chạy cho commit này (xanh gần nhất ở `6077497`, trước nhiều commit S2). Chưa ai thấy trên kính thật.
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: một chỗ `.white` (S2 `ceef34f`; mục 7). Shortcuts 55 test. Cổ điển giữ nguyên từng điểm ảnh; các commit này nằm trong cổng `verify.sh` xanh ở `6077497` (17 package cộng app). Chưa ai thấy trên kính thật.
 
 ## 1. Đã xây gì so với spec
 

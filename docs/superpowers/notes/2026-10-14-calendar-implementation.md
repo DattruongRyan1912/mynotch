@@ -6,7 +6,7 @@
 - **Commit chính:** `77a535c` agenda và nhận link họp, `fc35c95` module, `d35eb2a` sửa sau review, `f14dad6` gắn vào app.
 - **Test tự động:** 151 test theo báo cáo L1 (`verify.sh` qua ở `8a2b842`). Không dùng EventKit thật trong test. Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Lịch trong checklist gộp](../../manual-test-checklist-all.html#calendar)
-- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: sáu chỗ `.white`, scheme tối ép của ô thêm nhanh và nhãn "Tham gia" (S2 `d99d64e`, `b7f62d6`; mục 9). Calendar 330 test. Cổ điển giữ nguyên từng điểm ảnh; cổng `verify.sh` chưa chạy cho commit này (xanh gần nhất ở `6077497`, trước nhiều commit S2). Chưa ai thấy trên kính thật.
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: sáu chỗ `.white`, scheme tối ép của ô thêm nhanh và nhãn "Tham gia" (S2 `d99d64e`, `b7f62d6`; mục 9). Calendar 330 test. Cổ điển giữ nguyên từng điểm ảnh; các commit này nằm trong cổng `verify.sh` xanh ở `6077497` (17 package cộng app). Chưa ai thấy trên kính thật.
 - **Cập nhật sau `156f02d` (2026-10-15):** báo lại và bỏ qua cuộc họp, Whereby và Jitsi (`e042f41`, `66f20f6`), thêm sự kiện một dòng và tóm tắt trong ngày (`ce5c98c`, `f9dd973`) (mục 7 và 8). Calendar 326 test (`f511376`). Đường ghi EventKit chưa chạy với kho thật.
 
 ## 1. Đã xây gì so với spec

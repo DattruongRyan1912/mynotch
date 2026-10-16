@@ -7,7 +7,7 @@
 - **Commit chính:** `41a6f5d` và `a75ea22` engine, detector, selection reader; `af75ff2` Services trong Core và app; `57d1a85` và `2bd557a` module; `3fc9482` hàng đợi Services 10 giây; `2655167` gắn vào app (cùng Media); `2b613fe` từ chối yêu cầu Services khi module tắt và báo cho người dùng; `009871c` `context.presenter` thành facade theo module (`open()` thay `open(tab:)`).
 - **Test tự động:** 82 test (báo cáo L1 và báo cáo vòng sửa cuối; Translation chạy lại sau `009871c` và qua). Test không gọi framework Translation thật. Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Dịch trong checklist gộp](../../manual-test-checklist-all.html#translation)
-- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: ô nhập, ô kết quả, các chip đen và chip bôi đen (S2 `42dd1b1`; mục 9). Translation 907 test. Cổ điển giữ nguyên từng điểm ảnh; cổng `verify.sh` chưa chạy cho commit này (xanh gần nhất ở `6077497`, trước nhiều commit S2). Chưa ai thấy trên kính thật.
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: ô nhập, ô kết quả, các chip đen và chip bôi đen (S2 `42dd1b1`; mục 9). Translation 907 test. Cổ điển giữ nguyên từng điểm ảnh; các commit này nằm trong cổng `verify.sh` xanh ở `6077497` (17 package cộng app). Chưa ai thấy trên kính thật.
 - **Cập nhật sau `156f02d` (2026-10-15):** đọc to và thay vào chỗ đang chọn (`6f57656`, `fcbddbc`), quy đổi (`bcba139`, `1df3073`), từ điển và bộ máy dịch riêng (`7a813f7`, `5c7fffd`), "Bôi đen là hiểu" (`1f31453`, `cdd93f4`, `6e87a81`, `b684ca2`) (mục 7 và 8). Translation 899 test (`b684ca2`). Chưa ai nhìn bằng mắt hay thử với Accessibility, Keychain và mạng thật.
 
 ## 1. Đã xây gì so với spec
