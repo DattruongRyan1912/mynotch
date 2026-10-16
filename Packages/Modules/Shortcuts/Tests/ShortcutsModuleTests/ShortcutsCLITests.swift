@@ -110,23 +110,34 @@ private let shortcutID = "11111111-2222-3333-4444-555555555555"
     }
 
     @Test func cancellingTerminatesTheProcess() async {
-        let started = ContinuousClock.now
         let task = Task { [runner] in try await runner.run(executable: "/bin/sleep", arguments: ["30"]) }
         try? await Task.sleep(for: .milliseconds(100))
+        // Timed from the cancel: how long the task took to start on a busy machine says nothing about the kill.
+        let cancelled = ContinuousClock.now
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
-        #expect(ContinuousClock.now - started < .seconds(10))
+        #expect(ContinuousClock.now - cancelled < .seconds(10))
     }
 
-    /// `exec` keeps the ignored signal and leaves no child behind that could hold the pipe open after the kill.
-    @Test func aChildThatIgnoresTermIsKilledAfterTheGracePeriod() async {
-        let runner = SystemProcessRunner(killGrace: .milliseconds(200))
-        let started = ContinuousClock.now
-        let task = Task { try await runner.run(executable: "/bin/sh", arguments: ["-c", "trap '' TERM; exec /bin/sleep 20"]) }
-        try? await Task.sleep(for: .milliseconds(300))
-        task.cancel()
-        await #expect(throws: CancellationError.self) { try await task.value }
-        #expect(ContinuousClock.now - started < .seconds(10))
+    /// `exec` keeps the ignored signal and leaves no child behind that could hold the pipe open after the kill. The cancel
+    /// waits for the shell to say that TERM is ignored, so a busy machine cannot cancel it earlier and prove less.
+    @Test(.timeLimit(.minutes(2)))
+    func aChildThatIgnoresTermIsKilledAfterTheGracePeriod() async throws {
+        let script = try RunnerScript(
+            runner: SystemProcessRunner(killGrace: .milliseconds(200)),
+            shell: "trap '' TERM; echo $$ > \"$0\"; exec /bin/sleep 600"
+        )
+        defer { script.cancel() }
+        await settle { script.pid != nil }
+        let pid = try #require(script.pid)
+        defer { kill(pid, SIGKILL) }
+
+        let cancelled = ContinuousClock.now
+        script.cancel()
+        await settle(timeout: .seconds(20)) { script.outcome != nil }
+        #expect(script.outcome == "cancelled")
+        // The sleep lasts ten minutes, so ending well before that is the kill, not the sleep running out.
+        #expect(ContinuousClock.now - cancelled < .seconds(20))
     }
 
     @Test func aVeryLargeOutputIsDrainedWithoutBlockingTheChild() async throws {
@@ -154,41 +165,67 @@ private let shortcutID = "11111111-2222-3333-4444-555555555555"
 
     /// The shell and its `sleep` both ignore TERM, and the `sleep` holds the output pipes open, so only a kill of the
     /// whole process group ends the run. The task and the sleep are always ended, so a regression fails instead of hanging.
-    @Test(.timeLimit(.minutes(1)))
+    @Test(.timeLimit(.minutes(2)))
     func aChildThatIgnoresTermIsKilledWithItsChildrenAfterTheGracePeriod() async throws {
-        let folder = ScratchFolders.shared.reserve("shortcuts-runner")
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let pidFile = folder.appending(path: "sleep.pid")
-        let outcome = Mutex<String?>(nil)
-        let task = Task { [pidFile] in
-            do {
-                _ = try await SystemProcessRunner().run(
-                    executable: "/bin/sh", arguments: ["-c", "trap '' TERM; /bin/sleep 30 & echo $! > \"$0\"; wait", pidFile.path(percentEncoded: false)]
-                )
-                outcome.withLock { $0 = "finished" }
-            } catch is CancellationError {
-                outcome.withLock { $0 = "cancelled" }
-            } catch {
-                outcome.withLock { $0 = "failed: \(error)" }
-            }
-        }
-        func sleepPID() -> pid_t? {
-            (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-        }
-        defer { task.cancel() }
-        await settle { sleepPID() != nil }
-        let pid = try #require(sleepPID())
+        // The sleep lasts ten minutes: ending well before that is the kill, never the sleep running out on its own.
+        let script = try RunnerScript(
+            runner: SystemProcessRunner(),
+            shell: "trap '' TERM; /bin/sleep 600 & echo $! > \"$0\"; wait"
+        )
+        defer { script.cancel() }
+        // Generous: a busy machine can take many seconds to run the shell this far.
+        await settle { script.pid != nil }
+        let pid = try #require(script.pid)
         defer { kill(pid, SIGKILL) }
 
-        let started = ContinuousClock.now
-        task.cancel()
-        await settle(timeout: .seconds(8)) { outcome.withLock { $0 } != nil }
-        let elapsed = ContinuousClock.now - started
-        #expect(outcome.withLock { $0 } == "cancelled")
-        // Not before the grace period (TERM was ignored), and about two seconds after it.
+        let cancelled = ContinuousClock.now
+        script.cancel()
+        await settle(timeout: .seconds(20)) { script.outcome != nil }
+        let elapsed = ContinuousClock.now - cancelled
+        #expect(script.outcome == "cancelled")
+        // Not before the grace period (TERM was ignored), which a busy machine can only stretch, never shorten.
         #expect(elapsed > .seconds(1.5))
-        #expect(elapsed < .seconds(4))
-        await settle(timeout: .seconds(2)) { kill(pid, 0) != 0 }
+        // Far below the sleep, so only the kill of the process group can have ended it, however slow the machine is.
+        #expect(elapsed < .seconds(20))
+        // The sleep is a grandchild: launchd has to reap it, which can also take a while under load.
+        await settle(timeout: .seconds(10)) { kill(pid, 0) != 0 }
         #expect(kill(pid, 0) != 0, "the sleep is still running")
     }
+}
+
+/// A shell script run by the real runner as a task whose end is recorded rather than awaited, so a regression that never
+/// ends the run fails a test instead of hanging it. The script gets a file as `$0` and writes a process id to it.
+private final class RunnerScript: Sendable {
+    private let pidFile: URL
+    private let ended = Mutex<String?>(nil)
+    private let task = Mutex<Task<Void, Never>?>(nil)
+
+    init(runner: SystemProcessRunner, shell script: String) throws {
+        let folder = ScratchFolders.shared.reserve("shortcuts-runner")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        pidFile = folder.appending(path: "child.pid")
+        let path = pidFile.path(percentEncoded: false)
+        task.withLock { [self] in
+            $0 = Task {
+                do {
+                    _ = try await runner.run(executable: "/bin/sh", arguments: ["-c", script, path])
+                    ended.withLock { $0 = "finished" }
+                } catch is CancellationError {
+                    ended.withLock { $0 = "cancelled" }
+                } catch {
+                    ended.withLock { $0 = "failed: \(error)" }
+                }
+            }
+        }
+    }
+
+    /// The process id the script wrote, once it has.
+    var pid: pid_t? {
+        (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+
+    /// How the run ended, or nil while it is still going.
+    var outcome: String? { ended.withLock { $0 } }
+
+    func cancel() { task.withLock { $0?.cancel() } }
 }

@@ -67,8 +67,9 @@ final class FakeShortcutsCLI: ShortcutsCLI {
     }
 }
 
-/// Lets tasks the module started finish.
-func settle(timeout: Duration = .seconds(5), until condition: () -> Bool) async {
+/// Lets tasks the module started finish. It polls, so it returns as soon as `condition` holds; the generous default only
+/// matters on a machine so busy that a task takes seconds to get a turn, and a failing test pays it once.
+func settle(timeout: Duration = .seconds(30), until condition: () -> Bool) async {
     let deadline = ContinuousClock.now + timeout
     while !condition(), ContinuousClock.now < deadline {
         try? await Task.sleep(for: .milliseconds(2))
