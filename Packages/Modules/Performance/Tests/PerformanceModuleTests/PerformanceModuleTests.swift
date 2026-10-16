@@ -3,6 +3,7 @@ import MyNotchTestSupport
 import Observation
 import SwiftUI
 import Testing
+@testable import FanHelperKit
 @testable import PerformanceModule
 
 @Suite struct PerformanceModuleTests {

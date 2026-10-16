@@ -1,4 +1,5 @@
 import Testing
+@testable import FanHelperKit
 @testable import PerformanceModule
 
 @Suite struct SMCThermalReaderTests {

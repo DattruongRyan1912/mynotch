@@ -1,4 +1,5 @@
 import Testing
+@testable import FanHelperKit
 @testable import PerformanceModule
 
 /// Byte fixtures are the bytes this Mac's SMC returned in the TH0 probe (MacBookPro18,3).

@@ -1,12 +1,17 @@
 import IOKit
 
-nonisolated struct SMCKeyInfo: Equatable, Sendable {
-    let size: Int
-    let type: String
+public struct SMCKeyInfo: Equatable, Sendable {
+    public let size: Int
+    public let type: String
+
+    public init(size: Int, type: String) {
+        self.size = size
+        self.type = type
+    }
 }
 
 /// What the module asks the SMC: the name of the key at an index, the size and type of a key, and a key's bytes. All reads.
-nonisolated protocol SMCChannel: Sendable {
+public protocol SMCChannel: Sendable {
     func keyName(at index: Int) -> String?
     func info(of key: String) -> SMCKeyInfo?
     func bytes(of key: String, info: SMCKeyInfo) -> [UInt8]?
@@ -14,13 +19,13 @@ nonisolated protocol SMCChannel: Sendable {
 
 /// The SMC's request commands this module sends. There is no case for the write command (6): nothing here can write to the
 /// SMC, and a test pins the list.
-nonisolated enum SMCCommand: UInt8, CaseIterable {
+enum SMCCommand: UInt8, CaseIterable {
     case readKey = 5
     case keyAtIndex = 8
     case keyInfo = 9
 }
 
-nonisolated struct SMCVersion {
+struct SMCVersion {
     var major: UInt8 = 0
     var minor: UInt8 = 0
     var build: UInt8 = 0
@@ -28,7 +33,7 @@ nonisolated struct SMCVersion {
     var release: UInt16 = 0
 }
 
-nonisolated struct SMCPLimitData {
+struct SMCPLimitData {
     var version: UInt16 = 0
     var length: UInt16 = 0
     var cpuPLimit: UInt32 = 0
@@ -37,7 +42,7 @@ nonisolated struct SMCPLimitData {
 }
 
 /// Three bytes of padding make it 12 bytes like the C struct; Swift would leave it at 9 and shift every later field.
-nonisolated struct SMCKeyInfoData {
+struct SMCKeyInfoData {
     var dataSize: UInt32 = 0
     var dataType: UInt32 = 0
     var dataAttributes: UInt8 = 0
@@ -45,7 +50,7 @@ nonisolated struct SMCKeyInfoData {
 }
 
 /// The 80-byte request and reply of the SMC's user client, field for field as the kernel declares it.
-nonisolated struct SMCParamStruct {
+struct SMCParamStruct {
     typealias Bytes = (
         UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8,
         UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8
@@ -66,13 +71,13 @@ nonisolated struct SMCParamStruct {
 }
 
 /// The connection to the `AppleSMC` service. Opening it needs no permission outside the App Sandbox, which MyNotch is not in.
-nonisolated final class AppleSMCChannel: SMCChannel {
+public final class AppleSMCChannel: SMCChannel {
     /// The one external method of the user client: it takes the request struct and fills the reply struct.
     private static let handleYPCEvent: UInt32 = 2
     private let connection: io_connect_t
 
     /// Nil when the service is missing or refuses the connection.
-    init?() {
+    public init?() {
         let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSMC"))
         guard service != IO_OBJECT_NULL else { return nil }
         defer { IOObjectRelease(service) }
@@ -83,13 +88,13 @@ nonisolated final class AppleSMCChannel: SMCChannel {
 
     deinit { IOServiceClose(connection) }
 
-    func keyName(at index: Int) -> String? {
+    public func keyName(at index: Int) -> String? {
         var request = SMCParamStruct()
         request.data32 = UInt32(truncatingIfNeeded: index)
         return call(request, .keyAtIndex).map { SMCKey.name($0.key) }
     }
 
-    func info(of key: String) -> SMCKeyInfo? {
+    public func info(of key: String) -> SMCKeyInfo? {
         guard let code = SMCKey.code(key) else { return nil }
         var request = SMCParamStruct()
         request.key = code
@@ -97,7 +102,7 @@ nonisolated final class AppleSMCChannel: SMCChannel {
         return SMCKeyInfo(size: Int(reply.keyInfo.dataSize), type: SMCKey.name(reply.keyInfo.dataType))
     }
 
-    func bytes(of key: String, info: SMCKeyInfo) -> [UInt8]? {
+    public func bytes(of key: String, info: SMCKeyInfo) -> [UInt8]? {
         guard let code = SMCKey.code(key), info.size <= 32 else { return nil }
         var request = SMCParamStruct()
         request.key = code

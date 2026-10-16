@@ -1,5 +1,6 @@
 import Foundation
 import Synchronization
+@testable import FanHelperKit
 @testable import PerformanceModule
 
 /// What this Mac's SMC returned in the TH0 probe, for the keys the module cares about and a few look-alikes, in the order the

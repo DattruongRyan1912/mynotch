@@ -1,4 +1,5 @@
 import Testing
+@testable import FanHelperKit
 @testable import PerformanceModule
 
 /// The key names are the ones this Mac's SMC lists (TH0 report).

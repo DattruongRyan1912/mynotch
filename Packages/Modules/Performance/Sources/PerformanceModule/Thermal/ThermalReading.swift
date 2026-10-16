@@ -1,3 +1,5 @@
+import FanHelperKit
+
 /// Reads the Mac's temperatures and fan speeds; faked in tests. Whatever it does is off the main actor.
 nonisolated protocol ThermalReading: Sendable {
     /// Whether the SMC can be opened at all. Cheap: the sensors are found by the first `read`, which takes a while.

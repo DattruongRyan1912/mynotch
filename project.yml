@@ -78,6 +78,12 @@ targets:
           copyFiles:
             destination: resources
             subpath: ChromeExtension
+      # The launchd job of the fan helper, in Contents/Library/LaunchDaemons, which is where SMAppService.daemon looks for it.
+      - path: Tools/mynotch-fan-helper/Daemon/io.lucasvu.mynotch.fanhelper.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchDaemons
     dependencies:
       - package: MyNotchCore
       - package: NotchUI
@@ -120,6 +126,13 @@ targets:
           destination: executables
       # Copied into Contents/MacOS, where ClipboardModule's ClipboardMCPHelperFile looks for the helper that AI agents run.
       - target: mynotch-clipboard-mcp
+        embed: true
+        link: false
+        codeSign: true
+        copy:
+          destination: executables
+      # Copied into Contents/MacOS, where the plist above says it is (BundleProgram); launchd runs it as root when the app connects.
+      - target: mynotch-fan-helper
         embed: true
         link: false
         codeSign: true
@@ -252,5 +265,22 @@ targets:
       groups: [signing]
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch.youtube-host
+        SKIP_INSTALL: YES
+        ENABLE_HARDENED_RUNTIME: YES
+  # The privileged helper for the fans, registered with SMAppService.daemon from Performance's settings (see FanHelperManager). It
+  # answers a ping and reads the fans over XPC to a connection signed by the team, and has no operation that writes.
+  mynotch-fan-helper:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Tools/mynotch-fan-helper
+        excludes: ["Daemon/**"]
+    dependencies:
+      - package: PerformanceModule
+        product: FanHelperKit
+    settings:
+      groups: [signing]
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch.fan-helper
         SKIP_INSTALL: YES
         ENABLE_HARDENED_RUNTIME: YES
