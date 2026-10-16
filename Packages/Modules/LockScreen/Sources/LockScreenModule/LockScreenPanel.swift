@@ -55,12 +55,15 @@ final class LockScreenPanel: NSPanel, LockScreenWindow {
         return min(max(ceil(card - 0.01), minimumHeight), maximumHeight)
     }
 
-    /// Top centre of `screen`, just under the notch (AppKit coordinates), `height` tall.
-    static func frame(on screen: ScreenDescriptor, height: CGFloat) -> CGRect {
-        let geometry = NotchGeometry(screen: screen, config: NotchLayoutConfig())
+    /// Top centre of `screen`, `gap` under the notch as it is drawn there (AppKit coordinates), `height` tall. The notch is the
+    /// hardware one, or on a display without one the virtual notch of the user's settings: as tall as they say, and a floating pill that
+    /// hangs `topGap` below the edge as well as one stuck to it. Every notch is laid out from one config, so any notch that is showing
+    /// tells it; with none showing (the user hid it) the defaults are what is left to go by.
+    static func frame(on screen: ScreenDescriptor, height: CGFloat, interface: NotchInterface = .shared) -> CGRect {
+        let geometry = NotchGeometry(screen: screen, config: interface.notches.first?.geometry.config ?? NotchLayoutConfig())
         return CGRect(
             x: screen.frame.midX + geometry.centerOffset - width / 2,
-            y: screen.frame.maxY - geometry.notchSize.height - gap - height,
+            y: screen.frame.maxY - geometry.topGap - geometry.notchSize.height - gap - height,
             width: width,
             height: height
         )

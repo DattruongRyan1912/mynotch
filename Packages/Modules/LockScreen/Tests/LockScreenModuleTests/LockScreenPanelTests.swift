@@ -51,6 +51,84 @@ import Testing
         #expect(frame.maxY == top)
     }
 
+    // MARK: under the notch the display really has
+
+    /// A display without a notch of its own, `menuBarHeight` 24 tall, at `origin` on the desktop.
+    private func virtualScreen(at origin: CGPoint = .zero) -> ScreenDescriptor {
+        ScreenDescriptor(
+            frame: CGRect(x: origin.x, y: origin.y, width: 1920, height: 1080), safeAreaTop: 0,
+            auxiliaryTopLeftWidth: nil, auxiliaryTopRightWidth: nil, menuBarHeight: 24
+        )
+    }
+
+    /// An interface that shows one notch, on `screen`, laid out from `config`: what `ScreenManager` publishes.
+    private func interface(showing config: NotchLayoutConfig, on screen: ScreenDescriptor) -> NotchInterface {
+        NotchInterface(notches: [NotchDisplay(id: 1, screenFrame: screen.frame, geometry: NotchGeometry(screen: screen, config: config))])
+    }
+
+    @Test func staysTheGapClearOfAFloatingPill() {
+        let screen = virtualScreen()
+        let frame = LockScreenPanel.frame(
+            on: screen, height: 80, interface: interface(showing: NotchLayoutConfig(virtualNotchStyle: .pill), on: screen)
+        )
+        // The pill hangs 5 pt below the top and is 24 tall, so it ends 29 from the top; the panel starts the gap (8) under that. Measured
+        // from the notch only, it would start 3 pt under the pill.
+        #expect(frame.maxY == 1080 - 5 - 24 - gap)
+        #expect(frame.maxY == 1043)
+        #expect(frame.midX == 960)
+        #expect(frame.size == size)
+    }
+
+    @Test func staysTheGapClearOfANotchStuckToTheTopOfADisplayWithoutOne() {
+        let screen = virtualScreen()
+        let frame = LockScreenPanel.frame(
+            on: screen, height: 80, interface: interface(showing: NotchLayoutConfig(virtualNotchStyle: .notch), on: screen)
+        )
+        #expect(frame.maxY == 1080 - 24 - gap)
+    }
+
+    @Test func followsTheVirtualNotchHeightTheUserChose() {
+        let screen = virtualScreen()
+        for (style, top) in [(VirtualNotchStyle.notch, CGFloat(0)), (.pill, NotchGeometry.pillTopGap)] {
+            let config = NotchLayoutConfig(virtualNotchWidth: 250, virtualNotchHeight: 40, virtualNotchStyle: style)
+            let frame = LockScreenPanel.frame(on: screen, height: 80, interface: interface(showing: config, on: screen))
+            #expect(frame.maxY == 1080 - top - 40 - gap, "\(style)")
+            #expect(frame.midX == 960, "\(style)")
+        }
+    }
+
+    @Test func aHardwareNotchIsNeverMovedByThePillSetting() {
+        let screen = ScreenDescriptor(
+            frame: CGRect(x: 0, y: 0, width: 1000, height: 800), safeAreaTop: 30,
+            auxiliaryTopLeftWidth: 400, auxiliaryTopRightWidth: 500, menuBarHeight: 30
+        )
+        let frame = LockScreenPanel.frame(
+            on: screen, height: 80, interface: interface(showing: NotchLayoutConfig(virtualNotchHeight: 40, virtualNotchStyle: .pill), on: screen)
+        )
+        #expect(frame.maxY == 800 - 30 - gap, "the cutout's own height, with no pill gap above it")
+        #expect(frame.midX == 450, "still under the asymmetric cutout")
+    }
+
+    @Test func aSecondDisplayIsLaidOutFromTheSameSettingsAsTheNotchOnTheFirst() {
+        let main = ScreenDescriptor(
+            frame: CGRect(x: 0, y: 0, width: 1512, height: 982), safeAreaTop: 32,
+            auxiliaryTopLeftWidth: 656, auxiliaryTopRightWidth: 656, menuBarHeight: 32
+        )
+        let external = virtualScreen(at: CGPoint(x: 1512, y: -200))
+        // The only notch showing is the hardware one, on the main display; the pill setting is still the user's.
+        let frame = LockScreenPanel.frame(
+            on: external, height: 80, interface: interface(showing: NotchLayoutConfig(virtualNotchStyle: .pill), on: main)
+        )
+        #expect(frame.midX == 2472)
+        #expect(frame.maxY == 880 - 5 - 24 - gap)
+    }
+
+    @Test func withNoNotchShowingTheDefaultsAreWhatThePanelGoesBy() {
+        let frame = LockScreenPanel.frame(on: virtualScreen(), height: 80, interface: NotchInterface())
+        #expect(frame.maxY == 1080 - 24 - gap)
+        #expect(frame.midX == 960)
+    }
+
     // MARK: hiding from screen recordings
 
     /// The panel is built but never shown, so nothing appears on a screen and nothing can be captured.
