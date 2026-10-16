@@ -67,16 +67,22 @@ import Testing
             let session = TimerSession(kind: kind, label: kind == .reminder ? "lấy đồ phơi" : "")
             var actions = [TimerFinishAction(role: .snooze, title: "+5 phút") {}, TimerFinishAction(role: .dismiss, title: "Tắt") {}]
             if let next = kind.next {
-                actions.insert(TimerFinishAction(role: .next, title: TimerSuggestion(kind: next, minutes: 5).toastTitle, accent: next.accent) {}, at: 0)
+                actions.insert(TimerFinishAction(role: .next, title: TimerSuggestion(kind: next, minutes: 5).toastTitle) {}, at: 0)
             }
             return AnyView(TimerFinishToastView(toast: TimerFinishToast(session: session, actions: actions)))
+        }
+        func button(_ role: TimerFinishAction.Role, _ title: String) -> AnyView {
+            AnyView(TimerToastButton(action: TimerFinishAction(role: role, title: title) {}))
         }
         return [
             Fixture(name: "countdown", view: AnyView(TimerTabView(state: countdown, module: module)), size: tab, wash: 0.04, ink: 250),
             Fixture(name: "stopwatch", view: AnyView(TimerTabView(state: stopwatch, module: module)), size: tab, wash: 0.04, ink: 250),
             Fixture(name: "finish toast, reminder", view: toast(.reminder), size: CGSize(width: 560, height: 170), wash: 0.04, ink: 250),
-            // The next step is a solid accent button with a white label, on purpose (S2): it is the one thing that is allowed to be white.
-            Fixture(name: "finish toast, task", view: toast(.task), size: CGSize(width: 560, height: 170), wash: nil, ink: 250),
+            Fixture(name: "finish toast, task", view: toast(.task), size: CGSize(width: 560, height: 170), wash: 0.04, ink: 250),
+            // The buttons alone: the label is the primary text token whichever wash is behind it (dark on light glass, light on dark
+            // glass and on the classic notch), never a system bordered style that dims.
+            Fixture(name: "toast button, primary", view: button(.dismiss, "Tắt"), size: CGSize(width: 90, height: 34), wash: 0.005, ink: 25),
+            Fixture(name: "toast button, secondary", view: button(.snooze, "+5 phút"), size: CGSize(width: 110, height: 34), wash: 0.005, ink: 40),
             Fixture(
                 name: "finished on the lock screen", view: AnyView(TimerFinishedLockScreenView(session: TimerSession(kind: .reminder, label: "lấy đồ phơi"))),
                 size: CGSize(width: 300, height: 50), wash: 0.005, ink: 60),
@@ -105,6 +111,18 @@ import Testing
             for scheme in fixture.classicSchemes {
                 let reading = try read(fixture.view, glass: false, scheme: scheme, size: fixture.size)
                 #expect(reading.lighter(than: fixture.reach) >= fixture.ink, "\(fixture.name) in \(scheme)")
+            }
+        }
+    }
+
+    /// The label is the token itself, which the look decides: white on the classic notch, the system's primary colour on glass.
+    @Test func theToastButtonsLabelIsThePrimaryTextTokenOnBothLooks() {
+        for glass in [false, true] {
+            let state = NotchLookState()
+            state.isGlass = glass
+            NotchLookState.$current.withValue(state) {
+                #expect(TimerToastButton.labelColour == NotchTokens.primaryText)
+                #expect(TimerToastButton.labelColour == (glass ? Color.primary : Color.white))
             }
         }
     }

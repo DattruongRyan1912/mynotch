@@ -129,7 +129,7 @@ public final class TimerModule: FeatureModule {
     var finishToast: TimerFinishToast {
         var actions: [TimerFinishAction] = []
         if let suggestion {
-            actions.append(TimerFinishAction(role: .next, title: suggestion.toastTitle, accent: suggestion.kind.accent) { [weak self] in
+            actions.append(TimerFinishAction(role: .next, title: suggestion.toastTitle) { [weak self] in
                 self?.startNext()
                 self?.context?.presenter.close()
             })

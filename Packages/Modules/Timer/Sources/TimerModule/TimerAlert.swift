@@ -8,9 +8,10 @@ struct TimerFinishAction: Identifiable {
 
     let role: Role
     let title: String
-    /// The type the next step starts, for its colour; nil for the other buttons.
-    var accent: Color?
     let run: @MainActor () -> Void
+
+    /// "Tắt" is the one that ends the alert, so it is the one that stands out.
+    var isPrimary: Bool { role == .dismiss }
 
     var id: Role { role }
 }
@@ -45,22 +46,46 @@ struct TimerFinishToastView: View {
                         .foregroundStyle(NotchTokens.secondaryText)
                 }
                 HStack(spacing: 8) {
-                    ForEach(toast.actions) { action in
-                        if action.role == .next {
-                            Button(action.title, action: action.run)
-                                .buttonStyle(.borderedProminent)
-                                .tint(action.accent)
-                        } else {
-                            Button(action.title, action: action.run)
-                                .buttonStyle(.bordered)
-                        }
-                    }
+                    ForEach(toast.actions) { TimerToastButton(action: $0) }
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(toast.title)
+    }
+}
+
+/// A button of the toast, drawn like the notch's other controls (Calendar's and Todo's pills) and not with a system bordered
+/// style, which dims in a window that is not key, as the notch's panel is. The label is the primary text token on a wash of the
+/// same colour, so it reads on the black notch and on light and dark glass; the primary button's wash is the accent instead.
+struct TimerToastButton: View {
+    let action: TimerFinishAction
+    @Environment(\.notchAccent) private var accent
+    @State private var isHovering = false
+
+    /// Read in a `body`, like every text token.
+    static var labelColour: Color { NotchTokens.primaryText }
+
+    var body: some View {
+        Button(action: action.run) {
+            Text(action.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Self.labelColour)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(wash, in: Capsule())
+                .overlay { if action.isPrimary { Capsule().strokeBorder(accent, lineWidth: 1) } }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+    }
+
+    private var wash: Color {
+        action.isPrimary
+            ? accent.opacity(isHovering ? NotchTokens.selectionOpacity + 0.14 : NotchTokens.selectionOpacity + 0.08)
+            : NotchTokens.fill(isHovering ? 0.22 : 0.14)
     }
 }
 
