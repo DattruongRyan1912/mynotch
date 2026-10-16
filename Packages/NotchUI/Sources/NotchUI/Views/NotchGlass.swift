@@ -90,6 +90,10 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
     /// the gaps part of the window.
     static let hitOpacity = 0.01
 
+    /// How far a glass element trails the layout it follows (measured: 55 to 100 ms, and more at the end of a spring): a tile that is back
+    /// in the notch's body stays in the tree this much longer before it is taken out, so its glass is back too.
+    static let glassLag: Double = 0.12
+
     /// The radius of a shape inside another one that is `inset` away from its edge: the outer radius less that gap, so the two
     /// curves are concentric. Never below 0.
     static func concentricRadius(outer: CGFloat, inset: CGFloat) -> CGFloat {
@@ -99,7 +103,8 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
     let shape: NotchGlassShape
     /// Whether the notch and its bubbles are wrapped in one `GlassEffectContainer`.
     let usesContainer: Bool
-    /// The notch's own shape: nil only in the classic look. With `tiles` its glass is `Glass.identity` while the notch is open.
+    /// The notch's own shape: nil only in the classic look. With `tiles` its glass is `Glass.identity` while the notch is open (and the
+    /// root view then does not put the notch's own view in the tree at all, so nothing of it is drawn).
     let notch: Shape?
     /// The bubbles' shapes, in the order of the bubbles.
     let bubbles: [Shape]

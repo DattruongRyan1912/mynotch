@@ -136,13 +136,17 @@ struct NotchTilesLayerCanaryTests {
 
     // MARK: the tiles come out of the notch and go back into it
 
-    func sample(_ rig: Rig, _ change: () -> Void) async -> [(t: Double, elements: [CGRect])] {
+    /// What the glass is, every few ms for 1.2 s after `change`: its elements, and in how many glass layers (SDF layers that hold any)
+    /// they are. Shapes can only blend into one another inside one layer.
+    func sample(_ rig: Rig, _ change: () -> Void) async -> [(t: Double, elements: [CGRect], layers: Int)] {
         change()
         let start = Date()
-        var samples: [(Double, [CGRect])] = []
+        var samples: [(Double, [CGRect], Int)] = []
         while Date().timeIntervalSince(start) < 1.2 {
             try? await Task.sleep(for: .milliseconds(4))
-            samples.append((Date().timeIntervalSince(start) * 1000, elements(rig.hosting)))
+            samples.append((
+                Date().timeIntervalSince(start) * 1000, elements(rig.hosting), glassLayers(rig.hosting).filter { !$0.elements.isEmpty }.count
+            ))
         }
         return samples
     }
@@ -179,7 +183,7 @@ struct NotchTilesLayerCanaryTests {
         try await poll("no glass but the notch's and the bubbles'") { tileGlass(rig.hosting).isEmpty }
     }
 
-    func timeline(_ samples: [(t: Double, elements: [CGRect])]) -> String {
+    func timeline(_ samples: [(t: Double, elements: [CGRect], layers: Int)]) -> String {
         var lines: [String] = []
         var lastPrinted = -100.0
         for sample in samples where sample.t - lastPrinted >= 45 {
@@ -189,48 +193,70 @@ struct NotchTilesLayerCanaryTests {
         return lines.joined(separator: " | ")
     }
 
-    @Test func theTilesSplitOutOfTheNotchAndMergeBackWithNoMomentWithoutGlassAndNoGlassOfTheirsLeftAtRest() async throws {
+    @Test func theTilesSplitOutOfTheNotchAndFlowBackIntoItInOneMotionWithNoMomentWithoutGlass() async throws {
         let rig = try await rig(shape: .tiles)
         defer { rig.window.contentView = nil }
         let centre = geometry.panelSize.width / 2
         let final = NotchTilesLayout.open(
             shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 190), notchHeight: geometry.notchSize.height, topRadius: 8, tabCount: 2
         )
+        let pill = geometry.shapeSize(for: .compact)
 
         let opening = await sample(rig) { rig.model.open(tab: nil, onPurpose: false) }
         print("CANARY opening: \(timeline(opening))")
         #expect(opening.allSatisfy { !$0.elements.isEmpty }, "no sample of the opening without glass")
+        #expect(opening.allSatisfy { $0.layers == 1 }, "the tiles are glass of one layer from the first frame")
         func near(_ rects: [CGRect], _ tile: NotchTilesLayout.Tile, slack: CGFloat) -> Bool {
             rects.contains { abs($0.width - tile.size.width) <= slack && abs($0.height - tile.size.height) <= slack }
         }
         let last = try #require(opening.last)
+        #expect(last.elements.count == 2, "while it is open the glass is the capsule's and the tile's, with no pill over them: \(last.elements)")
         #expect(near(last.elements, final.content, slack: 10), "the tile ends at its final rect")
         if let bar = final.tabBar { #expect(near(last.elements, bar, slack: 10), "and the capsule at its") }
         #expect((opening.flatMap(\.elements).map { abs($0.midX - centre) }.max() ?? 0) < 4, "centred the whole way")
 
         let closing = await sample(rig) { rig.model.close() }
         print("CANARY closing: \(timeline(closing))")
+        // One motion: there is glass at every moment, the notch's own (334 x 40 with the activity's strip) is there from the start of the
+        // close at its size and is never put in again, and the tiles' and the notch's glass are in one layer, where the shapes blend.
         #expect(closing.allSatisfy { !$0.elements.isEmpty }, "no sample of the closing without glass")
+        #expect(closing.allSatisfy { $0.layers == 1 }, "the tiles and the notch are glass of one layer all the way")
+        func hasPill(_ sample: (t: Double, elements: [CGRect], layers: Int)) -> Bool {
+            sample.elements.contains { abs($0.width - (pill.width + 8)) < 6 && abs($0.height - (pill.height + 8)) < 6 }
+        }
+        #expect(closing.filter { $0.t > 60 }.allSatisfy(hasPill), "the notch's glass is there the whole time the tiles go back")
+        // The glass only merges: the number of elements never goes up again once the notch's own is in, and ends at the notch's alone.
+        let counts = closing.map(\.elements.count)
+        let peak = try #require(counts.max())
+        #expect(peak == 3, "the notch's, the capsule's and the tile's: \(counts)")
+        let afterPeak = counts[(try #require(counts.firstIndex(of: peak)))...]
+        #expect(zip(afterPeak, afterPeak.dropFirst()).allSatisfy { $0 >= $1 }, "the elements only merge (never one put back in): \(counts)")
+        #expect(counts.last == 1, "and one is left: \(counts)")
+        // The tiles' glass is taken out when it is inside the notch's: nothing sticks out of the pill in the last sample that has the tiles.
+        let lastWithTiles = try #require(closing.last { $0.elements.count >= 3 })
+        #expect(
+            lastWithTiles.elements.allSatisfy { $0.width <= pill.width + 8 + 6 && $0.height <= pill.height + 8 + 6 },
+            "the tiles leave inside the pill: \(lastWithTiles.elements)"
+        )
         // The content tile shrinks from the first moments, with no stretch at full size. Its glass element trails the layout by a few tens of
-        // ms (that is the element's, not a spring's), so: it only goes down (to within 3 pt), is clearly down (40 pt) by 80 ms, and by
-        // 130 ms is under 90 % of its size. The capsule is not followed: it widens on the way, and ends as wide as the tile.
-        let tallest: ([CGRect]) -> CGFloat? = { tileElements($0).filter { $0.height > 60 }.max { $0.width < $1.width }?.width }
+        // ms, so: it only goes down (to within 3 pt), is clearly down (40 pt) by 100 ms, and by 120 ms is under 90 % of its size. The
+        // capsule is not followed: it widens on the way, and ends as wide as the tile.
+        let tallest: ([CGRect]) -> CGFloat? = { $0.filter { $0.height > 60 }.max { $0.width < $1.width }?.width }
         let widths = closing.compactMap { sample in tallest(sample.elements).map { (sample.t, $0) } }
         let first = try #require(widths.first)
         #expect(first.0 < 60 && first.1 > final.content.size.width - 40, "the first sample sees the tile still at its size: \(first)")
-        let at80 = try #require(widths.first { $0.0 >= 80 })
-        #expect(at80.1 < first.1 - 40, "by \(Int(at80.0)) ms the tile is at \(at80.1) from \(first.1)")
-        let at130 = try #require(widths.first { $0.0 >= 130 })
-        #expect(at130.1 < final.content.size.width * 0.9, "by \(Int(at130.0)) ms the tile is at \(at130.1) of \(final.content.size.width)")
+        let at100 = try #require(widths.first { $0.0 >= 100 })
+        #expect(at100.1 < first.1 - 40, "by \(Int(at100.0)) ms the tile is at \(at100.1) from \(first.1)")
+        let at120 = try #require(widths.first { $0.0 >= 120 })
+        #expect(at120.1 < final.content.size.width * 0.9, "by \(Int(at120.0)) ms the tile is at \(at120.1) of \(final.content.size.width)")
         var previous = CGFloat.infinity
         for (t, width) in widths {
             #expect(width <= previous + 3, "the tile does not grow while closing (\(Int(t)) ms)")
             previous = min(previous, width)
         }
-        // Once it is back, its glass is dropped on the way and what is left fades out (the window server takes about 0.6 s over that,
-        // whatever it is told): after 800 ms none of the tiles' is left, only the notch's own, as in the slab.
-        for sample in closing where sample.t > 800 {
-            #expect(tileElements(sample.elements).isEmpty, "no tile glass left at \(Int(sample.t)) ms: \(sample.elements)")
+        // At rest: the notch's glass alone, as in the slab.
+        for sample in closing where sample.t > 900 {
+            #expect(sample.elements.count == 1, "only the notch's glass is left at \(Int(sample.t)) ms: \(sample.elements)")
         }
         #expect((closing.flatMap(\.elements).map { abs($0.midX - centre) }.max() ?? 0) < 4)
     }
@@ -252,13 +278,29 @@ struct NotchTilesLayerCanaryTests {
         return found
     }
 
-    /// While the notch closes, the strip's text is in the glass layer that is drawn last: no glass of a tile is ever above it, however
-    /// much of the glass is still under it (the tiles are the size of the notch's body when they go).
-    @Test func theStripIsDrawnAboveEveryTilesGlassWhileTheNotchCloses() async throws {
-        let rig = try await rig(shape: .tiles)
-        defer { rig.window.contentView = nil }
-        try await opened(rig)
-        rig.model.close()
+    /// Whether, inside the glass layer `glass`, what is drawn after every glass element is a portal (which is how the content of a glass
+    /// view is shown above the glass: a copy of it, with the original hidden under the elements). The layers are in draw order.
+    func contentIsPortalledAboveEveryElement(of glass: CALayer) -> Bool {
+        var index = 0
+        var lastElement = -1, firstPortal = Int.max
+        func walk(_ layer: CALayer) {
+            index += 1
+            let name = NSStringFromClass(type(of: layer))
+            if name == "CASDFElementLayer" { lastElement = index }
+            if name.hasSuffix("SDFPortalLayer") { firstPortal = min(firstPortal, index) }
+            for sub in layer.sublayers ?? [] { walk(sub) }
+        }
+        walk(glass)
+        return lastElement > 0 && firstPortal != Int.max && firstPortal > lastElement
+    }
+
+    /// Runs `change` and for 1.2 s after it checks, every few ms, that the strip's text (the red probe) is drawn above all the glass: all
+    /// the glass is in one layer (the notch's own, the tiles' and the bubbles' are shapes of one container, and that is also what lets them
+    /// blend), whose content is portalled above every element of it; and should there be a second layer, no element of one drawn after
+    /// the strip's is over it. Returns how many samples had the strip, and how many of them had glass under it (the tiles' or the toast's), which is what
+    /// makes the check worth anything.
+    func stripIsAboveTheGlass(_ rig: Rig, during change: () -> Void) async throws -> (checked: Int, underneath: Int) {
+        change()
         let start = Date()
         var checked = 0, underneath = 0
         while Date().timeIntervalSince(start) < 1.2 {
@@ -269,14 +311,42 @@ struct NotchTilesLayerCanaryTests {
             let all = glassLayers(rig.hosting)
             var own = probe.superlayer
             while let layer = own, NSStringFromClass(type(of: layer)) != "SwiftUI.SDFLayer" { own = layer.superlayer }
-            let index = try #require(all.firstIndex { $0.layer === own }, "the strip is inside a glass layer")
+            let ownLayer = try #require(own, "the strip is inside a glass layer")
+            let index = try #require(all.firstIndex { $0.layer === ownLayer }, "the strip is inside a glass layer")
             checked += 1
+            #expect(all.filter { !$0.elements.isEmpty }.count <= 1, "one glass layer: shapes that are in two do not blend and stack")
+            #expect(contentIsPortalledAboveEveryElement(of: ownLayer), "the strip is shown above every element of its layer")
             for later in all[(index + 1)...] { #expect(!later.elements.contains { $0.intersects(frame) }, "glass above the strip: \(later.elements)") }
-            if all[..<index].contains(where: { $0.elements.contains { $0.intersects(frame) } }) { underneath += 1 }
+            // Under the strip: an element of an earlier layer, or a second one of its own layer that covers it.
+            if all[..<index].contains(where: { $0.elements.contains { $0.intersects(frame) } })
+                || all[index].elements.filter({ $0.intersects(frame) }).count > 1 {
+                underneath += 1
+            }
         }
-        #expect(checked > 100, "the strip was there to check (\(checked) samples)")
-        // Not vacuous: for a while the tiles' glass really is under the strip (it is the size of the notch's body, which holds the strip).
-        #expect(underneath > 0, "the tiles' glass was under the strip at some point")
+        return (checked, underneath)
+    }
+
+    /// While the notch closes the tiles and the notch's glass are one layer, so the order of the views is not the text's: the strip is a
+    /// portal above all the shapes of it. (In U3f they were two layers, with the tiles' drawn over the strip; two layers fail this.)
+    @Test(arguments: [0, 2]) func theStripIsDrawnAboveEveryTilesGlassWhileTheNotchCloses(bubbles: Int) async throws {
+        let rig = try await rig(shape: .tiles, bubbles: bubbles)
+        defer { rig.window.contentView = nil }
+        try await opened(rig)
+        let result = try await stripIsAboveTheGlass(rig) { rig.model.close() }
+        #expect(result.checked > 100, "the strip was there to check (\(result.checked) samples)")
+        #expect(result.underneath > 0, "the tiles' glass was under the strip at some point")
+    }
+
+    /// A toast over the open tab covers it with the tiles as identity glass, and the notch goes from there to the collapsed pill while
+    /// that fades: the same, with the toast's pill and the tiles' fading glass.
+    @Test func theStripIsDrawnAboveTheCoveredTilesGlassWhenAToastGoesAndTheNotchCloses() async throws {
+        let rig = try await rig(shape: .tiles)
+        defer { rig.window.contentView = nil }
+        try await opened(rig)
+        rig.model.showToast(AnyView(Color.clear.frame(width: 40, height: 20)), duration: .seconds(60))
+        try await poll("the toast") { rig.model.displayState == .toast }
+        let result = try await stripIsAboveTheGlass(rig) { rig.model.close() }
+        #expect(result.checked > 100, "the strip was there to check (\(result.checked) samples)")
     }
 
     @Test func noTileGlassOverlapsTheStripOnceTheNotchIsCollapsed() async throws {

@@ -92,6 +92,7 @@ private struct OpenNotch {
         window.contentView = hosting
         let notch = OpenNotch(hosting: hosting, window: window, frame: frame, geometry: geometry, model: model, settings: harness.settings)
         try await notch.wait("the tab was laid out") { frame.value != nil }
+        try await notch.settle()
         return notch
     }
 
@@ -108,6 +109,21 @@ private struct OpenNotch {
         }
         hosting.layoutSubtreeIfNeeded()
         try #require(condition(), "gave up waiting: \(what)")
+    }
+
+    /// Waits until the tab's frame has not moved for 100 ms: with tiles the notch springs out of its body as it opens, and a shape
+    /// chosen while it is open springs out the same way.
+    func settle() async throws {
+        var last: CGRect?
+        var still = 0
+        for _ in 0..<1000 {
+            hosting.layoutSubtreeIfNeeded()
+            if let value = frame.value, value == last { still += 1 } else { still = 0 }
+            if still >= 10 { return }
+            last = frame.value
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(Bool(false), "gave up waiting: the tab to settle")
     }
 
     /// Lets the run loop turn a few times, for an assertion that nothing happened (it follows a wait for what was to happen).
@@ -192,6 +208,7 @@ private struct OpenNotch {
 
         notch.settings.set(.tiles, for: InterfaceSettings.glassShape)
         try await notch.wait("the tiles") { notch.frame.plan?.shape == .tiles && notch.frame.value?.minX != slab.minX }
+        try await notch.settle()
         let tiled = try #require(notch.frame.value)
         #expect(abs(tiled.minX - (slab.minX + pad)) < 0.01, "the content is in its tile now: \(tiled)")
 
@@ -386,31 +403,20 @@ private struct OpenNotch {
         #expect(NotchTilesLayout.progress(of: CGSize(width: end.content.size.width + 4, height: end.content.size.height), from: rest.content.size, to: end.content.size) > 1)
     }
 
-    @Test func anOpenNotchsTilesAreGlassAtEverySizeFromTheFirstFrame() {
+    @Test func aTileIsBackInTheNotchsBodyOnlyWhenItIsAtItsRestRectOrPastIt() {
         let rest = rest(), end = open(tabs: 2)
-        for size in [rest.content.size, CGSize(width: 190, height: 40), end.content.size] {
-            #expect(NotchTilesLayout.wantsGlass(size: size, rest: rest.content.size, final: end.content.size, phase: .open), "\(size)")
+        for tile in [(rest.content, end.content), (rest.tabBar!, end.tabBar!)] {
+            func back(_ progress: CGFloat) -> Bool {
+                let size = CGSize(
+                    width: tile.0.size.width + progress * (tile.1.size.width - tile.0.size.width),
+                    height: tile.0.size.height + progress * (tile.1.size.height - tile.0.size.height)
+                )
+                return NotchTilesLayout.isBack(size: size, rest: tile.0.size, final: tile.1.size)
+            }
+            #expect(back(0) && back(NotchTilesLayout.backWithin) && back(-0.1), "at the rest rect, or under it as the spring overshoots")
+            #expect(!back(NotchTilesLayout.backWithin * 3) && !back(0.5) && !back(1), "not while it still has a way to go")
         }
-    }
-
-    @Test func aTabCoveredByAToastHasNoGlassAtAnySize() {
-        let rest = rest(), end = open(tabs: 2)
-        for size in [rest.content.size, end.content.size] {
-            #expect(!NotchTilesLayout.wantsGlass(size: size, rest: rest.content.size, final: end.content.size, phase: .covered), "\(size)")
-        }
-    }
-
-    @Test func aClosingTilesGlassGoesOnceItIsMostOfTheWayBackToTheNotchAndNotBefore() {
-        let rest = rest().content.size, end = open(tabs: 2).content.size
-        func glass(_ progress: CGFloat) -> Bool {
-            let size = CGSize(width: rest.width + progress * (end.width - rest.width), height: rest.height + progress * (end.height - rest.height))
-            return NotchTilesLayout.wantsGlass(size: size, rest: rest, final: end, phase: .closing)
-        }
-        #expect(glass(1), "just starting back")
-        #expect(glass(0.7))
-        #expect(!glass(NotchTilesLayout.glassUntil - 0.01), "past the line: identity, which then fades while it finishes the way")
-        #expect(!glass(0.3) && !glass(0))
-        #expect(NotchTilesLayout.glassUntil > 0.3 && NotchTilesLayout.glassUntil < 0.9)
+        #expect(NotchTilesLayout.backWithin > 0 && NotchTilesLayout.backWithin < 0.1, "a tile is taken out when it is inside the pill")
     }
 
     @Test func theTilesStartAtTheCollapsedNotchAndEndAtTheTabPagesRects() {

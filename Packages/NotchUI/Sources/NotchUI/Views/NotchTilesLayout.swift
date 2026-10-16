@@ -6,8 +6,8 @@ import CoreGraphics
 /// Both tiles are centred on the notch (its centre is the panel's), so a tile is a size and the distance from the top of the panel.
 /// When the notch is not open they are where the collapsed notch is: its body, which is inside its shape. When it opens they spring from
 /// there (`NotchTokens.spring`) to where the tab page puts them, and on close back; so the glass splits out of the notch and merges into
-/// it. Closing, their glass is dropped on the way (`NotchTilesLayout.wantsGlass`) and the notch's own view is above them (see
-/// `NotchRootView`), so at rest there is none, and while it fades none of it is above the strip.
+/// it. They are glass the whole way, in the same container as the notch's own glass, which is there from the first frame of the close,
+/// and they are taken out of the tree when they are back (`NotchTilesLayout.isBack`), so at rest there is none.
 nonisolated struct NotchTilesLayout: Equatable, Sendable {
     /// One tile: its size and the distance of its top from the top of the panel.
     struct Tile: Equatable, Sendable {
@@ -23,29 +23,22 @@ nonisolated struct NotchTilesLayout: Equatable, Sendable {
         return max(width, height)
     }
 
-    /// How far back a closing tile may be, as a part of the way, and still be glass: past it the glass is `Glass.identity`, which the
-    /// window server takes about 0.6 s to fade out whatever it is told, so it must start early to be gone soon after the notch has
-    /// collapsed. What is left fades under the notch's own view, which is drawn after the tiles, so it is never above the strip's text.
-    static let glassUntil: CGFloat = 0.6
+    /// How far from `rest` a tile may still be, as a part of the way to `final`, and count as back in the notch's body.
+    static let backWithin: CGFloat = 0.02
 
-    /// What a tile is doing, which decides whether it is glass.
+    /// What a tile is doing.
     enum Phase: Sendable {
-        /// The notch is open: glass, from the first frame.
+        /// The notch is open.
         case open
         /// A toast covers the tab, which keeps its tile where it was: not glass, so nothing but the toast's slab is drawn.
         case covered
-        /// The notch has closed and the tile is on its way back: glass while it is far from the notch, and never again once it has not
-        /// been (a tile that was covered stays glass-less).
+        /// The notch has closed and the tile is on its way back into its body.
         case closing
     }
 
-    /// Whether a tile of `size` is glass in `phase`.
-    static func wantsGlass(size: CGSize, rest: CGSize, final: CGSize, phase: Phase) -> Bool {
-        switch phase {
-        case .open: true
-        case .covered: false
-        case .closing: progress(of: size, from: rest, to: final) > glassUntil
-        }
+    /// Whether a tile of `size` is back in the notch's body (or past it, while the spring overshoots).
+    static func isBack(size: CGSize, rest: CGSize, final: CGSize) -> Bool {
+        progress(of: size, from: rest, to: final) <= backWithin + 1e-9
     }
 
     /// nil with a single tab, which has no capsule.
