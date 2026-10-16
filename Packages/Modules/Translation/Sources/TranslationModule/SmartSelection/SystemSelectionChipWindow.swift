@@ -123,9 +123,19 @@ final class SystemSelectionChipWindow: SelectionChipWindowing {
         self.screens = screens
     }
 
+    /// How long the small button takes to come in.
+    static let fadeDuration: TimeInterval = 0.15
+
     func show(_ content: SelectionChipContent, near anchor: CGRect) {
         place(content, near: anchor)
-        panel?.orderFrontRegardless()
+        guard let panel else { return }
+        panel.orderFrontRegardless()
+        // The small button fades in (`place` left it transparent); a chip is simply there.
+        guard panel.alphaValue < 1 else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.fadeDuration
+            panel.animator().alphaValue = 1
+        }
     }
 
     /// Everything `show` does except putting the panel on screen: its content, its size and its place. Returns the frame the
@@ -140,6 +150,8 @@ final class SystemSelectionChipWindow: SelectionChipWindowing {
         hosting.rootView = AnyView(SelectionChipView(content: content, interface: interface, maxHeight: room))
         let frame = SelectionGeometry.chipFrame(size: hosting.fittingSize, anchor: anchor, screens: displays)
         panel.setFrame(frame, display: true)
+        // Transparent until `show` fades it in: a button that comes up, not one that appears.
+        panel.alphaValue = content.kind == .translateButton && !panel.isVisible ? 0 : 1
         return panel.frame
     }
 

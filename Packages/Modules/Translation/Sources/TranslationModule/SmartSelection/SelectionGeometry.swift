@@ -41,6 +41,15 @@ nonisolated enum SelectionGeometry {
         return rect
     }
 
+    /// Where a selection ends, for what belongs there rather than under the middle of it: a narrow anchor as tall as the
+    /// selection. For a mouse selection that is where the pointer is, kept within the selection's rectangle; for a keyboard
+    /// one, its right edge. An anchor that is only a point (the pointer, when nothing better was known) is already an end.
+    static func endAnchor(of anchor: CGRect, pointer: CGPoint, byPointer: Bool) -> CGRect {
+        guard anchor.width > 0 else { return anchor }
+        let x = byPointer ? min(max(pointer.x, anchor.minX), anchor.maxX) : anchor.maxX
+        return CGRect(x: x, y: anchor.minY, width: 0, height: anchor.height)
+    }
+
     /// The chip centred just below the anchor, above it when there is no room below, always inside the visible frame of the
     /// display the anchor is on.
     static func chipFrame(size: CGSize, anchor: CGRect, screens: [ScreenArea]) -> CGRect {
@@ -71,7 +80,8 @@ nonisolated enum SelectionGeometry {
         return screens.min { distance(from: centre, to: $0.frame) < distance(from: centre, to: $1.frame) }
     }
 
-    private static func distance(from point: CGPoint, to frame: CGRect) -> CGFloat {
+    /// How far `point` is from `frame`: nothing inside it or on its edge.
+    static func distance(from point: CGPoint, to frame: CGRect) -> CGFloat {
         hypot(max(frame.minX - point.x, 0, point.x - frame.maxX), max(frame.minY - point.y, 0, point.y - frame.maxY))
     }
 

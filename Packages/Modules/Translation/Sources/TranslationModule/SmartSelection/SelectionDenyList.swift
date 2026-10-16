@@ -47,9 +47,12 @@ struct RunningApplications {
 struct SmartSelectionSettingsView: View {
     @Binding var smartSelection: Bool
     @Binding var showChip: Bool
+    @Binding var showButton: Bool
     @Binding var showActivity: Bool
     @Binding var denyList: [String]
     let applications: RunningApplications
+
+    static let buttonTitle = "Hiện nút dịch nhỏ khi không tự dịch"
 
     var body: some View {
         Group {
@@ -60,6 +63,11 @@ struct SmartSelectionSettingsView: View {
             Toggle(isOn: $showChip) {
                 Text("Hiện nút cạnh vùng chọn")
                 Text("Một nút nhỏ có kết quả và nút “Mở”. Tự mất sau vài giây, khi bạn bấm chỗ khác hoặc nhấn Esc.")
+            }
+            .disabled(!Self.optionsEnabled(smartSelection: smartSelection))
+            Toggle(isOn: $showButton) {
+                Text(Self.buttonTitle)
+                Text("Khi MyNotch không tự dịch (tên riêng, tiêu đề, chữ tiếng Việt, câu chưa chắc là tiếng nước ngoài), một nút nhỏ hiện dưới cuối vùng chọn. Bấm vào để dịch như khi nhấn phím tắt. Không hiện cho mã, đường dẫn hay link; bấm chuột phải vào nút để không hiện trong app đó nữa.")
             }
             .disabled(!Self.optionsEnabled(smartSelection: smartSelection))
             Toggle(isOn: $showActivity) {

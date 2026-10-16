@@ -49,7 +49,12 @@ nonisolated enum SelectionLanguage {
     /// For a Vietnamese user, text with no accents is held to more: Vietnamese typed that way is often taken for Italian or
     /// Romanian, so a text with several common Vietnamese words shows nothing, and any guess needs 0.9 and three words.
     static func assess(_ text: String, target: Locale.Language, candidates: [Locale.Language]) -> Assessment {
-        guard hasEnoughToTranslate(text), SelectionShape.isProse(text) else { return .skip(.shape) }
+        switch SelectionShape.kind(of: text) {
+        case .code: return .skip(.shapeCode)
+        case .name: return .skip(.shapeName)
+        case .prose: break
+        }
+        guard hasEnoughToTranslate(text) else { return .skip(.shapeShort) }
         guard let guess = guess(of: text) else { return .skip(.lowConfidence) }
         guard LanguageDetector.writtenLanguage(of: target) != guess.language else { return .skip(.sameLanguage) }
         guard passesUnaccentedRules(text: text, target: target, confidence: guess.confidence) else { return .skip(.lowConfidence) }

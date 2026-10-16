@@ -3,7 +3,7 @@ import os
 
 /// Why a selection shows nothing, as the short code the log carries. Every exit of a reading that is not a hint has one, so
 /// that "selecting does nothing" can be explained from the unified log alone.
-nonisolated enum SelectionSkip: String, Sendable {
+nonisolated enum SelectionSkip: String, Sendable, CaseIterable {
     case notTrusted = "not-trusted"
     case noFrontApp = "no-front-app"
     case ownApp = "own-app"
@@ -16,8 +16,12 @@ nonisolated enum SelectionSkip: String, Sendable {
     case tooLong = "too-long"
     case blank
     case unchanged
-    /// Not something written to be read: a link, a path, code, a log line, a name, one word.
-    case shape
+    /// A name or a heading: up to three capitalised words. Whether it needs no translation is only a guess.
+    case shapeName = "shape-name"
+    /// Not something written to be read: code, a log line, a path, a link, an identifier, or mostly numbers and marks.
+    case shapeCode = "shape-code"
+    /// One word that is not a name: a dictionary's business, and in an editor or a terminal nearly every double click.
+    case shapeShort = "shape-short"
     case sameLanguage = "same-language"
     /// The recognizer is not sure enough, or the text has no accents and is held to more.
     case lowConfidence = "low-confidence"
@@ -27,6 +31,20 @@ nonisolated enum SelectionSkip: String, Sendable {
     case noConversion = "no-conversion"
     case cancelled
     case noHint = "no-hint"
+}
+
+extension SelectionSkip {
+    /// Whether a selection skipped for this reason gets the small translate button: when it is only a guess that nothing is
+    /// worth translating (a name or heading, a doubtful language, text in the user's own language, which they may want in
+    /// another). Not for what is certainly nothing to translate (code, links, paths, one plain word), nor for anything that
+    /// was not read, was refused, or was already handled. Exhaustive on purpose: a new reason must be decided here.
+    var offersButton: Bool {
+        switch self {
+        case .shapeName, .lowConfidence, .sameLanguage, .noHint: true
+        case .notTrusted, .noFrontApp, .ownApp, .denied, .cooldown, .secure, .unresponsive, .none, .tooLong, .blank, .unchanged,
+             .shapeCode, .shapeShort, .unsupportedLanguage, .noConversion, .cancelled: false
+        }
+    }
 }
 
 /// Why the on-device preview could not be made for text that is in another language.
@@ -75,6 +93,11 @@ nonisolated struct SelectionLogLine: ExpressibleByStringLiteral, Sendable {
 
     static func previewFailed(_ reason: PreviewFailure) -> Self {
         Self(text: "preview failed reason=\(reason.rawValue)")
+    }
+
+    /// The small translate button came up, which is when it was seen, not when it was decided on.
+    static func buttonShown(reason: SelectionSkip) -> Self {
+        Self(text: "button shown reason=\(reason.rawValue)")
     }
 
     static func deny(added: Bool) -> Self {

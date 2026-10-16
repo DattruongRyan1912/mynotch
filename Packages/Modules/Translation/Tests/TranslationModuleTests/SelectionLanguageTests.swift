@@ -64,6 +64,51 @@ import Testing
         #expect(SelectionLanguage.source(of: "你好吗", target: .vi, candidates: candidates) == nil)
     }
 
+    // MARK: why there is no source
+
+    func reason(_ text: String, target: Locale.Language = .vi, candidates: [Locale.Language]? = nil) -> SelectionSkip? {
+        if case .skip(let reason) = SelectionLanguage.assess(text, target: target, candidates: candidates ?? self.candidates) { reason } else { nil }
+    }
+
+    @Test(arguments: ["PageSpeed Insights", "Getting Started", "Tim Cook", "Hello", "NASA"])
+    func aNameIsSkippedAsAName(text: String) {
+        #expect(reason(text) == .shapeName, "\(text)")
+    }
+
+    @Test(arguments: [
+        "https://example.com/blog/2026/10/why-we-moved", "john.smith@example.com", "/Users/x/Project/MyNotch", "let value = compute(input)",
+        "2026-10-15 09:12:44 INFO Server started on port 8080", "snake_case_name another_one", "12345",
+    ])
+    func codeLinksPathsAndLogsAreSkippedAsCode(text: String) {
+        #expect(reason(text) == .shapeCode, "\(text)")
+    }
+
+    @Test(arguments: ["hello", "ephemeral", "你好吗", "don't"])
+    func oneWordThatIsNotAName_isSkippedAsTooShort(text: String) {
+        #expect(reason(text) == .shapeShort, "\(text)")
+    }
+
+    @Test func aWordMistakenForCodeIsStillCodeBeforeItIsTooShort() {
+        #expect(reason("snake_case_name") == .shapeCode)
+        #expect(reason("https://example.com") == .shapeCode)
+    }
+
+    @Test func textInTheTargetLanguageIsSkippedAsTheSameLanguage() {
+        #expect(reason("Hôm nay trời đẹp quá, chúng ta đi dạo nhé") == .sameLanguage)
+    }
+
+    @Test func aGuessThatIsNotSureIsSkippedAsLowConfidence() {
+        #expect(reason("Hello world") == .lowConfidence)
+    }
+
+    @Test func aLanguageThatCannotBeTranslatedIsSkippedAsUnsupported() {
+        #expect(reason("The quick brown fox jumps over the lazy dog", candidates: [.vi, .ja]) == .unsupportedLanguage)
+    }
+
+    @Test func foreignProseHasNoReason() {
+        #expect(reason("The quick brown fox jumps over the lazy dog") == nil)
+    }
+
     @Test func theFirstCandidateOfTheLanguageIsTheSource() {
         let british = Locale.Language(identifier: "en-GB")
         #expect(SelectionLanguage.source(of: "The quick brown fox jumps over the lazy dog", target: .vi, candidates: [.vi, .en, british]) == .en)

@@ -11,7 +11,9 @@ import SwiftUI
 /// Microsoft, an OpenAI-compatible server); its key stays in the Keychain, and when it fails the tab says so and offers
 /// Apple's translation instead of switching by itself. With "Bôi đen là hiểu" on, a selection in any app is understood
 /// without a keystroke: its conversion or a preview of its translation (Apple's on-device engine only) shows in a small chip
-/// beside it, and the chip's "Mở" opens the full result in this tab.
+/// beside it, and the chip's "Mở" opens the full result in this tab. A selection it does not translate by itself, for a
+/// reason that is only a guess (a name or heading, a doubtful language, the user's own language), gets a small translate
+/// button instead, whose click does what the shortcut does.
 public final class TranslationModule: FeatureModule {
     public let descriptor = ModuleDescriptor(
         id: "translation",
@@ -127,7 +129,8 @@ public final class TranslationModule: FeatureModule {
         let smart = SmartSelection(
             context: context, setup: smartSelectionSetup,
             decider: SelectionDecider(converter: converter, preview: smartSelectionSetup.preview, languages: languages, settings: context.settings),
-            open: { [weak self] in self?.openSelection($0) }
+            open: { [weak self] in self?.openSelection($0) },
+            translate: { [weak self] in self?.selectionShortcutPressed() }
         )
         smartSelection = smart
         context.hotkeys.register("translateSelection", title: "Dịch đoạn chữ đang chọn", initial: shortcut) { [weak self] in
@@ -223,6 +226,7 @@ public final class TranslationModule: FeatureModule {
             showReplaceButton: settings.binding(keys.showReplaceButton),
             smartSelection: settings.binding(keys.smartSelection),
             showSelectionChip: settings.binding(keys.selectionChip),
+            showSelectionButton: settings.binding(keys.selectionButton),
             showSelectionActivity: settings.binding(keys.selectionActivity),
             selectionDenyList: settings.binding(keys.selectionDenyList),
             convertCurrency: settings.binding(keys.convertCurrency),

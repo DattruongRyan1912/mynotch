@@ -52,6 +52,41 @@ import Testing
         #expect(anchor.origin.y == 1080)
     }
 
+    // MARK: the end of the selection, for the small button
+
+    @Test func aMouseSelectionEndsWhereThePointerIsWithinItsRectangle() {
+        let rect = CGRect(x: 100, y: 300, width: 200, height: 20)
+        let end = SelectionGeometry.endAnchor(of: rect, pointer: CGPoint(x: 260, y: 310), byPointer: true)
+        #expect(end == CGRect(x: 260, y: 300, width: 0, height: 20))
+        #expect(SelectionGeometry.endAnchor(of: rect, pointer: CGPoint(x: 330, y: 310), byPointer: true).origin.x == 300)
+        #expect(SelectionGeometry.endAnchor(of: rect, pointer: CGPoint(x: 70, y: 310), byPointer: true).origin.x == 100)
+    }
+
+    @Test func aKeyboardSelectionEndsAtTheRightEdgeOfItsRectangle() {
+        let rect = CGRect(x: 100, y: 300, width: 200, height: 20)
+        let end = SelectionGeometry.endAnchor(of: rect, pointer: CGPoint(x: 5, y: 5), byPointer: false)
+        #expect(end == CGRect(x: 300, y: 300, width: 0, height: 20))
+    }
+
+    @Test func aSelectionWithNoRectangleIsWhereThePointerIs() {
+        let point = CGRect(x: 120, y: 340, width: 0, height: 0)
+        #expect(SelectionGeometry.endAnchor(of: point, pointer: CGPoint(x: 120, y: 340), byPointer: true) == point)
+        #expect(SelectionGeometry.endAnchor(of: point, pointer: CGPoint(x: 900, y: 900), byPointer: false) == point)
+    }
+
+    @Test func theButtonGoesThroughTheChipsOwnPlacement() {
+        // Below the end of the selection, centred on it; above when there is no room; and kept on the display.
+        let button = CGSize(width: 22, height: 22)
+        let low = SelectionGeometry.endAnchor(of: CGRect(x: 100, y: 500, width: 200, height: 20), pointer: CGPoint(x: 250, y: 510), byPointer: true)
+        let below = SelectionGeometry.chipFrame(size: button, anchor: low, screens: all)
+        #expect(below == CGRect(x: 239, y: 472, width: 22, height: 22))
+        let near = SelectionGeometry.endAnchor(of: CGRect(x: 100, y: 5, width: 200, height: 20), pointer: CGPoint(x: 250, y: 10), byPointer: true)
+        let above = SelectionGeometry.chipFrame(size: button, anchor: near, screens: all)
+        #expect(above.minY >= 25)
+        let edge = SelectionGeometry.endAnchor(of: CGRect(x: 1400, y: 500, width: 100, height: 20), pointer: CGPoint(x: 1500, y: 510), byPointer: false)
+        #expect(main.visibleFrame.union(right.visibleFrame).contains(SelectionGeometry.chipFrame(size: button, anchor: edge, screens: all)))
+    }
+
     // MARK: where there is nothing to go by
 
     @Test(arguments: [

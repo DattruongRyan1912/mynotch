@@ -35,7 +35,8 @@ import Testing
         for list in [[], ["com.a", "com.zzz"]] {
             let view = Form {
                 SmartSelectionSettingsView(
-                    smartSelection: .constant(true), showChip: .constant(true), showActivity: .constant(false), denyList: .constant(list),
+                    smartSelection: .constant(true), showChip: .constant(true), showButton: .constant(true), showActivity: .constant(false),
+                    denyList: .constant(list),
                     applications: apps
                 )
             }
@@ -47,5 +48,16 @@ import Testing
     @Test func theOptionsAreGreyedWhenTheFeatureIsOff() {
         #expect(SmartSelectionSettingsView.optionsEnabled(smartSelection: true))
         #expect(!SmartSelectionSettingsView.optionsEnabled(smartSelection: false))
+    }
+
+    @Test func theSmallButtonIsOnByDefaultAndItsRowIsGreyedWithTheFeature() async {
+        let fixture = ModuleFixture()
+        await fixture.start()
+        #expect(fixture.harness.settingsEnvironment(for: "translation")!.settings.value(fixture.keys.selectionButton))
+        #expect(SmartSelectionSettingsView.optionsEnabled(smartSelection: true))
+    }
+
+    @Test func theSmallButtonRowSaysWhatItIsFor() {
+        #expect(SmartSelectionSettingsView.buttonTitle == "Hiện nút dịch nhỏ khi không tự dịch")
     }
 }

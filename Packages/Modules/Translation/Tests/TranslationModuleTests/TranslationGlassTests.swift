@@ -160,6 +160,8 @@ import Testing
                 Fixture(name: "result", view: result, size: tab, wash: nil, ink: 100, reach: 0.15),
                 Fixture(name: "conversion", view: conversion, size: tab, wash: nil, ink: 100, reach: 0.15),
                 Fixture(name: "chip", view: chip(.conversion, text: "5 ft 11 in = 1,80 m"), size: CGSize(width: 300, height: 40), wash: nil, ink: 100, reach: 0.15),
+                // A 22 pt button: a light glyph on its own black capsule, so it too is meant to be light.
+                Fixture(name: "translate button", view: chip(.translateButton, text: ""), size: CGSize(width: 40, height: 40), wash: nil, ink: 15, reach: 0.15),
             ]
         }
     }

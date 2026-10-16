@@ -15,6 +15,8 @@ struct SmartSelectionSetup {
     var preview: any OnDeviceTranslationEngine = SmartSelectionSetup.systemPreview()
     /// The displays, the main one first.
     var screens: () -> [ScreenArea] = { SmartSelectionSetup.systemScreens() }
+    /// Where the pointer is, which the small translate button asks while it is up: it goes when the pointer leaves for far away.
+    var pointer: @MainActor () -> CGPoint = { NSEvent.mouseLocation }
     var ownProcessID: pid_t = getpid()
     /// Where it tells what it is doing: the unified log, category `smart-selection`.
     var log: any SelectionLog = OSSelectionLog()
@@ -45,7 +47,9 @@ struct SmartSelectionSetup {
 }
 
 /// "Bôi đen là hiểu": watches for selections in other apps, understands them (a conversion or a preview of a translation)
-/// and shows what it found beside the selection and, if the user wants, beside the collapsed notch.
+/// and shows what it found beside the selection and, if the user wants, beside the collapsed notch. A selection that is read
+/// but not translated by itself, for a reason that is only a guess (a name or heading, a doubtful language, the user's own
+/// language), gets a small translate button instead, which does what ⌃⌥T does.
 ///
 /// Nothing the user selects is written anywhere or sent anywhere from here, and it is held in memory only until the next
 /// selection or the end of the module: the preview is on-device, and the selected text is never logged.
@@ -92,6 +96,7 @@ final class SmartSelection {
     private let setup: SmartSelectionSetup
     private let keys: TranslationKeys
     private let openResult: @MainActor (SelectionSource) -> Void
+    private let translateSelection: @MainActor () -> Void
     private var chip: SelectionChip!
     private var watcher: SelectionWatcher?
     private var isWatching = false
@@ -109,21 +114,29 @@ final class SmartSelection {
     /// Processes already switched into accessibility mode, or found in it: once is enough for as long as the process lives.
     private var switchedOn: Set<pid_t> = []
     private var denialCount = 0
+    /// A key that does not change a selection was pressed since the selection was made (⌘C, typing): the user has what they
+    /// wanted from it, so the small translate button is not offered. The watcher lets ⌘C be, so this is the button's own note.
+    private var keyPressedSinceSelection = false
 
-    /// - Parameter open: the chip's "Mở": opens the notch's Translation tab on the selection.
+    /// - Parameters:
+    ///   - open: the chip's "Mở": opens the notch's Translation tab on the selection.
+    ///   - translate: the small button's click: what the shortcut does, which reads the selection again and opens the tab on it.
     init(
-        context: ModuleContext, setup: SmartSelectionSetup, decider: SelectionDecider, open: @escaping @MainActor (SelectionSource) -> Void
+        context: ModuleContext, setup: SmartSelectionSetup, decider: SelectionDecider, open: @escaping @MainActor (SelectionSource) -> Void,
+        translate: @escaping @MainActor () -> Void
     ) {
         self.context = context
         self.setup = setup
         self.decider = decider
         openResult = open
+        translateSelection = translate
         keys = TranslationKeys(context.settings)
         chip = SelectionChip(
             scheduler: context.scheduler,
             show: { [weak self] hint, anchor in self?.present(hint, near: anchor) },
             hide: { [weak self] in self?.withdraw() },
-            onDismiss: { }
+            onDismiss: { },
+            pointer: setup.pointer
         )
     }
 
@@ -144,10 +157,11 @@ final class SmartSelection {
         setup.preview.invalidate()
     }
 
-    /// Whether anything would be shown: the feature is on and has a chip or an activity to show it with.
+    /// Whether anything would be shown: the feature is on and has a chip, an activity or the small button to show it with.
     private var wantsToWatch: Bool {
         let settings = context.settings
-        return settings.value(keys.smartSelection) && (settings.value(keys.selectionChip) || settings.value(keys.selectionActivity))
+        return settings.value(keys.smartSelection)
+            && (settings.value(keys.selectionChip) || settings.value(keys.selectionActivity) || settings.value(keys.selectionButton))
     }
 
     func apply(logging: Bool = false) {
@@ -212,6 +226,18 @@ final class SmartSelection {
             if let readingProcessID, readingProcessID != processID { supersedeReading() }
             if let lastHandled, lastHandled.application.processID != processID { self.lastHandled = nil }
             return
+        }
+        // Any key puts the small translate button away, or keeps it from coming up if the selection is still being read. The watcher
+        // lets ⌘C be, since a chip's result is still worth seeing after a copy; the button only offers a translation, which
+        // someone who has copied the text does not need, and it must not flash after a quick drag and copy.
+        switch input {
+        case .keyUp(let key, _):
+            keyPressedSinceSelection = !key.changesSelection
+            if chip.hint?.kind == .translateButton { chip.dismiss() }
+        case .mouseDown, .mouseUp:
+            keyPressedSinceSelection = false
+        case .applicationActivated:
+            break
         }
         watcher?.handle(input)
     }
@@ -312,15 +338,24 @@ final class SmartSelection {
         let decision = await decider.decide(for: source)
         guard isCurrent(request) else { return }
         lastHandled = source
+        let anchor = SelectionGeometry.anchor(bounds: bounds, pointer: pointer, screens: setup.screens(), pointerMatters: byPointer)
         switch decision {
         case .skip(let reason):
             skip(reason)
+            if reason.offersButton { offerButton(for: source, because: reason, anchor: anchor, pointer: pointer, byPointer: byPointer) }
         case .hint(let hint, let failure):
             if let failure { log(.previewFailed(failure)) }
             log(.hint(hint.kind))
-            let anchor = SelectionGeometry.anchor(bounds: bounds, pointer: pointer, screens: setup.screens(), pointerMatters: byPointer)
             chip.show(hint, anchor: anchor)
         }
+    }
+
+    /// The selection was read and skipped for a reason that is only a guess: a small translate button at the end of it, if the
+    /// user wants one. It is shown after a short delay, and the log says so only when it is.
+    private func offerButton(for source: SelectionSource, because reason: SelectionSkip, anchor: CGRect, pointer: CGPoint, byPointer: Bool) {
+        guard context.settings.value(keys.selectionButton), !keyPressedSinceSelection else { return }
+        let end = SelectionGeometry.endAnchor(of: anchor, pointer: pointer, byPointer: byPointer)
+        chip.show(SelectionHint(kind: .translateButton, text: "", source: source, reason: reason), anchor: end, watchesPointer: byPointer)
     }
 
     /// Switches a Chrome or Electron app into accessibility mode, the way the shortcut does, when the user allows it and it is
@@ -379,6 +414,13 @@ final class SmartSelection {
 
     private func present(_ hint: SelectionHint, near anchor: CGRect) {
         let settings = context.settings
+        if hint.kind == .translateButton {
+            // Its own setting and its own look, and never a live activity: "Dịch" beside the notch for every name would be noise.
+            guard settings.value(keys.selectionButton), let reason = hint.reason else { return }
+            setup.window.show(content(for: hint), near: anchor)
+            log(.buttonShown(reason: reason))
+            return
+        }
         if settings.value(keys.selectionChip) {
             setup.window.show(content(for: hint), near: anchor)
             log("chip shown")
@@ -405,13 +447,28 @@ final class SmartSelection {
         let application = hint.source.application
         var deny: (@MainActor () -> Void)?
         if application.bundleID != nil { deny = { [weak self] in self?.deny(application) } }
+        let open: @MainActor () -> Void
+        if hint.kind == .translateButton {
+            open = { [weak self] in self?.translateButtonClicked() }
+        } else {
+            open = { [weak self] in self?.openCurrent() }
+        }
         return SelectionChipContent(
             kind: hint.kind, text: hint.text, actionTitle: hint.kind == .button ? SelectionHint.buttonTitle : "Mở",
             caption: hint.kind == .translation ? SelectionHint.caption(of: hint.source.text) : nil, note: hint.note,
-            open: { [weak self] in self?.openCurrent() },
+            open: open,
             deny: deny,
             hover: { [weak self] in self?.chip.hoverChanged($0) }
         )
+    }
+
+    /// The small button's click: exactly what ⌃⌥T does with the selection, through the module's own shortcut path, which reads
+    /// the selection again and opens the tab on it. The button goes first, and a button that is already gone does nothing.
+    private func translateButtonClicked() {
+        guard chip.hint?.kind == .translateButton else { return }
+        log("button clicked")
+        chip.dismiss()
+        translateSelection()
     }
 
     /// "Mở": the result of the selection the chip is showing, in the notch.

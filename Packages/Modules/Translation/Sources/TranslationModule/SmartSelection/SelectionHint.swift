@@ -8,6 +8,9 @@ nonisolated struct SelectionHint: Equatable, Sendable {
         /// Foreign text whose preview could not be made: the chip is a "Dịch" button that opens the tab, and `text` is only the
         /// reason it needs ("Cần tải gói ngôn ngữ") or nothing.
         case button
+        /// A selection that was read but not translated by itself, for a reason that is only a guess: just a small translate
+        /// button, which does what the shortcut does. `text` is empty and `reason` says why it is offered.
+        case translateButton
 
         /// What the log calls it.
         var logCode: String {
@@ -15,6 +18,7 @@ nonisolated struct SelectionHint: Equatable, Sendable {
             case .conversion: "conversion"
             case .translation: "preview"
             case .button: "button"
+            case .translateButton: "translate-button"
             }
         }
     }
@@ -40,6 +44,8 @@ nonisolated struct SelectionHint: Equatable, Sendable {
     /// Set when only the start of the selection was translated: the translation then ends with "…" and the chip says that
     /// "Mở" translates all of it.
     var note: String?
+    /// For the small translate button: why the selection was not translated by itself.
+    var reason: SelectionSkip?
 
     /// The first line of the original text, for the small caption over its translation; nil when it has none.
     static func caption(of original: String) -> String? {

@@ -82,6 +82,74 @@ import Testing
         #expect(width(canDeny: true) > width(canDeny: false))
     }
 
+    // MARK: the small translate button
+
+    func buttonContent(canDeny: Bool = true) -> SelectionChipContent {
+        var deny: (@MainActor () -> Void)?
+        if canDeny { deny = {} }
+        return SelectionChipContent(kind: .translateButton, text: "", open: {}, deny: deny, hover: { _ in })
+    }
+
+    @Test func theButtonIsAbout22PointsSquare() throws {
+        let window = makeWindow()
+        let frame = window.place(buttonContent(), near: CGRect(x: 500, y: 400, width: 0, height: 20))
+        #expect(abs(frame.width - 22) <= 1, "\(frame.width)")
+        #expect(abs(frame.height - 22) <= 1, "\(frame.height)")
+        window.hide()
+    }
+
+    @Test func theButtonSitsJustBelowTheEndOfTheSelection() throws {
+        let window = makeWindow()
+        let frame = window.place(buttonContent(), near: CGRect(x: 500, y: 400, width: 0, height: 20))
+        #expect(frame.maxY <= 400 - SelectionGeometry.gap + 0.5)
+        #expect(frame.maxY > 400 - SelectionGeometry.gap - 1.5)
+        #expect(abs(frame.midX - 500) <= 1)
+        #expect(screen.visibleFrame.contains(frame))
+        window.hide()
+    }
+
+    @Test func theButtonIsTheSameNeverKeyPanelAsTheChip() throws {
+        let window = makeWindow()
+        window.place(buttonContent(), near: CGRect(x: 500, y: 400, width: 0, height: 20))
+        let panel = try #require(window.panel)
+        #expect(!panel.canBecomeKey)
+        #expect(!panel.canBecomeMain)
+        #expect(panel.styleMask.contains(.nonactivatingPanel))
+        #expect(!panel.hidesOnDeactivate)
+        window.hide()
+    }
+
+    @Test func theButtonStartsTransparentSoItCanFadeInAndAChipDoesNot() throws {
+        let window = makeWindow()
+        window.place(buttonContent(), near: CGRect(x: 500, y: 400, width: 0, height: 20))
+        #expect(try #require(window.panel).alphaValue == 0)
+        window.hide()
+        window.place(content(), near: CGRect(x: 500, y: 400, width: 100, height: 20))
+        #expect(try #require(window.panel).alphaValue == 1)
+        window.hide()
+    }
+
+    @Test func theButtonFollowsTheHideFromRecordingSettingLikeTheChip() throws {
+        interface.captureHiding = .always
+        let window = makeWindow()
+        window.place(buttonContent(), near: CGRect(x: 500, y: 400, width: 0, height: 20))
+        #expect(try #require(window.panel).sharingType == .none)
+        window.hide()
+    }
+
+    @Test func theButtonAcceptsTheFirstClickAndReportsThePointer() throws {
+        var hovers: [Bool] = []
+        let view = SelectionChipHostingView(rootView: AnyView(SelectionChipView(content: buttonContent(), interface: interface))) { hovers.append($0) }
+        #expect(view.acceptsFirstMouse(for: nil))
+        view.pointerEntered()
+        view.pointerExited()
+        #expect(hovers == [true, false])
+    }
+
+    @Test func theButtonHasAnAccessibleNameAndAHelpTag() {
+        #expect(SelectionTranslateButton.label == "Dịch vùng chọn")
+    }
+
     // MARK: a whole translation
 
     @Test func aLongTranslationGrowsTheChipAndKeepsItBelowTheSelection() throws {

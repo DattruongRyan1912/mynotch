@@ -9,6 +9,7 @@ struct TranslationSettingsView: View {
     @Binding var showReplaceButton: Bool
     @Binding var smartSelection: Bool
     @Binding var showSelectionChip: Bool
+    @Binding var showSelectionButton: Bool
     @Binding var showSelectionActivity: Bool
     @Binding var selectionDenyList: [String]
     @Binding var convertCurrency: Bool
@@ -47,7 +48,7 @@ struct TranslationSettingsView: View {
                 Text("Cho phím tắt và Bôi đen là hiểu. Chrome chuyển sang chế độ hỗ trợ trình đọc màn hình, và một số app đổi cách di chuyển cửa sổ; tắt mục này không hoàn lại chế độ của app đang chạy, mở lại app để trở về như cũ.")
             }
             SmartSelectionSettingsView(
-                smartSelection: $smartSelection, showChip: $showSelectionChip, showActivity: $showSelectionActivity,
+                smartSelection: $smartSelection, showChip: $showSelectionChip, showButton: $showSelectionButton, showActivity: $showSelectionActivity,
                 denyList: $selectionDenyList, applications: applications
             )
             Toggle(isOn: $showReplaceButton) {

@@ -87,6 +87,52 @@ import Testing
         #expect(SelectionShape.isProse("Good morning to everyone here"))
     }
 
+    // MARK: what kind of thing it is (the reason behind a skip)
+
+    nonisolated static let names = [
+        "PageSpeed Insights", "Getting Started", "Tim Cook", "Apple Park", "Google Chrome", "New York City", "Hello", "Insights", "NASA",
+    ]
+
+    /// Not prose and not a name: code, links, paths, logs, identifiers, and text that is mostly digits and marks.
+    nonisolated static let codeLike = notProse.filter { !names.contains($0) && !["John Smith"].contains($0) } + ["12345", "ok ?? !! ## -- ** 12 34 hello there"]
+
+    @Test(arguments: names + ["John Smith"])
+    func upToThreeCapitalisedWordsAreAName(text: String) {
+        #expect(SelectionShape.kind(of: text) == .name, "\(text)")
+    }
+
+    @Test(arguments: codeLike)
+    func codeLinksPathsAndLogsAreNotAName(text: String) {
+        #expect(SelectionShape.kind(of: text) == .code, "\(text)")
+    }
+
+    @Test(arguments: prose)
+    func proseIsProse(text: String) {
+        #expect(SelectionShape.kind(of: text) == .prose, "\(text)")
+    }
+
+    /// The split must not loosen the automatic preview: whatever `isProse` refused is still refused.
+    @Test(arguments: notProse + prose + ["ok ?? !! ## -- ** 12 34 hello there", "https://a.example.com https://b.example.com https://c.example.com see"])
+    func isProseIsExactlyTheProseKind(text: String) {
+        #expect(SelectionShape.isProse(text) == (SelectionShape.kind(of: text) == .prose), "\(text)")
+    }
+
+    @Test func aQuarterOfPunctuationAndDigitsIsTheMostProseAllows() {
+        // 3 digits of 9 characters is a third: not prose. 3 of 15 is a fifth: prose.
+        #expect(SelectionShape.kind(of: "abc 123 def") == .code)
+        #expect(SelectionShape.kind(of: "abcd 123 efgh ijkl") == .prose)
+    }
+
+    @Test func aNameWithADigitOrALowercaseWordIsNotAName() {
+        #expect(SelectionShape.kind(of: "Windows 11") == .prose)
+        #expect(SelectionShape.kind(of: "Tim cook") == .prose)
+        #expect(SelectionShape.kind(of: "Tim Cook Apple Park") == .prose)
+    }
+
+    @Test func aNameWithACodeSymbolIsCode() {
+        #expect(SelectionShape.kind(of: "Tim_Cook") == .code)
+    }
+
     // MARK: Vietnamese without accents
 
     nonisolated static let unaccentedVietnamese = [

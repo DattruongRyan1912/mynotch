@@ -43,6 +43,8 @@ struct TranslationKeys {
     let smartSelection: SettingKey<Bool>
     /// The small button beside the selection that shows what was understood.
     let selectionChip: SettingKey<Bool>
+    /// A small translate button beside a selection that was read but is not translated by itself, for a reason that is only a guess.
+    let selectionButton: SettingKey<Bool>
     /// What was understood is also shown as a short live activity beside the collapsed notch.
     let selectionActivity: SettingKey<Bool>
     /// Bundle IDs of the apps whose selections are never read.
@@ -64,6 +66,7 @@ struct TranslationKeys {
         openAIModel = settings.key("openAIModel", default: "gpt-4o-mini")
         smartSelection = settings.key("smartSelection", default: true)
         selectionChip = settings.key("selectionChip", default: true)
+        selectionButton = settings.key("selectionButton", default: true)
         selectionActivity = settings.key("selectionActivity", default: false)
         selectionDenyList = settings.key("selectionDenyList", default: [])
     }

@@ -17,9 +17,20 @@ nonisolated enum SelectionShape {
         case bare
     }
 
-    /// Whether `text` could be prose: not code, not a log line, mostly words, not just a name, not mostly punctuation or digits.
-    static func isProse(_ text: String) -> Bool {
-        guard !hasCodeSymbols(text), !looksLikeLog(text) else { return false }
+    /// What a selection is, apart from what language it is in.
+    enum Kind: Sendable {
+        /// Could have been written to be read.
+        case prose
+        /// Up to three capitalised words: a person, a place, a product, a heading. Maybe foreign, maybe not.
+        case name
+        /// Code, a log line, a link, a path, an identifier, or mostly numbers and marks.
+        case code
+    }
+
+    /// What `text` looks like: code, a name, or prose. Prose is what is not code (no code symbols, no log line, mostly words,
+    /// not mostly punctuation or digits) and not just a name.
+    static func kind(of text: String) -> Kind {
+        guard !hasCodeSymbols(text), !looksLikeLog(text) else { return .code }
         let tokens = text.split(whereSeparator: \.isWhitespace).map(String.init)
         var words = 0
         var others = 0
@@ -27,13 +38,19 @@ nonisolated enum SelectionShape {
             switch classify(token) {
             case .word: words += 1
             case .other: others += 1
-            case .code: return false
+            case .code: return .code
             case .bare: break
             }
         }
         // At least two thirds of the tokens that are anything must be words: a link or two in a sentence is fine.
-        guard words >= 1, words * 3 >= (words + others) * 2 else { return false }
-        return !isName(tokens) && punctuationShare(of: text) <= 0.25
+        guard words >= 1, words * 3 >= (words + others) * 2 else { return .code }
+        if isName(tokens) { return .name }
+        return punctuationShare(of: text) <= 0.25 ? .prose : .code
+    }
+
+    /// Whether `text` could be prose: not code, not a log line, mostly words, not just a name, not mostly punctuation or digits.
+    static func isProse(_ text: String) -> Bool {
+        kind(of: text) == .prose
     }
 
     /// Vietnamese typed without accents ("toi dang di hoc"), which the recognizer takes for Italian or Romanian. Several

@@ -46,6 +46,7 @@ import Testing
 
     @Test func startingWithNothingToShowItWithSaysItIsNotWatching() async {
         fixture.set(false, for: \.selectionChip)
+        fixture.set(false, for: \.selectionButton)
         await start()
         #expect(log.lines.first == "start watcher=0 trusted=1 keys=0")
     }
@@ -182,11 +183,25 @@ import Testing
 
     @Test func aTextThatIsNotProse() async {
         let url = await skipLine("https://example.com/blog/2026/10/why-we-moved") 
-        #expect(url.last == "skip reason=shape")
+        #expect(url.last == "skip reason=shape-code")
         let code = await lines { await fixture.dragSelecting("let value = compute(input)") }
-        #expect(code.last == "skip reason=shape")
-        let oneWord = await lines { await fixture.dragSelecting("Hello") }
-        #expect(oneWord.last == "skip reason=shape")
+        #expect(code.last == "skip reason=shape-code")
+        let path = await lines { await fixture.dragSelecting("/Users/ryan/Project/MyNotch") }
+        #expect(path.last == "skip reason=shape-code")
+        let log = await lines { await fixture.dragSelecting("2026-10-15 09:12:44 INFO Server started on port 8080") }
+        #expect(log.last == "skip reason=shape-code")
+    }
+
+    @Test func aNameOrAHeading() async {
+        let heading = await skipLine("PageSpeed Insights")
+        #expect(heading.contains("skip reason=shape-name"))
+        let name = await lines { await fixture.dragSelecting("Hello") }
+        #expect(name.contains("skip reason=shape-name"))
+    }
+
+    @Test func oneWordThatIsNotAName() async {
+        let written = await skipLine("ephemeral")
+        #expect(written.last == "skip reason=shape-short")
     }
 
     @Test func aTextInTheTargetLanguage() async {
@@ -272,7 +287,7 @@ import Testing
         await fixture.dragSelecting("5 ft 11 in")
         let known = [
             "start watcher=", "gesture pointer=", "skip reason=", "hint kind=", "preview failed reason=", "chip shown", "activity shown",
-            "keys on trusted=", "watcher ", "accessibility enabled ", "accessibility refused ", "notice ", "deny ",
+            "keys on trusted=", "watcher ", "accessibility enabled ", "accessibility refused ", "notice ", "deny ", "button ",
         ]
         for line in log.lines {
             #expect(known.contains { line.hasPrefix($0) }, "\(line)")

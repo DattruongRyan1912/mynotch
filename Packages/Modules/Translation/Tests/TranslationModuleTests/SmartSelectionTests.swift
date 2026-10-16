@@ -55,6 +55,7 @@ import Testing
 
     @Test func watchesOnlyWhileSomethingWouldBeShown() async {
         fixture.set(false, for: \.selectionChip)
+        fixture.set(false, for: \.selectionButton)
         await start()
         #expect(!fixture.input.isRunning)
         fixture.set(true, for: \.selectionActivity)
@@ -63,6 +64,19 @@ import Testing
         fixture.set(false, for: \.selectionActivity)
         await eventually { !fixture.input.isRunning }
         #expect(!fixture.input.isRunning)
+    }
+
+    @Test func theSmallButtonAloneIsReasonEnoughToWatch() async {
+        fixture.set(false, for: \.selectionChip)
+        fixture.set(false, for: \.selectionActivity)
+        await start()
+        #expect(fixture.input.isRunning, "the button is on by default")
+        fixture.set(false, for: \.selectionButton)
+        await eventually { !fixture.input.isRunning }
+        #expect(!fixture.input.isRunning)
+        fixture.set(true, for: \.selectionButton)
+        await eventually { fixture.input.isRunning }
+        #expect(fixture.input.isRunning)
     }
 
     // MARK: key-ups need Accessibility, the mouse does not

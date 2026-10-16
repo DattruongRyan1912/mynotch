@@ -31,6 +31,8 @@ struct ModuleFixture {
     let input = FakeSelectionInput()
     let chipWindow = FakeChipWindow()
     let displays = FakeDisplays()
+    /// Where the pointer is, which only the translate button looks at: no test reads the real one.
+    let pointer = FakePointer(at: CGPoint(x: 300, y: 500))
     /// Apple's engine for the previews, which is not the one the tab translates with.
     let previewEngine = FakeEngine()
     /// What the watcher logs, and the waits it makes for an app to build its accessibility tree (which return at once).
@@ -71,7 +73,7 @@ struct ModuleFixture {
             engines: EngineSetup(keys: keyStore, transport: transport, log: engineLog),
             smartSelection: SmartSelectionSetup(
                 accessibility: accessibility, input: input, window: chipWindow, preview: previewEngine, screens: { [displays] in displays.areas },
-                log: selectionLog, pause: { [treePauses] in treePauses.durations.append($0) },
+                pointer: { [pointer] in pointer.location }, log: selectionLog, pause: { [treePauses] in treePauses.durations.append($0) },
                 showToast: { [toasts] in toasts.show($0, $1) },
                 applicationName: { $0.bundleID == "com.apple.Safari" ? "Safari" : ($0.bundleID ?? "app") }
             ),

@@ -50,6 +50,14 @@ struct SelectionChipLabel: View {
     @Environment(\.notchAccent) private var accent
 
     var body: some View {
+        if content.kind == .translateButton {
+            SelectionTranslateButton(content: content)
+        } else {
+            chip
+        }
+    }
+
+    private var chip: some View {
         Group {
             // With less room beside the selection than the smallest translation chip, the compact line, which fits anywhere.
             if content.kind == .translation, maxHeight >= SelectionChipLayout.minChipHeight { wholeTranslation } else { compactLine }
@@ -160,6 +168,36 @@ struct SelectionChipLabel: View {
         }
         .padding(.horizontal, SelectionChipLayout.sidePadding)
         .padding(.vertical, 10)
+    }
+}
+
+/// The small translate button: a glyph on a black circle about 22 pt across, the chip's own surface, so it reads on the classic
+/// notch and on glass alike. It asks for nothing else: a click does what the shortcut does. Hiding the app is a right click,
+/// since there is no room for a "⋯". It comes up transparent (the panel fades it in), so it is not drawn here.
+struct SelectionTranslateButton: View {
+    static let side: CGFloat = 22
+    static let label = "Dịch vùng chọn"
+
+    let content: SelectionChipContent
+
+    var body: some View {
+        Button(action: content.open) {
+            Image(systemName: "translate")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(NotchTokens.primaryText)
+                .frame(width: Self.side, height: Self.side)
+                .background(Color.black.opacity(0.9), in: Circle())
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.14)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(Self.label)
+        .accessibilityLabel(Self.label)
+        .contextMenu {
+            if let deny = content.deny {
+                Button("Không hiện trong app này", action: deny)
+            }
+        }
     }
 }
 
