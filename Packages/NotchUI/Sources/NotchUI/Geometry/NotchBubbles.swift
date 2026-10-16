@@ -32,11 +32,12 @@ nonisolated extension NotchGeometry {
     private var compactBodyRight: CGFloat { shapeSize(for: .compact).width / 2 - cornerRadii(for: .compact).top }
 
     /// Where bubble `index` goes, from the notch's centre line (x grows right) and the top edge of the screen (y grows
-    /// down), the way SwiftUI lays it out.
+    /// down), the way SwiftUI lays it out. A bubble is as tall as the pill's body and starts at the pill's top (the gap below the edge),
+    /// so it is centred on it.
     public func bubbleFrame(at index: Int) -> CGRect {
         let diameter = bubbleDiameter
         return CGRect(
-            x: compactBodyRight + Self.bubbleGap + CGFloat(index) * (diameter + Self.bubbleGap), y: 0, width: diameter, height: diameter
+            x: compactBodyRight + Self.bubbleGap + CGFloat(index) * (diameter + Self.bubbleGap), y: topGap, width: diameter, height: diameter
         )
     }
 
@@ -84,7 +85,8 @@ nonisolated extension NotchGeometry {
         let pill = shapeSize(for: .compact)
         if listRows > 0 {
             let list = CGRect(
-                x: centre - pill.width / 2 - Self.hitPadding, y: screenFrame.maxY - pill.height - listHeight(rows: listRows) - Self.hitPadding,
+                x: centre - pill.width / 2 - Self.hitPadding,
+                y: screenFrame.maxY - topGap - pill.height - listHeight(rows: listRows) - Self.hitPadding,
                 width: pill.width + 2 * Self.hitPadding, height: listHeight(rows: listRows) + Self.hitPadding
             )
             if list.contains(point) { return .list }

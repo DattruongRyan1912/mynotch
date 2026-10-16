@@ -29,12 +29,13 @@ import Testing
         #expect(frame.midX == 754.5)
     }
 
-    @Test func staysOnAScreenWhoseOriginIsNotZeroAndUsesItsOwnNotchHeight() {
+    @Test func staysOnAScreenWhoseOriginIsNotZeroAndStartsThePaddingBelowTheTopWhereThereIsNoCutout() {
+        // A display without a notch has no cutout to keep free, so the content starts the padding (14 pt) below the top edge.
         let geometry = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig())
         let frame = geometry.contentFrame(height: 88, in: NotchGeometryTests.external.frame)
-        #expect(frame == CGRect(x: 1512 + 960 - 300 + 22, y: 1080 - 25 - 88, width: 556, height: 88))
+        #expect(frame == CGRect(x: 1512 + 960 - 300 + 22, y: 1080 - 14 - 88, width: 556, height: 88))
         let above = NotchGeometry(screen: NotchGeometryTests.externalAboveLeft, config: NotchLayoutConfig())
-        let top: CGFloat = 982 + 1080 - 25
+        let top: CGFloat = 982 + 1080 - 14
         #expect(above.contentFrame(height: 88, in: NotchGeometryTests.externalAboveLeft.frame).maxY == top)
     }
 

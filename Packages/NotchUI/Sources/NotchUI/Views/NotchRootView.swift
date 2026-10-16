@@ -47,6 +47,10 @@ struct NotchRootView: View {
     private struct Layout: Equatable {
         let state: NotchState
         let bottom: CGFloat
+        /// The outline and the gap below the screen's top edge: a change of the virtual notch's style (notch or pill) springs like
+        /// any other change of the shape, instead of jumping.
+        let shape: NotchShape
+        let gap: CGFloat
     }
 
     /// What names an activity to a person and to VoiceOver: its summary, else its module's name.
@@ -106,17 +110,17 @@ struct NotchRootView: View {
             "body display=\(state.logDescription) size=\(size.width)x\(size.height) strip=\(activities.stripHeight) "
                 + "bottom=\(bottom) bubbles=\(accessories.bubbles) list=\(accessories.listRows) shownTab=\(shownTab?.id.rawValue ?? "-")"
         )
-        let shape = NotchShape(topRadius: radii.top, bottomRadius: radii.bottom)
+        let shape = geometry.shape(for: state)
         let accent = theme?.accent ?? NotchTokens.accent
         let surface = surface
         let plan = glassPlan
-        let layout = Layout(state: state, bottom: bottom)
+        let layout = Layout(state: state, bottom: bottom, shape: shape, gap: geometry.topGap)
         NotchGlassFamily(plan) {
             ZStack(alignment: .top) {
                 if let tiles = plan.tiles {
                     tilesNotch(plan: plan, tiles: tiles, size: size, radii: radii, accessories: accessories, layout: layout)
                 } else {
-                    NotchBackdrop(surface: surface, bodyHeight: geometry.notchSize.height, veil: plan.veil)
+                    NotchBackdrop(surface: surface, bodyHeight: backdropBodyHeight, veil: plan.veil)
                         .overlay(alignment: .top) {
                             content(accessories)
                                 .padding(.horizontal, radii.top)
@@ -137,7 +141,12 @@ struct NotchRootView: View {
                 }
                 bubbles
             }
+            // The floating pill's gap below the screen's top edge: layout, not an offset, so the glass is placed from it, and it springs
+            // when the style changes. Nothing for the notch, which sticks to the edge.
+            .padding(.top, geometry.topGap)
+            .animation(NotchTokens.spring, value: geometry.topGap)
         }
+        .overlay(alignment: .top) { gapVeil }
         .environment(\.notchIsOnScreen, model.isOnScreen)
         // The accent for the notch's own controls and for a tab's marks, and the tint of the system controls in a tab.
         .environment(\.notchAccent, accent)
@@ -147,6 +156,21 @@ struct NotchRootView: View {
         .environment(\.notchSurface, surface)
         .environment(\.notchGlassNamespace, surface.isLiquidGlass ? glassNamespace : nil)
         .environment(\.notchGlassPlan, plan)
+    }
+
+    /// How much of the top of the notch is the solid black of the cutout's own body under the classic blur: all of the body on a hardware
+    /// notch, which has to join the cutout, and none on a display without one (a notch or a pill there has no cutout to join, and the tab
+    /// page starts near its top).
+    private var backdropBodyHeight: CGFloat { geometry.kind == .hardware ? geometry.notchSize.height : 0 }
+
+    /// While the pill is open, the gap above it: faint enough that no one can see it, but not transparent, because a window lets a click
+    /// on a fully transparent pixel through to what is behind (the menu bar), and the pointer there counts as being on the notch
+    /// (`NotchGeometry.hitRect` reaches up through the gap). As wide as the open pill; nothing for the notch, or when the pill is
+    /// collapsed (the pill itself takes the click).
+    @ViewBuilder private var gapVeil: some View {
+        if geometry.isPill && state.isExpanded {
+            Color.black.opacity(NotchGlassPlan.hitOpacity).frame(width: geometry.shapeSize(for: .open(nil)).width, height: geometry.topGap)
+        }
     }
 
     /// The drag targeting the notch reports: only the end of a drag is forwarded.
@@ -177,7 +201,7 @@ struct NotchRootView: View {
         plan: NotchGlassPlan, tiles: NotchGlassPlan.Tiles, size: CGSize, radii: (top: CGFloat, bottom: CGFloat),
         accessories: CompactAccessories, layout: Layout
     ) -> some View {
-        let fullShape = NotchShape(topRadius: radii.top, bottomRadius: radii.bottom)
+        let fullShape = geometry.shape(for: state)
         // The collapsed notch this one came from, and will go back to.
         let collapsed: NotchState = model.hasActivity ? .compact : .closed
         let collapsedRadii = geometry.cornerRadii(for: collapsed)
@@ -185,7 +209,7 @@ struct NotchRootView: View {
         let showsTabs = isOpen || model.tabUnderToast != nil
         let openRadii = geometry.cornerRadii(for: .open(nil))
         let final = NotchTilesLayout.open(
-            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: contentHeight), notchHeight: geometry.notchSize.height,
+            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: contentHeight), topInset: geometry.openTopInset,
             topRadius: openRadii.top, tabCount: registry.tabs.count
         )
         let rest = NotchTilesLayout.rest(collapsedSize: collapsedSize, topRadius: collapsedRadii.top, hasTabBar: final.tabBar != nil)
@@ -194,7 +218,7 @@ struct NotchRootView: View {
         )
 
         ZStack(alignment: .top) {
-            NotchBackdrop(surface: surface, bodyHeight: geometry.notchSize.height, veil: plan.veil)
+            NotchBackdrop(surface: surface, bodyHeight: backdropBodyHeight, veil: plan.veil)
                 .clipShape(fullShape)
                 .frame(width: size.width, height: size.height)
                 .animation(NotchTokens.spring, value: layout)
@@ -202,7 +226,7 @@ struct NotchRootView: View {
             if showsTabs || tilesInTree {
                 if registry.tabs.count >= 2, let bar = final.tabBar {
                     tile(
-                        rest: rest.tabBar ?? bar, final: bar, glass: tiles.tabBar, shape: Capsule(), showsTabs: showsTabs,
+                        rest: rest.tabBar ?? bar, final: bar, glass: tiles.tabBar, shape: Capsule(), restShape: Capsule(), showsTabs: showsTabs,
                         blurs: plan.blursUnder, atRest: tileIsBack
                     ) {
                         TabBar(tabs: registry.tabs, selected: shownTab?.id) { model.open(tab: $0) }
@@ -212,7 +236,8 @@ struct NotchRootView: View {
                 }
                 tile(
                     rest: rest.content, final: final.content, glass: tiles.content,
-                    shape: RoundedRectangle(cornerRadius: concentricTileRadius, style: .continuous), showsTabs: showsTabs,
+                    shape: RoundedRectangle(cornerRadius: concentricTileRadius, style: .continuous),
+                    restShape: RoundedRectangle(cornerRadius: restTileRadius, style: .continuous), showsTabs: showsTabs,
                     blurs: plan.blursUnder, atRest: tileIsBack
                 ) {
                     openContent
@@ -249,11 +274,11 @@ struct NotchRootView: View {
 
     /// One tile: see `NotchTile`. Its content is laid out at the size it has when the notch is open, and is there while the tab is.
     private func tile<S: Shape, Content: View>(
-        rest: NotchTilesLayout.Tile, final: NotchTilesLayout.Tile, glass: NotchGlassPlan.Shape, shape: S, showsTabs: Bool,
+        rest: NotchTilesLayout.Tile, final: NotchTilesLayout.Tile, glass: NotchGlassPlan.Shape, shape: S, restShape: S, showsTabs: Bool,
         blurs: Bool, atRest: @escaping () -> Void, @ViewBuilder content: () -> Content
     ) -> some View {
         NotchTile(
-            rest: rest, final: final, glass: glass, shape: shape, showsTabs: showsTabs, blurs: blurs, isOpen: isOpen,
+            rest: rest, final: final, glass: glass, shape: shape, restShape: restShape, showsTabs: showsTabs, blurs: blurs, isOpen: isOpen,
             phase: isOpen ? .open : (showsTabs ? .covered : .closing), atRest: atRest,
             handle: NotchHandle(model: model), namespace: glassNamespace, content: content()
         )
@@ -367,9 +392,14 @@ struct NotchRootView: View {
         NotchGlassPlan.concentricRadius(outer: geometry.cornerRadii(for: .open(nil)).bottom, inset: NotchTokens.padding)
     }
 
+    /// The corner radius of the content's tile in the collapsed notch's body, which it springs from and back to: the radius of that
+    /// body's own corners. On a notch that is 10, which is also the tile's radius when open (the same as before the pill); a pill's body is
+    /// a capsule, half its height, and a tile with a smaller radius would stick out past the capsule's ends.
+    private var restTileRadius: CGFloat { geometry.cornerRadii(for: .closed).bottom }
+
     private func expanded<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(spacing: 0) {
-            Color.clear.frame(height: geometry.notchSize.height)
+            Color.clear.frame(height: geometry.openTopInset)
             content()
         }
         .padding([.horizontal, .bottom], NotchTokens.padding)
@@ -439,7 +469,9 @@ private struct NotchTile<S: Shape, Content: View>: View {
     let rest: NotchTilesLayout.Tile
     let final: NotchTilesLayout.Tile
     let glass: NotchGlassPlan.Shape
+    /// The tile's shape when it is open, and in the collapsed notch's body (the same, but for the content tile on a pill).
     let shape: S
+    let restShape: S
     let showsTabs: Bool
     /// Whether a material is drawn under the tile's glass (`NotchGlassPlan.blursUnder`).
     let blurs: Bool
@@ -458,6 +490,7 @@ private struct NotchTile<S: Shape, Content: View>: View {
 
     var body: some View {
         let target = showsTabs && appeared ? final : rest
+        let outline = target == final ? shape : restShape
         Color.clear
             .overlay(alignment: .top) {
                 if showsTabs {
@@ -470,16 +503,16 @@ private struct NotchTile<S: Shape, Content: View>: View {
                         .transition(.asymmetric(insertion: .opacity.animation(NotchTokens.enter), removal: .opacity.animation(NotchTokens.leave)))
                 }
             }
-            .clipShape(shape)
+            .clipShape(outline)
             .frame(width: target.size.width, height: target.size.height)
             // Late by the glass's lag behind the layout, so the tile is taken out when its glass, not only its frame, is back.
             .background {
                 TileProgress(progress: target == final ? 1 : 0, isClosing: phase == .closing, atRest: atRest)
                     .animation(NotchTokens.spring.delay(NotchGlassPlan.glassLag), value: target)
             }
-            .notchGlass(hasGlass ? glass : NotchGlassPlan.Shape(id: glass.id, glass: .identity), in: shape, namespace: namespace)
+            .notchGlass(hasGlass ? glass : NotchGlassPlan.Shape(id: glass.id, glass: .identity), in: outline, namespace: namespace)
             .background {
-                if blurs && hasGlass { TileMaterial(progress: target == final ? 1 : 0, isClosing: phase == .closing, shape: shape) }
+                if blurs && hasGlass { TileMaterial(progress: target == final ? 1 : 0, isClosing: phase == .closing, shape: outline) }
             }
             .padding(.top, target.top)
             .animation(NotchTokens.spring, value: target)

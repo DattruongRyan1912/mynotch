@@ -21,6 +21,12 @@ struct InterfaceSettingsPage: View {
                 Toggle("Ẩn khi app đang fullscreen", isOn: settings.binding(InterfaceSettings.hideInFullscreen))
             }
             Section("Kích thước notch ảo (màn hình không có notch)") {
+                Picker("Kiểu", selection: settings.binding(InterfaceSettings.virtualNotchStyle)) {
+                    Text("Notch (sát mép trên)").tag(VirtualNotchStyle.notch)
+                    Text("Viên thuốc (nổi)").tag(VirtualNotchStyle.pill)
+                }
+                Text("Viên thuốc nổi cách mép trên một chút, như Dynamic Island. Máy có phần khuyết giữ nguyên.")
+                    .font(.caption).foregroundStyle(.secondary)
                 slider("Chiều rộng", InterfaceSettings.virtualNotchWidth, 120...300, unit: "pt")
                 Toggle("Cao bằng menu bar", isOn: settings.binding(InterfaceSettings.virtualNotchMatchesMenuBar))
                 slider("Chiều cao", InterfaceSettings.virtualNotchHeight, 24...40, unit: "pt")

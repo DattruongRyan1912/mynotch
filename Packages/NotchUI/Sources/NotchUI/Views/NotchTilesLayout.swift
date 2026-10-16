@@ -46,12 +46,13 @@ nonisolated struct NotchTilesLayout: Equatable, Sendable {
     var content: Tile
 
     /// The tiles of the open notch (and of a notch showing a toast over a tab, which keeps them where they are): `shapeSize` is the
-    /// notch's size, `notchHeight` the height of the notch's body that the tab page starts under, `topRadius` the radius of the
+    /// notch's size, `topInset` how far below its top the tab page starts (`NotchGeometry.openTopInset`: under a hardware notch's cutout, or
+    /// the padding below the top of a display without one), `topRadius` the radius of the
     /// shape's ears, which the content is inset by (and by `NotchTokens.padding`), and `tabCount` the number of tabs.
-    static func open(shapeSize: CGSize, notchHeight: CGFloat, topRadius: CGFloat, tabCount: Int) -> NotchTilesLayout {
+    static func open(shapeSize: CGSize, topInset: CGFloat, topRadius: CGFloat, tabCount: Int) -> NotchTilesLayout {
         let inset = topRadius + NotchTokens.padding
         let width = shapeSize.width - 2 * inset
-        var top = notchHeight
+        var top = topInset
         var bar: Tile?
         if tabCount >= 2 {
             let size = CGSize(

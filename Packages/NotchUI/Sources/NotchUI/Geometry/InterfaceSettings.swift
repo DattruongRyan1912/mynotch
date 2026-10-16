@@ -11,6 +11,14 @@ nonisolated public enum DisplayMode: String, Codable, Sendable, CaseIterable {
     case cursor
 }
 
+/// How the notch of a display without a hardware notch is drawn (`interface.virtualNotchStyle`).
+nonisolated public enum VirtualNotchStyle: String, Codable, Sendable, CaseIterable {
+    /// The notch's own outline, stuck to the top edge of the screen, as it always was. The default.
+    case notch
+    /// A pill that floats a few points below the top edge, like the Dynamic Island, and grows into a rounded rectangle when it opens.
+    case pill
+}
+
 /// Global interface settings (`interface.*`).
 public enum InterfaceSettings {
     public static let displayMode = SettingKey("interface.displayMode", default: DisplayMode.all)
@@ -18,6 +26,8 @@ public enum InterfaceSettings {
     /// When true the virtual notch is as tall as the menu bar; otherwise `virtualNotchHeight` is used.
     public static let virtualNotchMatchesMenuBar = SettingKey("interface.virtualNotchMatchesMenuBar", default: true)
     public static let virtualNotchHeight = SettingKey("interface.virtualNotchHeight", default: 32.0, clampedTo: 24...40)
+    /// Whether the virtual notch is stuck to the top edge or a floating pill. A display with a hardware notch never changes.
+    public static let virtualNotchStyle = SettingKey("interface.virtualNotchStyle", default: VirtualNotchStyle.notch)
     public static let openWidth = SettingKey(
         "interface.openWidth", default: 600.0,
         clampedTo: Double(NotchGeometry.openWidthLimits.lowerBound)...Double(NotchGeometry.openWidthLimits.upperBound)
@@ -57,12 +67,18 @@ nonisolated public struct NotchLayoutConfig: Equatable, Sendable {
     public var virtualNotchHeight: CGFloat?
     public var compactSideWidth: CGFloat = 64
     public var openWidth: CGFloat = 600
+    /// How a display without a hardware notch draws it; `NotchGeometry` ignores it on one that has.
+    public var virtualNotchStyle: VirtualNotchStyle = .notch
 
-    public init(virtualNotchWidth: CGFloat = 185, virtualNotchHeight: CGFloat? = nil, compactSideWidth: CGFloat = 64, openWidth: CGFloat = 600) {
+    public init(
+        virtualNotchWidth: CGFloat = 185, virtualNotchHeight: CGFloat? = nil, compactSideWidth: CGFloat = 64, openWidth: CGFloat = 600,
+        virtualNotchStyle: VirtualNotchStyle = .notch
+    ) {
         self.virtualNotchWidth = virtualNotchWidth
         self.virtualNotchHeight = virtualNotchHeight
         self.compactSideWidth = compactSideWidth
         self.openWidth = openWidth
+        self.virtualNotchStyle = virtualNotchStyle
     }
 }
 
@@ -72,7 +88,8 @@ extension NotchLayoutConfig {
             virtualNotchWidth: settings.value(InterfaceSettings.virtualNotchWidth),
             virtualNotchHeight: settings.value(InterfaceSettings.virtualNotchMatchesMenuBar)
                 ? nil : settings.value(InterfaceSettings.virtualNotchHeight),
-            openWidth: settings.value(InterfaceSettings.openWidth)
+            openWidth: settings.value(InterfaceSettings.openWidth),
+            virtualNotchStyle: settings.value(InterfaceSettings.virtualNotchStyle)
         )
     }
 }

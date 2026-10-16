@@ -313,7 +313,7 @@ private struct OpenNotch {
 
     func open(tabs: Int) -> NotchTilesLayout {
         NotchTilesLayout.open(
-            shapeSize: openSize, notchHeight: geometry.notchSize.height, topRadius: geometry.cornerRadii(for: .open(nil)).top, tabCount: tabs
+            shapeSize: openSize, topInset: geometry.openTopInset, topRadius: geometry.cornerRadii(for: .open(nil)).top, tabCount: tabs
         )
     }
 
@@ -423,10 +423,10 @@ private struct OpenNotch {
 
     @Test func aTabOfAnotherHeightMovesTheFinalRectsSoTheAnimationFollowsIt() {
         let tall = NotchTilesLayout.open(
-            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 240), notchHeight: geometry.notchSize.height, topRadius: 8, tabCount: 2
+            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 240), topInset: geometry.openTopInset, topRadius: 8, tabCount: 2
         )
         let short = NotchTilesLayout.open(
-            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 120), notchHeight: geometry.notchSize.height, topRadius: 8, tabCount: 2
+            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 120), topInset: geometry.openTopInset, topRadius: 8, tabCount: 2
         )
         #expect(tall != short, "the animation is keyed on the layout, which differs")
         #expect(tall.content.size.height - short.content.size.height == 120)
