@@ -19,12 +19,24 @@ import Testing
 
     // MARK: The notch's measures
 
-    /// A screen with no notch of its own, so the notch is the virtual one.
-    static func geometry(virtualNotchWidth: CGFloat = 185, openWidth: CGFloat = 600) -> NotchGeometry {
+    static let screenFrame = CGRect(x: 0, y: 0, width: 1512, height: 982)
+
+    /// A screen with no notch of its own, so the notch is the virtual one, stuck to the top or a floating pill.
+    static func geometry(virtualNotchWidth: CGFloat = 185, openWidth: CGFloat = 600, style: VirtualNotchStyle = .notch) -> NotchGeometry {
         let screen = ScreenDescriptor(
-            frame: CGRect(x: 0, y: 0, width: 1512, height: 982), safeAreaTop: 0, auxiliaryTopLeftWidth: nil, auxiliaryTopRightWidth: nil, menuBarHeight: 24
+            frame: screenFrame, safeAreaTop: 0, auxiliaryTopLeftWidth: nil, auxiliaryTopRightWidth: nil, menuBarHeight: 24
         )
-        return NotchGeometry(screen: screen, config: NotchLayoutConfig(virtualNotchWidth: virtualNotchWidth, openWidth: openWidth))
+        return NotchGeometry(
+            screen: screen, config: NotchLayoutConfig(virtualNotchWidth: virtualNotchWidth, openWidth: openWidth, virtualNotchStyle: style)
+        )
+    }
+
+    /// A screen with a notch of its own: the camera housing keeps its height free at the top of the open notch.
+    static func hardwareGeometry() -> NotchGeometry {
+        let screen = ScreenDescriptor(
+            frame: screenFrame, safeAreaTop: 32, auxiliaryTopLeftWidth: 656, auxiliaryTopRightWidth: 656, menuBarHeight: 32
+        )
+        return NotchGeometry(screen: screen, config: NotchLayoutConfig())
     }
 
     /// The strip as `NotchRootView` lays it out: in the compact shape, the content has `radii.top` on both sides, and the strip
@@ -44,11 +56,12 @@ import Testing
         )
     }
 
-    /// The content of the AI tab in the open notch: its width, and the height a 200 pt tab leaves under the notch and over the padding.
+    /// The content of the AI tab in the open notch: its width, and the height a 200 pt tab leaves under where the notch starts the page
+    /// (`openTopInset`: the camera housing's height on a screen that has one, the padding on one that has not) and over the padding.
     func tab(_ geometry: NotchGeometry) -> (width: CGFloat, height: CGFloat) {
         let size = geometry.shapeSize(for: .open(nil), contentHeight: 200)
         let width = size.width - 2 * geometry.cornerRadii(for: .open(nil)).top - 2 * NotchTokens.padding
-        return (width, size.height - geometry.notchSize.height - NotchTokens.padding)
+        return (width, size.height - geometry.openTopInset - NotchTokens.padding)
     }
 
     var narrowStrip: Strip { strip(Self.geometry(virtualNotchWidth: 0)) }
@@ -168,6 +181,22 @@ import Testing
         let narrowTab = tab(Self.geometry(openWidth: 0))
         #expect(narrowTab.width == CGFloat(436))
         #expect(tab(Self.geometry()).width == CGFloat(556))
+    }
+
+    /// The room is read off the notch's own layout (where `contentFrame` puts the page, and where the open shape ends), not worked out
+    /// again: on every screen it is what a 200 pt tab leaves, whatever sits above the page. The virtual notch has no camera housing, so
+    /// the page starts closer to the top there, and the pill adds the gap above its shape without taking any of the room.
+    @Test func aTabHasTheRoomTheNotchLeavesItOnEveryKindOfScreen() {
+        let screens: [(String, NotchGeometry)] = [
+            ("virtual notch", Self.geometry()), ("virtual pill", Self.geometry(style: .pill)), ("hardware notch", Self.hardwareGeometry()),
+        ]
+        for (name, geometry) in screens {
+            let pageTop = geometry.contentFrame(height: 0, in: Self.screenFrame).maxY
+            let shapeBottom = Self.screenFrame.maxY - geometry.topGap - geometry.shapeSize(for: .open(nil), contentHeight: 200).height
+            #expect(tab(geometry).height == pageTop - shapeBottom - NotchTokens.padding, "\(name)")
+            #expect(tab(geometry).height == 200 - NotchTokens.padding, "\(name)")
+        }
+        #expect(Self.geometry().notchSize.height > Self.geometry().openTopInset, "the virtual notch is taller than the page's inset, which is what the old measure got wrong")
     }
 
     // MARK: The reviewer's requests
