@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import MyNotchCore
 import MyNotchTestSupport
@@ -219,6 +220,99 @@ import Testing
         #expect(store.spectrumBands == nil)
         #expect(!store.spectrumPermissionLikelyDenied)
         #expect(harness.scheduler.pendingCount == 0)
+    }
+
+    // MARK: - Nobody sees the bars
+
+    /// A real bars view in a window, as SwiftUI puts one in a notch's activity.
+    func attachBars() -> (view: SpectrumBarsView, window: NSWindow) {
+        let view = SpectrumBarsView(store: store, accent: CGColor(gray: 1, alpha: 1))
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 40, height: 30), styleMask: .borderless, backing: .buffered, defer: true)
+        window.contentView = view
+        view.frame = CGRect(origin: .zero, size: NowPlayingBars.size)
+        return (view, window)
+    }
+
+    /// Lets the stop delay pass and says whether the tap went quiet.
+    func tapStopsAfterTheDelay() async -> Bool {
+        await settle { harness.scheduler.pendingCount > 0 }
+        harness.scheduler.advance(by: SpectrumFeed.stopDelay)
+        return !spectrum.isStarted
+    }
+
+    /// A fullscreen app in front, a locked screen and a display that sleeps all take the notch's window out of sight, which
+    /// the window controller passes on as `notchIsOnScreen` (see `NotchPresence`): that is all the bars look at.
+    @Test func aNotchThatCannotBeSeenStopsTheTap() async {
+        await harness.registry.bootstrap()
+        harness.settings.set(true, for: keys.realSpectrum)
+        source.emit(AdapterLines.track())
+        let (view, window) = attachBars()
+        await settle { spectrum.isStarted }
+        #expect(spectrum.isStarted)
+        view.isNotchOnScreen = false
+        #expect(await tapStopsAfterTheDelay())
+        #expect(store.spectrumViewCount == 0)
+        #expect(!view.isMadeUp)
+        window.contentView = nil
+    }
+
+    @Test func theTapComesBackWhenTheNotchCanBeSeenAgain() async {
+        await harness.registry.bootstrap()
+        harness.settings.set(true, for: keys.realSpectrum)
+        source.emit(AdapterLines.track())
+        let (view, window) = attachBars()
+        await settle { spectrum.isStarted }
+        view.isNotchOnScreen = false
+        #expect(await tapStopsAfterTheDelay())
+        view.isNotchOnScreen = true
+        await settle { spectrum.isStarted }
+        #expect(spectrum.isStarted)
+        #expect(spectrum.startCount == 2)
+        window.contentView = nil
+    }
+
+    @Test func anActivityThatIsNotShownStopsTheTap() async {
+        await harness.registry.bootstrap()
+        harness.settings.set(true, for: keys.realSpectrum)
+        source.emit(AdapterLines.track())
+        let (_, window) = attachBars()
+        await settle { spectrum.isStarted }
+        #expect(spectrum.isStarted)
+        // The activity went away (its setting, a track that ended, the notch open on another tab): its views leave the window.
+        window.contentView = nil
+        #expect(await tapStopsAfterTheDelay())
+    }
+
+    @Test func pausingStopsTheTapAndTheBarsTogether() async {
+        await harness.registry.bootstrap()
+        harness.settings.set(true, for: keys.realSpectrum)
+        source.emit(AdapterLines.track())
+        let (view, window) = attachBars()
+        await settle { spectrum.isStarted }
+        source.emit(AdapterLines.playing(false))
+        #expect(await tapStopsAfterTheDelay())
+        await settle { !view.isMadeUp }
+        #expect(!view.isMadeUp, "paused bars rest: nothing runs")
+        window.contentView = nil
+    }
+
+    /// Two displays show the activity: the tap serves both, and goes only when neither can be seen.
+    @Test func theTapRunsWhileAnyDisplayShowsTheBars() async {
+        await harness.registry.bootstrap()
+        harness.settings.set(true, for: keys.realSpectrum)
+        source.emit(AdapterLines.track())
+        let first = attachBars()
+        let second = attachBars()
+        await settle { spectrum.isStarted }
+        #expect(store.spectrumViewCount == 2)
+        first.view.isNotchOnScreen = false
+        harness.scheduler.advance(by: .seconds(10))
+        #expect(spectrum.isStarted, "the other display still shows the bars")
+        #expect(spectrum.startCount == 1)
+        second.view.isNotchOnScreen = false
+        #expect(await tapStopsAfterTheDelay())
+        first.window.contentView = nil
+        second.window.contentView = nil
     }
 
     @Test func barsOnScreenNeverCountBelowZero() {

@@ -12,7 +12,8 @@ public enum NotchPerf {
         case layouts
         /// `NotchRootView.body`: the whole notch re-evaluated. A state change does it; it never happens per frame.
         case bodies
-        /// A redraw of the spectrum bars.
+        /// A redraw of the spectrum bars from the tap's levels: one per set of levels, whatever the number of displays. The made-up
+        /// motion is no redraw at all (an animation the render server plays), so it adds nothing here.
         case spectrumUpdates
     }
 

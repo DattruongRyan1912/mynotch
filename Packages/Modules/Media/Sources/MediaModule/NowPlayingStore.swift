@@ -1,4 +1,5 @@
 import AppKit
+import MyNotchCore
 import Observation
 
 /// What the media views show: the reduced adapter state plus the decoded artwork and the playing app.
@@ -62,13 +63,23 @@ final class NowPlayingStore {
 
     @ObservationIgnored private var reducer = NowPlayingReducer()
     @ObservationIgnored private let lookUpApp: @MainActor (String) -> PlayerApp?
+    /// What moves every bars view of this store; made as the first one is.
+    @ObservationIgnored private(set) lazy var barsHub = SpectrumBarsHub(store: self, scheduler: barsScheduler, now: barsClock)
+    @ObservationIgnored private let barsScheduler: any Scheduler
+    @ObservationIgnored private let barsClock: () -> Date
     /// Revision of `artworkImage`'s bytes; the image is decoded only when it changes.
     @ObservationIgnored private var artworkRevision: Int?
     /// Bundle IDs `appName`/`appIcon` were looked up for, so position updates skip the lookup.
     @ObservationIgnored private var appBundleIDs: [String] = []
 
-    init(lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed) {
+    /// `scheduler` and `now` are the clock of the bars' driver, which tests move by hand.
+    init(
+        lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed,
+        scheduler: any Scheduler = TaskScheduler(), now: @escaping () -> Date = Date.init
+    ) {
         self.lookUpApp = lookUpApp
+        barsScheduler = scheduler
+        barsClock = now
     }
 
     /// Folds one adapter line in; false when the line was ignored and nothing changed.

@@ -8,8 +8,25 @@ import Testing
 @Suite struct BarsDriverTests {
     struct Frame: Equatable {
         let time: Double
-        let levels: [Double]
-        let animated: Bool
+        let frame: BarsFrame
+
+        init(time: Double, frame: BarsFrame) {
+            self.time = time
+            self.frame = frame
+        }
+
+        init(time: Double, levels: [Double], animated: Bool) {
+            self.init(time: time, frame: .levels(levels, animated: animated))
+        }
+
+        /// The levels of a drawn frame; nil for the made-up motion.
+        var levels: [Double]? {
+            if case .levels(let levels, _) = frame { levels } else { nil }
+        }
+
+        var animated: Bool {
+            if case .levels(_, let animated) = frame { animated } else { false }
+        }
     }
 
     final class Frames {
@@ -37,7 +54,7 @@ import Testing
         let seconds = seconds
         return BarsDriver(
             scheduler: scheduler, now: { Self.epoch + seconds(scheduler.now) + skew.seconds },
-            draw: { levels, animated in frames.all.append(Frame(time: seconds(scheduler.now), levels: levels, animated: animated)) }
+            draw: { frames.all.append(Frame(time: seconds(scheduler.now), frame: $0)) }
         )
     }
 
@@ -54,18 +71,31 @@ import Testing
 
     // MARK: - Made-up motion
 
-    @Test func madeUpMotionStepsThirtyTimesASecondAndMatchesTheLevelsFunction() {
+    /// The bars play the made-up motion themselves (an animation of their layers), so the driver says so once and then has nothing to
+    /// do: no frame and no timer per step, which were 30 of each a second, for every display.
+    @Test func madeUpMotionIsOneFrameAndNeverATimer() {
         let driver = makePlayingDriver()
         defer { driver.setOnScreen(false) }
-        advance(by: .seconds(1))
-        // One at once, then one per step.
-        #expect(frames.all.count == 31)
-        for frame in frames.all {
-            #expect(frame.levels == NowPlayingBars.levels(spectrum: nil, isPlaying: true, at: Self.epoch + frame.time))
-            #expect(!frame.animated)
-        }
-        let gaps = zip(frames.all, frames.all.dropFirst()).map { $1.time - $0.time }
-        #expect(gaps.allSatisfy { abs($0 - 1.0 / 30) < 0.001 })
+        #expect(frames.all == [Frame(time: 0, frame: .madeUp)])
+        #expect(scheduler.pendingCount == 0)
+        advance(by: .seconds(60))
+        #expect(frames.all.count == 1)
+        #expect(scheduler.pendingCount == 0)
+    }
+
+    @Test func aViewThatJoinsIsToldWhatTheOthersShow() {
+        let driver = makeDriver()
+        driver.setOnScreen(true)
+        #expect(driver.current == .levels([0, 0, 0, 0], animated: false), "at rest")
+        driver.setPlaying(true)
+        #expect(driver.current == .madeUp)
+        driver.setSpectrum([0.25, 0.5, 0.75, 1])
+        advance(by: .milliseconds(100))
+        #expect(driver.current == .levels([0.25, 0.5, 0.75, 1], animated: false))
+        driver.setSpectrum(nil)
+        #expect(driver.current == .madeUp)
+        driver.setPlaying(false)
+        #expect(driver.current == .levels([0, 0, 0, 0], animated: false))
     }
 
     // MARK: - The tap's bands
@@ -119,7 +149,7 @@ import Testing
         advance(by: .milliseconds(100))
         #expect((38...40).contains(frames.all.filter { $0.time < 1 }.count))
         #expect(gaps().allSatisfy { $0 >= 0.025 - 1e-6 })
-        #expect(frames.all.last?.levels.first == Double(Float(41) / 1000))
+        #expect(frames.all.last?.levels?.first == Double(Float(41) / 1000))
         #expect(scheduler.pendingCount == 0)
     }
 
@@ -131,7 +161,7 @@ import Testing
         let inFirstSecond = frames.all.filter { $0.time < 1 }
         #expect((38...40).contains(inFirstSecond.count))
         #expect(gaps().allSatisfy { $0 >= 0.025 - 1e-6 })
-        #expect(frames.all.last?.levels.first == Double(Float(125) / 1000))
+        #expect(frames.all.last?.levels?.first == Double(Float(125) / 1000))
         #expect(scheduler.pendingCount == 0)
     }
 
@@ -204,7 +234,7 @@ import Testing
         let waiting = deliver(at: tapArrivals(count: 150, lateSet: 10, lateBy: lateBy), to: driver)
         advance(by: .milliseconds(100))
         #expect(waiting <= 3, "\(waiting) of 150 sets waited")
-        #expect(frames.all.last?.levels.first == Double(Float(150) / 1000))
+        #expect(frames.all.last?.levels?.first == Double(Float(150) / 1000))
     }
 
     /// The tap's timer is allowed 5 ms of leeway, so its sets come 28 to 38 ms apart. Each is drawn the moment it arrives,
@@ -219,7 +249,7 @@ import Testing
             #expect(frames.all.count == step, "set \(step) was drawn at once")
             #expect(scheduler.pendingCount == 0, "nothing waits for a slot after set \(step)")
         }
-        #expect(frames.all.compactMap { $0.levels.first } == (1...60).map { Double(Float($0) / 100) })
+        #expect(frames.all.compactMap { $0.levels?.first } == (1...60).map { Double(Float($0) / 100) })
         // Drawn on arrival: 60 sets over about two seconds, 30 a second.
         let span = (frames.all.last?.time ?? 0) - (frames.all.first?.time ?? 0)
         #expect(abs(span / 59 - 1.0 / 30) < 0.002)
@@ -238,21 +268,31 @@ import Testing
         frames.all = []
         driver.setSpectrum(nil)
         advance(by: .seconds(1))
-        #expect(frames.all.count >= 30)
-        for frame in frames.all {
-            #expect(frame.levels == NowPlayingBars.levels(spectrum: nil, isPlaying: true, at: Self.epoch + frame.time))
-        }
+        #expect(frames.all == [Frame(time: 0, frame: .madeUp)])
+        #expect(scheduler.pendingCount == 0)
     }
 
     @Test func theTapStartingStopsTheMadeUpMotion() {
         let driver = makePlayingDriver()
         advance(by: .milliseconds(200))
-        driver.setSpectrum([0.5, 0.5, 0.5, 0.5])
         frames.all = []
+        driver.setSpectrum([0.5, 0.5, 0.5, 0.5])
         advance(by: .seconds(1))
-        // Only the bands' own draw, which waited for its slot: no steps of made-up motion follow.
-        #expect(frames.all.map(\.levels) == [[0.5, 0.5, 0.5, 0.5]])
+        // Only the bands' own draw: nothing of the made-up motion follows it.
+        #expect(frames.all == [Frame(time: 0.2, levels: [0.5, 0.5, 0.5, 0.5], animated: false)])
         #expect(scheduler.pendingCount == 0)
+    }
+
+    @Test func madeUpMotionComesBackEachTimeItIsNeeded() {
+        let driver = makePlayingDriver()
+        driver.setSpectrum([0.5, 0.5, 0.5, 0.5])
+        driver.setSpectrum(nil)
+        driver.setPlaying(false)
+        driver.setPlaying(true)
+        driver.setOnScreen(false)
+        driver.setOnScreen(true)
+        let kinds = frames.all.map { $0.frame == .madeUp }
+        #expect(kinds == [true, false, true, false, true, true])
     }
 
     // MARK: - Pausing
@@ -275,8 +315,9 @@ import Testing
         driver.setPlaying(true)
         #expect(frames.all.count == 1)
         #expect(frames.all[0].animated == false)
+        #expect(frames.all[0].frame == .madeUp)
         advance(by: .milliseconds(100))
-        #expect(frames.all.count == 4)
+        #expect(frames.all.count == 1)
     }
 
     @Test func barsThatNeverPlayedDrawTheirRestOnceOnScreen() {

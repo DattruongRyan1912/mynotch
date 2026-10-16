@@ -1,13 +1,20 @@
 import Foundation
 import MyNotchCore
 
-/// Decides what the bars show and when it is drawn, so the bars' view only draws what it is handed. The bars draw only while
-/// they are on screen with something playing. New bands from the tap draw the moment they arrive, with no timer: the tap
-/// delivers about 30 sets a second, and a source faster than that is thinned to at most 40 draws a second. The made-up motion
-/// steps 30 times a second on a timer of its own. Time comes from the scheduler and `now`, so tests move it by hand.
+/// What the bars are told to show.
+nonisolated enum BarsFrame: Equatable {
+    /// One level in 0…1 per bar, and whether to ease to it instead of jumping.
+    case levels([Double], animated: Bool)
+    /// The made-up motion: the bars run it themselves, as an animation the render server plays (see `SpectrumBarsView`).
+    case madeUp
+}
+
+/// Decides what the bars show and when it is drawn, so the bars' views only draw what they are handed. One driver serves every
+/// bars view of a store, whatever the number of displays (see `SpectrumBarsHub`). The bars draw only while they are on screen with
+/// something playing. New bands from the tap draw the moment they arrive, with no timer: the tap delivers about 30 sets a second,
+/// and a source faster than that is thinned to at most 40 draws a second. The made-up motion is not drawn at all: it is one
+/// `.madeUp` frame, and no timer. Time comes from the scheduler and `now`, so tests move it by hand.
 final class BarsDriver {
-    /// Time between two redraws: the tap delivers about 30 sets a second, and the made-up motion steps at this rate.
-    static let interval: Duration = .nanoseconds(33_333_333)
     private static let intervalSeconds: TimeInterval = 0.033_333_333
     /// The least time between two draws of tap bands. The tap's timer has 5 ms of leeway, so its sets come 28 to 38 ms apart;
     /// holding back the early ones for a full interval cost a `Task.sleep` and a main-actor hop each and drifted the rate to
@@ -16,22 +23,25 @@ final class BarsDriver {
 
     private let scheduler: any Scheduler
     private let now: () -> Date
-    private let draw: ([Double], _ animated: Bool) -> Void
+    private let draw: (BarsFrame) -> Void
     private var isOnScreen = false
     private var isPlaying = false
     private var spectrum: [Float]?
     private var lastLevels: [Double]?
     private var lastDraw: Date?
-    /// The next step of the made-up motion.
-    private var step: ScheduledAction?
     /// A set of bands that arrived less than `minimumGap` after the last draw; it draws the latest bands when the gap has passed.
     private var pending: ScheduledAction?
 
-    /// `draw` gets one level in 0…1 per bar and whether to ease to it instead of jumping.
-    init(scheduler: any Scheduler, now: @escaping () -> Date = Date.init, draw: @escaping ([Double], _ animated: Bool) -> Void) {
+    init(scheduler: any Scheduler, now: @escaping () -> Date = Date.init, draw: @escaping (BarsFrame) -> Void) {
         self.scheduler = scheduler
         self.now = now
         self.draw = draw
+    }
+
+    /// What the bars show now, for a view that joins while the others are running.
+    var current: BarsFrame {
+        if isPlaying && spectrum == nil { return .madeUp }
+        return .levels(lastLevels ?? NowPlayingBars.levels(spectrum: spectrum, isPlaying: isPlaying, at: now()), animated: false)
     }
 
     /// Off screen nothing is drawn or scheduled; back on screen the bars draw their current state at once.
@@ -56,28 +66,20 @@ final class BarsDriver {
         if bands == nil {
             restart(animated: false)
         } else {
-            cancelStep()
             requestDraw()
         }
     }
 
     private func restart(animated: Bool) {
-        cancelStep()
         cancelPending()
         guard isOnScreen else { return }
         if isPlaying && spectrum == nil {
-            tick()
+            // Once: the bars animate themselves from here, and nothing is drawn or scheduled per frame.
+            lastLevels = nil
+            draw(.madeUp)
         } else {
             drawNow(animated: animated)
         }
-    }
-
-    /// One step of the made-up motion, and the schedule of the next.
-    private func tick() {
-        step = nil
-        guard isOnScreen, isPlaying, spectrum == nil else { return }
-        drawNow()
-        step = scheduler.schedule(after: Self.interval) { [weak self] in self?.tick() }
     }
 
     /// Draws now, or as soon as the gap after the last draw has passed when the set came too soon. The wait ends at the gap, not
@@ -103,12 +105,7 @@ final class BarsDriver {
         let levels = NowPlayingBars.levels(spectrum: spectrum, isPlaying: isPlaying, at: date)
         guard levels != lastLevels else { return }
         lastLevels = levels
-        draw(levels, animated)
-    }
-
-    private func cancelStep() {
-        step?.cancel()
-        step = nil
+        draw(.levels(levels, animated: animated))
     }
 
     private func cancelPending() {

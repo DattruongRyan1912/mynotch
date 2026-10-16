@@ -52,6 +52,32 @@ struct NowPlayingBars: View {
         let swell = 0.5 + 0.5 * sin(time * (2.1 + offset * 0.8) + offset * 2.7)
         return 0.2 + 0.8 * beat * (0.45 + 0.55 * swell)
     }
+
+    /// How tall a bar is at `level`.
+    static func height(forLevel level: Double) -> CGFloat {
+        minHeight + (maxHeight - minHeight) * level
+    }
+
+    /// How long the made-up motion takes to come back to where it was: every wave of every bar runs at a whole multiple of
+    /// 0.1 rad/s, so the motion repeats exactly every 2π / 0.1 s (about 63 s) and a loop of that length has no seam.
+    nonisolated static let madeUpLoop: TimeInterval = 2 * .pi / 0.1
+    /// Keyframes per second of the loop: the 30 steps a second the bars always made.
+    nonisolated static let madeUpRate = 30.0
+    /// Keyframes in a loop; each is held for `madeUpLoop / madeUpKeyframeCount`, a hair over a thirtieth of a second.
+    nonisolated static let madeUpKeyframeCount = Int((madeUpLoop * madeUpRate).rounded())
+
+    /// How far into the loop `date` is. It follows the wall clock, so every bars view on every display shows the same height at
+    /// the same moment, and one that joins later picks up where the others are.
+    nonisolated static func madeUpPhase(at date: Date) -> TimeInterval {
+        date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: madeUpLoop)
+    }
+
+    /// The heights, in points, that bar `bar` takes over one loop of the made-up motion, one per keyframe: what `level(bar:at:)`
+    /// says at the start of each.
+    static func madeUpHeights(bar: Int) -> [CGFloat] {
+        let step = madeUpLoop / Double(madeUpKeyframeCount)
+        return (0..<madeUpKeyframeCount).map { height(forLevel: level(bar: bar, at: Date(timeIntervalSinceReferenceDate: Double($0) * step))) }
+    }
 }
 
 /// Under the closed notch while the lyrics are synced: the line being sung and the one coming next, like karaoke.
@@ -70,8 +96,8 @@ struct NowPlayingLyricStrip: View {
     @Environment(\.notchSurface) private var surface
 
     var body: some View {
-        // At each line when it is filled word by word, else four times a second, which is fine-grained enough for lines that
-        // last seconds; the clock itself is exact. Not at all while the notch is hidden.
+        // At each line (see `LyricTickSchedule`), which is when the text changes: a line that is filled word by word is one
+        // animation the render server runs, and nothing else here moves. Not at all while the notch is hidden.
         // The style is read here, in the body: the timeline's closure runs later, where the environment is not this view's to read.
         let karaoke: KaraokeStyle = surface.isLiquidGlass ? .stripOnGlass : .strip
         LyricTimeline(store: store) { date in

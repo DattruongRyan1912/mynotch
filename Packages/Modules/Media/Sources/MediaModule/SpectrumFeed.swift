@@ -16,6 +16,8 @@ final class SpectrumFeed {
     /// Set when the source could not start; it stays off until the setting is turned off and on again.
     private var hasFailed = false
     private var stopTimer: ScheduledAction?
+    /// The inputs of the last `update`, for the debug line that says why the tap stopped.
+    private var lastInputs = (isPlaying: false, isShown: false)
 
     init(source: any SpectrumSource, store: NowPlayingStore, scheduler: any Scheduler, logger: Logger) {
         self.source = source
@@ -26,11 +28,12 @@ final class SpectrumFeed {
 
     /// Call whenever one of the inputs may have changed; repeated calls with the same inputs do nothing.
     func update(isEnabled: Bool, isPlaying: Bool, isShown: Bool) {
+        lastInputs = (isPlaying, isShown)
         guard isEnabled else {
             // Off means stop capturing now. A failed tap gets another chance when the setting comes back on.
             hasFailed = false
             store.setSpectrumPermissionLikelyDenied(false)
-            stop()
+            stop("setting off")
             return
         }
         if isPlaying && isShown && !hasFailed {
@@ -39,22 +42,28 @@ final class SpectrumFeed {
             isRunning = true
             // A new tap session judges the permission afresh and never reports "not denied" itself.
             store.setSpectrumPermissionLikelyDenied(false)
+            logger.debug("Spectrum tap started")
             source.start { [weak self] event in self?.receive(event) }
         } else if isRunning && stopTimer == nil {
-            stopTimer = scheduler.schedule(after: Self.stopDelay) { [weak self] in self?.stop() }
+            stopTimer = scheduler.schedule(after: Self.stopDelay) { [weak self] in
+                guard let self else { return }
+                stop("idle: playing=\(lastInputs.isPlaying) barsOnScreen=\(lastInputs.isShown)")
+            }
         }
     }
 
     /// The module stops: no tap, no permission hint.
     func shutDown() {
-        stop()
+        stop("module stopped")
         store.setSpectrumPermissionLikelyDenied(false)
     }
 
-    private func stop() {
+    /// `reason` goes to the debug log with the stop, so a real Mac says why the tap went quiet: the log holds no content.
+    private func stop(_ reason: String) {
         cancelStopTimer()
         guard isRunning else { return }
         isRunning = false
+        logger.debug("Spectrum tap stopped: \(reason, privacy: .public)")
         source.stop()
         store.showSpectrum(nil)
     }
@@ -76,7 +85,7 @@ final class SpectrumFeed {
         case .failed(let reason):
             logger.error("Real spectrum stopped: \(reason, privacy: .public)")
             hasFailed = true
-            stop()
+            stop("failed")
         }
     }
 }

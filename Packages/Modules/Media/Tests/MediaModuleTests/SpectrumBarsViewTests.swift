@@ -8,22 +8,26 @@ import Testing
 
 /// The bars' layers and what makes the view count as bars on screen, with a manual clock for the redraws.
 @Suite struct SpectrumBarsViewTests {
-    let scheduler = ManualScheduler()
+    static let epoch = Date(timeIntervalSinceReferenceDate: 1_000)
+    let scheduler: ManualScheduler
     let store: NowPlayingStore
     /// The accent the bars are made with: what their notch's environment says.
     let notchAccent = CGColor(srgbRed: 0.2, green: 0.7, blue: 0.4, alpha: 1)
 
+    /// The store's clock is the manual scheduler's, from `epoch`: the bars' driver and the made-up motion's phase read it.
     init() {
-        store = NowPlayingStore(lookUpApp: { _ in nil })
+        let scheduler = ManualScheduler()
+        self.scheduler = scheduler
+        store = NowPlayingStore(lookUpApp: { _ in nil }, scheduler: scheduler, now: Self.clock(of: scheduler))
         store.apply(line: AdapterLines.track(), receivedAt: Date())
     }
 
+    static func clock(of scheduler: ManualScheduler) -> () -> Date {
+        { epoch + Double(scheduler.now.components.seconds) + Double(scheduler.now.components.attoseconds) / 1e18 }
+    }
+
     func makeView() -> SpectrumBarsView {
-        let scheduler = scheduler
-        let epoch = Date(timeIntervalSinceReferenceDate: 1_000)
-        return SpectrumBarsView(store: store, accent: notchAccent, scheduler: scheduler, now: {
-            epoch + Double(scheduler.now.components.seconds) + Double(scheduler.now.components.attoseconds) / 1e18
-        })
+        SpectrumBarsView(store: store, accent: notchAccent)
     }
 
     /// The view in a window, the way SwiftUI puts it in the notch's.
