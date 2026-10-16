@@ -5,7 +5,10 @@ import Testing
 /// The line decodes wait in: a few at once, the rest in order, and a request that is cancelled while it waits leaves it.
 @Suite struct ClipboardDecodeGateTests {
     func eventually(_ condition: () -> Bool) async -> Bool {
-        for _ in 0..<400 {
+        // By the clock, not by the count: the cooperative pool is shared with the heavy tests of this package, which can keep a decode
+        // from starting for many seconds.
+        let deadline = ContinuousClock.now + .seconds(240)
+        while ContinuousClock.now < deadline {
             if condition() { return true }
             try? await Task.sleep(for: .milliseconds(5))
         }

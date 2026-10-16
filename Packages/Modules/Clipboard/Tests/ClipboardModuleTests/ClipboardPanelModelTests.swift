@@ -19,6 +19,20 @@ final class FakePanelActions: ClipboardPanelActions {
         return .pasted
     }
 
+    private(set) var dragged: [UUID] = []
+    private(set) var dragEnds = 0
+
+    func dragProvider(for item: ClipboardItem) -> NSItemProvider {
+        dragged.append(item.id)
+        events.append("drag provider")
+        return NSItemProvider(object: "kéo" as NSString)
+    }
+
+    func dragEnded() {
+        dragEnds += 1
+        events.append("drag ended")
+    }
+
     func note(_ event: String) {
         events.append(event)
     }

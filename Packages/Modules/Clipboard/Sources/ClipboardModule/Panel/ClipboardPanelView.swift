@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The floating clipboard panel: a header to drag and pin it by, the search, the recent items beside a preview of the
@@ -9,6 +10,8 @@ struct ClipboardPanelView: View {
     @Bindable var model: ClipboardPanelModel
 
     @Environment(\.notchAccent) private var accent
+    /// Waits for the mouse button to go up after a row is dragged out.
+    @State private var dragWatch: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -161,6 +164,7 @@ struct ClipboardPanelView: View {
                             .id(item.id)
                             .requestsLinkPreview(of: item, from: module)
                             .onTapGesture { model.activate(item.id) }
+                            .onDrag { startDrag(item) }
                             .accessibilityAddTraits(item.id == selected ? [.isButton, .isSelected] : .isButton)
                             .accessibilityAction { model.activate(item.id) }
                         }
@@ -257,5 +261,23 @@ struct ClipboardPanelView: View {
 
     private func imageURL(of item: ClipboardItem) -> URL? {
         module.displayImageURL(of: item)
+    }
+
+    /// SwiftUI reports no end of a drag, so the panel hears it ended once the mouse button is up again, and a moment later, so a
+    /// drop on a target that reads at once is handled first.
+    private func startDrag(_ item: ClipboardItem) -> NSItemProvider {
+        let provider = model.beginDrag(of: item.id)
+        dragWatch?.cancel()
+        let model = model
+        dragWatch = Task {
+            repeat {
+                try? await Task.sleep(for: .milliseconds(100))
+            } while NSEvent.pressedMouseButtons & 1 != 0 && !Task.isCancelled
+            // Where it was let go, not where the pointer is a moment later.
+            let releasedAt = NSEvent.mouseLocation
+            try? await Task.sleep(for: .milliseconds(300))
+            if !Task.isCancelled { model.endDrag(releasedAt: releasedAt) }
+        }
+        return provider
     }
 }

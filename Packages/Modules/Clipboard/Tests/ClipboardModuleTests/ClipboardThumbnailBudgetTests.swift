@@ -20,6 +20,15 @@ nonisolated final class FakeThumbnailDecoder: @unchecked Sendable {
     /// What it answers for a picture it cannot read.
     var answersNil = false
 
+    /// A test that fails half way must not leave decodes held for ever, which would hang the run instead of failing it: after five
+    /// minutes everything is let through.
+    init() {
+        Task.detached { [self] in
+            try? await Task.sleep(for: .seconds(300))
+            letAllThrough()
+        }
+    }
+
     var running: Int { lock.withLock { runningNow } }
     /// How many are held, which is when `letHeldThrough` is sure to find them.
     var waiting: Int { lock.withLock { held.count } }
@@ -29,20 +38,22 @@ nonisolated final class FakeThumbnailDecoder: @unchecked Sendable {
     var memoryCalls: [Data] { lock.withLock { memoryBytes } }
     var sizesAsked: [Int] { lock.withLock { fileSizes } }
 
+    /// Its decodes run on the main actor, where the test is, and not on the cooperative pool: the pool is shared with the heavy tests of
+    /// this package, which can keep a decode from starting for a long time, and these tests count what is running.
     var decoder: ClipboardPreviewImageDecoder {
         ClipboardPreviewImageDecoder(
-            file: { [self] url, size in
+            file: { @MainActor [self] url, size in
                 lock.withLock { fileSizes.append(size) }
                 return await make(name: url.lastPathComponent)
             },
-            memory: { [self] data, _ in
+            memory: { @MainActor [self] data, _ in
                 lock.withLock { memoryBytes.append(data) }
                 return await make(name: "memory")
             }
         )
     }
 
-    private func make(name: String) async -> CGImage? {
+    @MainActor private func make(name: String) async -> CGImage? {
         lock.withLock {
             runningNow += 1
             peakNow = max(peakNow, runningNow)
@@ -106,7 +117,10 @@ nonisolated final class FakeThumbnailDecoder: @unchecked Sendable {
     }
 
     func eventually(_ condition: () -> Bool) async -> Bool {
-        for _ in 0..<600 {
+        // By the clock, not by the count: the cooperative pool is shared with the heavy tests of this package, which can keep a decode
+        // from starting for many seconds.
+        let deadline = ContinuousClock.now + .seconds(240)
+        while ContinuousClock.now < deadline {
             if condition() { return true }
             try? await Task.sleep(for: .milliseconds(5))
         }
@@ -180,6 +194,8 @@ nonisolated final class FakeThumbnailDecoder: @unchecked Sendable {
             #expect(await eventually { fake.started == step && fake.waiting == 1 })
             fake.letHeldThrough()
         }
+        // Whatever the steps found, nothing stays held.
+        fake.letAllThrough()
         for task in tasks { _ = await task.value }
 
         #expect(fake.names == (0..<5).map { "picture-\($0).png" })
@@ -191,30 +207,34 @@ nonisolated final class FakeThumbnailDecoder: @unchecked Sendable {
         let cache = cache(limit: 2)
         var tasks: [Task<NSImage?, Never>] = []
         for index in 0..<8 { tasks.append(Task { await cache.thumbnail(for: url(index)) }) }
-        #expect(await eventually { fake.running == 2 })
+        // Which two got the turns is for the scheduler to say; what matters is that two are decoding and six wait.
+        #expect(await eventually { fake.running == 2 && cache.stats.waitingDecodes == 6 })
 
-        // Six of the eight scroll away while they wait.
-        for task in tasks[2...] { task.cancel() }
-        for task in tasks[2...] { #expect(await task.value == nil) }
-
+        // All eight scroll away: the six that wait leave the line, the two that are decoding cannot be stopped.
+        for task in tasks { task.cancel() }
+        #expect(await eventually { cache.stats.waitingDecodes == 0 })
         fake.letAllThrough()
-        for task in tasks[..<2] { #expect(await task.value != nil) }
+        var answers: [NSImage?] = []
+        for task in tasks { answers.append(await task.value) }
 
         #expect(fake.started == 2)
         #expect(cache.stats.decodesStarted == 2)
         #expect(cache.stats.decodesSkipped == 6)
-        for index in 2..<8 { #expect(cache.cachedThumbnail(for: url(index)) == nil) }
+        #expect(answers.compactMap(\.self).count == 2)
+        // What was decoded is kept, since it was made.
+        #expect((0..<8).filter { cache.cachedThumbnail(for: url($0)) != nil }.count == 2)
     }
 
     @Test func afterManyCancelsTheNextRequestsStillRun() async {
         let cache = cache(limit: 2)
         var tasks: [Task<NSImage?, Never>] = []
         for index in 0..<40 { tasks.append(Task { await cache.thumbnail(for: url(index)) }) }
-        #expect(await eventually { fake.running == 2 })
-        for task in tasks[2...] { task.cancel() }
-        for task in tasks[2...] { _ = await task.value }
+        #expect(await eventually { fake.running == 2 && cache.stats.waitingDecodes == 38 })
+        for task in tasks { task.cancel() }
+        #expect(await eventually { cache.stats.waitingDecodes == 0 })
         fake.letAllThrough()
-        for task in tasks[..<2] { _ = await task.value }
+        for task in tasks { _ = await task.value }
+        #expect(fake.started == 2)
 
         // No slot was lost: a new card is decoded at once.
         let image = await cache.thumbnail(for: url(100))

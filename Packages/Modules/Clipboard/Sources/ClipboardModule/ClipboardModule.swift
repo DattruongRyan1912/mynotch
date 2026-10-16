@@ -440,6 +440,7 @@ public final class ClipboardModule: FeatureModule {
         model.isKeyboardBack = { [weak panelWindow] in panelWindow?.keyboardIsWithFrontApp() ?? false }
         model.onPinnedChange = { [weak self] pinned in self?.panelPinChanged(pinned) }
         model.onMove = { origin in settings.set(ClipboardPanelPosition(origin), for: keys.panelPosition) }
+        model.panelFrame = { [weak panelWindow] in panelWindow?.frame }
         panel = model
         attachPreview(to: model, window: panelPreviewWindow) { [weak panelWindow] in (panelWindow?.frame, panelWindow?.windowIdentity) }
         // Only a pinned panel is where it was left; an unpinned one is always beside the pointer.
@@ -706,6 +707,9 @@ public final class ClipboardModule: FeatureModule {
     /// What dragging a card out carries. A stored image is dragged as a copy, or not at all when copying fails: a drop
     /// must never move or rename the stored file.
     func dragProvider(for item: ClipboardItem) -> NSItemProvider {
+        // A card or row may be older than the history: an item of a board that has locked since (its items left memory), or one that
+        // was deleted, carries nothing, whatever the view still holds of it.
+        guard let item = state.history.items.first(where: { $0.id == item.id }) else { return NSItemProvider() }
         // A picture of an open locked board becomes a file only if the drop target asks, and only for the drag.
         if let provider = openImageDragProvider(for: item) { return provider }
         var urls = fileURLs(of: item)

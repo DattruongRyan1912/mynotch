@@ -28,7 +28,10 @@ struct WeakBox<Object: AnyObject> {
 /// the real window controller's window without putting it on a screen, closes it and waits for the objects to be freed.
 extension ClipboardModuleTests {
     func eventuallyFreed(_ freed: () -> Bool) async -> Bool {
-        for _ in 0..<600 {
+        // By the clock, not by the count: the cooperative pool is shared with the heavy tests of this package, which can keep a decode
+        // from starting for many seconds.
+        let deadline = ContinuousClock.now + .seconds(240)
+        while ContinuousClock.now < deadline {
             if freed() { return true }
             try? await Task.sleep(for: .milliseconds(5))
         }

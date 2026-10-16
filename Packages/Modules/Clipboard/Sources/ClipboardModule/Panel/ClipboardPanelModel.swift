@@ -8,6 +8,11 @@ protocol ClipboardPanelActions: AnyObject {
     /// `beforePaste` after writing the pasteboard and before sending ⌘V, to get the keyboard out of the panel; if that
     /// answers false it pastes nothing and answers `.copied`.
     @discardableResult func activate(_ item: ClipboardItem, beforePaste: @escaping () -> Bool) -> ClipboardPaster.Outcome?
+    /// What dragging the item's row out carries: the one provider the notch's cards and the library use. Nothing for an item that is
+    /// no longer in the history (its board locked, or it was deleted).
+    func dragProvider(for item: ClipboardItem) -> NSItemProvider
+    /// A drag is over, so the file made for its picture can go once the drop target has had time to read it.
+    func dragEnded()
 }
 
 extension ClipboardModule: ClipboardPanelActions {}
@@ -54,6 +59,10 @@ final class ClipboardPanelModel: ClipboardPreviewHosting {
     @ObservationIgnored var onPinnedChange: ((Bool) -> Void)?
     /// Where the user dragged a pinned panel to: its frame's origin.
     @ObservationIgnored var onMove: ((CGPoint) -> Void)?
+    /// The panel's frame while it is open, to tell where a drag out of it ended.
+    @ObservationIgnored var panelFrame: (() -> CGRect?)?
+    /// The row being dragged out while the drag lasts; only one at a time.
+    private(set) var draggingID: UUID?
 
     /// The large preview of the selected item (Space, ⌘Y), which follows the selection while it is open.
     let preview = ClipboardPreviewState()
@@ -202,6 +211,39 @@ final class ClipboardPanelModel: ClipboardPreviewHosting {
         }
     }
 
+    // MARK: Dragging a row out
+
+    /// A row is dragged out to another app: it becomes the selected one, and the provider is what the drop target reads. The drag
+    /// never pastes and never closes a pinned panel. An unpinned panel stays open while it lasts, even when the keyboard leaves
+    /// (the app dropped on may take it), and closes when the drag ends outside it. An empty provider for a row that is gone.
+    func beginDrag(of id: UUID) -> NSItemProvider {
+        guard !isClosed, let item = items.first(where: { $0.id == id }) else { return NSItemProvider() }
+        preview.close()
+        chosenID = id
+        draggingID = id
+        ClipboardPanelLog.record("panel drag begins pinned=\(isPinned)")
+        return actions.dragProvider(for: item)
+    }
+
+    /// The button has been up for a moment, at `point` (screen coordinates when it was let go). The file made for a picture goes soon
+    /// after. A drag let go over the panel itself was dropped back or cancelled, and changes nothing. SwiftUI's drag does not say
+    /// whether a target took it, so letting go outside the panel stands for success: a pinned panel hands the keyboard to the app that
+    /// was dropped on (the user types there next), an unpinned one closes, as it does after any use of an item.
+    func endDrag(releasedAt point: CGPoint) {
+        let wasDragging = draggingID != nil
+        draggingID = nil
+        actions.dragEnded()
+        guard wasDragging, !isClosed else { return }
+        let outside = panelFrame?().map { !$0.contains(point) } ?? false
+        ClipboardPanelLog.record("panel drag ends outside=\(outside) pinned=\(isPinned)")
+        guard outside else { return }
+        if isPinned {
+            _ = onReturnKeyboard?()
+        } else {
+            requestClose()
+        }
+    }
+
     // MARK: Search tokens
 
     /// A click on a suggestion.
@@ -235,7 +277,8 @@ final class ClipboardPanelModel: ClipboardPreviewHosting {
     /// The panel lost the keyboard or the user clicked elsewhere: an unpinned panel is done, and the preview of either is.
     func focusLost() {
         preview.close()
-        if !isPinned { requestClose() }
+        // Not while a row is being dragged out: the app it is dropped on may take the keyboard, and the drag decides when the panel closes.
+        if !isPinned && draggingID == nil { requestClose() }
     }
 
     func requestClose() {
