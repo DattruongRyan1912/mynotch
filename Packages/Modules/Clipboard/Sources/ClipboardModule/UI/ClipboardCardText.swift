@@ -76,9 +76,11 @@ enum ClipboardCardText {
         return language == .generic ? ClipboardSearchTerms.codeTitle : ClipboardSearchTerms.codeTitle + " " + language.title
     }
 
-    /// What a list row calls the item: an image by its size, anything else by its summary.
-    static func rowTitle(of content: ClipboardContent) -> String {
+    /// What a list row calls the item: an image by its size, a link by the title of its page when that was read, anything else by its
+    /// summary.
+    static func rowTitle(of content: ClipboardContent, linkTitle: String? = nil) -> String {
         if case .image(let image) = content { return "Ảnh \(image.pixelWidth) × \(image.pixelHeight)" }
+        if case .link = content, let linkTitle { return linkTitle }
         return summary(of: content)
     }
 

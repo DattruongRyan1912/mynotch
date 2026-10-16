@@ -234,8 +234,9 @@ struct ClipboardTabView: View {
     private func card(_ item: ClipboardItem, isSelected: Bool, isPinned: Bool, now: Date) -> some View {
         ClipboardCardView(
             item: item, isSelected: isSelected, isPinned: isPinned, now: now,
-            imageURL: imageURL(of: item), thumbnails: module.thumbnails
+            imageURL: imageURL(of: item), thumbnails: module.thumbnails, link: module.linkPreviewDisplay(for: item)
         )
+        .requestsLinkPreview(of: item, from: module)
         .onTapGesture { activate(item) }
         .onDrag { startDrag(item) }
         .contextMenu {

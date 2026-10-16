@@ -17,6 +17,11 @@ struct ClipboardContentPreview: View {
         var textCharacters = ClipboardCardText.previewCharacters
         /// The colours of code, which follow the system's appearance unless the card is always dark.
         var codePalette = CodePalette.adaptive
+        /// How a link card with what was read of its page is laid out: the picture's height, and the lines of the title.
+        var linkImageHeight: CGFloat = 30
+        var linkTitleLines = 2
+        /// Whether the path and query of the address are shown under the host, as the panel's pane has room for.
+        var showsLinkPath = false
 
         /// The notch's card. Its colours are the text tokens, which follow the look, so it is made when it is drawn, not kept; and
         /// code is coloured for a dark card on the black notch and for the system's appearance on Liquid Glass.
@@ -30,13 +35,15 @@ struct ClipboardContentPreview: View {
         /// The floating panel's preview pane, which has the room for a longer excerpt.
         static let panel = Style(
             primary: .primary, secondary: .secondary, swatchBorder: .primary.opacity(0.2),
-            textLines: 14, textSize: 13, detailSize: 11, fileIconSize: 48, textCharacters: 1_500
+            textLines: 14, textSize: 13, detailSize: 11, fileIconSize: 48, textCharacters: 1_500,
+            linkImageHeight: 110, linkTitleLines: 3, showsLinkPath: true
         )
 
         static func library(_ size: ClipboardLibraryCardSize) -> Style {
             Style(
                 primary: .primary, secondary: .secondary, swatchBorder: .primary.opacity(0.2),
-                textLines: size.textLines, textSize: 12, detailSize: 11, fileIconSize: size == .small ? 28 : 40
+                textLines: size.textLines, textSize: 12, detailSize: 11, fileIconSize: size == .small ? 28 : 40,
+                linkImageHeight: size.linkImageHeight, linkTitleLines: size.linkTitleLines
             )
         }
     }
@@ -48,6 +55,8 @@ struct ClipboardContentPreview: View {
     let imageURL: URL?
     let thumbnails: ClipboardThumbnailCache
     let style: Style
+    /// What was read of a link's page, when link previews are on and this link may be read.
+    var link: ClipboardLinkPreviewDisplay?
 
     var body: some View {
         switch content {
@@ -64,19 +73,23 @@ struct ClipboardContentPreview: View {
                     .lineLimit(style.textLines)
             }
         case .link(let url):
-            let link = ClipboardCardText.link(url)
-            VStack(alignment: .leading, spacing: 3) {
-                Label(link.title, systemImage: "link")
-                    .font(.system(size: style.textSize, weight: .semibold))
-                    .foregroundStyle(style.primary)
-                    .lineLimit(1)
-                    // Keeps both ends of a long host, e.g. "develo…ple.com".
-                    .truncationMode(.middle)
-                if let detail = link.detail {
-                    Text(detail)
-                        .font(.system(size: style.detailSize))
-                        .foregroundStyle(style.secondary)
-                        .lineLimit(3)
+            if let link, !link.isEmpty {
+                ClipboardLinkCardContent(url: url, display: link, thumbnails: thumbnails, style: style)
+            } else {
+                let parts = ClipboardCardText.link(url)
+                VStack(alignment: .leading, spacing: 3) {
+                    Label(parts.title, systemImage: "link")
+                        .font(.system(size: style.textSize, weight: .semibold))
+                        .foregroundStyle(style.primary)
+                        .lineLimit(1)
+                        // Keeps both ends of a long host, e.g. "develo…ple.com".
+                        .truncationMode(.middle)
+                    if let detail = parts.detail {
+                        Text(detail)
+                            .font(.system(size: style.detailSize))
+                            .foregroundStyle(style.secondary)
+                            .lineLimit(3)
+                    }
                 }
             }
         case .color(let hex, let original):

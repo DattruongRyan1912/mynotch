@@ -67,6 +67,8 @@ nonisolated extension ClipboardHistory {
             item.contentHash = hash
             item.codeDetection = ClipboardCodeDetector.detect(content)
             item.edited = true
+            // Other words are another address, or none: what was read of the old page is not theirs.
+            item.linkPreview = nil
             item.copiedAt = date
             // Used now, so an ordinary item with a date of now, as `touch` makes one.
             item.exemptFromLimits = nil

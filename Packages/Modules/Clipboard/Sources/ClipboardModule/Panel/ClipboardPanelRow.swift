@@ -10,6 +10,7 @@ struct ClipboardPanelRow: View {
     let accessibilityLabel: String
     let imageURL: URL?
     let thumbnails: ClipboardThumbnailCache
+    var link: ClipboardLinkPreviewDisplay?
 
     @Environment(\.notchAccent) private var accent
     @State private var isHovered = false
@@ -24,10 +25,10 @@ struct ClipboardPanelRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            ClipboardItemGlyph(item: item, imageURL: imageURL, thumbnails: thumbnails, iconSize: 26)
+            ClipboardItemGlyph(item: item, imageURL: imageURL, thumbnails: thumbnails, iconSize: 26, link: link)
                 .frame(width: 34, height: 30)
             VStack(alignment: .leading, spacing: 2) {
-                Text(ClipboardCardText.rowTitle(of: item.content))
+                Text(ClipboardCardText.rowTitle(of: item.content, linkTitle: link?.title))
                     .font(.system(size: 12.5))
                     .lineLimit(1)
                     .truncationMode(.tail)

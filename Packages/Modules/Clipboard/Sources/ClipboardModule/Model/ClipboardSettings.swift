@@ -62,6 +62,11 @@ struct ClipboardSettingKeys {
     /// Whether open locked boards also close when the notch does. Off by default: a paste closes the notch, which would close the
     /// board after every item taken from it.
     let boardLockOnNotchClose: SettingKey<Bool>
+    /// A short, quiet sound when an item is captured and when MyNotch pastes one. Off by default.
+    let playSounds: SettingKey<Bool>
+    /// Whether a link's page is opened to read its title and picture. Off by default: it is the one thing the module does on the
+    /// network, and it tells the page's server that someone looked at the link.
+    let linkPreviews: SettingKey<Bool>
 
     init(_ settings: ModuleSettings) {
         paused = settings.key("paused", default: false)
@@ -85,5 +90,7 @@ struct ClipboardSettingKeys {
         mcpEnabled = settings.key("mcpEnabled", default: false)
         boardLockIdleMinutes = settings.key("boardLockIdleMinutes", default: 5, clampedTo: Self.boardLockIdleMinutesRange)
         boardLockOnNotchClose = settings.key("boardLockOnNotchClose", default: false)
+        playSounds = settings.key("playSounds", default: false)
+        linkPreviews = settings.key("linkPreviews", default: false)
     }
 }

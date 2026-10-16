@@ -49,6 +49,15 @@ public final class ClipboardModule: FeatureModule {
     var mcpServer: ClipboardMCPServer?
     /// Set while running: the open locked boards and what closes them; see `ClipboardModule+Vault`.
     var vault: ClipboardVault?
+    /// The optional sounds; see `ClipboardModule+Sound`. The clock is monotonic seconds.
+    let soundPlayer: any ClipboardSoundPlaying
+    let soundClock: () -> Double
+    var soundGate = ClipboardSoundGate()
+    /// The optional link previews; see `ClipboardModule+LinkPreview`.
+    let linkFetcher: ClipboardLinkFetcher
+    let linkPreviews = ClipboardLinkFetches()
+    /// How long a link's card stays on screen before its page is read; a test makes it longer or shorter.
+    var linkPreviewDwell = ClipboardModule.defaultLinkPreviewDwell
     let keychain: any BoardKeyKeychain
     let authenticator: any UserAuthenticating
     let keyDerivation: ClipboardVaultCrypto.Derivation
@@ -109,7 +118,9 @@ public final class ClipboardModule: FeatureModule {
             panelWindow: ClipboardPanelController(),
             libraryPreview: ClipboardPreviewController(),
             panelPreview: ClipboardPreviewController(),
-            tabPreview: ClipboardPreviewController()
+            tabPreview: ClipboardPreviewController(),
+            soundPlayer: ClipboardSystemSoundPlayer(),
+            linkTransport: ClipboardLinkNetwork()
         )
     }
 
@@ -132,8 +143,18 @@ public final class ClipboardModule: FeatureModule {
         keychain: any BoardKeyKeychain = SystemBoardKeyKeychain(),
         authenticator: any UserAuthenticating = SystemUserAuthenticator(),
         keyDerivation: ClipboardVaultCrypto.Derivation = .standard,
-        lockTriggers: ClipboardLockTriggers = .system
+        lockTriggers: ClipboardLockTriggers = .system,
+        soundPlayer: any ClipboardSoundPlaying = ClipboardSilentPlayer(),
+        soundClock: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
+        linkTransport: any ClipboardLinkTransport = ClipboardNoNetwork(),
+        linkTimeouts: (request: Duration, total: Duration) = (ClipboardLinkFetcher.requestTimeout, ClipboardLinkFetcher.totalTimeout),
+        linkSleep: @escaping ClipboardLinkFetcher.Sleep = { try await Task.sleep(for: $0) }
     ) {
+        self.soundPlayer = soundPlayer
+        self.soundClock = soundClock
+        linkFetcher = ClipboardLinkFetcher(
+            transport: linkTransport, requestTimeout: linkTimeouts.request, totalTimeout: linkTimeouts.total, sleep: linkSleep
+        )
         self.mcpSocketPath = mcpSocketPath
         self.installMCPHelper = installMCPHelper
         thumbnails.openImages = openImages
@@ -184,12 +205,16 @@ public final class ClipboardModule: FeatureModule {
         state.history = history
         store.deleteImages(for: removed)
         if history.persistable != loaded { store.scheduleSave(history) }
+        // A picture of a link that no item holds any more (an item gone while MyNotch was not running, a board that locked).
+        store.deleteOrphanLinkPreviews(keeping: history.linkPreviewFileNames)
         refreshPasteboardAccess()
         refreshAccessibility()
         restoreStack(from: store, keys: keys, settings: context.settings, excluding: Set(sealed.map(\.id)))
         scheduleClassification()
 
         let keystrokeGate = KeystrokeGate(keystrokes)
+        // Every ⌘V of a paste of ours goes through the gate, so this is the one place that knows it went out.
+        keystrokeGate.onSent = { [weak self] in self?.playPasteSound() }
         self.keystrokeGate = keystrokeGate
         paster = ClipboardPaster(
             pasteboard: pasteboard, keystrokes: keystrokeGate, scheduler: context.scheduler, isTrusted: isTrusted, modifiers: modifiers
@@ -246,6 +271,12 @@ public final class ClipboardModule: FeatureModule {
             }
         }
         context.run { [weak self] in
+            // Turning link previews off stops the ones that are on their way; nothing more is read from then on.
+            for await enabled in Observations({ settings.value(keys.linkPreviews) }) where !enabled {
+                self?.cancelLinkFetches()
+            }
+        }
+        context.run { [weak self] in
             // Keeping or not keeping the stack takes effect at once: the file is written, or deleted.
             for await _ in Observations({ settings.value(keys.stackPersist) }) {
                 self?.writeStackFile()
@@ -255,6 +286,7 @@ public final class ClipboardModule: FeatureModule {
 
     /// Writes any unsaved change before returning, so quitting right after a copy keeps it.
     public func stop() async {
+        cancelLinkFetches()
         stopMCP()
         // Every open board is sealed and closed first, so nothing of one outlives the module in memory or on disk.
         stopVault()
@@ -810,6 +842,7 @@ public final class ClipboardModule: FeatureModule {
             addedID = history.add(content, hash: ClipboardContent.hash(of: content), source: source, at: now(), isSensitive: isSensitive).id
             return []
         }
+        playCaptureSound(for: addedID)
         // A secret never goes on the stack, even when the history is set to keep it, and neither does an item of a locked board.
         if state.stack.isOn, !isSensitive, let added = state.history.items.first(where: { $0.id == addedID }),
            !state.history.protectedItemIDs.contains(added.id) {
@@ -1060,7 +1093,10 @@ public final class ClipboardModule: FeatureModule {
         guard !removed.isEmpty else { return }
         store.scheduleSave(history)
         await store.flush()
-        if store.writeCount > 0 { store.deleteImages(for: removed) }
+        if store.writeCount > 0 {
+            store.deleteImages(for: removed)
+            store.deleteLinkPreviewImages(named: removed.compactMap(\.linkPreviewFileName))
+        }
     }
 
     /// Applies a change, enforces the limits, deletes the images of removed items and schedules a save.
@@ -1070,9 +1106,11 @@ public final class ClipboardModule: FeatureModule {
         var history = state.history
         let removed = change(&history) + prune(&history)
         guard history != state.history else { return }
+        let previewFiles = state.history.linkPreviewFileNames
         state.history = history
         store.deleteImages(for: removed)
         store.scheduleSave(history)
+        deleteStaleLinkPreviews(of: previewFiles)
         vaultHistoryChanged()
     }
 
@@ -1096,6 +1134,8 @@ public final class ClipboardModule: FeatureModule {
 /// Passes ⌘V on until closed; the paster keeps its sender, so this is how a stop drops a paste still waiting.
 private final class KeystrokeGate: KeystrokeSending {
     var isOpen = true
+    /// Told after each ⌘V that went out, and only then: a closed gate sends nothing and says nothing.
+    var onSent: (() -> Void)?
     private let sender: any KeystrokeSending
 
     init(_ sender: any KeystrokeSending) {
@@ -1103,6 +1143,8 @@ private final class KeystrokeGate: KeystrokeSending {
     }
 
     func sendPaste() {
-        if isOpen { sender.sendPaste() }
+        guard isOpen else { return }
+        sender.sendPaste()
+        onSent?()
     }
 }

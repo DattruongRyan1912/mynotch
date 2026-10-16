@@ -20,6 +20,8 @@ struct ClipboardLibraryCard: View {
     /// The stored PNG of an image item.
     let imageURL: URL?
     let thumbnails: ClipboardThumbnailCache
+    /// What was read of a link's page, when link previews are on and this link may be read.
+    var link: ClipboardLinkPreviewDisplay?
 
     @Environment(\.notchAccent) private var accent
     @State private var isHovered = false
@@ -30,7 +32,7 @@ struct ClipboardLibraryCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ClipboardContentPreview(content: item.content, codeLanguage: item.codeLanguage, imageURL: imageURL, thumbnails: thumbnails, style: .library(size))
+            ClipboardContentPreview(content: item.content, codeLanguage: item.codeLanguage, imageURL: imageURL, thumbnails: thumbnails, style: .library(size), link: link)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .clipped()
             footer
@@ -76,6 +78,7 @@ struct ClipboardLibraryRow: View {
     let accessibilityLabel: String
     let imageURL: URL?
     let thumbnails: ClipboardThumbnailCache
+    var link: ClipboardLinkPreviewDisplay?
 
     @Environment(\.notchAccent) private var accent
     @State private var isHovered = false
@@ -86,9 +89,9 @@ struct ClipboardLibraryRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ClipboardItemGlyph(item: item, imageURL: imageURL, thumbnails: thumbnails)
+            ClipboardItemGlyph(item: item, imageURL: imageURL, thumbnails: thumbnails, link: link)
                 .frame(width: 40, height: 32)
-            Text(ClipboardCardText.rowTitle(of: item.content))
+            Text(ClipboardCardText.rowTitle(of: item.content, linkTitle: link?.title))
                 .font(.system(size: 13))
                 .lineLimit(1)
                 .truncationMode(.tail)

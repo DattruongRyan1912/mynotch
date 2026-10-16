@@ -23,6 +23,10 @@ nonisolated struct ClipboardItem: Identifiable, Codable, Sendable, Hashable {
     var copyCount: Int?
     /// true once the user replaced its words in the editor, which keeps its date and its source; nil otherwise.
     var edited: Bool?
+    /// The title and picture of a link's page, read when the user turned link previews on and the link showed in a card; nil before
+    /// that, for a link that may not be read (a private address, a secret) and for anything that is not a link. Never held by an item
+    /// of a board that has a lock.
+    var linkPreview: ClipboardLinkPreview?
 
     /// The language of a text that is code.
     var codeLanguage: CodeLanguage? { codeDetection?.language }

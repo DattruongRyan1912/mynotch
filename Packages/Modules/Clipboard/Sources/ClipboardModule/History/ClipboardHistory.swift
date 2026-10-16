@@ -174,11 +174,14 @@ nonisolated struct ClipboardHistory: Codable, Equatable, Sendable {
         boards.removeAll { $0.id == id }
     }
 
-    /// Ignores unknown items and boards, items already in the board, and a board that is locked (it has to be open to take a pin).
+    /// Ignores unknown items and boards, items already in the board, and a board that is locked (it has to be open to take a pin). An item
+    /// pinned to a board that has a lock loses what was read of its page.
     mutating func pin(itemID: UUID, to boardID: UUID) {
-        guard items.contains(where: { $0.id == itemID }), let index = boardIndex(boardID), !boards[index].isLocked,
+        guard let itemIndex = items.firstIndex(where: { $0.id == itemID }), let index = boardIndex(boardID), !boards[index].isLocked,
               !boards[index].itemIDs.contains(itemID) else { return }
         boards[index].itemIDs.insert(itemID, at: 0)
+        // What a page told of a link is not kept in a board that has a lock, which is for what must stay private.
+        if boards[index].isProtected { items[itemIndex].linkPreview = nil }
     }
 
     mutating func unpin(itemID: UUID, from boardID: UUID) {

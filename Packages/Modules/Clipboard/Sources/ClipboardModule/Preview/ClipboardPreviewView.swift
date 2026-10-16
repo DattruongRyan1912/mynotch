@@ -12,7 +12,7 @@ struct ClipboardPreviewView: View {
             if let item = host.previewedItem {
                 // A fresh view per item and per version of its words, so nothing loaded for the one before can show for the next, and
                 // an item the editor replaced is drawn again.
-                ClipboardPreviewItemView(item: item, imageSource: module.previewImageSource(of: item))
+                ClipboardPreviewItemView(item: item, imageSource: module.previewImageSource(of: item), link: module.linkPreviewDisplay(for: item))
                     .id(ClipboardPreviewIdentity(id: item.id, contentHash: item.contentHash))
             } else {
                 Color.clear
@@ -33,6 +33,8 @@ struct ClipboardPreviewIdentity: Hashable {
 struct ClipboardPreviewItemView: View {
     let item: ClipboardItem
     let imageSource: ClipboardPreviewImageSource?
+    /// What was read of a link's page, when link previews are on and this link may be read.
+    var link: ClipboardLinkPreviewDisplay?
     /// Worked out once, the first time it is needed: the view is made again at every change of the history while it is open, and the
     /// cut of a 2 MB text should not be.
     @State private var cache = ContentCache()
@@ -61,7 +63,7 @@ struct ClipboardPreviewItemView: View {
     }
 
     private var pane: some View {
-        ClipboardPreviewPane(content: content, item: item, imageSource: imageSource)
+        ClipboardPreviewPane(content: content, item: item, imageSource: imageSource, link: link)
     }
 
     private func filesOf(_ item: ClipboardItem) -> [URL] {
@@ -108,13 +110,14 @@ struct ClipboardPreviewPane: View {
     let item: ClipboardItem
     let imageSource: ClipboardPreviewImageSource?
     var isCompact = false
+    var link: ClipboardLinkPreviewDisplay?
 
     var body: some View {
         switch content {
         case .text(let text): ClipboardPreviewTextPane(text: text, isCompact: isCompact)
         case .image(let info): ClipboardPreviewImagePane(info: info, source: imageSource, isCompact: isCompact)
         case .color(let values): ClipboardPreviewColorPane(values: values, isCompact: isCompact)
-        case .link(let link): ClipboardPreviewLinkPane(link: link, isCompact: isCompact)
+        case .link(let address): ClipboardPreviewLinkPane(link: address, isCompact: isCompact, display: link)
         case .files: ClipboardPreviewFilesPane(urls: files, isCompact: isCompact)
         }
     }
@@ -249,15 +252,36 @@ struct ClipboardPreviewColorPane: View {
 struct ClipboardPreviewLinkPane: View {
     let link: ClipboardPreviewLink
     var isCompact = false
+    /// What was read of the page, when link previews are on and this link may be read; nil when it is not read at all.
+    var display: ClipboardLinkPreviewDisplay?
+
+    /// What the note under the address says: that the page is not opened, or where the title and picture come from. Nothing while
+    /// nothing has been read yet.
+    var note: String? {
+        guard let display else { return "Chỉ hiện địa chỉ: MyNotch không mở trang này." }
+        return display.isEmpty ? nil : "Tiêu đề và ảnh lấy từ trang của link."
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: isCompact ? 6 : 14) {
-                Image(systemName: "link")
-                    .font(.system(size: isCompact ? 18 : 34))
-                    .foregroundStyle(.secondary)
-                Text(link.host)
-                    .font(.system(size: isCompact ? 16 : 30, weight: .semibold))
+                if let imageURL = display?.imageURL {
+                    ClipboardLinkPreviewPicture(url: imageURL, height: isCompact ? 70 : 150)
+                } else {
+                    Image(systemName: "link")
+                        .font(.system(size: isCompact ? 18 : 34))
+                        .foregroundStyle(.secondary)
+                }
+                if let title = display?.title {
+                    Text(title)
+                        .font(.system(size: isCompact ? 14 : 26, weight: .semibold))
+                    Text(link.host)
+                        .font(.system(size: isCompact ? 11 : 16))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(link.host)
+                        .font(.system(size: isCompact ? 16 : 30, weight: .semibold))
+                }
                 if let detail = link.detail {
                     Text(detail)
                         .font(.system(size: isCompact ? 11 : 18, design: .monospaced))
@@ -267,8 +291,8 @@ struct ClipboardPreviewLinkPane: View {
                 Text(link.address)
                     .font(.system(size: isCompact ? 11 : 15, design: .monospaced))
                     .textSelection(.enabled)
-                if !isCompact {
-                    Text("Chỉ hiện địa chỉ: MyNotch không mở trang này.")
+                if !isCompact, let note {
+                    Text(note)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -277,7 +301,35 @@ struct ClipboardPreviewLinkPane: View {
             .padding(isCompact ? 12 : 32)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Link \(link.address)")
+        .accessibilityLabel(display?.title.map { "Link \($0), \(link.address)" } ?? "Link \(link.address)")
+    }
+}
+
+/// The small picture read from a link's page, decoded where it is drawn and never larger than it is.
+struct ClipboardLinkPreviewPicture: View {
+    let url: URL
+    let height: CGFloat
+
+    @Environment(\.displayScale) private var scale
+    @State private var image: CGImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: CGFloat(image.width) / scale, maxHeight: min(height, CGFloat(image.height) / scale), alignment: .leading)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            } else {
+                Color.clear.frame(height: 1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: url) {
+            let decoded = await ClipboardThumbnailCache.decode(url, maxPixelSize: ClipboardLinkImage.maxPixelSize)
+            if !Task.isCancelled { image = decoded }
+        }
     }
 }
 

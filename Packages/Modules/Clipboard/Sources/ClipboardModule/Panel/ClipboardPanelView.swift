@@ -156,9 +156,10 @@ struct ClipboardPanelView: View {
                             ClipboardPanelRow(
                                 item: item, isSelected: item.id == selected, shortcut: model.shortcutNumber(of: item.id),
                                 timeLabel: model.timeLabel(for: item), accessibilityLabel: model.accessibilityLabel(for: item),
-                                imageURL: imageURL(of: item), thumbnails: model.thumbnails
+                                imageURL: imageURL(of: item), thumbnails: model.thumbnails, link: module.linkPreviewDisplay(for: item)
                             )
                             .id(item.id)
+                            .requestsLinkPreview(of: item, from: module)
                             .onTapGesture { model.activate(item.id) }
                             .accessibilityAddTraits(item.id == selected ? [.isButton, .isSelected] : .isButton)
                             .accessibilityAction { model.activate(item.id) }
@@ -184,7 +185,7 @@ struct ClipboardPanelView: View {
             VStack(alignment: .leading, spacing: 10) {
                 ClipboardContentPreview(
                     content: item.content, codeLanguage: item.codeLanguage, imageURL: imageURL(of: item), thumbnails: model.thumbnails,
-                    style: .panel
+                    style: .panel, link: module.linkPreviewDisplay(for: item)
                 )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .clipped()

@@ -76,8 +76,8 @@ struct ClipboardPreviewImageInfo: Equatable, Sendable {
     var sizeText: String { ClipboardPreviewFormat.size(byteCount) }
 }
 
-/// A link as the preview shows it: the whole address, large, and its parts. Never fetched: there is no title unless the item had
-/// one, and an item holds only the address.
+/// A link as the preview shows it: the whole address, large, and its parts. An item holds only the address; the title and picture of its page,
+/// when the user allows reading them, are the module's (`ClipboardLinkPreviewDisplay`) and are drawn beside it.
 struct ClipboardPreviewLink: Equatable, Sendable {
     let address: String
     let scheme: String?

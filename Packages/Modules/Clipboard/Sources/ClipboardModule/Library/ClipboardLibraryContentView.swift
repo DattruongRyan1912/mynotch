@@ -148,7 +148,7 @@ struct ClipboardLibraryContentView: View {
                         item: item, size: model.cardSize, isSelected: model.selectedIDs.contains(item.id),
                         isPinned: model.pinnedIDs.contains(item.id), timeLabel: model.timeLabel(for: item),
                         accessibilityLabel: model.accessibilityLabel(for: item), imageURL: imageURL(of: item),
-                        thumbnails: model.thumbnails
+                        thumbnails: model.thumbnails, link: module.linkPreviewDisplay(for: item)
                     )
                 }
             }
@@ -162,7 +162,7 @@ struct ClipboardLibraryContentView: View {
                     ClipboardLibraryRow(
                         item: item, isSelected: model.selectedIDs.contains(item.id), isPinned: model.pinnedIDs.contains(item.id),
                         timeLabel: model.timeLabel(for: item), accessibilityLabel: model.accessibilityLabel(for: item),
-                        imageURL: imageURL(of: item), thumbnails: model.thumbnails
+                        imageURL: imageURL(of: item), thumbnails: model.thumbnails, link: module.linkPreviewDisplay(for: item)
                     )
                 }
             }
@@ -181,6 +181,7 @@ struct ClipboardLibraryContentView: View {
     private func interactive<Content: View>(_ item: ClipboardItem, @ViewBuilder content: () -> Content) -> some View {
         content()
             .id(item.id)
+            .requestsLinkPreview(of: item, from: module)
             .onTapGesture { click(item) }
             // Beside the single click, which stays immediate: the first click of a double click selects as usual.
             .simultaneousGesture(TapGesture(count: 2).onEnded { model.activate(item.id) })

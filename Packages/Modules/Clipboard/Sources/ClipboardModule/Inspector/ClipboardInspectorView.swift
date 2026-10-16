@@ -76,7 +76,8 @@ struct ClipboardInspectorItemView: View {
 
     private var preview: some View {
         ClipboardPreviewPane(
-            content: cache.content(for: item), item: item, imageSource: module.previewImageSource(of: item), isCompact: true
+            content: cache.content(for: item), item: item, imageSource: module.previewImageSource(of: item), isCompact: true,
+            link: module.linkPreviewDisplay(for: item)
         )
         .frame(height: 190)
         .frame(maxWidth: .infinity)

@@ -14,6 +14,8 @@ struct ClipboardCardView: View {
     /// The stored PNG of an image item.
     let imageURL: URL?
     let thumbnails: ClipboardThumbnailCache
+    /// What was read of a link's page, when link previews are on and this link may be read.
+    var link: ClipboardLinkPreviewDisplay?
 
     @Environment(\.notchAccent) private var accent
     @Environment(\.notchSurface) private var surface
@@ -42,7 +44,7 @@ struct ClipboardCardView: View {
     }
 
     private var preview: some View {
-        ClipboardContentPreview(content: item.content, codeLanguage: item.codeLanguage, imageURL: imageURL, thumbnails: thumbnails, style: .notch(onGlass: surface.isLiquidGlass))
+        ClipboardContentPreview(content: item.content, codeLanguage: item.codeLanguage, imageURL: imageURL, thumbnails: thumbnails, style: .notch(onGlass: surface.isLiquidGlass), link: link)
     }
 
     private var footer: some View {

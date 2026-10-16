@@ -72,6 +72,7 @@ struct ClipboardSettingsView: View {
             }
             Toggle("Đóng notch sau khi chép hoặc dán", isOn: settings.binding(keys.closeAfterAction))
             Toggle("Hiện thông báo khi chép", isOn: settings.binding(keys.showCopiedActivity))
+            soundsAndPreviews
             copyStack
             boardLocks
             excludedApps
@@ -82,6 +83,23 @@ struct ClipboardSettingsView: View {
                 pasteboardAccess(pasteboardAccessBehavior())
             }
         }
+    }
+
+    // MARK: Sounds and link previews
+
+    static let soundsNote = "Phát một tiếng nhẹ khi MyNotch ghi lại một mục mới và khi MyNotch dán một mục. Mục nhạy cảm, mục trông giống mật khẩu và mục trong board đã khoá không phát tiếng."
+    static let linkPreviewsNote = "Khi bật, MyNotch sẽ mở trang của link để đọc tiêu đề và ảnh xem trước; trang đó thấy địa chỉ IP của bạn. Chỉ link công khai: địa chỉ nội bộ, link có mật khẩu, mục nhạy cảm và board đã khoá không bao giờ được mở."
+
+    @ViewBuilder
+    private var soundsAndPreviews: some View {
+        Toggle("Âm thanh khi chép và dán", isOn: settings.binding(keys.playSounds))
+        Text(Self.soundsNote)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        Toggle("Xem trước link (cần mạng)", isOn: settings.binding(keys.linkPreviews))
+        Text(Self.linkPreviewsNote)
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 
     // MARK: Copy stack

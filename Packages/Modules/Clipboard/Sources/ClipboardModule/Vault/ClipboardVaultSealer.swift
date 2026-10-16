@@ -39,6 +39,12 @@ nonisolated enum ClipboardVaultSealer {
     static func sealNow(
         items: [ClipboardItem], images: [String: Data], key: SymmetricKey, boardID: UUID, maxBytes: Int = ClipboardVaultFile.maxFileBytes
     ) throws -> Data {
+        // What a page told of a link is not for a board that has a lock: it is never read for one and never sealed in one.
+        let items = items.map { item in
+            var item = item
+            item.linkPreview = nil
+            return item
+        }
         let names = Set(items.compactMap { item -> String? in
             if case .image(let image) = item.content { image.fileName } else { nil }
         })

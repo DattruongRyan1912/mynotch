@@ -8,6 +8,8 @@ struct ClipboardItemGlyph: View {
     let thumbnails: ClipboardThumbnailCache
     /// Side of a swatch or a file icon.
     var iconSize: CGFloat = 28
+    /// What was read of a link's page, when link previews are on: its picture takes the place of the link symbol.
+    var link: ClipboardLinkPreviewDisplay?
 
     var body: some View {
         switch item.content {
@@ -22,6 +24,8 @@ struct ClipboardItemGlyph: View {
                     .resizable()
                     .frame(width: iconSize, height: iconSize)
             }
+        case .link where link?.imageURL != nil:
+            ClipboardThumbnailView(url: link?.imageURL, cache: thumbnails, placeholder: .secondary, placeholderSize: 16)
         case .text, .richText, .link:
             Image(systemName: item.isCode ? ClipboardSearchTerms.codeSystemImage : item.content.kind.systemImage)
                 .font(.system(size: 15))

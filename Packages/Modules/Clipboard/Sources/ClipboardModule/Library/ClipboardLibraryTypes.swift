@@ -57,6 +57,23 @@ nonisolated enum ClipboardLibraryCardSize: Int, Codable, Sendable, CaseIterable 
         }
     }
 
+    /// A link card's picture and title, which share what the card has beside the footer.
+    var linkImageHeight: CGFloat {
+        switch self {
+        case .small: 22
+        case .medium: 36
+        case .large: 60
+        }
+    }
+
+    var linkTitleLines: Int {
+        switch self {
+        case .small: 1
+        case .medium: 2
+        case .large: 3
+        }
+    }
+
     /// The slider's position, 0 to 2.
     var sliderValue: Double { Double(rawValue) }
 

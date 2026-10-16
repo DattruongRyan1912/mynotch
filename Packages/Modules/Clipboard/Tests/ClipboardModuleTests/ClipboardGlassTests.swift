@@ -106,10 +106,10 @@ import Testing
         )
     }
 
-    func card(_ content: ClipboardContent, selected: Bool = false) -> some View {
+    func card(_ content: ClipboardContent, selected: Bool = false, link: ClipboardLinkPreviewDisplay? = nil) -> some View {
         let item = item(content)
         return ClipboardCardView(
-            item: item, isSelected: selected, isPinned: true, now: item.copiedAt, imageURL: nil, thumbnails: ClipboardThumbnailCache()
+            item: item, isSelected: selected, isPinned: true, now: item.copiedAt, imageURL: nil, thumbnails: ClipboardThumbnailCache(), link: link
         )
     }
 
@@ -256,6 +256,18 @@ import Testing
                         card(.color(hex: "#FF8800"))
                     }),
                     size: CGSize(width: 480, height: 130), wash: 0.005, ink: 200, reach: 0.15
+                ),
+                // A link whose page was read: the title, and a picture that is not on disk, so its stand-in is drawn.
+                Fixture(
+                    name: "link cards after a read",
+                    view: AnyView(HStack(spacing: 6) {
+                        card(.link(URL(string: "https://example.com/bao-cao")!), link: ClipboardLinkPreviewDisplay(title: "Báo cáo quý ba của công ty", imageURL: nil))
+                        card(
+                            .link(URL(string: "https://example.com/bai-viet")!),
+                            link: ClipboardLinkPreviewDisplay(title: "Bài viết có ảnh", imageURL: URL(fileURLWithPath: "/nonexistent/link-x.png"))
+                        )
+                    }),
+                    size: CGSize(width: 240, height: 130), wash: 0.005, ink: 150, reach: 0.15
                 ),
                 Fixture(name: "kind chips and boards", view: AnyView(filters), size: CGSize(width: 520, height: 60), wash: 0.005, ink: 100, reach: 0.15),
                 Fixture(

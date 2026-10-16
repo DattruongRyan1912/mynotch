@@ -19,6 +19,8 @@ final class ClipboardStore {
     private let directory: URL
     /// Where the PNG files are.
     let imagesDirectory: URL
+    /// Where the small pictures of links' pages are, apart from `images/`, whose files that folder's own clean-up knows by their names.
+    let linkPreviewsDirectory: URL
     private let scheduler: any Scheduler
     private let logger: Logger
     /// Dates the names of moved-aside files; injected so tests can put two failures in the same second.
@@ -41,6 +43,7 @@ final class ClipboardStore {
     init(directory: URL, scheduler: any Scheduler, logger: Logger, now: @escaping () -> Date = { .now }) {
         self.directory = directory
         imagesDirectory = directory.appending(path: "images", directoryHint: .isDirectory)
+        linkPreviewsDirectory = directory.appending(path: "linkpreviews", directoryHint: .isDirectory)
         self.scheduler = scheduler
         self.logger = logger
         self.now = now
@@ -135,6 +138,37 @@ final class ClipboardStore {
 
     private nonisolated static func isImageFileName(_ fileName: String) -> Bool {
         fileName.wholeMatch(of: /[0-9a-f]{64}\.png/) != nil
+    }
+
+    // MARK: Link previews
+
+    /// The small picture of a link's page, under `fileName` (`ClipboardLinkPreview.imageFileName`). The folder is the user's alone, and so
+    /// is the file. Throws for a name that is not one.
+    func saveLinkPreviewImage(_ png: Data, fileName: String) throws {
+        guard ClipboardLinkPreview.isImageFileName(fileName) else { throw CocoaError(.fileWriteInvalidFileName) }
+        try fileManager.createDirectory(
+            at: linkPreviewsDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
+        )
+        let url = linkPreviewsDirectory.appending(path: fileName, directoryHint: .notDirectory)
+        try png.write(to: url, options: .atomic)
+        try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path(percentEncoded: false))
+    }
+
+    /// nil for a name that is not a link picture's: it comes from the history file, which may have been edited.
+    func linkPreviewURL(fileName: String) -> URL? {
+        guard ClipboardLinkPreview.isImageFileName(fileName) else { return nil }
+        return linkPreviewsDirectory.appending(path: fileName, directoryHint: .notDirectory)
+    }
+
+    func deleteLinkPreviewImages(named fileNames: some Sequence<String>) {
+        for url in fileNames.compactMap(linkPreviewURL(fileName:)) where fileExists(url) { removeFile(url) }
+    }
+
+    /// Pictures that no item names: of an item removed without this being told (a crash, a restore that was refused), of a board that
+    /// locked, or of an address that was edited.
+    func deleteOrphanLinkPreviews(keeping referenced: Set<String>) {
+        guard let files = try? fileManager.contentsOfDirectory(at: linkPreviewsDirectory, includingPropertiesForKeys: nil) else { return }
+        for file in files where !referenced.contains(file.lastPathComponent) { removeFile(file) }
     }
 
     /// Call with the items a history change removed, since only they know their image files.
