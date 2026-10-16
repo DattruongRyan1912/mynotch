@@ -25,7 +25,8 @@ private final class TabModule: FeatureModule {
 /// `Task.sleep`; a sampler that spins the run loop holds the main actor and starves SwiftUI's tasks.
 @Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["MYNOTCH_GLASS_CANARY"] != nil))
 struct NotchTilesLayerCanaryTests {
-    let geometry = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig())
+    // Made as the window controller makes it: with tiles the open notch is taller by their chrome.
+    let geometry = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig(opensAsTiles: true))
     let red = (r: 255, g: 0, b: 0)
 
     struct Rig {
@@ -169,7 +170,7 @@ struct NotchTilesLayerCanaryTests {
     func opened(_ rig: Rig) async throws {
         rig.model.open(tab: nil, onPurpose: false)
         let width = NotchTilesLayout.open(
-            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 190), topInset: geometry.openTopInset, topRadius: 8, tabCount: 2
+            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 190, tabCount: 2), topInset: geometry.openTopInset, topRadius: 8, tabCount: 2
         ).content.size.width
         try await poll("the tile open") { tileElements(elements(rig.hosting)).contains { abs($0.width - width) < 12 } }
     }
@@ -194,7 +195,7 @@ struct NotchTilesLayerCanaryTests {
         defer { rig.window.contentView = nil }
         let centre = geometry.panelSize.width / 2
         let final = NotchTilesLayout.open(
-            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 190), topInset: geometry.openTopInset, topRadius: 8, tabCount: 2
+            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 190, tabCount: 2), topInset: geometry.openTopInset, topRadius: 8, tabCount: 2
         )
         let pill = geometry.shapeSize(for: .compact)
 

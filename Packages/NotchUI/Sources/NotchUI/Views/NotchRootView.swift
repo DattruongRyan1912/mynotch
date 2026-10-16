@@ -103,7 +103,7 @@ struct NotchRootView: View {
     var body: some View {
         let accessories = accessories
         let bottom = bottomHeight(accessories)
-        let size = geometry.shapeSize(for: state, contentHeight: contentHeight, bottomHeight: bottom)
+        let size = geometry.shapeSize(for: state, contentHeight: contentHeight, bottomHeight: bottom, tabCount: registry.tabs.count)
         let radii = geometry.cornerRadii(for: state)
         let _ = NotchPerf.count(.bodies)
         let _ = NotchLog.record(
@@ -209,7 +209,8 @@ struct NotchRootView: View {
         let showsTabs = isOpen || model.tabUnderToast != nil
         let openRadii = geometry.cornerRadii(for: .open(nil))
         let final = NotchTilesLayout.open(
-            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: contentHeight), topInset: geometry.openTopInset,
+            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: contentHeight, tabCount: registry.tabs.count),
+            topInset: geometry.openTopInset,
             topRadius: openRadii.top, tabCount: registry.tabs.count
         )
         let rest = NotchTilesLayout.rest(collapsedSize: collapsedSize, topRadius: collapsedRadii.top, hasTabBar: final.tabBar != nil)
@@ -364,7 +365,7 @@ struct NotchRootView: View {
         VStack(spacing: 0) {
             if registry.tabs.count >= 2 {
                 TabBar(tabs: registry.tabs, selected: shownTab?.id) { model.open(tab: $0) }
-                    .padding(.bottom, 6)
+                    .padding(.bottom, NotchTilesLayout.slabTabBarSpacing)
             }
             openContent
         }

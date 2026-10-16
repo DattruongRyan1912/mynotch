@@ -6,8 +6,10 @@ import Testing
 /// The tiles of Liquid Glass on a pill: they start as the pill and spring out of it into the open rounded rectangle, and on its
 /// concentric corners they stay inside its outline all the way.
 @Suite struct NotchPillTilesTests {
-    let pill = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: .pill))
-    let notch = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig())
+    // Both open as tiles, which makes the open notch taller by their chrome (`NotchGeometry.tilesChrome(tabCount:)`).
+    let pill = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: .pill, opensAsTiles: true))
+    let notch = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(opensAsTiles: true))
+    let macBook = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig(opensAsTiles: true))
 
     func rest(_ geometry: NotchGeometry, _ state: NotchState) -> NotchTilesLayout {
         NotchTilesLayout.rest(
@@ -17,7 +19,7 @@ import Testing
 
     func open(_ geometry: NotchGeometry, tabs: Int = 3, contentHeight: CGFloat = 190) -> NotchTilesLayout {
         NotchTilesLayout.open(
-            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: contentHeight), topInset: geometry.openTopInset,
+            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: contentHeight, tabCount: tabs), topInset: geometry.openTopInset,
             topRadius: geometry.cornerRadii(for: .open(nil)).top, tabCount: tabs
         )
     }
@@ -34,12 +36,13 @@ import Testing
         }
     }
 
-    @Test func theOpenTilesAreCentredAndInsetByThePaddingAlone() {
-        let size = pill.shapeSize(for: .open(nil), contentHeight: 190)
+    @Test func theOpenTilesAreCentredAndReachThePaddingFurtherOutThanTheContentDoesInOnePiece() {
+        let size = pill.shapeSize(for: .open(nil), contentHeight: 190, tabCount: 3)
         let layout = open(pill)
         let tile = layout.content
-        #expect(tile.size.width == size.width - 2 * NotchTokens.padding, "no ears: only the padding insets it sideways")
-        #expect(NotchTokens.padding + tile.size.width + NotchTokens.padding == size.width, "centred")
+        // No ears, so the content in one piece is `padding` in; the tile reaches the tile's own padding further out than that.
+        let inset = NotchTokens.padding - NotchGlassPlan.tilePadding
+        #expect(tile.size.width == size.width - 2 * inset)
         #expect(tile.top + tile.size.height + NotchTokens.padding == size.height, "the padding below it")
         let bar = layout.tabBar
         #expect(bar?.top == NotchTokens.padding, "the capsule is the padding under the top: there is no cutout to keep free")
@@ -48,15 +51,25 @@ import Testing
         #expect(open(notch).content.size.width == tile.size.width - 16)
     }
 
-    @Test func theOpenContentTileIsConcentricWithTheOpenPillsCorners() {
-        let radius = NotchGlassPlan.concentricRadius(outer: pill.cornerRadii(for: .open(nil)).bottom, inset: NotchTokens.padding)
+    @Test func theOpenContentTileIsConcentricWithTheNotchsBottomCornersAndThePillsToo() {
+        let radius = NotchGlassPlan.concentricRadius(outer: NotchGeometry.pillOpenRadius, inset: NotchTokens.padding)
         #expect(radius == 10, "24 less the 14 pt padding")
-        let size = pill.shapeSize(for: .open(nil), contentHeight: 190)
+        // On a notch (an ear of 8 and the padding, less the tile's own) the tile is 14 in from the side and from the bottom, so its bottom
+        // corners share the open notch's centre.
+        for geometry in [macBook, notch] {
+            let size = geometry.shapeSize(for: .open(nil), contentHeight: 190, tabCount: 3)
+            let tile = open(geometry).content
+            let sideways = (size.width - tile.size.width) / 2
+            let outer = geometry.cornerRadii(for: .open(nil)).bottom
+            #expect(sideways == NotchTokens.padding)
+            #expect(CGPoint(x: outer, y: size.height - outer) == CGPoint(x: sideways + radius, y: tile.top + tile.size.height - radius))
+        }
+        // A pill has no ears, so for the tile to have the room of the content in one piece it is 6 pt in from the sides and 14 from the
+        // bottom (the pill's own shape is not drawn while the tiles are out).
+        let size = pill.shapeSize(for: .open(nil), contentHeight: 190, tabCount: 3)
         let tile = open(pill).content
-        // The tile's bottom corners and the pill's have the same centre.
-        let outerCentre = CGPoint(x: pill.cornerRadii(for: .open(nil)).bottom, y: size.height - pill.cornerRadii(for: .open(nil)).bottom)
-        let tileCentre = CGPoint(x: NotchTokens.padding + radius, y: tile.top + tile.size.height - radius)
-        #expect(outerCentre == tileCentre)
+        #expect((size.width - tile.size.width) / 2 == NotchTokens.padding - NotchGlassPlan.tilePadding)
+        #expect(tile.top + tile.size.height == size.height - NotchTokens.padding)
     }
 
     /// Points along the four edges of `rect`, a point in from each.
@@ -72,11 +85,13 @@ import Testing
     }
 
     @Test func theOpenTilesAreInsideThePillsOutlineAndTheStartingPillIsInsideItsTop() throws {
-        let size = pill.shapeSize(for: .open(nil), contentHeight: 190)
+        let size = pill.shapeSize(for: .open(nil), contentHeight: 190, tabCount: 3)
         let outline = pill.shape(for: .open(nil)).path(in: CGRect(origin: .zero, size: size))
         let layout = open(pill)
         let tileRadius = NotchGlassPlan.concentricRadius(outer: NotchGeometry.pillOpenRadius, inset: NotchTokens.padding)
-        let tile = CGRect(x: NotchTokens.padding, y: layout.content.top, width: layout.content.size.width, height: layout.content.size.height)
+        let tile = CGRect(
+            x: (size.width - layout.content.size.width) / 2, y: layout.content.top, width: layout.content.size.width, height: layout.content.size.height
+        )
         let tilePath = RoundedRectangle(cornerRadius: tileRadius, style: .circular).path(in: tile)
         let tileEdge = edge(of: tile).filter { tilePath.contains($0) }
         #expect(tileEdge.count > 100, "the tile's edge is there to check")

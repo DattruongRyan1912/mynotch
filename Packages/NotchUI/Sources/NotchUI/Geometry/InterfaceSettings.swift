@@ -69,16 +69,20 @@ nonisolated public struct NotchLayoutConfig: Equatable, Sendable {
     public var openWidth: CGFloat = 600
     /// How a display without a hardware notch draws it; `NotchGeometry` ignores it on one that has.
     public var virtualNotchStyle: VirtualNotchStyle = .notch
+    /// Whether the open notch is made of Liquid Glass tiles (a capsule for the tab bar and a tile for the content). The tiles take room
+    /// of their own around what a tab shows, so the open notch is taller by that much and a tab gets the room it gets in one piece.
+    public var opensAsTiles = false
 
     public init(
         virtualNotchWidth: CGFloat = 185, virtualNotchHeight: CGFloat? = nil, compactSideWidth: CGFloat = 64, openWidth: CGFloat = 600,
-        virtualNotchStyle: VirtualNotchStyle = .notch
+        virtualNotchStyle: VirtualNotchStyle = .notch, opensAsTiles: Bool = false
     ) {
         self.virtualNotchWidth = virtualNotchWidth
         self.virtualNotchHeight = virtualNotchHeight
         self.compactSideWidth = compactSideWidth
         self.openWidth = openWidth
         self.virtualNotchStyle = virtualNotchStyle
+        self.opensAsTiles = opensAsTiles
     }
 }
 
@@ -89,7 +93,8 @@ extension NotchLayoutConfig {
             virtualNotchHeight: settings.value(InterfaceSettings.virtualNotchMatchesMenuBar)
                 ? nil : settings.value(InterfaceSettings.virtualNotchHeight),
             openWidth: settings.value(InterfaceSettings.openWidth),
-            virtualNotchStyle: settings.value(InterfaceSettings.virtualNotchStyle)
+            virtualNotchStyle: settings.value(InterfaceSettings.virtualNotchStyle),
+            opensAsTiles: settings.value(InterfaceSettings.look) == .liquidGlass && settings.value(InterfaceSettings.glassShape) == .tiles
         )
     }
 }

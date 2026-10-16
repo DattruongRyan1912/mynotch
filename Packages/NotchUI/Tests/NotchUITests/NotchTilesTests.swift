@@ -56,12 +56,17 @@ private struct OpenNotch {
     let geometry: NotchGeometry
     let model: NotchViewModel
     let settings: SettingsStore
+    let harness: RegistryHarness
+    let theme: NotchTheme
 
     /// Builds it and lays it out.
     static func make(
         look: NotchLook, clarity: NotchGlassClarity = .balanced, shape: NotchGlassShape = .slab, tinted: Bool = false, tabs: Int = 1
     ) async throws -> OpenNotch {
-        let geometry = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig())
+        // As the window controller makes it: with tiles the open notch is taller by their chrome (`NotchLayoutConfig(settings:)`).
+        let geometry = NotchGeometry(
+            screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig(opensAsTiles: look == .liquidGlass && shape == .tiles)
+        )
         let frame = ProbeFrame()
         let modules = [ProbeModule("probe", order: 0, frame: frame)]
             + (1..<max(tabs, 1)).map { ProbeModule(ModuleID(stringLiteral: "other\($0)"), order: $0, frame: nil) }
@@ -83,13 +88,24 @@ private struct OpenNotch {
         let window = NSWindow(contentRect: CGRect(origin: .zero, size: geometry.panelSize), styleMask: .borderless, backing: .buffered, defer: true)
         window.appearance = NSAppearance(named: .aqua)
         window.contentView = hosting
-        let notch = OpenNotch(hosting: hosting, window: window, frame: frame, geometry: geometry, model: model, settings: harness.settings)
+        let notch = OpenNotch(
+            hosting: hosting, window: window, frame: frame, geometry: geometry, model: model, settings: harness.settings, harness: harness,
+            theme: theme
+        )
         try await notch.wait("the tab was laid out") { frame.value != nil }
         try await notch.settle()
         return notch
     }
 
     func close() { window.contentView = nil }
+
+    /// What the window controller does when the settings change the geometry: a root view of the new one, and a panel of its size.
+    func reshape(opensAsTiles: Bool) {
+        let new = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig(opensAsTiles: opensAsTiles))
+        hosting.rootView = NotchRootView(model: model, activities: harness.activities, registry: harness.registry, geometry: new, theme: theme)
+        window.setContentSize(new.panelSize)
+        hosting.frame = CGRect(origin: .zero, size: new.panelSize)
+    }
 
     /// Waits for `condition`, which is polled every 10 ms (the main actor is free while it sleeps, so SwiftUI applies what changed), and
     /// lays the view out each time; up to ten seconds. Every positive assertion waits for what it expects, never for a stretch of the
@@ -157,16 +173,17 @@ private struct OpenNotch {
         // The slab: the tab bar's 24 pt and 6 below it, then the tab. Tiles: the capsule, the gap, then the tile's padding.
         #expect(abs(slab.minY - (geometry.notchSize.height + 24 + 6)) < 0.01, "\(slab)")
         #expect(abs(tiled.minY - (geometry.notchSize.height + capsule + gap + pad)) < 0.01, "\(tiled)")
-        #expect(abs(tiled.minX - (slab.minX + pad)) < 0.01 && abs(tiled.width - (slab.width - 2 * pad)) < 0.01)
-        #expect(abs(tiled.maxY - (slab.maxY - pad)) < 0.01, "the notch is the size it was")
+        // And the tab has the room it has in one piece, to the point: the notch is taller for the tiles' chrome.
+        #expect(abs(tiled.minX - slab.minX) < 0.01 && abs(tiled.width - slab.width) < 0.01, "\(slab) \(tiled)")
+        #expect(abs(tiled.height - slab.height) < 0.01, "\(slab) \(tiled)")
     }
 
-    @Test func withOneTabThereIsNoCapsuleAndTheTileIsStillAroundTheContent() async throws {
+    @Test func withOneTabThereIsNoCapsuleAndTheTileIsStillAroundTheContentWhichHasTheSameRoom() async throws {
         let pad = NotchGlassPlan.tilePadding
         let slab = try await tabFrame(shape: .slab, tabs: 1)
         let tiled = try await tabFrame(shape: .tiles, tabs: 1)
-        #expect(abs(tiled.minY - (slab.minY + pad)) < 0.01 && abs(tiled.maxY - (slab.maxY - pad)) < 0.01)
-        #expect(abs(tiled.width - (slab.width - 2 * pad)) < 0.01)
+        #expect(abs(tiled.minY - (slab.minY + pad)) < 0.01, "the tile's padding above it")
+        #expect(abs(tiled.width - slab.width) < 0.01 && abs(tiled.height - slab.height) < 0.01 && abs(tiled.minX - slab.minX) < 0.01)
     }
 
     @Test func clarityMovesNothingOnEitherShape() async throws {
@@ -200,12 +217,15 @@ private struct OpenNotch {
         #expect(try #require(notch.frame.value) == slab, "the clarity, live, and nothing moved")
 
         notch.settings.set(.tiles, for: InterfaceSettings.glassShape)
-        try await notch.wait("the tiles") { notch.frame.plan?.shape == .tiles && notch.frame.value?.minX != slab.minX }
+        notch.reshape(opensAsTiles: true)
+        try await notch.wait("the tiles") { notch.frame.plan?.shape == .tiles && notch.frame.value?.minY != slab.minY }
         try await notch.settle()
         let tiled = try #require(notch.frame.value)
-        #expect(abs(tiled.minX - (slab.minX + pad)) < 0.01, "the content is in its tile now: \(tiled)")
+        #expect(abs(tiled.minY - (slab.minY + NotchGlassPlan.tileGap + pad)) < 0.01, "the content is in its tile now, under the capsule: \(tiled)")
+        #expect(abs(tiled.width - slab.width) < 0.01 && abs(tiled.height - slab.height) < 0.01, "with the room it had: \(slab) \(tiled)")
 
         notch.settings.set(.slab, for: InterfaceSettings.glassShape)
+        notch.reshape(opensAsTiles: false)
         try await notch.wait("the slab again") { notch.frame.plan?.tiles == nil && notch.frame.value == slab }
         #expect(try #require(notch.frame.value) == slab, "and back")
     }
@@ -330,7 +350,7 @@ private struct OpenNotch {
         #expect(bar?.size == CGSize(width: TabBarMetrics.width(count: 3) + 16, height: 30))
         #expect(bar?.top == geometry.notchSize.height, "under the notch's body")
         #expect(layout.content.top == geometry.notchSize.height + 30 + gap)
-        #expect(layout.content.size.width == openSize.width - 2 * (8 + pad), "inside the ears and the padding")
+        #expect(layout.content.size.width == openSize.width - 2 * (8 + pad - NotchGlassPlan.tilePadding), "the tile reaches the padding further out than the content, which is inside the ears and the padding")
         #expect(layout.content.top + layout.content.size.height == openSize.height - pad, "the padding above the notch's bottom")
         // Concentric corners, so the tile's radius is the notch's less the padding.
         #expect(NotchGlassPlan.concentricRadius(outer: geometry.cornerRadii(for: .open(nil)).bottom, inset: pad) == 10)

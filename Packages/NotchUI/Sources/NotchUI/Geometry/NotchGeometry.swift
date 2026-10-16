@@ -52,6 +52,16 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     /// How far the shape's top is below the top edge of the screen: the pill's gap, nothing for the notch, which sticks to the edge.
     public var topGap: CGFloat { isPill ? Self.pillTopGap : 0 }
 
+    /// Whether the open notch is made of tiles.
+    public var opensAsTiles: Bool { config.opensAsTiles }
+
+    /// How much taller the open notch is for its tiles, with `tabCount` tabs: the tile's own inset around the content, and the capsule
+    /// for the tab bar with the gap under it, over what the tab bar takes in one piece. The tab gets the room it gets in one piece, and
+    /// not less. Nothing when the notch is not made of tiles.
+    public func tilesChrome(tabCount: Int) -> CGFloat {
+        opensAsTiles ? NotchTilesLayout.extraHeight(tabCount: tabCount) : 0
+    }
+
     public init(screen: ScreenDescriptor, config: NotchLayoutConfig) {
         self.config = config
         let limits = Self.openWidthLimits
@@ -95,9 +105,12 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
         return min(requested, Self.maxBottomHeight)
     }
 
-    /// Full shape size, including the top "ears" that blend into the menu bar. `bottomHeight` is how far the collapsed
+    /// Full shape size, including the top "ears" that blend into the menu bar. The open notch with tiles is taller by their chrome, which
+    /// depends on `tabCount` (see `tilesChrome(tabCount:)`). `bottomHeight` is how far the collapsed
     /// notch grows downward, for the strip or the open list (see `bottomHeight(for:strip:listRows:)`); other states ignore it.
-    public func shapeSize(for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, bottomHeight: CGFloat = 0) -> CGSize {
+    public func shapeSize(
+        for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, bottomHeight: CGFloat = 0, tabCount: Int = 1
+    ) -> CGSize {
         let ears = 2 * cornerRadii(for: state).top
         switch state {
         case .closed:
@@ -109,7 +122,7 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
             )
         case .open, .toast:
             let content = min(max(contentHeight, NotchTab.heightRange.lowerBound), Self.maxContentHeight)
-            return CGSize(width: openWidth, height: openTopInset + content)
+            return CGSize(width: openWidth, height: openTopInset + content + tilesChrome(tabCount: tabCount))
         }
     }
 
@@ -120,10 +133,12 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     }
 
     /// Fixed panel size: the largest the notch can ever get, whatever the size settings are (and the pill's gap above it). The open
-    /// notch never needs more than this (`openTopInset` is at most the notch's height), and the list under the collapsed notch needs
-    /// all of it, so a display without a notch has no smaller panel for the band its open notch no longer has.
+    /// notch never needs more than the notch's height and the most a tab gets (`openTopInset` is at most the notch's height), and the
+    /// list under the collapsed notch needs all of it, so a display without a notch has no smaller panel for the band its open notch no
+    /// longer has; with tiles the open notch is taller by their chrome, and the panel with it.
     public var panelSize: CGSize {
-        CGSize(width: Self.maxOpenWidth, height: topGap + notchSize.height + Self.maxContentHeight)
+        let open = openTopInset + Self.maxContentHeight + tilesChrome(tabCount: 2)
+        return CGSize(width: Self.maxOpenWidth, height: topGap + max(notchSize.height + Self.maxContentHeight, open))
     }
 
     /// Panel frame anchored to the top centre of `screenFrame` (AppKit coordinates).
@@ -154,22 +169,29 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     /// Area (screen coordinates) where the pointer counts as "inside" the notch. For the pill it reaches up through the gap to the top row of
     /// the screen, so moving the pointer to the top edge above the pill still opens it, and a click in the gap is a click on the notch.
     public func hitRect(
-        for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, bottomHeight: CGFloat = 0, in screenFrame: CGRect
+        for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, bottomHeight: CGFloat = 0, tabCount: Int = 1,
+        in screenFrame: CGRect
     ) -> CGRect {
-        paddedRect(for: state, contentHeight: contentHeight, bottomHeight: bottomHeight, padding: Self.hitPadding, in: screenFrame)
+        paddedRect(
+            for: state, contentHeight: contentHeight, bottomHeight: bottomHeight, tabCount: tabCount, padding: Self.hitPadding, in: screenFrame
+        )
     }
 
     /// The enlarged hit area used while something is being dragged.
     public func dragHitRect(
-        for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, bottomHeight: CGFloat = 0, in screenFrame: CGRect
+        for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, bottomHeight: CGFloat = 0, tabCount: Int = 1,
+        in screenFrame: CGRect
     ) -> CGRect {
-        paddedRect(for: state, contentHeight: contentHeight, bottomHeight: bottomHeight, padding: Self.dragHitPadding, in: screenFrame)
+        paddedRect(
+            for: state, contentHeight: contentHeight, bottomHeight: bottomHeight, tabCount: tabCount, padding: Self.dragHitPadding,
+            in: screenFrame
+        )
     }
 
     private func paddedRect(
-        for state: NotchState, contentHeight: CGFloat, bottomHeight: CGFloat, padding: CGFloat, in screenFrame: CGRect
+        for state: NotchState, contentHeight: CGFloat, bottomHeight: CGFloat, tabCount: Int, padding: CGFloat, in screenFrame: CGRect
     ) -> CGRect {
-        let size = shapeSize(for: state, contentHeight: contentHeight, bottomHeight: bottomHeight)
+        let size = shapeSize(for: state, contentHeight: contentHeight, bottomHeight: bottomHeight, tabCount: tabCount)
         let padded = CGRect(
             x: screenFrame.midX + centerOffset - size.width / 2,
             y: screenFrame.maxY - topGap - size.height,

@@ -79,4 +79,24 @@ private final class ControllerModule: FeatureModule {
         #expect(controller.geometry.shape(for: .open(nil)) == before.shape(for: .open(nil)))
         #expect(controller.geometry.topGap == 0)
     }
+
+    @Test func changingToTilesWhileOpenGivesTheControllerTheTallerNotchAndPanelAndKeepsItOpen() async {
+        let screen = NotchGeometryTests.macBook14
+        let controller = await makeController(on: screen, .notch)
+        defer { controller.close() }
+        controller.model.open(tab: "a")
+        let before = controller.display.geometry
+        #expect(!before.opensAsTiles)
+        controller.update(displayID: 1, screen: screen, config: NotchLayoutConfig(opensAsTiles: true))
+        let tiled = controller.display.geometry
+        #expect(tiled.opensAsTiles)
+        #expect(tiled.panelSize.height - before.panelSize.height == NotchTilesLayout.extraHeight(tabCount: 2), "the panel holds the taller notch")
+        #expect(
+            tiled.shapeSize(for: .open("a"), contentHeight: 190, tabCount: 2).height - before.shapeSize(for: .open("a"), contentHeight: 190, tabCount: 2).height
+                == NotchTilesLayout.extraHeight(tabCount: 2)
+        )
+        #expect(controller.model.displayState == .open("a"), "nothing closed it")
+        controller.update(displayID: 1, screen: screen, config: NotchLayoutConfig())
+        #expect(controller.display.geometry == before)
+    }
 }

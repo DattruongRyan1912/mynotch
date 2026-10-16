@@ -24,6 +24,8 @@ private final class PillTabModule: FeatureModule {
 @Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["MYNOTCH_GLASS_CANARY"] != nil))
 struct NotchPillCanaryTests {
     let geometry = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: .pill))
+    /// The same, opening as tiles (taller by their chrome).
+    let tilesGeometry = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: .pill, opensAsTiles: true))
     let gap = NotchGeometry.pillTopGap
     let red = (r: 255, g: 0, b: 0)
 
@@ -46,7 +48,7 @@ struct NotchPillCanaryTests {
         shape: NotchGlassShape, clarity: NotchGlassClarity = .balanced, bubbles: Int = 0, style: VirtualNotchStyle = .pill,
         screen: ScreenDescriptor = NotchGeometryTests.external
     ) async throws -> Rig {
-        let geometry = NotchGeometry(screen: screen, config: NotchLayoutConfig(virtualNotchStyle: style))
+        let geometry = NotchGeometry(screen: screen, config: NotchLayoutConfig(virtualNotchStyle: style, opensAsTiles: shape == .tiles))
         let harness = RegistryHarness([PillTabModule("a", order: 0), PillTabModule("b", order: 1)])
         await harness.registry.bootstrap()
         harness.settings.set(.liquidGlass, for: InterfaceSettings.look)
@@ -210,7 +212,7 @@ struct NotchPillCanaryTests {
             defer { rig.window.contentView = nil }
             let pill = geometry.shapeSize(for: .compact)
             let final = NotchTilesLayout.open(
-                shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 190), topInset: geometry.openTopInset,
+                shapeSize: tilesGeometry.shapeSize(for: .open(nil), contentHeight: 190, tabCount: 2), topInset: tilesGeometry.openTopInset,
                 topRadius: 0, tabCount: 2
             )
             let opening = await sample(rig) { rig.model.open(tab: nil, onPurpose: false) }
@@ -263,7 +265,7 @@ struct NotchPillCanaryTests {
             try await Task.sleep(for: .milliseconds(700))
         }
         let before = elements(rig.hosting)
-        let pill = geometry
+        let pill = shape == .tiles ? tilesGeometry : geometry
         let toPill = await sample(rig) { rig.show(pill) }
         print("CANARY style notch -> pill (\(shape), opened \(opened)): \(timeline(toPill))")
         #expect(toPill.allSatisfy { !$0.elements.isEmpty }, "no sample without glass")
@@ -274,12 +276,13 @@ struct NotchPillCanaryTests {
         let settled = try #require(toPill.last?.elements.first)
         // The notch's own glass is its shape grown by 4 pt; the open tiles' (the biggest elements, with tiles) are their shapes.
         let tile = NotchTilesLayout.open(
-            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 190), topInset: geometry.openTopInset, topRadius: 0, tabCount: 2
+            shapeSize: tilesGeometry.shapeSize(for: .open(nil), contentHeight: 190, tabCount: 2), topInset: tilesGeometry.openTopInset,
+            topRadius: 0, tabCount: 2
         ).content
         let expectedTop = shape == .tiles && opened ? gap + tile.top : gap - 4
         #expect(abs(settled.minY - expectedTop) < 3, "and ends a gap below where it was: \(settled)")
         // And the notch: back to where it was.
-        let toNotch = await sample(rig) { rig.show(NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig())) }
+        let toNotch = await sample(rig) { rig.show(NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(opensAsTiles: shape == .tiles))) }
         let back = try #require(toNotch.last?.elements.first)
         #expect(abs(back.minY - (before.first?.minY ?? 0)) < 3 && abs(back.width - (before.first?.width ?? 0)) < 3, "\(back) against \(before.first.map { "\($0)" } ?? "-")")
     }
@@ -288,12 +291,11 @@ struct NotchPillCanaryTests {
 
     @Test(arguments: VirtualNotchStyle.allCases, NotchGlassShape.allCases)
     func theOpenNotchGrowsInPlaceFromTheCollapsedShapeWithItsTopFixedAndTheTabPageNearTheTop(style: VirtualNotchStyle, shape: NotchGlassShape) async throws {
-        let geometry = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: style))
+        let geometry = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: style, opensAsTiles: shape == .tiles))
         let rig = try await rig(shape: shape, style: style)
         defer { rig.window.contentView = nil }
-        let middle = geometry.panelSize.width / 2
         let final = NotchTilesLayout.open(
-            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 190), topInset: geometry.openTopInset,
+            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 190, tabCount: 2), topInset: geometry.openTopInset,
             topRadius: geometry.cornerRadii(for: .open(nil)).top, tabCount: 2
         )
         let opening = await sample(rig) { rig.model.open(tab: nil, onPurpose: false) }
@@ -334,7 +336,7 @@ struct NotchPillCanaryTests {
         try await poll("open") { elements(rig.hosting).contains { $0.width > 300 } }
         try await Task.sleep(for: .milliseconds(700))
         let before = elements(rig.hosting)
-        let external = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: .pill))
+        let external = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: .pill, opensAsTiles: shape == .tiles))
         let moving = await sample(rig) { rig.show(external) }
         print("CANARY MacBook -> external (\(shape)): \(timeline(moving))")
         #expect(moving.allSatisfy { !$0.elements.isEmpty }, "no sample without glass")

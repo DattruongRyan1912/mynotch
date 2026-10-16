@@ -320,7 +320,8 @@ final class NotchWindowController {
         let accessories = CompactAccessories(activities: activities, geometry: geometry, isListOpen: model.isListOpen, state: state)
         return geometry.pointerZone(
             at: point, state: state, contentHeight: registry.contentHeight(for: state, tabUnderToast: model.tabUnderToast),
-            strip: activities.stripHeight, bubbles: accessories.bubbles, listRows: accessories.listRows, dragging: dragging, in: screenFrame
+            strip: activities.stripHeight, bubbles: accessories.bubbles, listRows: accessories.listRows, dragging: dragging,
+            tabCount: registry.tabs.count, in: screenFrame
         )
     }
 
@@ -363,6 +364,8 @@ final class NotchWindowController {
         var listRows: Int
         var state: NotchState
         var contentHeight: CGFloat
+        /// With tiles the open notch's height also depends on whether there is a capsule.
+        var tabCount: Int
         var wantsKeyboard: Bool
         var focusesKeyboard: Bool
         var isDragging: Bool
@@ -390,6 +393,7 @@ final class NotchWindowController {
                     } ?? 0,
                     state: state,
                     contentHeight: registry.contentHeight(for: state, tabUnderToast: covered),
+                    tabCount: registry.tabs.count,
                     wantsKeyboard: NotchKeyboardPolicy.wantsKeyboard(state: state, tabUnderToast: covered, tabs: registry.tabs),
                     focusesKeyboard: NotchKeyboardPolicy.focusesKeyboard(
                         state: state, tabUnderToast: covered, tabs: registry.tabs, onPurpose: model.isOpenedOnPurpose

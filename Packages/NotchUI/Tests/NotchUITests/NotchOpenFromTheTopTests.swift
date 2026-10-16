@@ -25,6 +25,10 @@ private final class TopModule: FeatureModule {
     let macBook = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig())
     let notch = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig())
     let pill = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: .pill))
+    // The same, opening as tiles.
+    let macBookTiles = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig(opensAsTiles: true))
+    let notchTiles = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(opensAsTiles: true))
+    let pillTiles = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: .pill, opensAsTiles: true))
     let padding = NotchTokens.padding
 
     // MARK: the inset
@@ -121,16 +125,16 @@ private final class TopModule: FeatureModule {
         return (
             NotchTilesLayout.rest(collapsedSize: geometry.shapeSize(for: .closed), topRadius: collapsed.top, hasTabBar: tabs >= 2),
             NotchTilesLayout.open(
-                shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: content), topInset: geometry.openTopInset,
+                shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: content, tabCount: tabs), topInset: geometry.openTopInset,
                 topRadius: geometry.cornerRadii(for: .open(nil)).top, tabCount: tabs
             )
         )
     }
 
     @Test func theTilesOfADisplayWithoutACutoutStartAsTheCollapsedNotchAndEndHigher() {
-        for (name, geometry) in [("notch", notch), ("pill", pill)] {
+        for (name, geometry) in [("notch", notchTiles), ("pill", pillTiles)] {
             let (rest, open) = tiles(geometry)
-            let book = tiles(macBook)
+            let book = tiles(macBookTiles)
             // They start where they always did: the collapsed notch's body, at the top of the shape.
             #expect(rest.content.top == 0 && rest.tabBar?.top == 0, Comment(rawValue: name))
             #expect(rest.content.size.height == geometry.notchSize.height, Comment(rawValue: name))
@@ -139,34 +143,38 @@ private final class TopModule: FeatureModule {
             #expect(open.content.top == padding + 30 + NotchGlassPlan.tileGap, Comment(rawValue: name))
             #expect(open.content.top == (book.open.content.top) - (32 - 14), "\(name): 18 pt higher than on a MacBook")
             #expect(open.tabBar?.size == book.open.tabBar?.size, "\(name): the capsule is the same")
-            #expect(open.content.size.height == geometry.shapeSize(for: .open(nil), contentHeight: 190).height - padding - open.content.top, Comment(rawValue: name))
+            #expect(open.content.size.height == geometry.shapeSize(for: .open(nil), contentHeight: 190, tabCount: 2).height - padding - open.content.top, Comment(rawValue: name))
             #expect(open.content.size.height == book.open.content.size.height, "\(name): the tile is as tall as on a MacBook: the content asked for it")
         }
     }
 
     @Test func aSingleTabHasOnlyTheTileUnderTheTopInset() {
-        for geometry in [notch, pill] {
+        for geometry in [notchTiles, pillTiles] {
             let (_, open) = tiles(geometry, tabs: 1)
             #expect(open.tabBar == nil)
             #expect(open.content.top == padding)
-            #expect(open.content.size.height == 190 - padding)
+            // The tab's room is 190 less the padding below, as in one piece; the tile is its own padding bigger all round.
+            #expect(open.content.size.height - 2 * NotchGlassPlan.tilePadding == 190 - padding)
         }
     }
 
     @Test func aMacBooksTilesAreUnchanged() {
-        let (rest, open) = tiles(macBook)
+        let (rest, open) = tiles(macBookTiles)
         #expect(open.tabBar?.top == 32 && open.content.top == 32 + 30 + NotchGlassPlan.tileGap)
         #expect(rest.content.top == 0 && rest.content.size == CGSize(width: 185, height: 32))
     }
 
     // MARK: the concentric padding
 
-    @Test func onAPillTheContentIsTheSameDistanceFromAllFourEdges() {
-        let (_, open) = tiles(pill, tabs: 1)
-        let size = pill.shapeSize(for: .open(nil), contentHeight: 190)
-        #expect(open.content.top == padding)
-        #expect(open.content.top + open.content.size.height + padding == size.height, "the padding below")
-        #expect(open.content.size.width + 2 * padding == size.width, "and at the sides")
+    @Test func onAPillTheContentInOnePieceIsTheSameDistanceFromTheTopAndTheSides() {
+        // (The bottom is tested on the drawn view: `NotchPillViewTests`.)
+        let frame = NotchGeometryTests.external.frame
+        let content = pill.contentFrame(height: 100, in: frame)
+        let open = CGRect(
+            x: frame.midX - pill.shapeSize(for: .open(nil)).width / 2, y: 0, width: pill.shapeSize(for: .open(nil)).width, height: 1
+        )
+        #expect(content.minX - open.minX == padding && open.maxX - content.maxX == padding, "the padding at the sides")
+        #expect(frame.maxY - content.maxY == NotchGeometry.pillTopGap + padding, "and under the gap")
     }
 }
 

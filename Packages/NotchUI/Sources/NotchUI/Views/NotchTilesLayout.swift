@@ -41,6 +41,21 @@ nonisolated struct NotchTilesLayout: Equatable, Sendable {
         progress(of: size, from: rest, to: final) <= backWithin + 1e-9
     }
 
+    /// The space the slab leaves between its tab bar and the content (`NotchRootView.tabPage`).
+    static let slabTabBarSpacing: CGFloat = 6
+
+    /// How much taller the open notch is made of tiles than in one piece, for a tab to have the same room in both: the tile's own inset
+    /// all round the content (two `tilePadding`), and with a capsule, the capsule and the gap under it over the tab bar and its spacing
+    /// in the slab.
+    static func extraHeight(tabCount: Int) -> CGFloat {
+        var extra = 2 * NotchGlassPlan.tilePadding
+        if tabCount >= 2 {
+            let capsule = TabBarMetrics.iconSize.height + 2 * NotchGlassPlan.tabBarInset.height
+            extra += capsule + NotchGlassPlan.tileGap - (TabBarMetrics.iconSize.height + slabTabBarSpacing)
+        }
+        return extra
+    }
+
     /// nil with a single tab, which has no capsule.
     var tabBar: Tile?
     var content: Tile
@@ -48,9 +63,11 @@ nonisolated struct NotchTilesLayout: Equatable, Sendable {
     /// The tiles of the open notch (and of a notch showing a toast over a tab, which keeps them where they are): `shapeSize` is the
     /// notch's size, `topInset` how far below its top the tab page starts (`NotchGeometry.openTopInset`: under a hardware notch's cutout, or
     /// the padding below the top of a display without one), `topRadius` the radius of the
-    /// shape's ears, which the content is inset by (and by `NotchTokens.padding`), and `tabCount` the number of tabs.
+    /// shape's ears, which the content is inset by (and by `NotchTokens.padding`), and `tabCount` the number of tabs. What a tab shows is
+    /// `NotchGlassPlan.tilePadding` inside its tile, so the tile reaches that much further out than the content does in one piece, and
+    /// `shapeSize` (which is taller by `extraHeight`) leaves the content the room it has there.
     static func open(shapeSize: CGSize, topInset: CGFloat, topRadius: CGFloat, tabCount: Int) -> NotchTilesLayout {
-        let inset = topRadius + NotchTokens.padding
+        let inset = topRadius + NotchTokens.padding - NotchGlassPlan.tilePadding
         let width = shapeSize.width - 2 * inset
         var top = topInset
         var bar: Tile?
