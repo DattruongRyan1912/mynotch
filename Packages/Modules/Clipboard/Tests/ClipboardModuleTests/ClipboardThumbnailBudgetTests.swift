@@ -267,7 +267,6 @@ nonisolated final class FakeThumbnailDecoder: @unchecked Sendable {
         let stats = cache.stats
         #expect(stats.cachedBytes <= ClipboardThumbnailStorage.costLimit)
         #expect(stats.cachedCount < 100)
-        #expect(stats.cachedCount > 10)
         #expect(stats.recentCount == ClipboardThumbnailStorage.recentLimit)
         // The latest are always there, kept or not by the cache.
         #expect(cache.cachedThumbnail(for: url(99)) != nil)
@@ -307,7 +306,8 @@ nonisolated final class FakeThumbnailDecoder: @unchecked Sendable {
         fake.letAllThrough()
         let notch = cache()
         let library = ClipboardThumbnailCache(maxPixelSize: ClipboardThumbnailCache.libraryPixelSize, sharing: notch)
-        for index in 0..<5 {
+        // Nine pictures in all, so every one is among the twelve latest, which are held whatever `NSCache` does.
+        for index in 0..<3 {
             _ = await notch.thumbnail(for: url(index))
             _ = await library.thumbnail(for: url(index))
             _ = await library.thumbnail(for: url(index), maxPixelSize: ClipboardThumbnailCache.glyphPixelSize)
@@ -315,14 +315,13 @@ nonisolated final class FakeThumbnailDecoder: @unchecked Sendable {
 
         library.release()
 
-        for index in 0..<5 {
+        for index in 0..<3 {
             #expect(notch.cachedThumbnail(for: url(index)) != nil, "the notch's own stays")
             #expect(library.cachedThumbnail(for: url(index)) == nil, "the library's goes")
             #expect(library.cachedThumbnail(for: url(index), maxPixelSize: ClipboardThumbnailCache.glyphPixelSize) == nil)
         }
-        #expect(notch.stats.cachedCount == 5)
-        // Of the twelve latest, the four that were the notch's.
-        #expect(notch.stats.recentCount == 4)
+        // Of the nine, the three that were the notch's.
+        #expect(notch.stats.recentCount == 3)
     }
 
     @Test func aSizeAnotherOpenWindowStillUsesIsKeptUntilTheLastOneCloses() async {
@@ -360,7 +359,7 @@ nonisolated final class FakeThumbnailDecoder: @unchecked Sendable {
         fake.letAllThrough()
         let cache = cache()
         for index in 0..<5 { _ = await cache.thumbnail(for: url(index)) }
-        #expect(cache.stats.cachedCount == 5)
+        #expect(cache.stats.recentCount == 5)
 
         cache.releaseMemory()
 
@@ -507,9 +506,12 @@ nonisolated final class FakeThumbnailDecoder: @unchecked Sendable {
         let stats = cache.stats
         #expect(stats.decodesStarted == 3)
         #expect(stats.decodesSkipped == 0)
-        #expect(stats.cachedCount == 3)
+        // `NSCache` may let go of what it holds at any moment when the machine is short of memory, so it is only bounded from above;
+        // the latest are held by the cache itself.
+        #expect(stats.recentCount == 3)
         let picture = FakeThumbnailDecoder.picture(side: 100)
-        #expect(stats.cachedBytes == 3 * (picture?.bytesPerRow ?? 0) * 100)
+        #expect(stats.cachedCount <= 3)
+        #expect(stats.cachedBytes <= 3 * (picture?.bytesPerRow ?? 0) * 100)
         #expect(stats.peakConcurrentDecodes >= 1)
     }
 }

@@ -308,9 +308,12 @@ final class ClipboardPanelModel: ClipboardPreviewHosting {
     /// Before a paste: an unpinned panel leaves the screen, which returns the keyboard to the app in front, and a pinned
     /// one hands it back. Whether the keyboard is really back is checked either way.
     private func giveBackKeyboard() -> Bool {
+        ClipboardPanelLog.record("panel paste: the keyboard goes back to the app behind, pinned=\(isPinned)")
         if isPinned { return onReturnKeyboard?() ?? false }
         requestClose()
-        return isKeyboardBack?() ?? false
+        let isBack = isKeyboardBack?() ?? false
+        ClipboardPanelLog.record("panel paste: the panel closed, the keyboard is with the app in front: \(isBack)")
+        return isBack
     }
 
     /// `keyboardIsBack`: a paste already got the keyboard out of the panel; a copy has not, and the user will press ⌘V in

@@ -31,6 +31,7 @@ final class ClipboardPanelController: NSObject, ClipboardPanelWindowing {
     /// What puts the panel on the screen and gives it the keyboard, so a test can leave it off.
     private let orderFront: (ClipboardFloatingPanel) -> Void
     private let keyboardHandBack = KeyboardHandBack()
+    private let keyboard: ClipboardPanelKeyboard
     private var panel: ClipboardFloatingPanel?
     private var onClose: (() -> Void)?
     /// Keeps the panel out of recordings the way the user asked, while it exists.
@@ -59,13 +60,15 @@ final class ClipboardPanelController: NSObject, ClipboardPanelWindowing {
         orderFront: @escaping (ClipboardFloatingPanel) -> Void = { panel in
             panel.orderFrontRegardless()
             panel.makeKey()
-        }
+        },
+        keyboard: ClipboardPanelKeyboard? = nil
     ) {
         self.interface = interface
         self.pointer = pointer
         self.screens = screens
         self.clickMonitor = clickMonitor
         self.orderFront = orderFront
+        self.keyboard = keyboard ?? .system(keyboardHandBack)
     }
 
     func show(_ content: AnyView, model: ClipboardPanelModel, restoringOrigin: CGPoint?, onClose: @escaping () -> Void) {
@@ -92,22 +95,38 @@ final class ClipboardPanelController: NSObject, ClipboardPanelWindowing {
         orderFront(panel)
     }
 
+    /// The hotkey, for a pinned panel that handed the keyboard away: the user is back, so it can take the keyboard again.
     func focus() {
-        panel?.orderFrontRegardless()
-        panel?.makeKey()
+        guard let panel else { return }
+        ClipboardPanelLog.record("focus requested \(panel.logSummary)")
+        panel.allowsKeyStatus = true
+        orderFront(panel)
     }
 
     /// Hands key status to a hidden 1 pt panel and orders that one out, which returns the keyboard to the app in front
-    /// without the visible panel blinking (NotchUI's hand-back, the one the notch uses). A panel that is not key has
-    /// nothing to hand back; the answer is then whether the keyboard is with the app in front anyway.
+    /// without the visible panel blinking (NotchUI's hand-back, the one the notch uses). The panel cannot become key while
+    /// it does so, and until the user comes back to it (a click, or the hotkey): a window that can become key gets key
+    /// status back the moment the hidden one leaves, which is what kept a pinned panel's paste from ever going out. A panel
+    /// that is not key has nothing to hand back; the answer is then whether the keyboard is with the app in front anyway.
     func returnKeyboard() -> Bool {
-        let front = NSWorkspace.shared.frontmostApplication
-        guard let panel, panel.isKeyWindow else { return KeyboardHandBack.keyboardIsWith(front) }
-        return keyboardHandBack.returnKeyboard(from: panel, to: front)
+        let front = keyboard.frontApp()
+        guard let panel, keyboard.isKey(panel) else {
+            let isBack = keyboard.isWithFront(front)
+            ClipboardPanelLog.record("hand-back not needed, the panel has no keyboard back=\(isBack)")
+            return isBack
+        }
+        ClipboardPanelLog.record("hand-back begins \(panel.logSummary)")
+        // Before the hand-back, so the hidden panel's leaving finds no window that wants the keyboard.
+        panel.allowsKeyStatus = false
+        let isBack = keyboard.handBack(panel, front)
+        // The keyboard stays with the panel when it could not be moved: the panel is as it was, and nothing is pasted.
+        if !isBack { panel.allowsKeyStatus = true }
+        ClipboardPanelLog.record("hand-back done back=\(isBack) \(panel.logSummary)")
+        return isBack
     }
 
     func keyboardIsWithFrontApp() -> Bool {
-        KeyboardHandBack.keyboardIsWith(NSWorkspace.shared.frontmostApplication)
+        keyboard.isWithFront(keyboard.frontApp())
     }
 
     func close() {

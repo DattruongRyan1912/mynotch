@@ -222,7 +222,10 @@ public final class ClipboardModule: FeatureModule {
 
         let keystrokeGate = KeystrokeGate(keystrokes)
         // Every ⌘V of a paste of ours goes through the gate, so this is the one place that knows it went out.
-        keystrokeGate.onSent = { [weak self] in self?.playPasteSound() }
+        keystrokeGate.onSent = { [weak self] in
+            ClipboardPanelLog.record("⌘V sent")
+            self?.playPasteSound()
+        }
         self.keystrokeGate = keystrokeGate
         paster = ClipboardPaster(
             pasteboard: pasteboard, keystrokes: keystrokeGate, scheduler: context.scheduler, isTrusted: isTrusted, modifiers: modifiers
@@ -940,12 +943,15 @@ public final class ClipboardModule: FeatureModule {
         let closeAfterAction = context.settings.value(keys.closeAfterAction)
         switch outcome {
         case .pasted:
+            if beforePaste != nil { ClipboardPanelLog.record("panel paste: ⌘V is on its way") }
             context.presenter.close()
         case .copiedNeedsPermission:
+            ClipboardPanelLog.record("paste not sent, no Accessibility permission: hint to press ⌘V")
             askToPressPaste(context)
         case .copied:
             // The keyboard did not leave the panel, so nothing was pasted: the user pastes by hand, as without Accessibility.
             if keyboardRefused {
+                ClipboardPanelLog.record("panel paste refused, the keyboard did not leave the panel: hint to press ⌘V")
                 askToPressPaste(context)
             } else if closeAfterAction {
                 context.presenter.close()

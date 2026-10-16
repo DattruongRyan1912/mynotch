@@ -31,13 +31,34 @@ final class ClipboardFloatingPanel: NSPanel {
         title = "Bảng clipboard"
     }
 
-    override var canBecomeKey: Bool { true }
+    /// False from the moment a paste hands the keyboard to the app behind until the user comes back to the panel. A window that
+    /// can become key gets key status back as soon as the hidden panel that took it leaves (AppKit picks the next candidate), so
+    /// a pinned panel that stays on screen could never give the keyboard away; the notch's panel does the same.
+    var allowsKeyStatus = true {
+        didSet {
+            guard allowsKeyStatus != oldValue else { return }
+            ClipboardPanelLog.record("allowsKey=\(allowsKeyStatus) \(logSummary)")
+        }
+    }
+
+    override var canBecomeKey: Bool { allowsKeyStatus }
     override var canBecomeMain: Bool { false }
+
+    /// Geometry and key state, for the trace.
+    var logSummary: String {
+        "window=\(windowNumber) frame=\(frame.origin.x),\(frame.origin.y) \(frame.width)x\(frame.height) key=\(isKeyWindow)"
+    }
 
     /// Space in the search field is typed text, which never reaches it as a command, so every key press is looked at here first.
     override func sendEvent(_ event: NSEvent) {
         if offersToPreview(event), handlePreviewKey(event) { return }
+        // The user is back at the panel: a click takes the keyboard again, as it did before a paste handed it away.
+        if !allowsKeyStatus, Self.isClick(event) { allowsKeyStatus = true }
         super.sendEvent(event)
+    }
+
+    static func isClick(_ event: NSEvent) -> Bool {
+        event.type == .leftMouseDown || event.type == .rightMouseDown || event.type == .otherMouseDown
     }
 
     func offersToPreview(_ event: NSEvent) -> Bool {
