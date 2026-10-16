@@ -568,8 +568,9 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
         history = state.history
         counts = ClipboardLibraryContent.counts(of: history)
         pinnedIDs = Set(history.boards.flatMap(\.itemIDs))
-        let existing = Set(history.items.map(\.id))
         if let pending = pendingDeletion {
+            // Only when a deletion waits for an answer: a set of every id is not made on each change of the history.
+            let existing = Set(history.items.map(\.id))
             let remaining = pending.intersection(existing)
             pendingDeletion = remaining.isEmpty ? nil : remaining
         }
