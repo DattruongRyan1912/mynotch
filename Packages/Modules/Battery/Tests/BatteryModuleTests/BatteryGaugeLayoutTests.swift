@@ -57,12 +57,16 @@ import Testing
 }
 
 @Suite struct BatteryGaugeMotionTests {
-    @Test func theHighlightSweepsOnlyWhileChargingVisibleAndMotionIsAllowed() {
-        #expect(BatteryGaugeMotion.isSweeping(isCharging: true, isTabVisible: true, reduceMotion: false))
-        #expect(!BatteryGaugeMotion.isSweeping(isCharging: false, isTabVisible: true, reduceMotion: false))
-        #expect(!BatteryGaugeMotion.isSweeping(isCharging: true, isTabVisible: false, reduceMotion: false))
-        #expect(!BatteryGaugeMotion.isSweeping(isCharging: true, isTabVisible: true, reduceMotion: true))
-        #expect(!BatteryGaugeMotion.isSweeping(isCharging: false, isTabVisible: false, reduceMotion: true))
+    @Test func theHighlightSweepsOnlyWhileChargingVisibleOnScreenAndMotionIsAllowed() {
+        func sweeping(charging: Bool = true, tabVisible: Bool = true, onScreen: Bool = true, reduceMotion: Bool = false) -> Bool {
+            BatteryGaugeMotion.isSweeping(isCharging: charging, isTabVisible: tabVisible, isOnScreen: onScreen, reduceMotion: reduceMotion)
+        }
+        #expect(sweeping())
+        #expect(!sweeping(charging: false))
+        #expect(!sweeping(tabVisible: false))
+        #expect(!sweeping(onScreen: false))
+        #expect(!sweeping(reduceMotion: true))
+        #expect(!sweeping(charging: false, tabVisible: false, onScreen: false, reduceMotion: true))
     }
 
     @Test func theSweepRepeatsEveryTwoPointSixSeconds() {

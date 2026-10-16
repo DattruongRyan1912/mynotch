@@ -14,6 +14,7 @@ struct BatteryTabView: View {
     let actions: BatteryTabActions
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.notchIsOnScreen) private var isOnScreen
 
     var body: some View {
         content
@@ -32,7 +33,9 @@ struct BatteryTabView: View {
                     percent: snapshot.percent,
                     tone: presentation.tone,
                     isCharging: snapshot.isCharging,
-                    isSweeping: BatteryGaugeMotion.isSweeping(isCharging: snapshot.isCharging, isTabVisible: state.isTabVisible, reduceMotion: reduceMotion),
+                    isSweeping: BatteryGaugeMotion.isSweeping(
+                        isCharging: snapshot.isCharging, isTabVisible: state.isTabVisible, isOnScreen: isOnScreen, reduceMotion: reduceMotion
+                    ),
                     accessibilityLabel: presentation.accessibilityLabel
                 )
                 BatteryFactsRow(facts: presentation.facts)

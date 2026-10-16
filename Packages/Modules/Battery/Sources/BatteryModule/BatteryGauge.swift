@@ -90,22 +90,6 @@ struct BatteryGauge: View {
     }
 }
 
-/// A soft band of light crossing the fill from left to right, over and over.
-private struct ChargingSweep: View {
-    let fillWidth: CGFloat
-
-    private static let bandWidth: CGFloat = 70
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60)) { timeline in
-            let phase = BatteryGaugeMotion.sweepPhase(at: timeline.date.timeIntervalSinceReferenceDate)
-            LinearGradient(colors: [.clear, .white.opacity(0.25), .clear], startPoint: .leading, endPoint: .trailing)
-                .frame(width: Self.bandWidth)
-                .offset(x: -Self.bandWidth + phase * (fillWidth + Self.bandWidth))
-        }
-    }
-}
-
 extension BatteryFillTone {
     /// The system's own battery colours: green charging, yellow in Low Power Mode, red when low.
     var color: Color {

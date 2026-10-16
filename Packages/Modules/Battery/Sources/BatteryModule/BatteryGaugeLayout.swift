@@ -43,8 +43,10 @@ nonisolated struct BatteryGaugeLayout: Equatable {
 nonisolated enum BatteryGaugeMotion {
     static let sweepPeriod: TimeInterval = 2.6
 
-    static func isSweeping(isCharging: Bool, isTabVisible: Bool, reduceMotion: Bool) -> Bool {
-        isCharging && isTabVisible && !reduceMotion
+    /// Only while it can be seen: charging, the tab open, the notch's window on screen (not hidden by a fullscreen app, a locked screen or
+    /// a display asleep), and motion allowed. Anywhere else the animation is not even added, so the render server carries nothing.
+    static func isSweeping(isCharging: Bool, isTabVisible: Bool, isOnScreen: Bool, reduceMotion: Bool) -> Bool {
+        isCharging && isTabVisible && isOnScreen && !reduceMotion
     }
 
     /// 0 at the left end of the fill and 1 past its right end, repeating every `sweepPeriod`.
