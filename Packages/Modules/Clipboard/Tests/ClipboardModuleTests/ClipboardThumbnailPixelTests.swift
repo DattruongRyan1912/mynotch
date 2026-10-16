@@ -160,4 +160,76 @@ import UniformTypeIdentifiers
 
         #expect(try drawn(thumbnail) == drawn(expected))
     }
+
+    // MARK: List rows
+
+    /// Where a picture of `width` x `height` lands when it is drawn aspect-fit into a box, centred on whole pixels.
+    func slotArea(width: Int, height: Int, box: CGSize) -> CGRect {
+        let fit = min(box.width / CGFloat(width), box.height / CGFloat(height))
+        let size = CGSize(width: (CGFloat(width) * fit).rounded(), height: (CGFloat(height) * fit).rounded())
+        return CGRect(x: ((box.width - size.width) / 2).rounded(), y: ((box.height - size.height) / 2).rounded(), width: size.width, height: size.height)
+    }
+
+    /// `image` drawn into `area` of a box of `box` pixels the way a row's slot shows a picture, with high interpolation, as the pixels of
+    /// that area (RGB: the pictures are opaque), leaving out the one-pixel rim, where edges are anti-aliased differently.
+    func drawn(_ image: CGImage, box: CGSize, in area: CGRect) throws -> [UInt8] {
+        let context = try #require(CGContext(
+            data: nil, width: Int(box.width), height: Int(box.height), bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.interpolationQuality = .high
+        context.draw(image, in: area)
+        let pixels = try #require(context.data).assumingMemoryBound(to: UInt8.self)
+        var covered: [UInt8] = []
+        for y in Int(area.minY) + 1..<Int(area.maxY) - 1 {
+            for x in Int(area.minX) + 1..<Int(area.maxX) - 1 {
+                let offset = y * context.bytesPerRow + x * 4
+                covered.append(contentsOf: [pixels[offset], pixels[offset + 1], pixels[offset + 2]])
+            }
+        }
+        return covered
+    }
+
+    /// How far apart two drawings are: the mean and the largest difference of a channel, out of 255.
+    func difference(_ first: [UInt8], _ second: [UInt8]) -> (mean: Double, max: Int) {
+        precondition(first.count == second.count && !first.isEmpty)
+        var total = 0, largest = 0
+        for index in first.indices {
+            let gap = abs(Int(first[index]) - Int(second[index]))
+            total += gap
+            largest = max(largest, gap)
+        }
+        return (Double(total) / Double(first.count), largest)
+    }
+
+    @Test func aRowsPictureAtTheSmallSizeLooksLikeTheOldOneScaledIntoTheSameSlot() async throws {
+        let cache = ClipboardThumbnailCache()
+        let pictures = [
+            try write(width: 1200, height: 800, named: "rows-noise.png"),
+            try write(width: 1600, height: 900, named: "rows-wide.png"),
+            try write(width: 600, height: 900, named: "rows-tall.png"),
+        ]
+        // The library's rows draw it in 40 x 32 points, the panel's in 34 x 30, on a screen with twice the pixels.
+        for box in [CGSize(width: 80, height: 64), CGSize(width: 68, height: 60)] {
+            for url in pictures {
+                let old = try cgImage(#require(await cache.thumbnail(for: url, maxPixelSize: ClipboardThumbnailCache.libraryPixelSize)))
+                let new = try cgImage(#require(await cache.thumbnail(for: url, maxPixelSize: ClipboardThumbnailCache.glyphPixelSize)))
+                let area = slotArea(width: new.width, height: new.height, box: box)
+                // What the slot would show if the picture were scaled once, straight from the file, to the pixels it covers.
+                let ideal = try reference(url, size: Int(max(area.width, area.height)))
+
+                let oldInSlot = try drawn(old, box: box, in: area)
+                let newInSlot = try drawn(new, box: box, in: area)
+                let idealInSlot = try drawn(ideal, box: box, in: area)
+                let sameAsOld = difference(oldInSlot, newInSlot)
+                let oldFromIdeal = difference(oldInSlot, idealInSlot)
+                let newFromIdeal = difference(newInSlot, idealInSlot)
+                print("ROWS \(url.lastPathComponent) \(Int(box.width))x\(Int(box.height)): new vs old mean \(sameAsOld.mean) max \(sameAsOld.max); old vs ideal mean \(oldFromIdeal.mean) max \(oldFromIdeal.max); new vs ideal mean \(newFromIdeal.mean) max \(newFromIdeal.max)")
+
+                // Close to what the 400 px picture gave, and no farther from a single clean scaling than that was.
+                #expect(sameAsOld.mean < 8, "\(url.lastPathComponent) \(box)")
+                #expect(newFromIdeal.mean <= oldFromIdeal.mean + 0.5, "\(url.lastPathComponent) \(box)")
+            }
+        }
+    }
 }
