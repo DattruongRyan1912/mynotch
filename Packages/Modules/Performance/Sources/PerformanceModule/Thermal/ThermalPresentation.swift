@@ -1,20 +1,5 @@
 import Foundation
 
-/// How hot the SoC is, for the colour of its number's marker, the sparkline and the strip. Round numbers a person can reason about:
-/// Apple does not publish the temperatures at which an M1 Pro slows down.
-nonisolated enum TemperatureTone: Equatable, Sendable {
-    case normal
-    case warm
-    case hot
-
-    static let warmFrom = 70.0
-    static let hotFrom = 90.0
-
-    init(celsius: Double) {
-        self = celsius >= Self.hotFrom ? .hot : celsius >= Self.warmFrom ? .warm : .normal
-    }
-}
-
 nonisolated enum ThermalFormat {
     static func degrees(_ celsius: Double?) -> String {
         celsius.map { "\(Int($0.rounded()))°" } ?? "—"
@@ -40,7 +25,7 @@ nonisolated struct ThermalPresentation: Equatable, Sendable {
     let cpu: String
     let gpu: String
     /// Nil until something has been read.
-    let tone: TemperatureTone?
+    let tone: Tone?
     let fans: [FanRow]
     let accessibilityLabel: String
 
@@ -48,7 +33,7 @@ nonisolated struct ThermalPresentation: Equatable, Sendable {
         soc = ThermalFormat.degrees(snapshot?.soc)
         cpu = ThermalFormat.degrees(snapshot?.cpu)
         gpu = ThermalFormat.degrees(snapshot?.gpu)
-        tone = snapshot?.soc.map(TemperatureTone.init(celsius:))
+        tone = snapshot?.soc.map(Tone.init(celsius:))
         fans = (snapshot?.fans ?? []).map { fan in
             let (rpm, low, high) = (ThermalFormat.rpm(fan.rpm), ThermalFormat.rpm(fan.minRPM), ThermalFormat.rpm(fan.maxRPM))
             return FanRow(

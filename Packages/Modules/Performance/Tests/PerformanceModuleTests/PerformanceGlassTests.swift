@@ -52,21 +52,27 @@ import Testing
         var reach = 0.3
     }
 
-    func column(cpu: Double, gpu: Double, fans: Int = 2) -> AnyView {
-        let state = PerformanceTabLayoutTests.state(fans: fans)
+    func columns(cpu: Double, gpu: Double, fans: Int = 2, thermal: Bool = true, pressure: MemoryPressure? = .normal) -> AnyView {
+        let state = PerformanceTabLayoutTests.state(fans: fans, thermal: thermal)
         state.thermal?.cpu = cpu
         state.thermal?.gpu = gpu
-        return AnyView(ThermalColumn(state: state))
+        state.usage?.pressure = pressure
+        return AnyView(PerformanceColumns(state: state))
     }
 
     var fixtures: [Fixture] {
         let size = CGSize(width: 452, height: PerformanceTabView.contentHeight)
         return [
-            Fixture(name: "normal", view: column(cpu: 52, gpu: 48), size: size, ink: 150),
-            Fixture(name: "warm", view: column(cpu: 78, gpu: 66), size: size, ink: 150),
-            Fixture(name: "hot", view: column(cpu: 96, gpu: 90), size: size, ink: 150),
-            Fixture(name: "no fans", view: column(cpu: 60, gpu: 55, fans: 0), size: size, ink: 150),
-            Fixture(name: "nothing read yet", view: AnyView(ThermalColumn(state: PerformanceState())), size: size, ink: 100),
+            Fixture(name: "normal", view: columns(cpu: 52, gpu: 48), size: size, ink: 300),
+            Fixture(name: "warm", view: columns(cpu: 78, gpu: 66, pressure: .warning), size: size, ink: 300),
+            Fixture(name: "hot", view: columns(cpu: 96, gpu: 90, pressure: .critical), size: size, ink: 300),
+            Fixture(name: "no fans", view: columns(cpu: 60, gpu: 55, fans: 0), size: size, ink: 300),
+            Fixture(name: "memory only", view: columns(cpu: 0, gpu: 0, thermal: false), size: size, ink: 200),
+            Fixture(name: "pressure unknown", view: columns(cpu: 60, gpu: 55, pressure: nil), size: size, ink: 300),
+            Fixture(
+                name: "nothing read yet", view: AnyView(PerformanceColumns(state: { let s = PerformanceState(); s.hasThermal = true; return s }())),
+                size: size, ink: 100
+            ),
         ]
     }
 
@@ -95,7 +101,7 @@ import Testing
     }
 
     @Test func theTonesAreColoursNotGreys() {
-        for tone in [TemperatureTone.normal, .warm, .hot] {
+        for tone in [Tone.normal, .caution, .critical] {
             let colour = NSColor(tone.color).usingColorSpace(.sRGB)
             let channels = [colour?.redComponent ?? 0, colour?.greenComponent ?? 0, colour?.blueComponent ?? 0]
             #expect((channels.max() ?? 0) - (channels.min() ?? 0) > 0.5, "\(tone)")

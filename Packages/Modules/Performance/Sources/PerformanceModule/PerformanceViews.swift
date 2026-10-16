@@ -1,13 +1,13 @@
 import NotchUI
 import SwiftUI
 
-extension TemperatureTone {
+extension Tone {
     /// The colours macOS itself uses for good, careful and bad.
     var color: Color {
         switch self {
         case .normal: Color(red: 0x34 / 255, green: 0xC7 / 255, blue: 0x59 / 255)
-        case .warm: Color(red: 1, green: 0x9F / 255, blue: 0x0A / 255)
-        case .hot: Color(red: 1, green: 0x45 / 255, blue: 0x3A / 255)
+        case .caution: Color(red: 1, green: 0x9F / 255, blue: 0x0A / 255)
+        case .critical: Color(red: 1, green: 0x45 / 255, blue: 0x3A / 255)
         }
     }
 }
@@ -15,7 +15,7 @@ extension TemperatureTone {
 /// The "Hiệu năng" tab.
 struct PerformanceTabView: View {
     /// What the tab's content needs, with room to spare; a test checks the content fits it at the narrowest notch.
-    static let contentHeight: CGFloat = 160
+    static let contentHeight: CGFloat = 184
     /// The tab bar's height when there are two or more tabs; `NotchTab.preferredHeight` includes it.
     static let tabBarHeight: CGFloat = 30
     static var preferredHeight: CGFloat { contentHeight + NotchTokens.padding + tabBarHeight }
@@ -24,10 +24,26 @@ struct PerformanceTabView: View {
     let actions: PerformanceTabActions
 
     var body: some View {
-        ThermalColumn(state: state)
+        PerformanceColumns(state: state)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .onAppear(perform: actions.appeared)
             .onDisappear(perform: actions.disappeared)
+    }
+}
+
+/// The temperatures on the left and the memory on the right; the memory alone on a Mac with no sensors to read.
+struct PerformanceColumns: View {
+    static let spacing: CGFloat = 20
+
+    let state: PerformanceState
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Self.spacing) {
+            if state.hasThermal {
+                ThermalColumn(state: state).frame(maxWidth: .infinity, alignment: .top)
+            }
+            MemoryColumn(state: state).frame(maxWidth: .infinity, alignment: .top)
+        }
     }
 }
 
@@ -41,7 +57,7 @@ struct ThermalColumn: View {
             HStack(alignment: .top, spacing: 14) {
                 summary(presentation)
                 VStack(alignment: .leading, spacing: 2) {
-                    ThermalSparkline(history: state.history, tone: presentation.tone)
+                    ThermalSparkline(history: state.thermal == nil ? ThermalHistory() : state.history, tone: presentation.tone)
                         .frame(height: 58)
                     Text("2 phút gần nhất")
                         .font(.system(size: 10))
@@ -148,7 +164,7 @@ struct ThermalSparkline: View {
     nonisolated static let inset: CGFloat = 3
 
     let history: ThermalHistory
-    let tone: TemperatureTone?
+    let tone: Tone?
 
     var body: some View {
         let line = tone?.color ?? NotchTokens.accent

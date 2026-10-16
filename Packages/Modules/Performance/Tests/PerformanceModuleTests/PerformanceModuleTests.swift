@@ -7,42 +7,64 @@ import Testing
 
 @Suite struct PerformanceModuleTests {
     static let stripKey = SettingKey("module.performance.stripTemperature", default: false)
+    static let memoryStripKey = SettingKey("module.performance.stripMemory", default: false)
 
     struct Fixture {
         let module: PerformanceModule
         let reader: FakeThermalReader
+        let memory: FakeMemoryReader
         let harness: RegistryHarness
         let clock: TestClock
 
-        @MainActor init(_ reader: FakeThermalReader = FakeThermalReader(), strip: Bool = false) async {
+        /// `strip` turns the temperature strip on before the module starts, `memoryStrip` the memory one.
+        @MainActor init(
+            _ reader: FakeThermalReader = FakeThermalReader(), memory: FakeMemoryReader = FakeMemoryReader(),
+            strip: Bool = false, memoryStrip: Bool = false
+        ) async {
             let clock = TestClock()
-            let module = PerformanceModule(thermal: reader, now: { clock.date })
+            let module = PerformanceModule(thermal: reader, memory: memory, now: { clock.date })
             let harness = RegistryHarness([module])
             if strip { harness.settings.set(true, for: PerformanceModuleTests.stripKey) }
+            if memoryStrip { harness.settings.set(true, for: PerformanceModuleTests.memoryStripKey) }
             await harness.registry.bootstrap()
-            (self.module, self.reader, self.harness, self.clock) = (module, reader, harness, clock)
+            (self.module, self.reader, self.memory, self.harness, self.clock) = (module, reader, memory, harness, clock)
         }
 
         /// A tab on screen; `disappear` is what removing it does.
         func appear() { module.actions.appeared() }
         func disappear() { module.actions.disappeared() }
 
-        /// Moves the scheduler's time and the module's clock together, then waits for the read that may have been asked for.
+        /// Moves the scheduler's time and the module's clock together.
         @MainActor func advance(_ seconds: Int) {
             clock.date = clock.date.addingTimeInterval(TimeInterval(seconds))
             harness.scheduler.advance(by: .seconds(seconds))
         }
 
         func reads() async -> Int { await reader.reads }
+        func memoryReads() async -> Int { await memory.reads }
     }
 
     final class TestClock {
         var date = Date(timeIntervalSinceReferenceDate: 5_000)
     }
 
-    @Test func aMacWhoseSMCCannotBeOpenedIsUnavailable() async {
+    @Test func aMacWhoseSMCCannotBeOpenedStillRunsWithTheMemoryAlone() async {
         let f = await Fixture(FakeThermalReader(available: false))
-        #expect(f.harness.registry.state(of: "performance") == .unavailable(reason: "Không mở được cảm biến nhiệt độ của máy"))
+        #expect(f.harness.registry.state(of: "performance") == .running)
+        #expect(f.module.state.hasThermal == false)
+        f.appear()
+        await settle { await f.memoryReads() == 1 }
+        await settle { f.module.state.usage != nil }
+        await settle { !f.module.isReading }
+        #expect(f.module.state.usage == FakeMemoryReader.usage)
+        #expect(await f.reads() == 0, "there are no sensors to read")
+    }
+
+    @Test func withoutSensorsNoTemperatureStripIsOffered() async {
+        let f = await Fixture(FakeThermalReader(available: false), strip: true)
+        #expect(f.module.state.stripTemperature == false)
+        #expect(f.harness.activities.current == nil)
+        #expect(f.harness.scheduler.pendingCount == 0)
     }
 
     @Test func runningButHiddenNothingIsScheduledOrRead() async {
@@ -52,6 +74,7 @@ import Testing
         f.advance(60)
         await idle()
         #expect(await f.reads() == 0, "starting checks the SMC can be opened and reads nothing")
+        #expect(await f.memoryReads() == 0)
     }
 
     @Test func openingTheTabReadsAtOnceAndThenEveryTwoSeconds() async {
@@ -59,6 +82,7 @@ import Testing
         f.appear()
         await settle { await f.reads() == 1 }
         #expect(await f.reads() == 1)
+        await settle { !f.module.isReading }
         #expect(f.module.state.thermal == FakeThermalReader.warm)
         #expect(f.harness.scheduler.pendingCount == 1)
 
@@ -80,6 +104,7 @@ import Testing
         await idle()
         #expect(await f.reads() == 1)
         #expect(f.module.state.isTabVisible == false)
+        #expect(f.module.state.thermal == nil, "nothing shows it now")
     }
 
     @Test func aSecondScreenKeepsItGoingUntilItsTabIsGoneToo() async {
@@ -148,6 +173,7 @@ import Testing
         f.advance(2)
         await settle { await f.reads() == 2 }
         await settle { f.harness.scheduler.pendingCount == 1 }
+        await settle { !f.module.isReading }
         #expect(f.module.state.thermal == FakeThermalReader.warm)
         #expect(f.module.state.history.samples.count == 1)
         #expect(f.harness.scheduler.pendingCount == 1)
@@ -182,6 +208,7 @@ import Testing
         #expect(f.harness.registry.state(of: "performance") == .running)
         f.appear()
         await settle { await f.reads() == 1 }
+        await settle { !f.module.isReading }
         #expect(f.module.state.thermal == FakeThermalReader.warm)
     }
 
@@ -213,6 +240,7 @@ import Testing
         let f = await Fixture(strip: true)
         #expect(f.harness.activities.current?.id == "performance/strip")
         await settle { await f.reads() == 1 }
+        await settle { !f.module.isReading }
         #expect(f.module.state.thermal == FakeThermalReader.warm)
         #expect(f.harness.scheduler.pendingCount == 1)
     }
@@ -303,14 +331,14 @@ import Testing
     }
 
     @Test func settingsRowsExistBeforeTheModuleEverStarts() throws {
-        let harness = RegistryHarness([PerformanceModule(thermal: FakeThermalReader(), now: { .now })])
+        let harness = RegistryHarness([PerformanceModule(thermal: FakeThermalReader(), memory: FakeMemoryReader(), now: { .now })])
         #expect(harness.registry.state(of: "performance") == .disabled)
         let view = try #require(harness.registry.settingsView(for: "performance"))
         #expect(String(describing: view).hasPrefix("AnyView(PerformanceSettingsView("))
     }
 
     @Test func theStripSettingIsOffUntilTheUserTurnsItOn() throws {
-        let harness = RegistryHarness([PerformanceModule(thermal: FakeThermalReader(), now: { .now })])
+        let harness = RegistryHarness([PerformanceModule(thermal: FakeThermalReader(), memory: FakeMemoryReader(), now: { .now })])
         let environment = try #require(harness.settingsEnvironment(for: "performance"))
         let key = PerformanceSettingsKeys(environment.settings).stripTemperature
         #expect(key.name == "module.performance.stripTemperature")

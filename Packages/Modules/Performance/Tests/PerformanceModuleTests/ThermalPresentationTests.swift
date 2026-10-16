@@ -3,12 +3,12 @@ import Testing
 
 @Suite struct ThermalPresentationTests {
     @Test func theToneFollowsTheTemperature() {
-        #expect(TemperatureTone(celsius: 45) == .normal)
-        #expect(TemperatureTone(celsius: 69.9) == .normal)
-        #expect(TemperatureTone(celsius: 70) == .warm)
-        #expect(TemperatureTone(celsius: 89.9) == .warm)
-        #expect(TemperatureTone(celsius: 90) == .hot)
-        #expect(TemperatureTone(celsius: 104) == .hot)
+        #expect(Tone(celsius: 45) == .normal)
+        #expect(Tone(celsius: 69.9) == .normal)
+        #expect(Tone(celsius: 70) == .caution)
+        #expect(Tone(celsius: 89.9) == .caution)
+        #expect(Tone(celsius: 90) == .critical)
+        #expect(Tone(celsius: 104) == .critical)
     }
 
     @Test func degreesAreWholeNumbersWithoutTheLetter() {
@@ -34,7 +34,7 @@ import Testing
         #expect(presentation.soc == "80°")
         #expect(presentation.cpu == "80°")
         #expect(presentation.gpu == "69°")
-        #expect(presentation.tone == .warm)
+        #expect(presentation.tone == .caution)
         #expect(presentation.fans.map(\.title) == ["Quạt 1", "Quạt 2"])
         #expect(presentation.fans.map(\.rpm) == ["5230", "5656"])
         #expect(presentation.fans.map(\.range) == ["1200–5779", "1200–6241"])
@@ -42,7 +42,7 @@ import Testing
     }
 
     @Test func theToneIsThatOfTheSoC() {
-        #expect(ThermalPresentation(ThermalSnapshot(cpu: 60, gpu: 92, fans: [])).tone == .hot)
+        #expect(ThermalPresentation(ThermalSnapshot(cpu: 60, gpu: 92, fans: [])).tone == .critical)
     }
 
     @Test func nothingReadYetShowsDashesAndNoTone() {
