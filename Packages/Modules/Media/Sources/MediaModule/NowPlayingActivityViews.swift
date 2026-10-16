@@ -60,6 +60,11 @@ struct NowPlayingBars: View {
 /// the dimmed note alone, so the notch keeps its height.
 struct NowPlayingLyricStrip: View {
     static let height: CGFloat = 36
+    /// The fonts of the two rows: the strip draws them and measures its width in them, so the two cannot drift apart.
+    static let currentFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
+    static let nextFont = NSFont.systemFont(ofSize: 11)
+    /// A line that is still wider than the notch can be gets this much smaller before it is cut off.
+    static let minimumScale: CGFloat = 0.8
 
     let store: NowPlayingStore
     @Environment(\.notchSurface) private var surface
@@ -84,6 +89,8 @@ struct NowPlayingLyricStrip: View {
             .animation(.easeOut(duration: 0.2), value: strip)
             .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height)
             .clipped()
+            // The notch is as wide as the wider of the two rows, so the whole line shows; it changes once per line.
+            .notchStripWidth(strip.preferredWidth())
         }
     }
 
@@ -96,11 +103,13 @@ struct NowPlayingLyricStrip: View {
                 Text(strip.current ?? LyricStrip.note)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(strip.current == nil ? NotchTokens.secondaryText : NotchTokens.primaryText)
+                    .minimumScaleFactor(Self.minimumScale)
                     .frame(height: 16)
             }
             Text(strip.next ?? "")
                 .font(.system(size: 11))
                 .foregroundStyle(NotchTokens.secondaryText)
+                .minimumScaleFactor(Self.minimumScale)
                 .frame(height: 14)
         }
         .lineLimit(1)
