@@ -7,7 +7,9 @@ import Testing
 /// Records instead of playing, so tests are silent.
 final class FakeSoundPlayer: SoundPlaying {
     private(set) var played: [String] = []
+    private(set) var stopCount = 0
     func play(named name: String) { played.append(name) }
+    func stop() { stopCount += 1 }
 }
 
 final class FakeClock {
@@ -31,6 +33,15 @@ struct TimerFixture {
     var fileURL: URL { harness.storageRoot.storage(for: "timer").directory.appending(path: "timer.json") }
 
     func start() async { await harness.registry.bootstrap() }
+
+    /// The module's settings as Settings would change them, whether or not the module runs.
+    var settings: ModuleSettings { harness.settingsEnvironment(for: "timer")!.settings }
+    var keys: TimerSettingsKeys { TimerSettingsKeys(settings) }
+
+    /// What the sound at the end of a countdown does ("Âm báo hết giờ"). The shipped default repeats, so a test about
+    /// something else that lets time pass after a finish picks `.once`.
+    func setAlert(_ mode: TimerAlertMode) { settings.set(mode, for: keys.alertMode) }
+    func setAlertSound(_ name: String) { settings.set(name, for: keys.alertSound) }
 
     /// Moves both the wall clock and the scheduler, as real time does.
     func advance(_ seconds: Int) {
@@ -97,9 +108,12 @@ struct TimerFixture {
         #expect(fixture.harness.scheduler.pendingCount == 0)
     }
 
-    @Test func finishingShowsHighActivityPlaysSoundOnceAndExpiresAfter30Seconds() async {
+    /// "Một lần": the old behaviour, a single sound. The activity stays up for as long as the alert lasts (60 s), so the
+    /// pulse and the finish text have something to sit on while the sound repeats.
+    @Test func finishingShowsHighActivityPlaysSoundOnceAndExpiresAfterTheAlertWindow() async {
         let fixture = TimerFixture()
         await fixture.start()
+        fixture.setAlert(.once)
         fixture.module.startCountdown(minutes: 1)
         fixture.advance(59)
         #expect(fixture.sound.played.isEmpty)
@@ -107,7 +121,7 @@ struct TimerFixture {
         #expect(fixture.sound.played == ["Glass"])
         #expect(fixture.module.state.model == .finished)
         #expect(fixture.harness.activities.current?.activity.priority == .high)
-        fixture.advance(29)
+        fixture.advance(59)
         #expect(fixture.harness.activities.current != nil)
         fixture.advance(1)
         #expect(fixture.harness.activities.current == nil)
@@ -193,13 +207,16 @@ struct TimerFixture {
         #expect(fixture.sound.played == ["Glass"])
     }
 
-    @Test func countdownThatFinishedWhileTheAppWasClosedShowsFinishedWithoutASound() async throws {
+    /// Older than the two-minute window: shown, as before, but not announced. `TimerAlertTests` has the two sides of the window.
+    @Test func countdownThatFinishedLongBeforeTheAppStartedShowsFinishedWithoutASound() async throws {
         let fixture = TimerFixture()
-        try fixture.seedFile(.countdown(endDate: fixture.clock.date.addingTimeInterval(-5)))
+        try fixture.seedFile(.countdown(endDate: fixture.clock.date.addingTimeInterval(-300)))
         await fixture.start()
         #expect(fixture.module.state.model == .finished)
         #expect(fixture.harness.activities.current?.activity.priority == .high)
+        #expect(fixture.harness.activities.current?.activity.expiresAfter == .seconds(30))
         #expect(fixture.sound.played.isEmpty)
+        #expect(fixture.harness.presenter.toastCount == 0)
         #expect(try fixture.savedModel() == .finished)
     }
 
@@ -279,7 +296,8 @@ struct TimerFixture {
         #expect(fixture.harness.lockScreen.current == nil)
     }
 
-    @Test func pausingFinishingAndCancellingTakeTheTimeOffTheLockScreen() async {
+    /// A finish is not the running time any more: it says "Hết giờ" until the user answers (`TimerAlertTests`).
+    @Test func pausingFinishingAndCancellingTakeTheRunningTimeOffTheLockScreen() async throws {
         let fixture = TimerFixture()
         await fixture.start()
         fixture.module.startCountdown(minutes: 1)
@@ -289,7 +307,7 @@ struct TimerFixture {
         #expect(fixture.harness.lockScreen.current != nil)
         fixture.advance(60)
         #expect(fixture.module.state.model == .finished)
-        #expect(fixture.harness.lockScreen.current == nil)
+        #expect(fixture.harness.lockScreen.current?.priority == .high)   // now the finished text, not the time
         fixture.module.addMinute()
         #expect(fixture.harness.lockScreen.current != nil)
         fixture.module.cancel()
@@ -316,6 +334,7 @@ struct TimerFixture {
     @Test func pausingACountdownThatIsDueFinishesItInsteadOfPausingAtZero() async throws {
         let fixture = TimerFixture()
         await fixture.start()
+        fixture.setAlert(.once)
         fixture.module.startCountdown(minutes: 1)
         // The wall clock passed the end (e.g. after sleep) but the finish timer has not run yet.
         fixture.clock.advance(61)
@@ -328,6 +347,7 @@ struct TimerFixture {
         // The finish timer that was already armed must not announce it a second time.
         fixture.harness.scheduler.advance(by: .seconds(120))
         #expect(fixture.sound.played == ["Glass"])
+        #expect(fixture.harness.presenter.toastCount == 1)
     }
 
     @Test func aChangeToACountdownThatIsStillRunningIsAppliedAsBefore() async {

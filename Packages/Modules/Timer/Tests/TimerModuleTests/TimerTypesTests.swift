@@ -286,7 +286,7 @@ import Testing
 
     @Test func aTaskThatEndedWhileTheAppWasClosedStillOffersABreak() async throws {
         let fixture = TimerFixture()
-        try fixture.seedFile(.countdown(endDate: fixture.clock.date.addingTimeInterval(-60)), session: TimerSession(kind: .task, label: ""))
+        try fixture.seedFile(.countdown(endDate: fixture.clock.date.addingTimeInterval(-300)), session: TimerSession(kind: .task, label: ""))
         await fixture.start()
         #expect(fixture.module.state.model == .finished)
         #expect(fixture.module.suggestion == TimerSuggestion(kind: .rest, minutes: 5))
@@ -392,7 +392,7 @@ import Testing
         #expect(activity.summary == "Hết giờ: Gọi mẹ")
         #expect(activity.hasBottom)
         #expect(String(describing: activity.bottom as Any).contains("Gọi mẹ"))
-        #expect(activity.expiresAfter == .seconds(30))
+        #expect(activity.expiresAfter == TimerModule.alertLifetime)   // announced, so it stays for as long as the alert lasts
         #expect(activity.minimal != nil)
     }
 

@@ -55,6 +55,15 @@ nonisolated struct TimerSuggestion: Equatable {
         case .reminder: "Nhắc việc \(minutes) phút"
         }
     }
+
+    /// The same step as a button of the toast, which has no room to say how long.
+    var toastTitle: String {
+        switch kind {
+        case .rest: "Bắt đầu nghỉ"
+        case .task: "Bắt đầu tập trung"
+        case .reminder: "Bắt đầu nhắc việc"
+        }
+    }
 }
 
 /// A length shown by name rather than by minutes, for what the dial cannot hold or sets in one click.

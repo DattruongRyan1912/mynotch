@@ -33,6 +33,9 @@ struct TimerTabView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .defaultFocus($dialFocused, true)
+        // The tab is in the tree only while it is shown (or under a toast), so this is the user opening it: a finish that rang
+        // while it was closed has been seen.
+        .onAppear { module.acknowledgeFinish() }
     }
 
     // MARK: Idle

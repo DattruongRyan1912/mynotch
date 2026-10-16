@@ -63,9 +63,23 @@ import Testing
         let stopwatch = TimerState()
         stopwatch.model = .stopwatchPaused(accumulated: 65)
         let tab = CGSize(width: 452, height: 170)
+        func toast(_ kind: TimerKind) -> AnyView {
+            let session = TimerSession(kind: kind, label: kind == .reminder ? "lấy đồ phơi" : "")
+            var actions = [TimerFinishAction(role: .snooze, title: "+5 phút") {}, TimerFinishAction(role: .dismiss, title: "Tắt") {}]
+            if let next = kind.next {
+                actions.insert(TimerFinishAction(role: .next, title: TimerSuggestion(kind: next, minutes: 5).toastTitle, accent: next.accent) {}, at: 0)
+            }
+            return AnyView(TimerFinishToastView(toast: TimerFinishToast(session: session, actions: actions)))
+        }
         return [
             Fixture(name: "countdown", view: AnyView(TimerTabView(state: countdown, module: module)), size: tab, wash: 0.04, ink: 250),
             Fixture(name: "stopwatch", view: AnyView(TimerTabView(state: stopwatch, module: module)), size: tab, wash: 0.04, ink: 250),
+            Fixture(name: "finish toast, reminder", view: toast(.reminder), size: CGSize(width: 560, height: 170), wash: 0.04, ink: 250),
+            // The next step is a solid accent button with a white label, on purpose (S2): it is the one thing that is allowed to be white.
+            Fixture(name: "finish toast, task", view: toast(.task), size: CGSize(width: 560, height: 170), wash: nil, ink: 250),
+            Fixture(
+                name: "finished on the lock screen", view: AnyView(TimerFinishedLockScreenView(session: TimerSession(kind: .reminder, label: "lấy đồ phơi"))),
+                size: CGSize(width: 300, height: 50), wash: 0.005, ink: 60),
             Fixture(name: "dial", view: AnyView(DialRing(fraction: 0.4, tint: .blue, showsKnob: true)), size: CGSize(width: 112, height: 112), wash: 0.005, ink: 100),
         ]
     }

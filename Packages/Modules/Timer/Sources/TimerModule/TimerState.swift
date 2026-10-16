@@ -13,4 +13,7 @@ final class TimerState {
     var adjustedMinutes: [TimerKind: Int] = [:]
     /// What the reminder field holds.
     var reminderLabel = ""
+    /// A countdown has ended and the user has not yet answered it: the finished activity pulses, the lock screen says so and the
+    /// sound may still be repeating. Ends when the user dismisses or snoozes it, starts something else or opens the tab.
+    var isAlerting = false
 }

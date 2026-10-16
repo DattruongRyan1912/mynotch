@@ -40,6 +40,14 @@ nonisolated struct TimerSession: Codable, Equatable, Sendable {
         }
     }
 
+    /// How the toast and the lock screen say it is over: "Hết giờ · lấy đồ phơi" for a reminder with a label.
+    var finishedHeadline: String {
+        switch kind {
+        case .reminder: label.isEmpty ? "Hết giờ" : "Hết giờ · \(label)"
+        case .task, .rest: "Hết giờ \(kind.title.lowercased())"
+        }
+    }
+
     /// What the collapsed notch says beside the glyph once it is over.
     var finishedText: String {
         label.isEmpty ? "Hết giờ" : label

@@ -27,27 +27,35 @@ enum TimerActivity {
         make(glyph: "stopwatch", tint: .orange, trailing: AnyView(TimerClock(range: range, countsDown: false, tint: .orange)), summary: "Bấm giờ")
     }
 
-    /// Raised above the other activities for `expiresAfter`; a reminder shows its label under the notch.
-    static func finished(session: TimerSession, expiresAfter: Duration) -> LiveActivity {
-        make(
-            glyph: session.kind.systemImage, tint: .red,
-            trailing: AnyView(Text("Hết giờ").font(.system(size: 13, weight: .semibold, design: .rounded)).foregroundStyle(.red)),
+    /// Raised above the other activities for `expiresAfter`; a reminder shows its label under the notch. The glyph and the text
+    /// pulse while `state.isAlerting`.
+    static func finished(session: TimerSession, state: TimerState, expiresAfter: Duration) -> LiveActivity {
+        let glyph = AnyView(TimerAlertGlyph(systemImage: session.kind.systemImage, state: state))
+        return make(
+            leading: glyph, trailing: AnyView(TimerAlertText(state: state)), minimal: glyph,
             summary: session.finishedSummary, strip: session.label, priority: .high, expiresAfter: expiresAfter)
     }
 
     private static func make(
-        glyph: String, tint: Color, trailing: AnyView, summary: String, strip: String = "",
+        glyph: String, tint: Color, trailing: AnyView, summary: String, strip: String = ""
+    ) -> LiveActivity {
+        let view = AnyView(TimerGlyph(systemImage: glyph, tint: tint))
+        return make(leading: view, trailing: trailing, minimal: view, summary: summary, strip: strip)
+    }
+
+    private static func make(
+        leading: AnyView, trailing: AnyView, minimal: AnyView, summary: String, strip: String = "",
         priority: ActivityPriority = .normal, expiresAfter: Duration? = nil
     ) -> LiveActivity {
         LiveActivity(
             id: TimerModule.activityID,
             priority: priority,
             expiresAfter: expiresAfter,
-            leading: AnyView(TimerGlyph(systemImage: glyph, tint: tint)),
+            leading: leading,
             trailing: trailing,
             bottom: strip.isEmpty ? nil : AnyView(TimerStrip(text: strip)),
             bottomHeight: TimerStrip.height,
-            minimal: AnyView(TimerGlyph(systemImage: glyph, tint: tint)),
+            minimal: minimal,
             summary: summary
         )
     }
