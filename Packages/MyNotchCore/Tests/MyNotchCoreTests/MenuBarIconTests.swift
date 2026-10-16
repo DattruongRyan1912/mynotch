@@ -3,9 +3,9 @@ import Testing
 
 @Suite struct MenuBarIconTests {
     private func action(
-        leftMouseUp: Bool = true, control: Bool = false, age: Double = 0.01, onButton: Bool = true
+        leftMouseUp: Bool = true, control: Bool = false, option: Bool = false, age: Double = 0.01, onButton: Bool = true
     ) -> MenuBarIcon.Action {
-        MenuBarIcon.action(isLeftMouseUp: leftMouseUp, hasControl: control, eventAge: age, isOnButton: onButton)
+        MenuBarIcon.action(isLeftMouseUp: leftMouseUp, hasControl: control, hasOption: option, eventAge: age, isOnButton: onButton)
     }
 
     @Test func aPlainLeftClickOnTheIconTogglesTheHiddenIcons() {
@@ -19,6 +19,17 @@ import Testing
         #expect(action(onButton: false) == .openMenu)                       // a click somewhere else
     }
 
+    @Test func anOptionClickTogglesTheAlwaysHiddenZoneToo() {
+        #expect(action(option: true) == .toggleAllIcons)
+    }
+
+    @Test func optionDoesNotMakeAnythingElseToggle() {
+        #expect(action(leftMouseUp: false, option: true) == .openMenu)
+        #expect(action(control: true, option: true) == .openMenu)
+        #expect(action(option: true, age: 0.6) == .openMenu)
+        #expect(action(option: true, onButton: false) == .openMenu)
+    }
+
     @Test func noEventAtAllOpensTheMenu() {
         #expect(MenuBarIcon.action(isLeftMouseUp: false, hasControl: false, eventAge: .infinity, isOnButton: false) == .openMenu)
     }
@@ -27,6 +38,12 @@ import Testing
 
     @Test func theTooltipExplainsTheClicksWhileTheHiderIsOn() {
         #expect(MenuBarIcon.toolTip(permissionNudge: nil, hiderIsOn: true) == "Bấm: hiện/ẩn icon. Chuột phải: menu.")
+    }
+
+    @Test func theTooltipMentionsTheOptionClickOnlyWithTheAlwaysHiddenSection() {
+        #expect(MenuBarIcon.toolTip(permissionNudge: nil, hiderIsOn: true, alwaysHiddenSection: true)
+            == "Bấm: hiện/ẩn icon. Giữ ⌥ khi bấm: cả icon luôn ẩn. Chuột phải: menu.")
+        #expect(MenuBarIcon.toolTip(permissionNudge: nil, hiderIsOn: false, alwaysHiddenSection: true) == nil)
     }
 
     @Test func theTooltipIsEmptyWithoutAHiderOrANudge() {

@@ -5,16 +5,26 @@ import MyNotchTestSupport
 
 /// Stands in for the status item, so nothing here touches the real menu bar. The windows start as they are in the
 /// menu bar when everything is well: "‹" just left of the MyNotch icon, on a display with a notch.
-private final class FakeSeparator: MenuBarSeparator {
+final class FakeSeparator: MenuBarSeparator {
     var length: CGFloat = 0 { didSet { lengths.append(length) } }
     var screens = [MenuBarScreen(frame: CGRect(x: 0, y: 0, width: 1_728, height: 1_117), barHeight: 38)]
     var separatorFrame: CGRect? = CGRect(x: 1_500, y: 1_093, width: 24, height: 24)
     var toggleFrame: CGRect? = CGRect(x: 1_540, y: 1_093, width: 28, height: 24)
     private(set) var lengths: [CGFloat] = []
+    /// The second separator ‹‹, absent unless a test turns the section on.
+    var hasAlwaysHiddenSection = false
+    var alwaysHiddenFrame: CGRect? = CGRect(x: 1_460, y: 1_093, width: 24, height: 24)
+    var alwaysHiddenLength: CGFloat = 0 { didSet { alwaysLengths.append(alwaysHiddenLength) } }
+    private(set) var alwaysLengths: [CGFloat] = []
 
     /// The user drags "‹" to the right of the icon.
     func dragSeparatorRightOfToggle() {
         separatorFrame = CGRect(x: 1_580, y: 1_093, width: 24, height: 24)
+    }
+
+    /// The user drags "‹‹" to the right of "‹".
+    func dragAlwaysHiddenRightOfSeparator() {
+        alwaysHiddenFrame = CGRect(x: 1_510, y: 1_093, width: 24, height: 24)
     }
 
     /// The separator pushed the icon off the screen, or the system dropped it.

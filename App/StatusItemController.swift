@@ -18,6 +18,7 @@ final class StatusItemController: NSObject {
     private var menu: NSMenu?
     private var visibilityItem: NSMenuItem?
     private var hiderItem: NSMenuItem?
+    private var alwaysHiddenItem: NSMenuItem?
     private var pauseItem: NSMenuItem?
     private var permissionItem: NSMenuItem?
     /// The red dot on the icon while a required permission is missing.
@@ -64,7 +65,9 @@ final class StatusItemController: NSObject {
     /// With the menu-bar hider on, a click on the icon shows or hides the icons and the menu moves to a right-click.
     private func observeHider() {
         Task { [weak self, settings] in
-            for await _ in Observations({ settings.value(MenuBarHiderSettings.enabled) }) {
+            for await _ in Observations({
+                (settings.value(MenuBarHiderSettings.enabled), settings.value(MenuBarHiderSettings.alwaysHiddenSection))
+            }) {
                 self?.applyClickBehaviour()
                 self?.updateHiderEntry()
                 self?.updatePermissionNudge()
@@ -135,17 +138,20 @@ final class StatusItemController: NSObject {
         }
     }
 
-    /// Only a plain left click toggles; a key press, VoiceOver, a right or control click and anything else opens the menu.
+    /// Only a left click toggles (with ⌥ the always-hidden zone too); a key press, VoiceOver, a right or control click and
+    /// anything else opens the menu.
     @objc private func statusButtonClicked() {
         let event = NSApp.currentEvent
         let action = MenuBarIcon.action(
             isLeftMouseUp: event?.type == .leftMouseUp,
             hasControl: event?.modifierFlags.contains(.control) == true,
+            hasOption: event?.modifierFlags.contains(.option) == true,
             eventAge: event.map { ProcessInfo.processInfo.systemUptime - $0.timestamp } ?? .infinity,
             isOnButton: event != nil && event?.window === item?.button?.window
         )
         switch action {
         case .toggleHiddenIcons: hider.toggle()
+        case .toggleAllIcons: hider.toggleAll()
         case .openMenu: showMenu()
         }
     }
@@ -161,6 +167,8 @@ final class StatusItemController: NSObject {
     private func updateHiderEntry() {
         hiderItem?.isHidden = !hider.isEnabled
         hiderItem?.title = hider.isCollapsed ? "Hiện icon đã ẩn" : "Ẩn bớt icon menu bar"
+        alwaysHiddenItem?.isHidden = !(hider.isEnabled && settings.value(MenuBarHiderSettings.alwaysHiddenSection))
+        alwaysHiddenItem?.title = hider.isShowingAlwaysHidden ? "Ẩn icon luôn ẩn" : "Hiện cả icon luôn ẩn"
     }
 
     private func addMissingDot(to button: NSStatusBarButton?) {
@@ -184,7 +192,10 @@ final class StatusItemController: NSObject {
     private func updatePermissionNudge() {
         let title = overview.nudgeTitle
         missingDot?.isHidden = title == nil
-        item?.button?.toolTip = MenuBarIcon.toolTip(permissionNudge: title, hiderIsOn: hider.isEnabled)
+        item?.button?.toolTip = MenuBarIcon.toolTip(
+            permissionNudge: title, hiderIsOn: hider.isEnabled,
+            alwaysHiddenSection: settings.value(MenuBarHiderSettings.alwaysHiddenSection)
+        )
         permissionItem?.title = title ?? ""
         permissionItem?.isHidden = title == nil
     }
@@ -204,6 +215,10 @@ final class StatusItemController: NSObject {
         hiderItem.target = self
         hiderItem.isHidden = !hider.isEnabled
         self.hiderItem = hiderItem
+        let alwaysHiddenItem = menu.addItem(withTitle: "Hiện cả icon luôn ẩn", action: #selector(toggleAllHiddenIcons), keyEquivalent: "")
+        alwaysHiddenItem.target = self
+        alwaysHiddenItem.isHidden = true
+        self.alwaysHiddenItem = alwaysHiddenItem
         let pauseItem = menu.addItem(withTitle: "Pause All Modules", action: #selector(togglePause), keyEquivalent: "")
         pauseItem.target = self
         self.pauseItem = pauseItem
@@ -217,6 +232,8 @@ final class StatusItemController: NSObject {
     @objc private func openPermissionsAction() { openPermissions() }
 
     @objc private func toggleHiddenIcons() { hider.toggle() }
+
+    @objc private func toggleAllHiddenIcons() { hider.toggleAll() }
 
     @objc private func toggleNotchVisibility() { screens.isHiddenByUser.toggle() }
 

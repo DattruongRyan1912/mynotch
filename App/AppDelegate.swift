@@ -53,9 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "toggleNotch", title: "Mở/đóng notch", owner: nil,
             initial: KeyboardShortcuts.Shortcut(.n, modifiers: [.control, .option])
         ) { [weak self] in self?.coordinator.toggle() }
-        hotkeys.register(
-            "toggleMenuBarIcons", title: "Hiện/ẩn icon menu bar", owner: nil
-        ) { [weak self] in self?.menuBarHider.toggle() }
+        MenuBarHiderShortcut.register(in: hotkeys) { [weak self] in self?.menuBarHider.toggle() }
         statusItem = StatusItemController(
             settings: settings, registry: registry, screens: screens, overview: permissionOverview, hider: menuBarHider,
             notice: menuBarNotice,
