@@ -503,6 +503,80 @@ import Testing
         #expect(fixture.state.selectionSource?.application.bundleID == "com.apple.Safari")
     }
 
+    /// The button's click, whatever "Dịch ngay khi mở" says: the tab opens on the text and translates it at once.
+    @Test(arguments: [true, false])
+    func aClickAlwaysTranslatesWhatItOpens(autoTranslateOnOpen: Bool) async throws {
+        fixture.set(autoTranslateOnOpen, for: \.autoTranslateOnOpen)
+        await fixture.start()
+        await select(heading)
+        try #require(chip.current).content.open()
+        await fixture.module.selectionRead?.value
+        await fixture.translated()
+        await settle()
+        #expect(fixture.harness.presenter.openedTabs == ["translation"])
+        #expect(fixture.state.input == heading)
+        #expect(fixture.engine.requests.map(\.text) == [heading])
+        #expect(!fixture.state.output.isEmpty)
+    }
+
+    /// ⌃⌥T itself is as it was: it translates when the setting says so and not otherwise.
+    @Test func theShortcutStillOpensWithoutTranslatingWhenTheSettingIsOff() async {
+        fixture.set(false, for: \.autoTranslateOnOpen)
+        await fixture.start()
+        fixture.accessibility.standing = heading
+        await fixture.pressShortcutAndRead()
+        #expect(fixture.harness.presenter.openedTabs == ["translation"])
+        #expect(fixture.state.input == heading)
+        fixture.harness.scheduler.advance(by: .seconds(1))
+        await settle()
+        #expect(fixture.module.translator?.translation == nil)
+        #expect(fixture.engine.requests.isEmpty)
+        #expect(fixture.state.output.isEmpty)
+    }
+
+    /// The registered hotkey itself, as the system calls it: it goes by the setting, not by the button's request.
+    @Test(arguments: [true, false])
+    func thePressedHotkeyGoesByTheSetting(autoTranslateOnOpen: Bool) async {
+        fixture.set(autoTranslateOnOpen, for: \.autoTranslateOnOpen)
+        await fixture.start()
+        fixture.accessibility.standing = heading
+        #expect(fixture.harness.hotkeyBackend.trigger("translation_translateSelection"))
+        await fixture.module.selectionRead?.value
+        fixture.harness.scheduler.advance(by: .seconds(1))
+        await fixture.translated()
+        await settle()
+        #expect(fixture.state.input == heading)
+        #expect(fixture.engine.requests.map(\.text) == (autoTranslateOnOpen ? [heading] : []))
+    }
+
+    @Test func theShortcutStillTranslatesWhenTheSettingIsOn() async {
+        await fixture.start()
+        fixture.accessibility.standing = heading
+        await fixture.pressShortcutAndRead()
+        await fixture.translated()
+        await settle()
+        #expect(fixture.engine.requests.map(\.text) == [heading])
+    }
+
+    /// Only the button's own request is at once: the next press of the shortcut goes by the setting again.
+    @Test func aClickDoesNotChangeWhatTheNextShortcutPressDoes() async throws {
+        fixture.set(false, for: \.autoTranslateOnOpen)
+        await fixture.start()
+        await select(heading)
+        try #require(chip.current).content.open()
+        await fixture.module.selectionRead?.value
+        await fixture.translated()
+        await settle()
+        #expect(fixture.engine.requests.count == 1)
+        fixture.accessibility.standing = "Getting Started"
+        await fixture.pressShortcutAndRead()
+        fixture.harness.scheduler.advance(by: .seconds(1))
+        await settle()
+        #expect(fixture.state.input == "Getting Started")
+        #expect(fixture.engine.requests.count == 1, "it opened without translating")
+        #expect(fixture.state.output.isEmpty)
+    }
+
     @Test func aClickBeforeItsDelayCannotHappen() async throws {
         await fixture.start()
         await fixture.dragSelecting(heading)

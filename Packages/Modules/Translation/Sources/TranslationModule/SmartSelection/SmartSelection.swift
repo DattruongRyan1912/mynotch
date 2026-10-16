@@ -120,7 +120,8 @@ final class SmartSelection {
 
     /// - Parameters:
     ///   - open: the chip's "Mở": opens the notch's Translation tab on the selection.
-    ///   - translate: the small button's click: what the shortcut does, which reads the selection again and opens the tab on it.
+    ///   - translate: the small button's click: what the shortcut does, which reads the selection again and opens the tab on it,
+    ///     translating at once whatever "Dịch ngay khi mở" says.
     init(
         context: ModuleContext, setup: SmartSelectionSetup, decider: SelectionDecider, open: @escaping @MainActor (SelectionSource) -> Void,
         translate: @escaping @MainActor () -> Void
@@ -462,8 +463,9 @@ final class SmartSelection {
         )
     }
 
-    /// The small button's click: exactly what ⌃⌥T does with the selection, through the module's own shortcut path, which reads
-    /// the selection again and opens the tab on it. The button goes first, and a button that is already gone does nothing.
+    /// The small button's click: what ⌃⌥T does with the selection, through the module's own shortcut path, which reads the
+    /// selection again and opens the tab on it (translating at once, which the closure asks for). The button goes first, and a
+    /// button that is already gone does nothing.
     private func translateButtonClicked() {
         guard chip.hint?.kind == .translateButton else { return }
         log("button clicked")

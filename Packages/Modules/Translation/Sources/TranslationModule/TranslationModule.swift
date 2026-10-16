@@ -130,7 +130,7 @@ public final class TranslationModule: FeatureModule {
             context: context, setup: smartSelectionSetup,
             decider: SelectionDecider(converter: converter, preview: smartSelectionSetup.preview, languages: languages, settings: context.settings),
             open: { [weak self] in self?.openSelection($0) },
-            translate: { [weak self] in self?.selectionShortcutPressed() }
+            translate: { [weak self] in self?.selectionShortcutPressed(translatingAtOnce: true) }
         )
         smartSelection = smart
         context.hotkeys.register("translateSelection", title: "Dịch đoạn chữ đang chọn", initial: shortcut) { [weak self] in
@@ -259,7 +259,10 @@ public final class TranslationModule: FeatureModule {
 
     /// The shortcut. The tab opens at once, empty and saying it is reading, since a slow app can take most of a
     /// second to answer; the selection fills it when the read ends. Nothing read leaves it empty, ready for typing.
-    func selectionShortcutPressed() {
+    ///
+    /// - Parameter translatingAtOnce: translate whatever "Dịch ngay khi mở" says. The shortcut itself goes by that setting; the
+    ///   small translate button asks for it, since a click that opens the tab with the text and no translation reads as broken.
+    func selectionShortcutPressed(translatingAtOnce: Bool = false) {
         guard let context, let translator else { return }
         selectionRead?.cancel()
         translator.receive(nil, translate: false)
@@ -276,7 +279,7 @@ public final class TranslationModule: FeatureModule {
             // Text typed meanwhile is what the user wants translated.
             guard state.input.isEmpty else { return }
             state.selectionSource = source
-            receive(source?.text)
+            receive(source?.text, translatingAtOnce: translatingAtOnce)
         }
     }
 
@@ -402,9 +405,11 @@ public final class TranslationModule: FeatureModule {
         }
     }
 
-    private func receive(_ text: String?) {
+    private func receive(_ text: String?, translatingAtOnce: Bool = false) {
         guard let context, let translator else { return }
-        translator.receive(text, translate: context.settings.value(TranslationKeys(context.settings).autoTranslateOnOpen))
+        translator.receive(
+            text, translate: translatingAtOnce || context.settings.value(TranslationKeys(context.settings).autoTranslateOnOpen)
+        )
     }
 
     private func showTab(_ context: ModuleContext) {
