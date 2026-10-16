@@ -45,7 +45,15 @@ final class YouTubeBridgeModel {
     /// The extension counts as connected while its last page message is no older than this; the page sends one every 5 s while a video plays.
     static let connectedWindow: TimeInterval = 30
 
+    /// What to say when MyNotch has brought the installed bridge up to date at its start: Chrome runs the extension from that folder
+    /// and keeps the old files until it is reloaded.
+    static func updateMessage(version: String) -> String {
+        "Đã cập nhật cầu nối Chrome lên \(version) — tải lại extension trong chrome://extensions"
+    }
+
     private(set) var message = ""
+    /// Set once, for this run, when the module updated the installed bridge; cleared when the user installs or removes it themselves.
+    private(set) var updateNotice: String?
     private(set) var isInstalled = false
     /// When the module last got a message that shows the extension at work in a YouTube page (captions, playback, clear, or
     /// a diagnostic of the content or page script); nil while there has been none. The service worker's own diagnostics do
@@ -81,7 +89,13 @@ final class YouTubeBridgeModel {
         if installed != isInstalled { isInstalled = installed }
     }
 
+    /// The module brought the installed copy up to `version`: the Settings rows say so until the user acts on the bridge.
+    func noteUpdated(to version: String) {
+        updateNotice = Self.updateMessage(version: version)
+    }
+
     func install() {
+        updateNotice = nil
         guard let setup else {
             message = "Không cài được cầu nối: thiếu thông tin thư mục của module."
             return
@@ -98,6 +112,7 @@ final class YouTubeBridgeModel {
     }
 
     func remove() {
+        updateNotice = nil
         guard let setup else {
             message = "Không gỡ được cầu nối: thiếu thông tin thư mục của module."
             return

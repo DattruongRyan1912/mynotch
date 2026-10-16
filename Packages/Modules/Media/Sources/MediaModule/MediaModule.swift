@@ -158,6 +158,9 @@ public final class MediaModule: FeatureModule {
     private let youtubeSocketPath: String?
     /// nil is the real installer, which needs the module's storage and so is made with the Settings rows.
     private let youtubeSetup: YouTubeBridgeSetup?
+    /// Whether the module brings an installed Chrome bridge up to date when it starts. The app's own module does, with the real
+    /// folders; a module made for a test never does unless the test asks, with folders of its own.
+    private let updatesInstalledBridge: Bool
     private var youtubeCaptionsEnabled = false
     /// Where the bridge's diagnostics go (category `youtube-bridge`): the receiver's, the matching decisions, the drift.
     private let youtubeLog: YouTubeBridgeLog
@@ -221,13 +224,13 @@ public final class MediaModule: FeatureModule {
                 tokens: KeychainTokenStore(),
                 signIn: AppleMusicLoginWindow(),
                 volume: .system(),
-                appControls: controls, appEnvironment: .system
+                appControls: controls, appEnvironment: .system, updatesInstalledBridge: true
             )
         } else {
             self.init(
                 makeSource: nil, spectrum: spectrum, lyricsClient: client,
                 tokens: KeychainTokenStore(), signIn: AppleMusicLoginWindow(), volume: .system(),
-                appControls: controls, appEnvironment: .system
+                appControls: controls, appEnvironment: .system, updatesInstalledBridge: true
             )
         }
     }
@@ -249,13 +252,14 @@ public final class MediaModule: FeatureModule {
         volume: VolumeModel = VolumeModel(hardware: NoVolumeHardware(), queue: SerialVolumeQueue()),
         tintExtract: @escaping ArtworkTinter.Extract = ArtworkTinter.backgroundExtract,
         appControls: [any AppPlayerControl] = [],
-        appEnvironment: MediaAppEnvironment = .inert
+        appEnvironment: MediaAppEnvironment = .inert,
+        updatesInstalledBridge: Bool = false
     ) {
         self.init(
             makeSource: { _ in source }, spectrum: spectrum, lyricsClient: lyricsClient,
             tokens: tokens, signIn: signIn, volume: volume, lookUpApp: lookUpApp, youtubeSocketPath: youtubeSocketPath,
             youtubeSetup: youtubeSetup, youtubeLog: youtubeLog, tintExtract: tintExtract,
-            appControls: appControls, appEnvironment: appEnvironment
+            appControls: appControls, appEnvironment: appEnvironment, updatesInstalledBridge: updatesInstalledBridge
         )
     }
 
@@ -281,12 +285,14 @@ public final class MediaModule: FeatureModule {
         youtubeLog: YouTubeBridgeLog = .system,
         tintExtract: @escaping ArtworkTinter.Extract = ArtworkTinter.backgroundExtract,
         appControls: [any AppPlayerControl] = [],
-        appEnvironment: MediaAppEnvironment = .inert
+        appEnvironment: MediaAppEnvironment = .inert,
+        updatesInstalledBridge: Bool = false
     ) {
         self.volume = volume
         self.lookUpApp = lookUpApp
         self.youtubeSocketPath = youtubeSocketPath
         self.youtubeSetup = youtubeSetup
+        self.updatesInstalledBridge = updatesInstalledBridge
         self.youtubeLog = youtubeLog
         self.makeSource = makeSource
         self.spectrum = spectrum
@@ -384,6 +390,26 @@ public final class MediaModule: FeatureModule {
             onLine: { [weak self] line in self?.receive(line) },
             onFailure: { [weak self] reason in self?.sourceFailed(reason) }
         )
+        updateInstalledBridge(context)
+    }
+
+    /// A bridge the user installed before is brought up to the app's (see `YouTubeBridgeInstaller.updateIfNeeded`): done here, at the
+    /// start, because nobody presses "Cài cầu nối cho Chrome" again after an update of the app. Then the user is told once what to do:
+    /// Chrome keeps running the old extension until it is reloaded. Never installs for a user who did not, and never fails the start.
+    private func updateInstalledBridge(_ context: ModuleContext) {
+        guard updatesInstalledBridge else { return }
+        let setup = youtubeSetup ?? .system(storageDirectory: context.storage.directory)
+        do {
+            guard let update = try setup.installer.updateIfNeeded() else { return }
+            youtubeLog("bridge updated extension=\(update.installedVersion ?? "unknown") now=\(update.bundledVersion) host=\(update.refreshedHost ? "refreshed" : "same")")
+            youtubeBridge.noteUpdated(to: update.bundledVersion)
+            context.presenter.showToast(
+                AnyView(YouTubeBridgeUpdateToast(text: YouTubeBridgeModel.updateMessage(version: update.bundledVersion))), duration: .seconds(6)
+            )
+        } catch {
+            // Only a number: an error's text can hold a path.
+            youtubeLog("bridge update failed code=\((error as NSError).code)")
+        }
     }
 
     public func stop() async {

@@ -35,6 +35,22 @@ import Testing
         )
     }
 
+    // MARK: update notice
+
+    @Test func theUpdateNoticeSaysTheVersionAndWhatToDoAndGoesWhenTheUserInstallsOrRemoves() throws {
+        try makeBundle()
+        configure()
+        #expect(model.updateNotice == nil)
+        model.noteUpdated(to: "0.2.2")
+        #expect(model.updateNotice == "Đã cập nhật cầu nối Chrome lên 0.2.2 — tải lại extension trong chrome://extensions")
+        model.install()
+        #expect(model.updateNotice == nil, "the user pressed the button themselves: they are on it")
+        model.noteUpdated(to: "0.2.3")
+        #expect(model.updateNotice?.contains("0.2.3") == true)
+        model.remove()
+        #expect(model.updateNotice == nil)
+    }
+
     // MARK: status
 
     @Test func theStatusSaysNotInstalledThenWaitingThenConnected() throws {

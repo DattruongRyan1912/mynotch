@@ -1,3 +1,4 @@
+import NotchUI
 import SwiftUI
 
 /// The Settings rows for YouTube captions from Chrome: the switch, the status of the bridge and its two buttons.
@@ -30,6 +31,9 @@ struct YouTubeBridgeRows: View {
             if model.listenFailed {
                 Text(YouTubeBridgeModel.listenFailureMessage).font(.caption).foregroundStyle(.red)
             }
+            if let notice = model.updateNotice {
+                Text(notice).font(.caption).foregroundStyle(.orange)
+            }
             if model.accessWithheld {
                 Text(YouTubeBridgeModel.accessWithheldMessage).font(.caption).foregroundStyle(.orange)
             }
@@ -43,5 +47,17 @@ struct YouTubeBridgeRows: View {
         }
         // Files may have been removed by hand since the page was last shown.
         .onAppear { model.refresh() }
+    }
+}
+
+/// The short notch toast that says the installed bridge was updated and what to do about it.
+struct YouTubeBridgeUpdateToast: View {
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: "arrow.triangle.2.circlepath")
+            .font(.callout.weight(.semibold))
+            .foregroundStyle(NotchTokens.primaryText)
+            .lineLimit(2)
     }
 }
