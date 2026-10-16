@@ -137,18 +137,24 @@ test("validateTabCommand is closed: another action, field, type, tab id or secon
   for (const value of bad) assert.equal(T.validateTabCommand(value), null, JSON.stringify(value));
 });
 
-test("a session message from the page script is read as text and two booleans, and only from this window with the tag", () => {
+test("a session message from the page script is read as text, numbers and flags, and only from this window with the tag", () => {
   const win = {};
   const event = (data, overrides = {}) => ({ source: win, origin: "https://site.example", data: { source: "mynotch-tab", ...data }, ...overrides });
   const accepted = T.acceptSessionMessage(
-    event({ type: "session", title: " Song\n", artist: "A", album: "B", next: true, previous: false, extra: "https://example.invalid/", url: "x" }),
+    event({
+      type: "session", title: " Song\n", artist: "A", album: "B", playback: "playing", position: { position: 30, duration: 200, rate: 1.5, at: 123 },
+      next: true, previous: false, play: true, pause: true, seek: true, extra: "https://example.invalid/", url: "x"
+    }),
     win,
     "https://site.example"
   );
-  assert.deepEqual(accepted, { title: "Song", artist: "A", album: "B", next: true, previous: false });
+  assert.deepEqual(accepted, {
+    title: "Song", artist: "A", album: "B", playback: "playing", position: { position: 30, duration: 200, rate: 1.5, at: 123 },
+    next: true, previous: false, play: true, pause: true, seek: true
+  });
   assert.deepEqual(
-    T.acceptSessionMessage(event({ type: "session", title: 5, next: "yes" }), win, "https://site.example"),
-    { title: "", artist: "", album: "", next: false, previous: false }
+    T.acceptSessionMessage(event({ type: "session", title: 5, next: "yes", playback: "stopped", position: "soon" }), win, "https://site.example"),
+    { title: "", artist: "", album: "", playback: "none", position: null, next: false, previous: false, play: false, pause: false, seek: false }
   );
   assert.equal(T.acceptSessionMessage(event({ type: "session", title: "x" }, { source: {} }), win, "https://site.example"), null);
   assert.equal(T.acceptSessionMessage(event({ type: "session", title: "x" }, { origin: "https://evil.example" }), win, "https://site.example"), null);
@@ -159,8 +165,26 @@ test("a session message from the page script is read as text and two booleans, a
   assert.equal(T.acceptSessionMessage(null, win, "https://site.example"), null);
 });
 
-test("buildInvoke names only the next and the previous track", () => {
-  assert.deepEqual(T.buildInvoke("next"), { source: "mynotch-tab", type: "invoke", action: "next" });
-  assert.deepEqual(T.buildInvoke("previous"), { source: "mynotch-tab", type: "invoke", action: "previous" });
-  for (const action of ["play", "seek", "", null, undefined, "Next"]) assert.equal(T.buildInvoke(action), null, String(action));
+test("the position of a session is kept only when it is a position, and each part of it is in range", () => {
+  const win = {};
+  const read = (position) =>
+    T.acceptSessionMessage({ source: win, origin: "o", data: { source: "mynotch-tab", type: "session", position } }, win, "o").position;
+  assert.deepEqual(read({ position: 0, duration: null, rate: 1, at: null }), { position: 0, duration: null, rate: 1, at: null });
+  assert.deepEqual(read({ position: 12.5 }), { position: 12.5, duration: null, rate: 1, at: null }, "no length, no speed: the defaults");
+  assert.deepEqual(read({ position: 5, duration: Infinity, rate: 99 }), { position: 5, duration: null, rate: 1, at: null });
+  assert.deepEqual(read({ position: 5, duration: -3, rate: 0 }), { position: 5, duration: null, rate: 1, at: null });
+  for (const bad of [null, undefined, 5, "x", [], {}, { position: -1 }, { position: NaN }, { position: "5" }, { position: Infinity }, { position: 1e9 }]) {
+    assert.equal(read(bad), null, JSON.stringify(bad));
+  }
+});
+
+test("buildInvoke names the actions the page's handlers can do, and a seek says to where", () => {
+  for (const action of ["next", "previous", "play", "pause"]) {
+    assert.deepEqual(T.buildInvoke(action), { source: "mynotch-tab", type: "invoke", action });
+  }
+  assert.deepEqual(T.buildInvoke("seek", 61.23456), { source: "mynotch-tab", type: "invoke", action: "seek", seconds: 61.235 });
+  assert.deepEqual(T.buildInvoke("seek", 0), { source: "mynotch-tab", type: "invoke", action: "seek", seconds: 0 });
+  assert.equal(T.buildInvoke("seek"), null);
+  for (const bad of [-1, NaN, Infinity, "5", null, 1e9]) assert.equal(T.buildInvoke("seek", bad), null, String(bad));
+  for (const action of ["toggle", "stop", "", null, undefined, "Next", "toString"]) assert.equal(T.buildInvoke(action), null, String(action));
 });

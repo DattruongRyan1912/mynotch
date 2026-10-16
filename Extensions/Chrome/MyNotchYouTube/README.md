@@ -31,7 +31,7 @@ Extension Chrome nhỏ (Manifest V3) làm hai việc cho ứng dụng MyNotch tr
 
 Để biết tab nào đang phát media, extension cần chạy một script nhỏ trên mọi trang `http` và `https` (khung chính), nên manifest xin quyền trang web `http://*/*` và `https://*/*`. Script này không làm gì trên trang không có media: chỉ có vài trình nghe sự kiện media (không có bộ đếm thời gian), và nó chỉ bắt đầu báo khi một phần tử `<video>` hoặc `<audio>` bắt đầu phát. Video tắt tiếng, âm thanh giao diện và clip dưới 5 giây bị bỏ qua, trừ khi trang tự đặt tiêu đề trong Media Session (nghĩa là nó là trình phát). Video/audio nằm trong iframe không được báo.
 
-Một script thứ hai chạy trong chính trang (MAIN world) chỉ để ghi nhận hai thứ của Media Session: tiêu đề/nghệ sĩ/album mà trang đặt và việc trang có xử lý "bài sau/bài trước" hay không; khi bạn bấm Bài sau/Bài trước trong MyNotch, nó gọi đúng hàm xử lý đó của trang, như nút media của Chrome. Nó gọi hàm gốc trước và trả kết quả nguyên vẹn, không đọc gì khác của trang.
+Một script thứ hai chạy trong chính trang (MAIN world) chỉ để ghi nhận những gì trang tự khai trong Media Session: tiêu đề/nghệ sĩ/album, trạng thái phát/tạm dừng (`playbackState`), vị trí (`setPositionState`) và những hàm xử lý mà trang đã đăng ký (phát, tạm dừng, tua, bài sau, bài trước). Nhờ vậy nhận ra cả trang phát bằng một `Audio` không nằm trong tài liệu (nhiều trình phát web làm vậy, và sự kiện media của tài liệu không bao giờ thấy nó), và khi bạn bấm nút trong MyNotch, nó gọi đúng hàm xử lý đó của trang, như nút media của Chrome. Khi trang có phần tử `<video>`/`<audio>` trong tài liệu thì phần tử đó là nguồn chính (vị trí chính xác hơn) và Media Session chỉ bổ sung. Script gọi hàm gốc trước và trả kết quả nguyên vẹn, không đọc gì khác của trang.
 
 Script của YouTube (`content.js`) vẫn nằm cùng mục với script này (Chrome chỉ nạp một file một lần cho mỗi tài liệu, và hai script cần cùng `captions.js` trong cùng một world) nhưng tự kiểm tra địa chỉ và không làm gì ngoài `www.youtube.com`.
 
@@ -55,7 +55,7 @@ Mã extension (id) cố định nhờ khoá công khai trong `manifest.json`, id
 
 Mỗi tab có media là một nguồn trong tab Media của notch. Khi trang phát, tạm dừng, tua hoặc đổi bài, script báo ngay; khi đang phát nó báo lại mỗi 5 giây, khi đang tạm dừng mỗi 30 giây (MyNotch giữ một tab vài phút không có tin). Khi trang không còn media, khi bạn rời trang hoặc đóng tab, MyNotch được báo là tab đó đã hết. Service worker không giữ danh sách tab nào ngoài bộ nhớ.
 
-Với YouTube, "Bài sau/Bài trước" cho một tab cụ thể vẫn là các cú bấm nút của trình phát (như phần trên); với trang khác là hàm xử lý Media Session của chính trang đó, nếu có. Khi trang không có, lệnh báo `unavailable` (mã chẩn đoán `content-tabcommand next unavailable`) và không làm gì thêm.
+Phát, tạm dừng và tua tác động thẳng lên phần tử media khi trang có, nếu không thì qua hàm xử lý Media Session của trang. Với YouTube, "Bài sau/Bài trước" cho một tab cụ thể vẫn là các cú bấm nút của trình phát (như phần trên); với trang khác là hàm xử lý Media Session của chính trang đó, nếu có. Khi trang không có, lệnh báo `unavailable` (mã chẩn đoán `content-tabcommand next unavailable`) và không làm gì thêm. Vị trí của một trang chỉ có Media Session là vị trí trang khai gần nhất, chạy tiếp theo tốc độ phát; trang không khai vị trí thì hiện 0 và không có độ dài.
 
 ## Gỡ bỏ
 

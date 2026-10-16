@@ -170,32 +170,62 @@
   }
 
   /**
-   * The page script (MAIN world) tells the content script what the page's Media Session holds: the metadata the page set and
-   * whether it has handlers for the next and previous track. Only text and two booleans cross, whatever the page put in them.
-   * Gate for window "message" events: this very window, its own origin and the tag.
+   * The page script (MAIN world) tells the content script what the page's Media Session holds: the metadata the page set, whether
+   * it says it plays or is paused, where it says it is (`setPositionState`), and which actions it has handlers for. That is how a
+   * page is known whose media is not an element of the document (an `Audio` the page keeps to itself) and how it is controlled:
+   * the page's own handlers are what Chrome's media controls call. Only text, numbers and booleans cross, whatever the page put
+   * in them. Gate for window "message" events: this very window, its own origin and the tag.
    */
   function acceptSessionMessage(event, win, origin) {
     if (!event || event.source !== win || event.origin !== origin) return null;
     var data = event.data;
     if (!isObject(data) || data.source !== SOURCE || data.type !== "session") return null;
+    var position = null;
+    var given = data.position;
+    if (isObject(given) && isNumber(given.position) && given.position >= 0 && given.position <= MAX_SECONDS) {
+      position = {
+        position: given.position,
+        duration: isNumber(given.duration) && given.duration > 0 && given.duration <= MAX_SECONDS ? given.duration : null,
+        rate: isNumber(given.rate) && given.rate > 0 && given.rate <= MAX_RATE ? given.rate : 1,
+        // When the page said it, on the clock the page's and the content script's worlds share; null when it did not say.
+        at: isNumber(given.at) ? given.at : null
+      };
+    }
     return {
       title: clean(data.title, MAX_TITLE),
       artist: clean(data.artist, MAX_NAME),
       album: clean(data.album, MAX_NAME),
+      playback: data.playback === "playing" || data.playback === "paused" ? data.playback : "none",
+      position: position,
       next: data.next === true,
-      previous: data.previous === true
+      previous: data.previous === true,
+      play: data.play === true,
+      pause: data.pause === true,
+      seek: data.seek === true
     };
   }
 
-  /** The content script's request to the page script: call the page's own handler for the next or the previous track. */
-  function buildInvoke(action) {
-    return action === "next" || action === "previous" ? { source: SOURCE, type: "invoke", action: action } : null;
+  /**
+   * The content script's request to the page script: call the page's own handler for this action. A seek says to where, in seconds.
+   * Null for anything else.
+   */
+  function buildInvoke(action, seconds) {
+    if (action === "seek") {
+      return isNumber(seconds) && seconds >= 0 && seconds <= MAX_SECONDS
+        ? { source: SOURCE, type: "invoke", action: "seek", seconds: round3(seconds) }
+        : null;
+    }
+    if (action === "next" || action === "previous" || action === "play" || action === "pause") {
+      return { source: SOURCE, type: "invoke", action: action };
+    }
+    return null;
   }
 
   var api = {
     SOURCE: SOURCE,
     MAX_TITLE: MAX_TITLE,
     MAX_NAME: MAX_NAME,
+    MAX_SECONDS: MAX_SECONDS,
     cleanSite: cleanSite,
     cleanText: clean,
     validateReport: validateReport,

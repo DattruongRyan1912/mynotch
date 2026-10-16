@@ -2,19 +2,24 @@
  * MyNotch YouTube Bridge: media tabs (content script, isolated world, any http or https page, top frame).
  *
  * Tells the service worker what the page's media is doing, so that MyNotch can show it next to the other sources that play
- * (Music, Spotify, other tabs) and control it:
+ * (Music, Spotify, other tabs) and control it. A page's media is known in one of two ways:
  *
- *  - It listens for the media events of the document (play, pause, seeked, ...) in the capture phase, so a page with no media costs
- *    three listeners and no timer. A one-second tick runs only while a media element is being reported.
- *  - A media element counts when it plays and is not a muted or very short clip (autoplay banners, interface sounds), unless the
- *    page has put a title in its Media Session, which is a page saying "this is a player". It keeps counting while it is paused.
- *  - It reports the title (the Media Session's, else the document's), the artist and album the Media Session names, the site (the
- *    host name only, never a path or a URL), whether it plays, its position and length, its speed, and whether it is live.
- *    On a state change at once, then every 5 s while it plays and every 30 s while it is paused (the app keeps a tab for a few
- *    minutes without news, and expects a paused one to keep telling it so).
- *  - It carries out the six commands of the app (play, pause, toggle, seek, next, previous) on that element. Next and previous are
- *    the page's own business: the YouTube script offers its button clicks, and for any other page the page script asks the page's
- *    own Media Session handler, when the page has one.
+ *  - As an element. The script listens for the media events of the document (play, pause, seeked, ...) in the capture phase, so a
+ *    page with no media costs a few listeners and no timer. A media element counts when it plays and is not a muted or very short
+ *    clip (autoplay banners, interface sounds), unless the page has put a title in its Media Session, which is a page saying
+ *    "this is a player". It keeps counting while it is paused.
+ *  - As a Media Session, for media that is no element of the document (an `Audio` the page keeps to itself, which no event of the
+ *    document ever shows): a page whose Media Session has a title and says it plays or is paused. The page script (MAIN world)
+ *    passes on what the session says, including where it says it is, and an element, when there is one, wins.
+ *
+ * It reports the title (the Media Session's, else the document's), the artist and album the Media Session names, the site (the host
+ * name only, never a path or a URL), whether it plays, its position and length, its speed, and whether it is live. On a state
+ * change at once, then every 5 s while it plays and every 30 s while it is paused (the app keeps a tab for a few minutes without
+ * news, and expects a paused one to keep telling it so). A one-second tick runs only while something is being reported.
+ *
+ * It carries out the six commands of the app (play, pause, toggle, seek, next, previous): on the element when there is one, else
+ * through the page's own Media Session handlers, which the page script calls. Next and previous are the page's own business: the
+ * YouTube script offers its button clicks, and for any other page the page's handler is called, when the page has one.
  *
  * No artwork, no URL, no request of its own. Only the fields of `tab-report` (see tabmessages.js) are ever sent.
  */
@@ -49,7 +54,7 @@
     el: null, // the element being reported
     reported: false, // a report went out and no end since
     last: null, // { key, time, at } of the last report
-    session: null, // what the page script last said of the Media Session: { title, artist, album, next, previous }
+    session: null, // what the page script last said of the Media Session, and when (see onPageMessage)
     timer: 0,
     messages: null, // chrome.runtime.onMessage, where the command listener is registered
     stopped: false
@@ -84,6 +89,22 @@
     return state.session && state.session.title ? state.session : null;
   }
 
+  /** What the page says its media is doing: read live when it says so, else what the page script last told us ("playing", "paused" or "none"). */
+  function sessionPlayback() {
+    try {
+      var live = root.navigator && root.navigator.mediaSession ? root.navigator.mediaSession.playbackState : "none";
+      if (live === "playing" || live === "paused") return live;
+    } catch (error) {
+      /* a page whose Media Session cannot be read from here */
+    }
+    return state.session ? state.session.playback : "none";
+  }
+
+  /** The page's media is not an element we know, and its Media Session has a title and says it plays or is paused. */
+  function isSessionActive() {
+    return !state.el && readSession() !== null && sessionPlayback() !== "none";
+  }
+
   /** Whether a media element is one to show: see the header. */
   function isEligible(el) {
     if (readSession()) return true;
@@ -97,7 +118,7 @@
   }
 
   /** The report for the element, or null while there is no title to give (the page has not set one yet). */
-  function build(el) {
+  function buildElement(el) {
     var session = readSession();
     var title = session ? session.title : C.cleanTitle(doc.title);
     if (!title || title === "YouTube") return null;
@@ -115,6 +136,40 @@
       duration: typeof duration === "number" && isFinite(duration) && duration >= 0 ? duration : null,
       rate: rate > 0 && rate <= 16 ? rate : 1,
       live: duration === Infinity
+    };
+  }
+
+  /**
+   * The report for the page's Media Session: the position it last gave, carried on at the speed it gave while it plays, since the
+   * session says it only when it changes. Without a position (many pages never set one) it is 0 of no length.
+   */
+  function buildSession() {
+    var session = readSession();
+    var playback = sessionPlayback();
+    if (!session || playback === "none") return null;
+    var given = state.session && state.session.position;
+    var rate = given ? given.rate : 1;
+    var time = 0;
+    var duration = null;
+    if (given) {
+      duration = given.duration;
+      var since = given.at !== null ? given.at : state.session.receivedAt;
+      var elapsed = playback === "playing" ? Math.min(Math.max((Date.now() - since) / 1000, 0), T.MAX_SECONDS) * rate : 0;
+      time = given.position + elapsed;
+      if (duration !== null) time = Math.min(time, duration);
+    }
+    return {
+      v: 1,
+      type: "tab-report",
+      site: T.cleanSite(root.location.hostname),
+      title: session.title,
+      artist: session.artist || "",
+      album: session.album || "",
+      state: playback,
+      time: time,
+      duration: duration,
+      rate: rate,
+      live: false
     };
   }
 
@@ -150,18 +205,30 @@
   /** Sends the element's report when something changed, the position is not where the last report put it, or a heartbeat is due. */
   function report(force) {
     var el = state.el;
-    if (!el) return;
-    if (!isConnected(el)) {
-      end();
+    var message;
+    if (el) {
+      if (!isConnected(el)) {
+        end();
+        afterElementGone();
+        return;
+      }
+      message = buildElement(el);
+    } else if (isSessionActive()) {
+      message = buildSession();
+    } else {
+      // Nothing left to show: say so, if anything was shown.
+      if (state.reported) end();
+      else stopTimer();
       return;
     }
-    var message = build(el);
     if (!message) return;
     var now = Date.now();
     var key = [message.title, message.artist, message.album, message.site, message.state, message.duration, message.rate, message.live].join("\u0001");
     var last = state.last;
+    // A session that never said where it is has no position to be off: only its heartbeat is news.
+    var positionKnown = Boolean(el) || Boolean(state.session && state.session.position);
     if (!force && last && last.key === key && now - last.at < heartbeat(message)) {
-      if (Math.abs(message.time - expectedTime(last, now)) < SAME_POSITION_SECONDS) return;
+      if (!positionKnown || Math.abs(message.time - expectedTime(last, now)) < SAME_POSITION_SECONDS) return;
     }
     var clean = T.validateReport(message);
     if (!clean) return;
@@ -178,6 +245,13 @@
     state.reported = false;
     stopTimer();
     if (reported) transmit(T.validateEnd({ v: 1, type: "tab-end" }));
+  }
+
+  /** The element is gone, and the page's Media Session may still say that it plays: then that is what the page shows now. */
+  function afterElementGone() {
+    if (!isSessionActive()) return;
+    startTimer();
+    report(true);
   }
 
   function startTimer() {
@@ -197,10 +271,6 @@
 
   function tick() {
     try {
-      if (!state.el) {
-        stopTimer();
-        return;
-      }
       report(false);
     } catch (error) {
       /* the next tick tries again */
@@ -219,8 +289,12 @@
       }
       if (el !== state.el) return;
       // What the report left out of a change, it sends only when it is one: a repeat of the same state is not sent again.
-      if (event.type === "emptied" || ((event.type === "durationchange" || event.type === "loadedmetadata") && !isEligible(el))) end();
-      else report(false);
+      if (event.type === "emptied" || ((event.type === "durationchange" || event.type === "loadedmetadata") && !isEligible(el))) {
+        end();
+        afterElementGone();
+      } else {
+        report(false);
+      }
     } catch (error) {
       /* a failing handler must not reach the page */
     }
@@ -230,9 +304,17 @@
   function onPageMessage(event) {
     var message = T.acceptSessionMessage(event, root, root.location.origin);
     if (!message) return;
+    message.receivedAt = Date.now();
     state.session = message;
     try {
-      if (state.el) report(false);
+      if (state.el) {
+        report(false);
+      } else if (isSessionActive()) {
+        startTimer();
+        report(false);
+      } else if (state.reported) {
+        end();
+      }
     } catch (error) {
       /* the next tick tries again */
     }
@@ -260,17 +342,42 @@
       }
     }
     var known = state.session ? (action === "next" ? state.session.next : state.session.previous) : false;
-    if (!known) return false;
-    var request = T.buildInvoke(action);
+    return known && invoke(action);
+  }
+
+  /** Asks the page script to call the page's own handler for the action; false when there is nothing valid to ask. */
+  function invoke(action, seconds) {
+    var request = T.buildInvoke(action, seconds);
     if (!request) return false;
     root.postMessage(request, root.location.origin);
     return true;
+  }
+
+  /** The same six commands through the page's Media Session handlers, for media that is no element of ours. */
+  function performThroughSession(command) {
+    var session = state.session;
+    switch (command.action) {
+      case "play":
+        return session.play && invoke("play");
+      case "pause":
+        return session.pause && invoke("pause");
+      case "toggle":
+        return sessionPlayback() === "playing" ? session.pause && invoke("pause") : session.play && invoke("play");
+      case "seek":
+        return session.seek && invoke("seek", command.seconds);
+      case "next":
+      case "previous":
+        return skip(command.action);
+      default:
+        return false;
+    }
   }
 
   /** Whether the command could be carried out. Never throws: a page that changed under us is "unavailable". */
   function perform(command) {
     try {
       var el = state.el;
+      if (!el && isSessionActive()) return performThroughSession(command) === true;
       if (!el || !isConnected(el)) return false;
       switch (command.action) {
         case "play":
@@ -365,6 +472,11 @@
   if (state.messages) state.messages.addListener(onRuntimeMessage);
   try {
     claimPlaying();
+    // A page that was already playing through its Media Session alone (no element of the document) when the script came.
+    if (!state.el && isSessionActive()) {
+      startTimer();
+      report(true);
+    }
   } catch (error) {
     /* the first media event finds it */
   }

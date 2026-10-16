@@ -50,7 +50,8 @@ function makePage({ title = "Placeholder page", hostname = "music.example.com", 
     runtime: { id: "extension-id" },
     runtimeListeners: [],
     removedRuntimeListeners: [],
-    sendThrows: null
+    sendThrows: null,
+    playbackState: "none"
   };
   const document = {
     get title() {
@@ -70,7 +71,16 @@ function makePage({ title = "Placeholder page", hostname = "music.example.com", 
     location: { href: `${ORIGIN}/album?x=secret#frag`, origin: ORIGIN, hostname },
     navigator: {
       get mediaSession() {
-        return page.noSession ? undefined : { get metadata() { return page.metadata; } };
+        return page.noSession
+          ? undefined
+          : {
+              get metadata() {
+                return page.metadata;
+              },
+              get playbackState() {
+                return page.playbackState;
+              }
+            };
       }
     },
     chrome: {
@@ -121,6 +131,9 @@ function makePage({ title = "Placeholder page", hostname = "music.example.com", 
   page.fire = (type, event = { type }) => [...(page.windowListeners[type] ?? [])].forEach((fn) => fn(event));
   page.session = (data) =>
     page.fire("message", { source: page.win, origin: ORIGIN, data: { source: "mynotch-tab", type: "session", ...data } });
+  /** What the page script says of a Media Session that is playing something. */
+  page.playSession = (data = {}) =>
+    page.session({ title: "Session song", artist: "Session artist", album: "", playback: "playing", play: true, pause: true, seek: true, ...data });
   page.command = (message, ...rest) => {
     const sender = rest.length > 0 ? rest[0] : { id: page.runtime.id };
     const responses = [];
@@ -629,4 +642,216 @@ test("without the libraries the script does nothing and says nothing", () => {
   runScripts(page.context, ["tabs.js"]);
   assert.deepEqual(page.docListeners, {});
   assert.deepEqual(page.sent, []);
+});
+
+// ---- media that is no element of the document: the page's Media Session says it ----------------------------
+
+const SESSION_REPORT = {
+  v: 1,
+  type: "tab-report",
+  site: "music.example.com",
+  title: "Session song",
+  artist: "Session artist",
+  album: "",
+  state: "playing",
+  time: 0,
+  duration: null,
+  rate: 1,
+  live: false
+};
+
+test("a page whose Media Session says it plays, with no element of ours, is reported from the session, with a tick", () => {
+  const page = makePage();
+  page.start();
+  assert.deepEqual(page.sent, []);
+  page.playSession();
+  assert.deepEqual(page.take(), [SESSION_REPORT]);
+  assert.deepEqual(page.live().map((interval) => interval.ms), [1000]);
+});
+
+test("the position the session gave carries on at its speed while it plays, and stops at its length", () => {
+  const page = makePage();
+  page.start();
+  page.context.__now = 10000;
+  page.playSession({ position: { position: 30, duration: 200, rate: 1.5, at: 10000 } });
+  assert.deepEqual(page.take().map(({ time, duration, rate }) => [time, duration, rate]), [[30, 200, 1.5]]);
+  page.advance(5000);
+  assert.deepEqual(page.take().map(({ time }) => time), [37.5], "five seconds at one and a half");
+  page.playSession({ position: { position: 199, duration: 200, rate: 1, at: 15000 } });
+  page.take();
+  page.advance(30000);
+  assert.ok(page.take().every(({ time }) => time <= 200), "never past the end");
+});
+
+test("a paused session does not carry its position on", () => {
+  const page = makePage();
+  page.start();
+  page.context.__now = 10000;
+  page.playSession({ playback: "paused", position: { position: 30, duration: 200, rate: 1, at: 10000 } });
+  assert.deepEqual(page.take().map(({ state, time }) => [state, time]), [["paused", 30]]);
+  page.advance(30000);
+  assert.deepEqual(page.take().map(({ state, time }) => [state, time]), [["paused", 30]], "its heartbeat, still where it was");
+});
+
+test("a session with no position is reported at zero with no length, and the session's title and artist are the report's", () => {
+  const page = makePage({ title: "Document title" });
+  page.start();
+  page.playSession({ title: "From the session", artist: "Someone", album: "Record" });
+  assert.deepEqual(page.take().map(({ title, artist, album, time, duration }) => [title, artist, album, time, duration]), [
+    ["From the session", "Someone", "Record", 0, null]
+  ]);
+});
+
+test("the session's heartbeat is every 5 s while it plays and every 30 s while it is paused", () => {
+  const page = makePage();
+  page.start();
+  page.playSession({ position: { position: 10, duration: 200, rate: 1, at: page.context.__now } });
+  page.take();
+  const run = (seconds) => {
+    const sent = [];
+    for (let second = 0; second < seconds; second++) {
+      page.advance(1000);
+      sent.push(...page.take());
+    }
+    return sent;
+  };
+  assert.equal(run(4).length, 0);
+  assert.equal(run(1).length, 1);
+  page.playSession({ playback: "paused", position: { position: 20, duration: 200, rate: 1, at: page.context.__now } });
+  page.take();
+  assert.equal(run(29).length, 0);
+  assert.equal(run(1).length, 1);
+});
+
+test("a session with no title, or that says it is not playing at all, is nothing to show", () => {
+  const page = makePage();
+  page.start();
+  page.playSession({ title: "" });
+  page.playSession({ playback: "none" });
+  assert.deepEqual(page.sent, []);
+  assert.deepEqual(page.intervals, []);
+});
+
+test("when the session says it no longer plays the page says it has no media, once", () => {
+  const page = makePage();
+  page.start();
+  page.playSession();
+  page.take();
+  page.session({ title: "Session song", playback: "none" });
+  assert.deepEqual(page.take(), [{ v: 1, type: "tab-end" }]);
+  assert.deepEqual(page.live(), []);
+  page.session({ title: "Session song", playback: "none" });
+  assert.deepEqual(page.take(), []);
+});
+
+test("the page's Media Session can be read from here too, and what it says live is believed over what was passed on", () => {
+  const page = makePage({ metadata: { title: "Read live", artist: "Live artist", album: "" } });
+  page.start();
+  page.playbackState = "paused";
+  page.session({ title: "", playback: "none" }); // the page script's last word is stale or empty
+  assert.deepEqual(page.take().map(({ title, state }) => [title, state]), [["Read live", "paused"]]);
+  page.playbackState = "playing";
+  page.advance(5000);
+  assert.deepEqual(page.take().map(({ title, state }) => [title, state]), [["Read live", "playing"]]);
+});
+
+test("a session that was already playing when the script came is reported at once", () => {
+  const page = makePage({ metadata: { title: "Already", artist: "", album: "" } });
+  page.playbackState = "playing";
+  page.start();
+  assert.deepEqual(page.take().map(({ title, state }) => [title, state]), [["Already", "playing"]]);
+  assert.equal(page.live().length, 1);
+});
+
+test("an element wins over the session, which then adds no second report", () => {
+  const el = video();
+  const page = makePage({ media: [el] });
+  page.start();
+  page.emit(el, "play");
+  page.take();
+  page.playSession({ title: "Session song" });
+  const sent = page.take();
+  assert.equal(sent.length, 1, "the title changed, and the element's own report says so");
+  assert.equal(sent[0].time, 30, "from the element: its position, not the session's zero");
+  page.advance(5000);
+  assert.ok(page.take().every((message) => message.time >= 30));
+});
+
+test("when the element goes and the session still says it plays, the session is what the page shows", () => {
+  const el = video();
+  const page = makePage({ media: [el] });
+  page.start();
+  page.emit(el, "play");
+  page.take();
+  page.playSession({ title: "Session song", position: { position: 12, duration: 100, rate: 1, at: page.context.__now } });
+  page.take();
+  page.emit(el, "emptied");
+  const sent = page.take();
+  assert.deepEqual(sent.map((message) => message.type), ["tab-end", "tab-report"], "the element's end, then the session's report");
+  assert.equal(sent[1].time, 12);
+  assert.equal(page.live().length, 1);
+
+  el.isConnected = false; // a removed element behaves alike
+  const other = video();
+  page.media.push(other);
+  page.emit(other, "play");
+  page.take();
+  other.isConnected = false;
+  page.advance(1000);
+  assert.deepEqual(page.take().map((message) => message.type), ["tab-end", "tab-report"]);
+});
+
+test("commands go through the page's Media Session handlers when there is no element: play, pause, toggle, seek, next, previous", () => {
+  const page = makePage();
+  page.start();
+  page.playSession({ next: true, previous: true });
+  const invoked = () => page.posted.splice(0).map((post) => post.data);
+  assert.deepEqual(page.command(command("pause")).responses, [{ ok: true }]);
+  assert.deepEqual(invoked(), [{ source: "mynotch-tab", type: "invoke", action: "pause" }]);
+  page.command(command("play"));
+  page.command(command("toggle")); // it plays: toggle pauses
+  page.command(command("seek", { seconds: 61.5 }));
+  page.command(command("next"));
+  page.command(command("previous"));
+  assert.deepEqual(invoked(), [
+    { source: "mynotch-tab", type: "invoke", action: "play" },
+    { source: "mynotch-tab", type: "invoke", action: "pause" },
+    { source: "mynotch-tab", type: "invoke", action: "seek", seconds: 61.5 },
+    { source: "mynotch-tab", type: "invoke", action: "next" },
+    { source: "mynotch-tab", type: "invoke", action: "previous" }
+  ]);
+  page.playSession({ playback: "paused", next: false, previous: false });
+  page.command(command("toggle")); // it is paused: toggle plays
+  assert.deepEqual(invoked(), [{ source: "mynotch-tab", type: "invoke", action: "play" }]);
+  assert.deepEqual(page.diags.map((message) => message.event).slice(0, 2), ["content-tabcommand pause ok", "content-tabcommand play ok"]);
+});
+
+test("a command the page has no handler for is unavailable, and nothing is asked of the page", () => {
+  const page = makePage();
+  page.start();
+  page.playSession({ play: false, pause: false, seek: false, next: false, previous: false });
+  page.posted.length = 0;
+  for (const action of ["play", "pause", "toggle", "next", "previous"]) {
+    assert.deepEqual(page.command(command(action)).responses, [{ ok: false }], action);
+  }
+  assert.deepEqual(page.command(command("seek", { seconds: 5 })).responses, [{ ok: false }]);
+  assert.deepEqual(page.posted, []);
+});
+
+test("with nothing playing in either way a command is unavailable", () => {
+  const page = makePage();
+  page.start();
+  assert.deepEqual(page.command(command("pause")).responses, [{ ok: false }]);
+  page.playSession({ playback: "none" });
+  assert.deepEqual(page.command(command("play")).responses, [{ ok: false }]);
+});
+
+test("next and previous in a session go to YouTube's button clicks when that script has left them", () => {
+  const page = makePage();
+  page.start();
+  page.playSession({ next: false, previous: false });
+  vm.runInContext(`globalThis[${SKIP}] = (action) => action === "next"`, page.context);
+  assert.deepEqual(page.command(command("next")).responses, [{ ok: true }]);
+  assert.deepEqual(page.command(command("previous")).responses, [{ ok: false }]);
+  assert.deepEqual(page.posted, []);
 });
