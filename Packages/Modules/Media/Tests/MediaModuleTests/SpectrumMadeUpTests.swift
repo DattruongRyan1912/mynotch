@@ -71,6 +71,21 @@ import Testing
 
     // MARK: - The animation
 
+    /// Building the loop's values takes milliseconds, which would land on every attach of every display (each collapse, each open of
+    /// the Media tab); in Debug it was 3.7 ms a view, and with the values kept it is 0.2.
+    @Test func theLoopsValuesAreBuiltOnceHoweverOftenViewsAttach() {
+        for _ in 0..<3 {
+            let views = (0..<2).map { _ in SpectrumBarsView(store: store, accent: accent) }
+            let windows = views.map(attach)
+            #expect(views.allSatisfy { $0.isMadeUp })
+            windows.forEach { $0.contentView = nil }
+        }
+        #expect(NowPlayingBars.madeUpKeyframeBuilds == 1)
+        for bar in 0..<NowPlayingBars.barCount {
+            #expect(NowPlayingBars.madeUpKeyframes[bar].map(\.doubleValue) == NowPlayingBars.madeUpHeights(bar: bar).map { Double($0) })
+        }
+    }
+
     @Test func theBarsOfAPlayingStoreRunTheMadeUpMotionAsAnAnimationOfEachLayer() throws {
         let view = SpectrumBarsView(store: store, accent: accent)
         let window = attach(view)

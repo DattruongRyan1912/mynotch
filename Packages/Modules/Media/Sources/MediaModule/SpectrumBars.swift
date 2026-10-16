@@ -152,7 +152,7 @@ final class SpectrumBarsView: NSView {
     /// of every display show the same height. Nothing here is drawn per frame: the render server plays it.
     static func madeUpAnimation(bar: Int, phase: TimeInterval) -> CAKeyframeAnimation {
         let loop = CAKeyframeAnimation(keyPath: "bounds.size.height")
-        loop.values = NowPlayingBars.madeUpHeights(bar: bar).map { NSNumber(value: Double($0)) }
+        loop.values = NowPlayingBars.madeUpKeyframes[bar]
         loop.calculationMode = .discrete
         loop.duration = NowPlayingBars.madeUpLoop
         loop.repeatCount = .infinity

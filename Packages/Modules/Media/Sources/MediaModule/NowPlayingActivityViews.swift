@@ -78,6 +78,17 @@ struct NowPlayingBars: View {
         let step = madeUpLoop / Double(madeUpKeyframeCount)
         return (0..<madeUpKeyframeCount).map { height(forLevel: level(bar: bar, at: Date(timeIntervalSinceReferenceDate: Double($0) * step))) }
     }
+
+    /// How many times `madeUpKeyframes` was built, for tests: once for the whole run of the app.
+    private(set) static var madeUpKeyframeBuilds = 0
+
+    /// `madeUpHeights` of every bar, as Core Animation takes them. Built the first time the made-up motion is shown and kept: building
+    /// them takes a few milliseconds, which would otherwise land on every attach of every display (each collapse and each open of the
+    /// Media tab) for the price of a quarter of a megabyte.
+    static let madeUpKeyframes: [[NSNumber]] = {
+        madeUpKeyframeBuilds += 1
+        return (0..<barCount).map { madeUpHeights(bar: $0).map { NSNumber(value: Double($0)) } }
+    }()
 }
 
 /// Under the closed notch while the lyrics are synced: the line being sung and the one coming next, like karaoke.
