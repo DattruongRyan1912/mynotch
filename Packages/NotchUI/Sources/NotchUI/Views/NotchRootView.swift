@@ -149,16 +149,19 @@ struct NotchRootView: View {
         Binding(get: { model.isDragging }, set: { if !$0 { model.setDragging(false) } })
     }
 
-    /// The notch with `tiles`. Four layers in one wrapper, all in the family's container so their glass blends and morphs:
+    /// The notch with `tiles`. Four layers in one wrapper, all in the family's container so their glass blends and morphs, in this order,
+    /// bottom to top (a glass view covers whatever is below it, content included, so the notch's own view, whose content is the
+    /// collapsed notch's strip and a toast, is last, and no tile's glass is ever above it):
     /// * the notch's **hit layer**, as big as the open notch whatever is drawn in it: it holds the faint veil that keeps the gaps between
     ///   the tiles part of the window, and it sizes the wrapper;
-    /// * the notch's **own glass and content**: the collapsed notch's strip and a toast's content are inside the view that carries
-    ///   the glass, which is what draws them above it (content outside it is under the container's glass and comes out blurred). Its
-    ///   glass is `Glass.identity` while the notch is open, and then it is only as big as the collapsed notch, so that it is already
-    ///   the right size when it comes back and nothing of the open notch's size ever shows as glass on the way;
     /// * the tab bar's **capsule** and the content's **tile**, which are not inside the notch's shape, so nothing clips their glass: they
     ///   are the collapsed notch's body while the notch is not open, and spring from there to where the tab page puts them
     ///   (`NotchTilesLayout`), and back. Their content is laid out at its final size and clipped by the tile's own shape, and fades in.
+    ///   Their glass is only there while the notch is open and until they are most of the way back when it closes (`NotchTile`);
+    /// * the notch's **own glass and content**: the collapsed notch's strip and a toast's content are inside the view that carries
+    ///   the glass, which is what draws them above it (content outside it is under the container's glass and comes out blurred). Its
+    ///   glass is `Glass.identity` while the notch is open, and then it is only as big as the collapsed notch, so that it is already
+    ///   the right size when it comes back and nothing of the open notch's size ever shows as glass on the way.
     ///
     /// The wrapper, whose size is the open notch's, carries the one hit shape, the one tap and the one drop target, as the slab's view
     /// does: SwiftUI delivers a gesture to the hit view and its ancestors, and the strip, the toast and the tab are all its descendants,
@@ -182,8 +185,8 @@ struct NotchRootView: View {
             shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: contentHeight), notchHeight: geometry.notchSize.height,
             topRadius: openRadii.top, tabCount: registry.tabs.count
         )
-        let current = showsTabs
-            ? final : NotchTilesLayout.rest(collapsedSize: collapsedSize, topRadius: collapsedRadii.top, hasTabBar: final.tabBar != nil)
+        let rest = NotchTilesLayout.rest(collapsedSize: collapsedSize, topRadius: collapsedRadii.top, hasTabBar: final.tabBar != nil)
+        let current = showsTabs ? final : rest
         let inner = CGSize(
             width: final.content.size.width - 2 * NotchGlassPlan.tilePadding, height: final.content.size.height - 2 * NotchGlassPlan.tilePadding
         )
@@ -193,6 +196,22 @@ struct NotchRootView: View {
                 .clipShape(fullShape)
                 .frame(width: size.width, height: size.height)
                 .animation(NotchTokens.spring, value: layout)
+
+            if registry.tabs.count >= 2, let bar = current.tabBar {
+                tile(bar, rest: rest.tabBar ?? bar, final: final.tabBar ?? bar, glass: tiles.tabBar, shape: Capsule(), key: current, showsTabs: showsTabs) {
+                    TabBar(tabs: registry.tabs, selected: shownTab?.id) { model.open(tab: $0) }
+                        .frame(width: TabBarMetrics.width(count: registry.tabs.count), height: TabBarMetrics.iconSize.height)
+                        .padding(.top, NotchGlassPlan.tabBarInset.height)
+                }
+            }
+            tile(
+                current.content, rest: rest.content, final: final.content, glass: tiles.content,
+                shape: RoundedRectangle(cornerRadius: concentricTileRadius, style: .continuous), key: current, showsTabs: showsTabs
+            ) {
+                openContent
+                    .frame(width: max(inner.width, 0), height: max(inner.height, 0))
+                    .padding(.top, NotchGlassPlan.tilePadding)
+            }
 
             Color.clear
                 .overlay(alignment: .top) {
@@ -204,22 +223,6 @@ struct NotchRootView: View {
                 .frame(width: glassSize.width, height: glassSize.height)
                 .notchGlass(plan.notch, in: glassShape, namespace: glassNamespace)
                 .animation(NotchTokens.spring, value: layout)
-
-            if registry.tabs.count >= 2, let bar = current.tabBar {
-                tile(bar, glass: tiles.tabBar, shape: Capsule(), key: current, showsTabs: showsTabs) {
-                    TabBar(tabs: registry.tabs, selected: shownTab?.id) { model.open(tab: $0) }
-                        .frame(width: TabBarMetrics.width(count: registry.tabs.count), height: TabBarMetrics.iconSize.height)
-                        .padding(.top, NotchGlassPlan.tabBarInset.height)
-                }
-            }
-            tile(
-                current.content, glass: tiles.content, shape: RoundedRectangle(cornerRadius: concentricTileRadius, style: .continuous),
-                key: current, showsTabs: showsTabs
-            ) {
-                openContent
-                    .frame(width: max(inner.width, 0), height: max(inner.height, 0))
-                    .padding(.top, NotchGlassPlan.tilePadding)
-            }
         }
         .contentShape(fullShape)
         // Once open, taps belong to the tab content; the root tap only opens the notch.
@@ -227,30 +230,16 @@ struct NotchRootView: View {
         .onDrop(of: allDropTypes, isTargeted: dropTargeting) { providers in drop(providers) }
     }
 
-    /// One tile: its glass in `shape`, which is `tile`'s size and distance from the top, with `content` inside, laid out at the size it
-    /// has when the notch is open, clipped by the tile's own shape and faded in while the tab is there. Frame and padding are layout,
-    /// so the glass follows them as they spring; `key` is what the spring is keyed on, so a tab of another height moves it too.
+    /// One tile: see `NotchTile`. Its content is laid out at the size it has when the notch is open, and is there while the tab is.
     private func tile<S: Shape, Content: View>(
-        _ tile: NotchTilesLayout.Tile, glass: NotchGlassPlan.Shape, shape: S, key: NotchTilesLayout, showsTabs: Bool,
-        @ViewBuilder content: () -> Content
+        _ tile: NotchTilesLayout.Tile, rest: NotchTilesLayout.Tile, final: NotchTilesLayout.Tile, glass: NotchGlassPlan.Shape, shape: S,
+        key: NotchTilesLayout, showsTabs: Bool, @ViewBuilder content: () -> Content
     ) -> some View {
-        Color.clear
-            .overlay(alignment: .top) {
-                if showsTabs {
-                    content()
-                        .environment(\.notch, NotchHandle(model: model))
-                        .opacity(isOpen ? 1 : 0)
-                        .allowsHitTesting(isOpen)
-                        .accessibilityHidden(!isOpen)
-                        .animation(NotchTokens.swap, value: isOpen)
-                        .transition(.asymmetric(insertion: .opacity.animation(NotchTokens.enter), removal: .opacity.animation(NotchTokens.leave)))
-                }
-            }
-            .clipShape(shape)
-            .frame(width: tile.size.width, height: tile.size.height)
-            .notchGlass(glass, in: shape, namespace: glassNamespace)
-            .padding(.top, tile.top)
-            .animation(NotchTokens.spring, value: key)
+        NotchTile(
+            tile: tile, rest: rest, final: final, glass: glass, shape: shape, key: key, showsTabs: showsTabs, isOpen: isOpen,
+            phase: isOpen ? .open : (showsTabs ? .covered : .closing),
+            handle: NotchHandle(model: model), namespace: glassNamespace, content: content()
+        )
     }
 
     /// The bubbles of the other live activities, beside the collapsed notch only. They appear and go with the pill's
@@ -367,5 +356,57 @@ struct NotchRootView: View {
             insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)).animation(NotchTokens.enter),
             removal: .opacity.animation(NotchTokens.leave)
         ))
+    }
+}
+
+/// One tile of the open notch (the tab bar's capsule, the content's tile): its glass in `shape`, which is `tile`'s size and distance
+/// from the top, with `content` inside, laid out at the size it has when the notch is open, clipped by the tile's own shape and
+/// faded in while the tab is there. The frame and the padding are layout, so they spring with the notch (`key` is what the
+/// animation is keyed on, so a tab of another height moves the tile too), with the notch's spring both ways.
+///
+/// Whether the tile is glass is decided from its phase and its animated size (`NotchTilesLayout.wantsGlass`): glass while the notch is
+/// open, none while a toast covers it, and closing, only until it is 40 % of the way back, so that its glass has faded by about when the
+/// notch has collapsed. A tile that is at rest has no glass.
+private struct NotchTile<S: Shape, Content: View>: View {
+    let tile: NotchTilesLayout.Tile
+    let rest: NotchTilesLayout.Tile
+    let final: NotchTilesLayout.Tile
+    let glass: NotchGlassPlan.Shape
+    let shape: S
+    let key: NotchTilesLayout
+    let showsTabs: Bool
+    let isOpen: Bool
+    let phase: NotchTilesLayout.Phase
+    let handle: NotchHandle
+    let namespace: Namespace.ID
+    let content: Content
+    @State private var wantsGlass = false
+
+    var body: some View {
+        // What the (sendable) geometry closure needs, taken out of `self`, which holds the content.
+        let (restSize, finalSize, phase) = (rest.size, final.size, phase)
+        Color.clear
+            .overlay(alignment: .top) {
+                if showsTabs {
+                    content
+                        .environment(\.notch, handle)
+                        .opacity(isOpen ? 1 : 0)
+                        .allowsHitTesting(isOpen)
+                        .accessibilityHidden(!isOpen)
+                        .animation(NotchTokens.swap, value: isOpen)
+                        .transition(.asymmetric(insertion: .opacity.animation(NotchTokens.enter), removal: .opacity.animation(NotchTokens.leave)))
+                }
+            }
+            .clipShape(shape)
+            .frame(width: tile.size.width, height: tile.size.height)
+            .onGeometryChange(for: Bool.self) { proxy in
+                NotchTilesLayout.wantsGlass(size: proxy.size, rest: restSize, final: finalSize, phase: phase)
+            } action: { wants in
+                // Closing, a tile that has stopped being glass does not become glass again (one that was covered never was).
+                wantsGlass = phase == .closing ? wantsGlass && wants : wants
+            }
+            .notchGlass(wantsGlass ? glass : NotchGlassPlan.Shape(id: glass.id, glass: .identity), in: shape, namespace: namespace)
+            .padding(.top, tile.top)
+            .animation(NotchTokens.spring, value: key)
     }
 }

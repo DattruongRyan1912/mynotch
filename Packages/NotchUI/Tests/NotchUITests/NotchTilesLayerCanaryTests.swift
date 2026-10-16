@@ -126,7 +126,7 @@ struct NotchTilesLayerCanaryTests {
         }
     }
 
-    // MARK: the tiles come out of the notch
+    // MARK: the tiles come out of the notch and go back into it
 
     func sample(_ rig: Rig, _ change: () -> Void) async -> [(t: Double, elements: [CGRect])] {
         change()
@@ -139,59 +139,183 @@ struct NotchTilesLayerCanaryTests {
         return samples
     }
 
-    @Test func theTilesSplitOutOfTheNotchFromTheFirstMomentAndMergeBackWithNoMomentWithoutGlass() async throws {
+    /// The elements that are not the notch's own glass, which is the collapsed notch's shape (an element is its shape grown by 4 pt).
+    func tileElements(_ elements: [CGRect]) -> [CGRect] {
+        let notch = geometry.shapeSize(for: .compact)
+        return elements.filter { !(abs($0.width - (notch.width + 8)) < 3 && abs($0.height - (notch.height + 8)) < 3) }
+    }
+
+    /// The elements of the tiles on screen: not the notch's own, and not a bubble's (32 pt).
+    func tileGlass(_ hosting: NSView) -> [CGRect] { tileElements(elements(hosting)).filter { $0.width > 50 } }
+
+    /// Polls `condition` every 20 ms, up to five seconds, with the main actor free while it sleeps: an assertion that something has gone
+    /// waits for it to go, not for a stretch of the clock.
+    func poll(_ what: String, _ condition: () -> Bool) async throws {
+        for _ in 0..<250 {
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(condition(), "gave up waiting: \(what)")
+    }
+
+    func opened(_ rig: Rig) async throws {
+        rig.model.open(tab: nil, onPurpose: false)
+        let width = NotchTilesLayout.open(
+            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 190), notchHeight: geometry.notchSize.height, topRadius: 8, tabCount: 2
+        ).content.size.width
+        try await poll("the tile open") { tileElements(elements(rig.hosting)).contains { abs($0.width - width) < 12 } }
+    }
+
+    func closed(_ rig: Rig) async throws {
+        rig.model.close()
+        try await poll("no glass but the notch's and the bubbles'") { tileGlass(rig.hosting).isEmpty }
+    }
+
+    func timeline(_ samples: [(t: Double, elements: [CGRect])]) -> String {
+        var lines: [String] = []
+        var lastPrinted = -100.0
+        for sample in samples where sample.t - lastPrinted >= 45 {
+            lastPrinted = sample.t
+            lines.append("\(Int(sample.t))ms " + sample.elements.map { "\(Int($0.width))x\(Int($0.height))" }.joined(separator: ","))
+        }
+        return lines.joined(separator: " | ")
+    }
+
+    @Test func theTilesSplitOutOfTheNotchAndMergeBackWithNoMomentWithoutGlassAndNoGlassOfTheirsLeftAtRest() async throws {
         let rig = try await rig(shape: .tiles)
         defer { rig.window.contentView = nil }
         let centre = geometry.panelSize.width / 2
-        let rest = NotchTilesLayout.rest(collapsedSize: geometry.shapeSize(for: .compact), topRadius: 6, hasTabBar: true)
         let final = NotchTilesLayout.open(
             shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 190), notchHeight: geometry.notchSize.height, topRadius: 8, tabCount: 2
         )
 
-        func timeline(_ samples: [(t: Double, elements: [CGRect])]) -> String {
-            var lines: [String] = []
-            var lastPrinted = -100.0
-            for sample in samples where sample.t - lastPrinted >= 45 {
-                lastPrinted = sample.t
-                lines.append("\(Int(sample.t))ms " + sample.elements.map { "\(Int($0.width))x\(Int($0.height))" }.joined(separator: ","))
-            }
-            return lines.joined(separator: " | ")
-        }
         let opening = await sample(rig) { rig.model.open(tab: nil, onPurpose: false) }
         print("CANARY opening: \(timeline(opening))")
         #expect(opening.allSatisfy { !$0.elements.isEmpty }, "no sample of the opening without glass")
-        // The glass is the rects of the tiles (an element is its shape grown by a few points each way).
         func near(_ rects: [CGRect], _ tile: NotchTilesLayout.Tile, slack: CGFloat) -> Bool {
             rects.contains { abs($0.width - tile.size.width) <= slack && abs($0.height - tile.size.height) <= slack }
         }
-        let first = try #require(opening.first)
-        print("CANARY first open sample \(Int(first.t)) ms: \(first.elements.map { "\(Int($0.width))x\(Int($0.height))" })  rest content \(rest.content.size)")
         let last = try #require(opening.last)
-        print("CANARY last open sample: \(last.elements.map { "\(Int($0.width))x\(Int($0.height))@\(Int($0.minY))" })  final content \(final.content.size) tabBar \(String(describing: final.tabBar?.size))")
         #expect(near(last.elements, final.content, slack: 10), "the tile ends at its final rect")
         if let bar = final.tabBar { #expect(near(last.elements, bar, slack: 10), "and the capsule at its") }
-        let widest = opening.flatMap(\.elements).map { abs($0.midX - centre) }.max() ?? 0
-        // (A presentation layer is read while SwiftUI is still setting the frames of the others, so a sample can be a point or two off.)
-        #expect(widest < 4, "centred the whole way: \(widest)")
+        #expect((opening.flatMap(\.elements).map { abs($0.midX - centre) }.max() ?? 0) < 4, "centred the whole way")
 
         let closing = await sample(rig) { rig.model.close() }
         print("CANARY closing: \(timeline(closing))")
         #expect(closing.allSatisfy { !$0.elements.isEmpty }, "no sample of the closing without glass")
-        let end = try #require(closing.last)
-        print("CANARY last close sample: \(end.elements.map { "\(Int($0.width))x\(Int($0.height))" })")
-        #expect(end.elements.allSatisfy { $0.width <= geometry.shapeSize(for: .compact).width + 12 }, "ends inside the collapsed notch")
+        // The content tile shrinks from the first moments, with no stretch at full size. Its glass element trails the layout by a few tens of
+        // ms (that is the element's, not a spring's), so: it only goes down (to within 3 pt), is clearly down (40 pt) by 80 ms, and by
+        // 130 ms is under 90 % of its size. The capsule is not followed: it widens on the way, and ends as wide as the tile.
+        let tallest: ([CGRect]) -> CGFloat? = { tileElements($0).filter { $0.height > 60 }.max { $0.width < $1.width }?.width }
+        let widths = closing.compactMap { sample in tallest(sample.elements).map { (sample.t, $0) } }
+        let first = try #require(widths.first)
+        #expect(first.0 < 60 && first.1 > final.content.size.width - 40, "the first sample sees the tile still at its size: \(first)")
+        let at80 = try #require(widths.first { $0.0 >= 80 })
+        #expect(at80.1 < first.1 - 40, "by \(Int(at80.0)) ms the tile is at \(at80.1) from \(first.1)")
+        let at130 = try #require(widths.first { $0.0 >= 130 })
+        #expect(at130.1 < final.content.size.width * 0.9, "by \(Int(at130.0)) ms the tile is at \(at130.1) of \(final.content.size.width)")
+        var previous = CGFloat.infinity
+        for (t, width) in widths {
+            #expect(width <= previous + 3, "the tile does not grow while closing (\(Int(t)) ms)")
+            previous = min(previous, width)
+        }
+        // Once it is back, its glass is dropped on the way and what is left fades out (the window server takes about 0.6 s over that,
+        // whatever it is told): after 800 ms none of the tiles' is left, only the notch's own, as in the slab.
+        for sample in closing where sample.t > 800 {
+            #expect(tileElements(sample.elements).isEmpty, "no tile glass left at \(Int(sample.t)) ms: \(sample.elements)")
+        }
         #expect((closing.flatMap(\.elements).map { abs($0.midX - centre) }.max() ?? 0) < 4)
     }
 
-    @Test func theCollapsedNotchWithBubblesHasTheSlabsGlassAndTheTwoTilesUnderIt() async throws {
-        let slab = try await rig(shape: .slab, bubbles: 2)
-        defer { slab.window.contentView = nil }
-        let tiles = try await rig(shape: .tiles, bubbles: 2)
-        defer { tiles.window.contentView = nil }
-        let slabCount = elements(slab.hosting).count
-        let tilesCount = elements(tiles.hosting).count
-        print("CANARY collapsed with 2 bubbles: slab \(slabCount) elements, tiles \(tilesCount)")
-        #expect(slabCount == 3, "the notch and two bubbles")
-        #expect(tilesCount == slabCount + 2, "and the capsule and the tile, inside the notch")
+    /// The glass layers of the tree in the order they are drawn (a later one is above an earlier one), each with the frames of its elements.
+    func glassLayers(_ hosting: NSView) -> [(layer: CALayer, elements: [CGRect])] {
+        var found: [(CALayer, [CGRect])] = []
+        func walk(_ layer: CALayer) {
+            if NSStringFromClass(type(of: layer)) == "SwiftUI.SDFLayer" {
+                let frames = layers(layer) { NSStringFromClass(type(of: $0)) == "CASDFElementLayer" }.map { element -> CGRect in
+                    let presented = element.presentation() ?? element
+                    return presented.convert(presented.bounds, to: nil)
+                }
+                found.append((layer, frames))
+            }
+            for sub in layer.sublayers ?? [] { walk(sub) }
+        }
+        if let root = hosting.layer { walk(root) }
+        return found
+    }
+
+    /// While the notch closes, the strip's text is in the glass layer that is drawn last: no glass of a tile is ever above it, however
+    /// much of the glass is still under it (the tiles are the size of the notch's body when they go).
+    @Test func theStripIsDrawnAboveEveryTilesGlassWhileTheNotchCloses() async throws {
+        let rig = try await rig(shape: .tiles)
+        defer { rig.window.contentView = nil }
+        try await opened(rig)
+        rig.model.close()
+        let start = Date()
+        var checked = 0, underneath = 0
+        while Date().timeIntervalSince(start) < 1.2 {
+            try await Task.sleep(for: .milliseconds(4))
+            let probes = layers(rig.hosting.layer) { isColoured($0, red) }
+            guard let probe = probes.first else { continue }
+            let frame = probe.convert(probe.bounds, to: nil)
+            let all = glassLayers(rig.hosting)
+            var own = probe.superlayer
+            while let layer = own, NSStringFromClass(type(of: layer)) != "SwiftUI.SDFLayer" { own = layer.superlayer }
+            let index = try #require(all.firstIndex { $0.layer === own }, "the strip is inside a glass layer")
+            checked += 1
+            for later in all[(index + 1)...] { #expect(!later.elements.contains { $0.intersects(frame) }, "glass above the strip: \(later.elements)") }
+            if all[..<index].contains(where: { $0.elements.contains { $0.intersects(frame) } }) { underneath += 1 }
+        }
+        #expect(checked > 100, "the strip was there to check (\(checked) samples)")
+        // Not vacuous: for a while the tiles' glass really is under the strip (it is the size of the notch's body, which holds the strip).
+        #expect(underneath > 0, "the tiles' glass was under the strip at some point")
+    }
+
+    @Test func noTileGlassOverlapsTheStripOnceTheNotchIsCollapsed() async throws {
+        let rig = try await rig(shape: .tiles)
+        defer { rig.window.contentView = nil }
+        try await opened(rig)
+        try await closed(rig)
+        try await poll("every tile shape gone") { tileGlass(rig.hosting).isEmpty }
+        let probes = layers(rig.hosting.layer) { isColoured($0, red) }
+        try #require(!probes.isEmpty, "the strip is back")
+        #expect(probes.allSatisfy(isInsideGlass))
+        let strips = probes.map { $0.convert($0.bounds, to: nil) }
+        let tiles = tileElements(elements(rig.hosting))
+        #expect(tiles.isEmpty, "no glass but the notch's own: \(tiles)")
+        for strip in strips { for tile in tiles { #expect(!tile.intersects(strip), "tile glass over the strip") } }
+    }
+
+    @Test func aToastOverATabThenGoingLeavesNoTileGlassBehindWithOrWithoutBubbles() async throws {
+        for bubbles in [0, 2] {
+            let rig = try await rig(shape: .tiles, bubbles: bubbles)
+            defer { rig.window.contentView = nil }
+            try await opened(rig)
+            rig.model.showToast(AnyView(Color.clear.frame(width: 40, height: 20)), duration: .seconds(60))
+            // In the toast the notch's own glass is the toast's pill, so once the tiles have faded it is the only glass over 50 pt wide.
+            try await poll("the toast's pill alone") { rig.model.displayState == .toast && elements(rig.hosting).filter { $0.width > 50 }.count == 1 }
+            try await closed(rig)
+            try await poll("every tile shape gone") { tileGlass(rig.hosting).isEmpty }
+            let count = elements(rig.hosting).count
+            print("CANARY toast then close, \(bubbles) bubbles: \(elements(rig.hosting).map { "\(Int($0.width))x\(Int($0.height))" })")
+            #expect(tileGlass(rig.hosting).isEmpty, "no tile glass left (\(bubbles) bubbles)")
+            #expect(count == 1 + bubbles, "the notch's and the bubbles'")
+        }
+    }
+
+    @Test func theCollapsedNotchHasExactlyTheSlabsGlassWithAndWithoutBubbles() async throws {
+        for bubbles in [0, 2] {
+            let slab = try await rig(shape: .slab, bubbles: bubbles)
+            defer { slab.window.contentView = nil }
+            let tiles = try await rig(shape: .tiles, bubbles: bubbles)
+            defer { tiles.window.contentView = nil }
+            // Straight away, and after a round of opening and closing.
+            #expect(elements(tiles.hosting).count == elements(slab.hosting).count, "\(bubbles) bubbles, at the start")
+            try await opened(tiles)
+            try await closed(tiles)
+            try await poll("every tile shape gone") { tileGlass(tiles.hosting).isEmpty }
+            print("CANARY collapsed, \(bubbles) bubbles: slab \(elements(slab.hosting).count), tiles \(elements(tiles.hosting).count) after open and close")
+            #expect(elements(tiles.hosting).count == elements(slab.hosting).count, "\(bubbles) bubbles, after open and close")
+        }
     }
 }

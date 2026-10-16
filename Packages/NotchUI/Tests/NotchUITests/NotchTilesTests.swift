@@ -300,7 +300,7 @@ private struct OpenNotch {
         )
     }
 
-    func rest(_ state: NotchState, hasTabBar: Bool = true) -> NotchTilesLayout {
+    func rest(_ state: NotchState = .compact, hasTabBar: Bool = true) -> NotchTilesLayout {
         NotchTilesLayout.rest(collapsedSize: geometry.shapeSize(for: state), topRadius: geometry.cornerRadii(for: state).top, hasTabBar: hasTabBar)
     }
 
@@ -362,16 +362,60 @@ private struct OpenNotch {
         #expect(rest(.closed).content.size.width == geometry.notchSize.width)
     }
 
+    // MARK: when a tile is glass
+
+    @Test func progressIsZeroAtTheRestRectAndOneAtTheTabPagesRectInWhicheverDimensionTravelsMost() {
+        let rest = rest(), end = open(tabs: 2)
+        #expect(NotchTilesLayout.progress(of: rest.content.size, from: rest.content.size, to: end.content.size) == 0)
+        #expect(NotchTilesLayout.progress(of: end.content.size, from: rest.content.size, to: end.content.size) == 1)
+        let half = CGSize(width: (rest.content.size.width + end.content.size.width) / 2, height: (rest.content.size.height + end.content.size.height) / 2)
+        #expect(abs(NotchTilesLayout.progress(of: half, from: rest.content.size, to: end.content.size) - 0.5) < 0.001)
+        // The capsule narrows as it comes out: its width travels backwards and its height does not, and it is still 0 to 1.
+        let bar = (rest.tabBar!.size, end.tabBar!.size)
+        #expect(NotchTilesLayout.progress(of: bar.0, from: bar.0, to: bar.1) == 0)
+        #expect(NotchTilesLayout.progress(of: bar.1, from: bar.0, to: bar.1) == 1)
+        // With nothing to travel in a dimension it is ignored, and a tile that overshoots is past 1.
+        #expect(NotchTilesLayout.progress(of: CGSize(width: 5, height: 5), from: CGSize(width: 5, height: 5), to: CGSize(width: 5, height: 5)) == 0)
+        #expect(NotchTilesLayout.progress(of: CGSize(width: end.content.size.width + 4, height: end.content.size.height), from: rest.content.size, to: end.content.size) > 1)
+    }
+
+    @Test func anOpenNotchsTilesAreGlassAtEverySizeFromTheFirstFrame() {
+        let rest = rest(), end = open(tabs: 2)
+        for size in [rest.content.size, CGSize(width: 190, height: 40), end.content.size] {
+            #expect(NotchTilesLayout.wantsGlass(size: size, rest: rest.content.size, final: end.content.size, phase: .open), "\(size)")
+        }
+    }
+
+    @Test func aTabCoveredByAToastHasNoGlassAtAnySize() {
+        let rest = rest(), end = open(tabs: 2)
+        for size in [rest.content.size, end.content.size] {
+            #expect(!NotchTilesLayout.wantsGlass(size: size, rest: rest.content.size, final: end.content.size, phase: .covered), "\(size)")
+        }
+    }
+
+    @Test func aClosingTilesGlassGoesOnceItIsMostOfTheWayBackToTheNotchAndNotBefore() {
+        let rest = rest().content.size, end = open(tabs: 2).content.size
+        func glass(_ progress: CGFloat) -> Bool {
+            let size = CGSize(width: rest.width + progress * (end.width - rest.width), height: rest.height + progress * (end.height - rest.height))
+            return NotchTilesLayout.wantsGlass(size: size, rest: rest, final: end, phase: .closing)
+        }
+        #expect(glass(1), "just starting back")
+        #expect(glass(0.7))
+        #expect(!glass(NotchTilesLayout.glassUntil - 0.01), "past the line: identity, which then fades while it finishes the way")
+        #expect(!glass(0.3) && !glass(0))
+        #expect(NotchTilesLayout.glassUntil > 0.3 && NotchTilesLayout.glassUntil < 0.9)
+    }
+
     @Test func theTilesStartAtTheCollapsedNotchAndEndAtTheTabPagesRects() {
-        // What the spring runs between: the layout before the notch opens and the one after, on the same tiles.
-        let start = rest(.compact), end = open(tabs: 2)
+        // What the animation runs between: the layout before the notch opens and the one after, on the same tiles.
+        let start = rest(), end = open(tabs: 2)
         #expect(start != end)
         #expect(start.content.size.width < end.content.size.width && start.content.size.height < end.content.size.height)
         #expect(start.content.top == 0 && end.content.top > 0)
         #expect(start.tabBar?.size.width ?? 0 > end.tabBar?.size.width ?? .infinity, "the capsule narrows as it comes out")
     }
 
-    @Test func aTabOfAnotherHeightMovesTheFinalRectsSoTheSpringFollowsIt() {
+    @Test func aTabOfAnotherHeightMovesTheFinalRectsSoTheAnimationFollowsIt() {
         let tall = NotchTilesLayout.open(
             shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 240), notchHeight: geometry.notchSize.height, topRadius: 8, tabCount: 2
         )
