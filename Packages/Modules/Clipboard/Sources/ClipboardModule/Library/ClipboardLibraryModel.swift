@@ -83,7 +83,7 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
     )
 
     @ObservationIgnored var onPreferencesChange: ((ClipboardLibraryPreferences) -> Void)?
-    /// Owned by the library, so its thumbnails go with the window.
+    /// The library's handle on the module's thumbnails; the pictures only it needed go when the window closes (`release()`).
     @ObservationIgnored let thumbnails: ClipboardThumbnailCache
     /// The large preview of the focused card (Space, ⌘Y), which follows the focus while it is open.
     let preview = ClipboardPreviewState()

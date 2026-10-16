@@ -25,8 +25,11 @@ public final class ClipboardModule: FeatureModule {
     static let libraryPasteDelay: Duration = .milliseconds(250)
 
     let state = ClipboardState()
-    /// Kept by the module so image cards do not decode their thumbnails again each time the notch opens.
+    /// Kept by the module so image cards do not decode their thumbnails again each time the notch opens. The library and the floating
+    /// panel take handles on it (`ClipboardThumbnailCache(maxPixelSize:sharing:)`), so the three share one budget.
     let thumbnails = ClipboardThumbnailCache()
+    /// Lets the thumbnails go when the system is short of memory, while the module runs.
+    let memoryWatch = ClipboardMemoryWatch()
     /// The pictures of the open locked boards, which are in memory and in no file; see `ClipboardModule+Vault`.
     let openImages = ClipboardOpenImages()
     /// The editor windows that are open; see `ClipboardModule+Edit`.
@@ -195,6 +198,9 @@ public final class ClipboardModule: FeatureModule {
         self.keys = keys
         self.store = store
         classificationBatches = []
+        thumbnails.logger = context.logger
+        // Warning or critical alike: the pictures are decoded again as cards ask for them.
+        memoryWatch.start { [weak self] _ in self?.thumbnails.releaseMemory() }
 
         let loaded = store.load()
         var history = loaded
@@ -297,6 +303,9 @@ public final class ClipboardModule: FeatureModule {
         closePanel()
         tabPreview.closePreview()
         tabPreviewWindow?.close()
+        // A module that is off holds no pictures.
+        memoryWatch.stop()
+        thumbnails.removeAll()
         keystrokeGate?.isOpen = false
         keystrokeGate = nil
         classificationStep?.cancel()
@@ -388,6 +397,7 @@ public final class ClipboardModule: FeatureModule {
                 layout: settings.value(keys.libraryLayout), sort: settings.value(keys.librarySort),
                 cardSize: settings.value(keys.libraryCardSize), inspectorVisible: settings.value(keys.libraryInspectorVisible)
             ),
+            thumbnails: ClipboardThumbnailCache(maxPixelSize: ClipboardThumbnailCache.libraryPixelSize, sharing: thumbnails),
             now: now
         )
         model.onPreferencesChange = { preferences in
@@ -396,7 +406,6 @@ public final class ClipboardModule: FeatureModule {
             settings.set(preferences.cardSize, for: keys.libraryCardSize)
             settings.set(preferences.inspectorVisible, for: keys.libraryInspectorVisible)
         }
-        model.thumbnails.openImages = openImages
         library = model
         attachPreview(to: model, window: libraryPreviewWindow) { [weak libraryWindow] in (libraryWindow?.frame, libraryWindow?.windowIdentity) }
         libraryWindow.show(AnyView(ClipboardLibraryView(module: self, model: model)), model: model, onClose: { [weak self] in
@@ -419,13 +428,15 @@ public final class ClipboardModule: FeatureModule {
         }
         let settings = context.settings
         let pinned = settings.value(keys.panelPinned)
-        let model = ClipboardPanelModel(state: state, actions: self, isPinned: pinned, now: now)
+        let model = ClipboardPanelModel(
+            state: state, actions: self, isPinned: pinned,
+            thumbnails: ClipboardThumbnailCache(maxPixelSize: ClipboardThumbnailCache.libraryPixelSize, sharing: thumbnails), now: now
+        )
         model.onClose = { [weak self] in self?.closePanel() }
         model.onReturnKeyboard = { [weak panelWindow] in panelWindow?.returnKeyboard() ?? false }
         model.isKeyboardBack = { [weak panelWindow] in panelWindow?.keyboardIsWithFrontApp() ?? false }
         model.onPinnedChange = { [weak self] pinned in self?.panelPinChanged(pinned) }
         model.onMove = { origin in settings.set(ClipboardPanelPosition(origin), for: keys.panelPosition) }
-        model.thumbnails.openImages = openImages
         panel = model
         attachPreview(to: model, window: panelPreviewWindow) { [weak panelWindow] in (panelWindow?.frame, panelWindow?.windowIdentity) }
         // Only a pinned panel is where it was left; an unpinned one is always beside the pointer.
@@ -778,6 +789,8 @@ public final class ClipboardModule: FeatureModule {
     /// Called by the library window closing, whether the user closed it or the module did.
     private func libraryClosed(_ model: ClipboardLibraryModel) {
         model.detach()
+        // The pictures only the library needed go with it.
+        model.thumbnails.release()
         libraryPreviewWindow?.close()
         if library === model { library = nil }
     }
@@ -811,6 +824,7 @@ public final class ClipboardModule: FeatureModule {
     /// Called by the panel window closing, whether the user closed it or the module did.
     private func panelClosed(_ model: ClipboardPanelModel) {
         model.detach()
+        model.thumbnails.release()
         panelPreviewWindow?.close()
         if panel === model { panel = nil }
     }

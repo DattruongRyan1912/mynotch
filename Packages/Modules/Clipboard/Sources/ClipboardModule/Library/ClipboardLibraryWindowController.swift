@@ -10,14 +10,18 @@ final class ClipboardLibraryWindowController: NSObject, ClipboardLibraryWindowin
     static let frameAutosaveName = "MyNotch.ClipboardLibrary"
 
     private let interface: NotchInterface
+    /// What the app does around the window opening and closing (regular app while it is open), which a test must not do to the process
+    /// it runs in. The same as the editor's.
+    private let activation: ClipboardEditorWindowController.Activation
     private var window: NSWindow?
     private var onClose: (() -> Void)?
     /// Keeps the window out of recordings the way the user asked, while it is open.
     private var captureFollower: CaptureHidingFollower?
 
     /// `interface` is where the "hide from screen recording" setting comes from: the app's shared one, or a test's own.
-    init(interface: NotchInterface = .shared) {
+    init(interface: NotchInterface = .shared, activation: ClipboardEditorWindowController.Activation = .system) {
         self.interface = interface
+        self.activation = activation
     }
 
     var isOpen: Bool { window != nil }
@@ -33,17 +37,22 @@ final class ClipboardLibraryWindowController: NSObject, ClipboardLibraryWindowin
             bringToFront()
             return
         }
-        self.onClose = onClose
         let window = makeWindow(content)
+        // AppKit saves the frame under this name on every move and resize, and restores it the next time.
+        if !window.setFrameUsingName(Self.frameAutosaveName) { window.center() }
+        window.setFrameAutosaveName(Self.frameAutosaveName)
+        register(window, model: model, onClose: onClose)
+        bringToFront()
+    }
+
+    /// Makes the window the controller's, so it answers for its closing. Does not show it.
+    func register(_ window: NSWindow, model: ClipboardLibraryModel, onClose: @escaping () -> Void) {
+        self.onClose = onClose
         (window as? ClipboardLibraryWindow)?.onPreviewKey = { [weak model] key, target, marked in
             model?.handlePreviewKey(key, target: target, hasMarkedText: marked) ?? false
         }
         window.delegate = self
-        // AppKit saves the frame under this name on every move and resize, and restores it the next time.
-        if !window.setFrameUsingName(Self.frameAutosaveName) { window.center() }
-        window.setFrameAutosaveName(Self.frameAutosaveName)
         self.window = window
-        bringToFront()
     }
 
     /// The window, configured but not on any screen, and already hidden from recordings when the setting says so: there is
@@ -71,11 +80,7 @@ final class ClipboardLibraryWindowController: NSObject, ClipboardLibraryWindowin
 
     func bringToFront() {
         guard let window else { return }
-        // Switch the policy first, so the app comes forward as a regular app with its menu bar.
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate()
-        if window.isMiniaturized { window.deminiaturize(nil) }
-        window.makeKeyAndOrderFront(nil)
+        activation.bringForward(window)
     }
 
     /// The system gives the keyboard to the app that was in front before.
@@ -94,9 +99,9 @@ extension ClipboardLibraryWindowController: NSWindowDelegate {
         window = nil
         (closing as? ClipboardLibraryWindow)?.onPreviewKey = nil
         stopFollowingSetting()
-        // Dropping the content ends the library's views at once and frees its thumbnails.
+        // Dropping the content ends the library's views at once; the module lets go of its model and thumbnails when told it closed.
         closing.contentViewController = nil
-        NSApp.setActivationPolicy(ClipboardLibraryActivation.policyAfterClosing(closing))
+        activation.windowClosed(closing)
         let onClose = onClose
         self.onClose = nil
         onClose?()

@@ -41,7 +41,7 @@ final class ClipboardPanelModel: ClipboardPreviewHosting {
     private(set) var isPinned: Bool
     /// What a copy did, shown while the panel stays open.
     private(set) var notice: ClipboardLibraryNotice?
-    /// Owned by the panel, so its thumbnails go with it.
+    /// The panel's handle on the module's thumbnails; the pictures only it needed go when it closes (`release()`).
     @ObservationIgnored let thumbnails: ClipboardThumbnailCache
 
     /// Closes the window. The panel asks for it at most once.

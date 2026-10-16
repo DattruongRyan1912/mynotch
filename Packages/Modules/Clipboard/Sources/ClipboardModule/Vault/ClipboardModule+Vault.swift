@@ -360,9 +360,9 @@ extension ClipboardModule {
         guard !items.isEmpty else { return }
         let ids = Set(items.map(\.id))
         updateStack { $0.removeEntries { ids.contains($0.item.id) } }
+        // One call for all: the library's and the panel's pictures are kept in the module's cache, and a picture that is being decoded
+        // right now is not kept either.
         thumbnails.removeAll()
-        library?.thumbnails.removeAll()
-        panel?.thumbnails.removeAll()
         state.forgetSearchText()
     }
 

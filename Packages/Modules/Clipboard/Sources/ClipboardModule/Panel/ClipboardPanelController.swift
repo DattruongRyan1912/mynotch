@@ -28,6 +28,8 @@ final class ClipboardPanelController: NSObject, ClipboardPanelWindowing {
     private let pointer: () -> CGPoint
     private let screens: () -> [ClipboardPanelPlacement.Screen]
     private let clickMonitor: ClipboardPanelClickMonitor
+    /// What puts the panel on the screen and gives it the keyboard, so a test can leave it off.
+    private let orderFront: (ClipboardFloatingPanel) -> Void
     private let keyboardHandBack = KeyboardHandBack()
     private var panel: ClipboardFloatingPanel?
     private var onClose: (() -> Void)?
@@ -53,12 +55,17 @@ final class ClipboardPanelController: NSObject, ClipboardPanelWindowing {
         screens: @escaping () -> [ClipboardPanelPlacement.Screen] = {
             NSScreen.screens.map { ClipboardPanelPlacement.Screen(frame: $0.frame, visibleFrame: $0.visibleFrame) }
         },
-        clickMonitor: ClipboardPanelClickMonitor = .system
+        clickMonitor: ClipboardPanelClickMonitor = .system,
+        orderFront: @escaping (ClipboardFloatingPanel) -> Void = { panel in
+            panel.orderFrontRegardless()
+            panel.makeKey()
+        }
     ) {
         self.interface = interface
         self.pointer = pointer
         self.screens = screens
         self.clickMonitor = clickMonitor
+        self.orderFront = orderFront
     }
 
     func show(_ content: AnyView, model: ClipboardPanelModel, restoringOrigin: CGPoint?, onClose: @escaping () -> Void) {
@@ -82,8 +89,7 @@ final class ClipboardPanelController: NSObject, ClipboardPanelWindowing {
         self.panel = panel
         self.onClose = onClose
         watch(model)
-        panel.orderFrontRegardless()
-        panel.makeKey()
+        orderFront(panel)
     }
 
     func focus() {

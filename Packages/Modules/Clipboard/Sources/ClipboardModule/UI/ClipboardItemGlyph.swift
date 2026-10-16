@@ -14,7 +14,7 @@ struct ClipboardItemGlyph: View {
     var body: some View {
         switch item.content {
         case .image:
-            ClipboardThumbnailView(url: imageURL, cache: thumbnails, placeholder: .secondary, placeholderSize: 16)
+            ClipboardThumbnailView(url: imageURL, cache: thumbnails, placeholder: .secondary, placeholderSize: 16, pixelSize: ClipboardThumbnailCache.glyphPixelSize)
         case .color(let hex, _):
             ClipboardColorSwatch(hex: hex, border: .primary.opacity(0.2))
                 .frame(width: iconSize, height: iconSize)
@@ -25,7 +25,9 @@ struct ClipboardItemGlyph: View {
                     .frame(width: iconSize, height: iconSize)
             }
         case .link where link?.imageURL != nil:
-            ClipboardThumbnailView(url: link?.imageURL, cache: thumbnails, placeholder: .secondary, placeholderSize: 16)
+            ClipboardThumbnailView(
+                url: link?.imageURL, cache: thumbnails, placeholder: .secondary, placeholderSize: 16, pixelSize: ClipboardThumbnailCache.glyphPixelSize
+            )
         case .text, .richText, .link:
             Image(systemName: item.isCode ? ClipboardSearchTerms.codeSystemImage : item.content.kind.systemImage)
                 .font(.system(size: 15))

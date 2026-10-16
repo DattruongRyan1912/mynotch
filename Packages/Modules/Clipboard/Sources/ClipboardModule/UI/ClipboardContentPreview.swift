@@ -140,19 +140,31 @@ struct ClipboardColorSwatch: View {
     }
 }
 
-/// An image card's preview, decoded once per file and off the main thread.
+/// An image card's preview, decoded once per file and size and off the main thread.
 struct ClipboardThumbnailView: View {
     let url: URL?
     let cache: ClipboardThumbnailCache
     /// Color of the stand-in shown until the thumbnail is ready.
     let placeholder: Color
     var placeholderSize: CGFloat = 26
+    /// The longest side to decode, in pixels, when the slot is smaller than the cache's own size (a list row's picture).
+    var pixelSize: Int?
 
     @State private var loaded: NSImage?
 
+    /// What is asked of the cache; a new url or size is a new request, and the old one is cancelled.
+    private struct Request: Equatable {
+        let url: URL?
+        let pixelSize: Int
+    }
+
+    private var request: Request {
+        Request(url: url, pixelSize: pixelSize ?? cache.maxPixelSize)
+    }
+
     var body: some View {
         Group {
-            if let image = loaded ?? url.flatMap(cache.cachedThumbnail(for:)) {
+            if let image = loaded ?? url.flatMap({ cache.cachedThumbnail(for: $0, maxPixelSize: request.pixelSize) }) {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -164,9 +176,12 @@ struct ClipboardThumbnailView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: url) {
-            guard let url else { return }
-            loaded = await cache.thumbnail(for: url)
+        // Ends with the view, so a card that scrolls away before its turn to be decoded is never decoded.
+        .task(id: request) {
+            guard let url = request.url else { return }
+            let image = await cache.thumbnail(for: url, maxPixelSize: request.pixelSize)
+            // An answer for a request that was replaced or cancelled is not shown.
+            if !Task.isCancelled { loaded = image }
         }
     }
 }
