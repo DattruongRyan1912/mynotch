@@ -321,7 +321,7 @@ final class NotchWindowController {
         return geometry.pointerZone(
             at: point, state: state, contentHeight: registry.contentHeight(for: state, tabUnderToast: model.tabUnderToast),
             strip: activities.stripHeight, bubbles: accessories.bubbles, listRows: accessories.listRows, dragging: dragging,
-            tabCount: registry.tabs.count, in: screenFrame
+            tabCount: registry.tabs.count, stripWidth: model.stripWidth(for: activities.current?.id), in: screenFrame
         )
     }
 
@@ -366,6 +366,8 @@ final class NotchWindowController {
         var contentHeight: CGFloat
         /// With tiles the open notch's height also depends on whether there is a capsule.
         var tabCount: Int
+        /// What the current activity's strip asked the collapsed notch's width to be.
+        var stripWidth: CGFloat
         var wantsKeyboard: Bool
         var focusesKeyboard: Bool
         var isDragging: Bool
@@ -394,6 +396,7 @@ final class NotchWindowController {
                     state: state,
                     contentHeight: registry.contentHeight(for: state, tabUnderToast: covered),
                     tabCount: registry.tabs.count,
+                    stripWidth: model.stripWidth(for: activities.current?.id),
                     wantsKeyboard: NotchKeyboardPolicy.wantsKeyboard(state: state, tabUnderToast: covered, tabs: registry.tabs),
                     focusesKeyboard: NotchKeyboardPolicy.focusesKeyboard(
                         state: state, tabUnderToast: covered, tabs: registry.tabs, onPurpose: model.isOpenedOnPurpose

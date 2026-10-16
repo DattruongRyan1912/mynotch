@@ -25,7 +25,7 @@ public enum NotchTokens {
     /// How much of the accent tints the Liquid Glass when the user asks for it: a hint of it, not a coat.
     nonisolated public static let glassTintOpacity: CGFloat = 0.25
     /// Space left and right of an activity's strip under the collapsed notch, inside the notch's body.
-    public static let stripPadding: CGFloat = 12
+    nonisolated public static let stripPadding: CGFloat = 12
     /// The one animation of the notch's size and shape; every state change moves it with this spring.
     public static let spring = Animation.spring(response: 0.38, dampingFraction: 0.8)
     /// A bubble beside the collapsed notch comes and goes at this fraction of its size, never from nothing.

@@ -35,6 +35,19 @@ struct NotchRootView: View {
         CompactAccessories(activities: activities, geometry: geometry, isListOpen: model.isListOpen, state: state)
     }
 
+    /// The width the current activity's strip asked for (`View.notchStripWidth`), which the collapsed notch is as wide as; 0 when it has
+    /// not asked, and under the open list, which takes the strip's place and is not one.
+    private func stripWidth(_ accessories: CompactAccessories) -> CGFloat {
+        accessories.listRows > 0 ? 0 : model.stripWidth(for: activities.current?.id)
+    }
+
+    /// A strip tells the notch the width it wants: kept for its activity, while the strip is the one on show. The strip leaving (the
+    /// notch opening, the activity ending, the list opening) reports 0 on its way out, which is not a request.
+    private func strip(reportsWidth width: CGFloat, _ accessories: CompactAccessories, bottom: CGFloat) {
+        guard state == .compact, bottom > 0, accessories.listRows == 0, let id = activities.current?.id else { return }
+        model.reportStripWidth(width, for: id)
+    }
+
     /// How far the collapsed notch grows: for the open list, which takes the strip's place, else for the current
     /// activity's strip; 0 in every other state.
     private func bottomHeight(_ accessories: CompactAccessories) -> CGFloat {
@@ -51,6 +64,8 @@ struct NotchRootView: View {
         /// any other change of the shape, instead of jumping.
         let shape: NotchShape
         let gap: CGFloat
+        /// A strip that wants a wider or narrower notch moves the shape's width with the same spring.
+        let width: CGFloat
     }
 
     /// What names an activity to a person and to VoiceOver: its summary, else its module's name.
@@ -103,7 +118,9 @@ struct NotchRootView: View {
     var body: some View {
         let accessories = accessories
         let bottom = bottomHeight(accessories)
-        let size = geometry.shapeSize(for: state, contentHeight: contentHeight, bottomHeight: bottom, tabCount: registry.tabs.count)
+        let size = geometry.shapeSize(
+            for: state, contentHeight: contentHeight, bottomHeight: bottom, tabCount: registry.tabs.count, stripWidth: stripWidth(accessories)
+        )
         let radii = geometry.cornerRadii(for: state)
         let _ = NotchPerf.count(.bodies)
         let _ = NotchLog.record(
@@ -114,7 +131,7 @@ struct NotchRootView: View {
         let accent = theme?.accent ?? NotchTokens.accent
         let surface = surface
         let plan = glassPlan
-        let layout = Layout(state: state, bottom: bottom, shape: shape, gap: geometry.topGap)
+        let layout = Layout(state: state, bottom: bottom, shape: shape, gap: geometry.topGap, width: size.width)
         NotchGlassFamily(plan) {
             ZStack(alignment: .top) {
                 if let tiles = plan.tiles {
@@ -147,6 +164,7 @@ struct NotchRootView: View {
             .animation(NotchTokens.spring, value: geometry.topGap)
         }
         .overlay(alignment: .top) { gapVeil }
+        .onPreferenceChange(NotchStripWidthKey.self) { strip(reportsWidth: $0, accessories, bottom: bottom) }
         .environment(\.notchIsOnScreen, model.isOnScreen)
         // The accent for the notch's own controls and for a tab's marks, and the tint of the system controls in a tab.
         .environment(\.notchAccent, accent)
@@ -205,7 +223,7 @@ struct NotchRootView: View {
         // The collapsed notch this one came from, and will go back to.
         let collapsed: NotchState = model.hasActivity ? .compact : .closed
         let collapsedRadii = geometry.cornerRadii(for: collapsed)
-        let collapsedSize = geometry.shapeSize(for: collapsed)
+        let collapsedSize = collapsedSize(collapsed)
         let showsTabs = isOpen || model.tabUnderToast != nil
         let openRadii = geometry.cornerRadii(for: .open(nil))
         let final = NotchTilesLayout.open(
@@ -273,6 +291,16 @@ struct NotchRootView: View {
         .onDrop(of: allDropTypes, isTargeted: dropTargeting) { providers in drop(providers) }
     }
 
+    /// The size of the collapsed notch in `collapsed` that the tiles come out of and go back into: with a strip, the pill is as wide as the
+    /// strip made it, and its body (the top row, which the tiles start as) with it.
+    private func collapsedSize(_ collapsed: NotchState) -> CGSize {
+        var size = geometry.shapeSize(for: collapsed)
+        if collapsed == .compact, activities.stripHeight > 0 {
+            size.width = geometry.compactWidth(stripWidth: model.stripWidth(for: activities.current?.id))
+        }
+        return size
+    }
+
     /// One tile: see `NotchTile`. Its content is laid out at the size it has when the notch is open, and is there while the tab is.
     private func tile<S: Shape, Content: View>(
         rest: NotchTilesLayout.Tile, final: NotchTilesLayout.Tile, glass: NotchGlassPlan.Shape, shape: S, restShape: S, showsTabs: Bool,
@@ -296,7 +324,7 @@ struct NotchRootView: View {
         if state == .compact {
             ActivityBubbles(
                 slots: ActivitySlot.bubbles(of: activities, capacity: geometry.bubbleCapacity),
-                geometry: geometry, label: label(for:), activate: activate
+                geometry: geometry, stripWidth: stripWidth(accessories), label: label(for:), activate: activate
             )
             .transition(.asymmetric(insertion: .opacity.animation(NotchTokens.enter), removal: .opacity.animation(NotchTokens.leave)))
             .notchLogLifecycle("bubbles")

@@ -1,9 +1,19 @@
 import AppKit
 import MyNotchCore
 import MyNotchTestSupport
+import Observation
 import SwiftUI
 import Testing
 @testable import NotchUI
+
+@Observable private final class CanaryStripBox {
+    var width: CGFloat = 330
+}
+
+private struct CanaryStrip: View {
+    let box: CanaryStripBox
+    var body: some View { Color.clear.notchStripWidth(box.width) }
+}
 
 private final class PillTabModule: FeatureModule {
     let descriptor: ModuleDescriptor
@@ -348,5 +358,63 @@ struct NotchPillCanaryTests {
         let settled = try #require(moving.last?.elements.first)
         #expect(abs(settled.height - (shape == .slab ? first.height - 18 : first.height)) < 3, "18 pt shorter with the slab, the same tile with tiles: \(first) -> \(settled)")
         #expect(abs(settled.minY - (shape == .slab ? first.minY + 5 : first.minY - 13)) < 3, "the slab's top is the pill's gap lower (a MacBook's sits at the edge) and the tile 18 pt higher less the gap: \(first) -> \(settled)")
+    }
+
+    // MARK: a strip that wants a wider notch
+
+    @Test(arguments: VirtualNotchStyle.allCases, NotchGlassShape.allCases)
+    func theCollapsedNotchWidensForItsStripWithTheSpringAboutItsCentreAndItsBubblesGoWithIt(
+        style: VirtualNotchStyle, shape: NotchGlassShape
+    ) async throws {
+        // The two clarities are shared out between the shapes.
+        let clarity: NotchGlassClarity = shape == .tiles ? .clear : .balanced
+        let geometry = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: style, opensAsTiles: shape == .tiles))
+        let harness = RegistryHarness([PillTabModule("a", order: 0), PillTabModule("b", order: 1)])
+        await harness.registry.bootstrap()
+        harness.settings.set(.liquidGlass, for: InterfaceSettings.look)
+        harness.settings.set(shape, for: InterfaceSettings.glassShape)
+        harness.settings.set(clarity, for: InterfaceSettings.glassClarity)
+        let theme = NotchTheme(settings: harness.settings, systemAccent: { NotchAccent.Palette.blue.rgb }, notifications: NotificationCenter())
+        let model = NotchViewModel(scheduler: harness.scheduler, availableTabs: { ["a", "b"] }, delays: { (.zero, .zero) })
+        model.hasActivity = true
+        let box = CanaryStripBox()
+        harness.activities.set(
+            LiveActivity(
+                id: "lyrics", leading: AnyView(Color.clear.frame(width: 16, height: 16)), trailing: AnyView(Color.clear.frame(width: 16, height: 12)),
+                bottom: AnyView(CanaryStrip(box: box)), bottomHeight: 36, summary: "lyrics"
+            ),
+            from: "media"
+        )
+        harness.activities.set(
+            LiveActivity(id: "bubble", priority: .low, leading: AnyView(Color.clear), trailing: AnyView(Color.clear), summary: "b"), from: "other"
+        )
+        model.bubbleCount = CompactAccessories.bubbleCount(activities: harness.activities, geometry: geometry)
+        let hosting = NSHostingView(
+            rootView: NotchRootView(model: model, activities: harness.activities, registry: harness.registry, geometry: geometry, theme: theme)
+        )
+        let window = NSWindow(contentRect: CGRect(origin: .zero, size: geometry.panelSize), styleMask: .borderless, backing: .buffered, defer: true)
+        window.contentView = hosting
+        defer { window.contentView = nil }
+        try await Task.sleep(for: .milliseconds(700))
+        let rig = Rig(harness: harness, theme: theme, model: model, hosting: hosting, window: window)
+        let before = geometry.compactWidth(stripWidth: 330)
+        let after = geometry.compactWidth(stripWidth: 500)
+        #expect(after > before)
+        let widening = await sample(rig) { box.width = 500 }
+        print("CANARY strip widens (\(style), \(shape), \(clarity)): \(timeline(widening))")
+        #expect(widening.allSatisfy { !$0.elements.isEmpty }, "no sample without glass")
+        let widths = Set(widening.compactMap { $0.elements.first { $0.width > 200 } }.map { Int($0.width.rounded()) })
+        #expect(widths.count >= 4, "the notch goes through \(widths.sorted()): a spring, not a jump")
+        #expect(worstCentreOffset(widening, wider: 200) < 4, "about its centre")
+        let settled = try #require(widening.last?.elements.first { $0.width > 200 })
+        #expect(abs(settled.width - (after + 8)) < 6, "ends as wide as the strip wants, the element's 4 pt each side: \(settled.width) against \(after + 8)")
+        // The bubble is beside the pill's new end.
+        let bubble = try #require(widening.last?.elements.first { $0.width < 60 })
+        let end = geometry.panelSize.width / 2 + after / 2 - geometry.cornerRadii(for: .compact).top
+        #expect(abs(bubble.minX - (end + NotchGeometry.bubbleGap)) < 3, "beside the pill with the same gap: \(bubble) after \(end)")
+        // And it narrows back with the spring when the strip asks for much less.
+        let narrowing = await sample(rig) { box.width = 330 }
+        let back = try #require(narrowing.last?.elements.first { $0.width > 200 })
+        #expect(abs(back.width - (before + 8)) < 6, "\(back.width) against \(before + 8)")
     }
 }

@@ -27,6 +27,9 @@ public final class NotchViewModel {
             NotchLog.record("activity \(hasActivity) display=\(displayState.logDescription)")
         }
     }
+    /// The width the current activity's strip asked for (`View.notchStripWidth`), and whose it is: it belongs to that activity alone, so
+    /// another one never starts from it.
+    private(set) var stripReport: StripReport?
     /// Set by the owner: how many bubbles of other activities are beside the notch. With none there is no list to open,
     /// and one that is open goes.
     public var bubbleCount = 0 {
@@ -64,6 +67,22 @@ public final class NotchViewModel {
     /// True when a click, the shortcut, the tab bar or a module opened the notch rather than hovering. Only then
     /// does a keyboard tab take the keyboard by itself.
     public private(set) var isOpenedOnPurpose = false
+
+    /// The width a strip asked for, which the notch is as wide as; 0 for an activity that has not asked.
+    func stripWidth(for activity: String?) -> CGFloat {
+        guard let activity, let report = stripReport, report.activity == activity else { return 0 }
+        return report.width
+    }
+
+    /// A strip tells the notch the width it wants. The first of an activity is taken, a wider one at once, and a narrower one only if it
+    /// is narrower by `StripWidth.shrinkThreshold` or more.
+    func reportStripWidth(_ width: CGFloat, for activity: String) {
+        let current = stripReport?.activity == activity ? stripReport?.width : nil
+        let settled = StripWidth.settle(current: current, reported: max(width, 0))
+        guard settled != current else { return }
+        stripReport = StripReport(activity: activity, width: settled)
+        NotchLog.record("strip width \(Int(settled)) display=\(displayState.logDescription)")
+    }
 
     /// What the view should render: `closed` becomes `compact` while an activity is live.
     public var displayState: NotchState {
@@ -307,4 +326,10 @@ public final class NotchViewModel {
             self?.close()
         }
     }
+}
+
+/// The width an activity's strip asked for.
+nonisolated struct StripReport: Equatable, Sendable {
+    let activity: String
+    let width: CGFloat
 }

@@ -28,31 +28,34 @@ nonisolated extension NotchGeometry {
     /// A bubble is a circle as tall as the collapsed notch's body.
     public var bubbleDiameter: CGFloat { notchSize.height }
 
-    /// Right edge of the collapsed pill's body (inside its ears), from the notch's centre line.
-    private var compactBodyRight: CGFloat { shapeSize(for: .compact).width / 2 - cornerRadii(for: .compact).top }
+    /// Right edge of the collapsed pill's body (inside its ears), from the notch's centre line, while its strip wants `stripWidth`.
+    private func compactBodyRight(stripWidth: CGFloat) -> CGFloat {
+        compactWidth(stripWidth: stripWidth) / 2 - cornerRadii(for: .compact).top
+    }
 
     /// Where bubble `index` goes, from the notch's centre line (x grows right) and the top edge of the screen (y grows
     /// down), the way SwiftUI lays it out. A bubble is as tall as the pill's body and starts at the pill's top (the gap below the edge),
-    /// so it is centred on it.
-    public func bubbleFrame(at index: Int) -> CGRect {
+    /// so it is centred on it. The bubbles go where the pill's side is, so they follow a pill that a strip made wider (`stripWidth`).
+    public func bubbleFrame(at index: Int, stripWidth: CGFloat = 0) -> CGRect {
         let diameter = bubbleDiameter
         return CGRect(
-            x: compactBodyRight + Self.bubbleGap + CGFloat(index) * (diameter + Self.bubbleGap), y: topGap, width: diameter, height: diameter
+            x: compactBodyRight(stripWidth: stripWidth) + Self.bubbleGap + CGFloat(index) * (diameter + Self.bubbleGap), y: topGap, width: diameter, height: diameter
         )
     }
 
     /// The same frame in screen coordinates (AppKit, y grows up).
-    public func bubbleScreenFrame(at index: Int, in screenFrame: CGRect) -> CGRect {
-        let frame = bubbleFrame(at: index)
+    public func bubbleScreenFrame(at index: Int, stripWidth: CGFloat = 0, in screenFrame: CGRect) -> CGRect {
+        let frame = bubbleFrame(at: index, stripWidth: stripWidth)
         return CGRect(
             x: screenFrame.midX + centerOffset + frame.minX, y: screenFrame.maxY - frame.maxY, width: frame.width, height: frame.height
         )
     }
 
     /// How many bubbles fit beside the collapsed pill inside the panel, which never resizes: `maxBubbles` unless the
-    /// pill is so wide that the last one would stick out of it.
+    /// pill is so wide that the last one would stick out of it. The pill as wide as a strip can make it (`maximumStripWidth`), so the
+    /// number does not change with the strip's width.
     public var bubbleCapacity: Int {
-        (0..<Self.maxBubbles).prefix { bubbleFrame(at: $0).maxX <= panelSize.width / 2 }.count
+        (0..<Self.maxBubbles).prefix { bubbleFrame(at: $0, stripWidth: .infinity).maxX <= panelSize.width / 2 }.count
     }
 
     /// Height of the list for `rows` rows (at most `maxListRows`); 0 for none.
@@ -72,12 +75,15 @@ nonisolated extension NotchGeometry {
     /// first bubble, so the pill keeps its edge. While a drag with data is over the notch only its drag area counts.
     public func pointerZone(
         at point: CGPoint, state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, strip: CGFloat = 0,
-        bubbles: Int = 0, listRows: Int = 0, dragging: Bool = false, tabCount: Int = 1, in screenFrame: CGRect
+        bubbles: Int = 0, listRows: Int = 0, dragging: Bool = false, tabCount: Int = 1, stripWidth: CGFloat = 0, in screenFrame: CGRect
     ) -> PointerZone {
         let bottom = bottomHeight(for: state, strip: strip, listRows: listRows)
+        // The notch is as wide as its strip wants only while the strip shows, which the open list takes the place of.
+        let ask = listRows > 0 ? 0 : stripWidth
         if dragging {
-            return dragHitRect(for: state, contentHeight: contentHeight, bottomHeight: bottom, tabCount: tabCount, in: screenFrame)
-                .contains(point) ? .notch : .outside
+            return dragHitRect(
+                for: state, contentHeight: contentHeight, bottomHeight: bottom, tabCount: tabCount, stripWidth: ask, in: screenFrame
+            ).contains(point) ? .notch : .outside
         }
         guard state == .compact else {
             return hitRect(for: state, contentHeight: contentHeight, tabCount: tabCount, in: screenFrame).contains(point) ? .notch : .outside
@@ -93,8 +99,8 @@ nonisolated extension NotchGeometry {
             if list.contains(point) { return .list }
         }
         if bubbles > 0 {
-            let last = bubbleScreenFrame(at: min(bubbles, Self.maxBubbles) - 1, in: screenFrame)
-            let first = bubbleScreenFrame(at: 0, in: screenFrame)
+            let last = bubbleScreenFrame(at: min(bubbles, Self.maxBubbles) - 1, stripWidth: ask, in: screenFrame)
+            let first = bubbleScreenFrame(at: 0, stripWidth: ask, in: screenFrame)
             // Down to the padding under the bubbles and up to the row above the screen's top edge, like the pill's rect.
             let area = CGRect(
                 x: first.minX, y: first.minY - Self.hitPadding, width: last.maxX + Self.hitPadding - first.minX,
@@ -103,6 +109,6 @@ nonisolated extension NotchGeometry {
             if area.contains(point) { return .bubbles }
         }
         let pillBottom = listRows > 0 ? 0 : bottom
-        return hitRect(for: .compact, bottomHeight: pillBottom, in: screenFrame).contains(point) ? .notch : .outside
+        return hitRect(for: .compact, bottomHeight: pillBottom, stripWidth: ask, in: screenFrame).contains(point) ? .notch : .outside
     }
 }

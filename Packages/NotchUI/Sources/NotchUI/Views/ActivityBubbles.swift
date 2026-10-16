@@ -24,6 +24,8 @@ struct ActivityIcon: View {
 struct ActivityBubbles: View {
     let slots: [ActivitySlot]
     let geometry: NotchGeometry
+    /// The width the current activity's strip asked for: the pill is that much wider, and the bubbles are beside it.
+    var stripWidth: CGFloat = 0
     let label: (ActivityCenter.Entry) -> String
     let activate: (ActivitySlot) -> Void
     @Environment(\.notchSurface) private var surface
@@ -45,9 +47,11 @@ struct ActivityBubbles: View {
                         )
                 }
             }
-            .padding(.leading, geometry.bubbleFrame(at: 0).minX)
+            .padding(.leading, geometry.bubbleFrame(at: 0, stripWidth: stripWidth).minX)
             .frame(width: half, height: geometry.bubbleDiameter, alignment: .leading)
             .animation(NotchTokens.spring, value: slots)
+            // With the notch's spring, so the bubbles move with a pill that widens or narrows for its strip.
+            .animation(NotchTokens.spring, value: stripWidth)
         }
         .frame(width: 2 * half, height: geometry.bubbleDiameter)
     }

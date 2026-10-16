@@ -28,6 +28,9 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     /// The radius of all four corners of the open pill: the open notch's own bottom radius, so the content's tile, which is
     /// `NotchTokens.padding` inside it, comes out concentric.
     public static let pillOpenRadius: CGFloat = 24
+    /// The widest a strip makes the collapsed notch, however much it asks for (and not wider than the open notch): so it stays on the
+    /// screen with room beside it for its bubbles. A strip that wants more scales its text down a little and is cut off after that.
+    public static let stripWidthLimit: CGFloat = 560
 
     public let kind: NotchKind
     /// Size of the physical (or virtual) notch body.
@@ -54,6 +57,23 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
 
     /// Whether the open notch is made of tiles.
     public var opensAsTiles: Bool { config.opensAsTiles }
+
+    /// The width of the collapsed notch with an activity but no strip: the notch's body, the ears and the two sides the activity's leading
+    /// and trailing views have.
+    public var compactWidth: CGFloat { notchSize.width + 2 * cornerRadii(for: .compact).top + 2 * config.compactSideWidth }
+
+    /// The widest a strip makes the collapsed notch: `stripWidthLimit` held to the open notch's width, and never below the collapsed notch's
+    /// own.
+    public var maximumStripWidth: CGFloat { max(compactWidth, min(openWidth, Self.stripWidthLimit)) }
+
+    /// The width of the collapsed notch while its strip wants `stripWidth` for what it shows (0 when it does not say): what it wants and
+    /// the padding the notch gives it (the ears and `NotchTokens.stripPadding`), never narrower than `compactWidth` and never wider
+    /// than `maximumStripWidth`. A strip that says nothing leaves it as it is.
+    public func compactWidth(stripWidth: CGFloat) -> CGFloat {
+        guard stripWidth > 0 else { return compactWidth }
+        let wanted = stripWidth + 2 * cornerRadii(for: .compact).top + 2 * NotchTokens.stripPadding
+        return min(max(wanted, compactWidth), maximumStripWidth)
+    }
 
     /// How much taller the open notch is for its tiles, with `tabCount` tabs: the tile's own inset around the content, and the capsule
     /// for the tab bar with the gap under it, over what the tab bar takes in one piece. The tab gets the room it gets in one piece, and
@@ -107,17 +127,21 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
 
     /// Full shape size, including the top "ears" that blend into the menu bar. The open notch with tiles is taller by their chrome, which
     /// depends on `tabCount` (see `tilesChrome(tabCount:)`). `bottomHeight` is how far the collapsed
-    /// notch grows downward, for the strip or the open list (see `bottomHeight(for:strip:listRows:)`); other states ignore it.
+    /// notch grows downward, for the strip or the open list (see `bottomHeight(for:strip:listRows:)`); other states ignore it. With a
+    /// `bottomHeight` the collapsed notch is as wide as the strip wants, `stripWidth` (see `compactWidth(stripWidth:)`); pass 0 under
+    /// the open list, which is not a strip.
     public func shapeSize(
-        for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, bottomHeight: CGFloat = 0, tabCount: Int = 1
+        for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, bottomHeight: CGFloat = 0, tabCount: Int = 1,
+        stripWidth: CGFloat = 0
     ) -> CGSize {
         let ears = 2 * cornerRadii(for: state).top
         switch state {
         case .closed:
             return CGSize(width: notchSize.width + ears, height: notchSize.height)
         case .compact:
+            // A strip that asks for a width gets it; with no strip (nothing under the notch, or the list) the notch is as wide as it was.
             return CGSize(
-                width: notchSize.width + ears + 2 * config.compactSideWidth,
+                width: compactWidth(stripWidth: bottomHeight > 0 ? stripWidth : 0),
                 height: notchSize.height + self.extraHeight(for: state, requested: bottomHeight)
             )
         case .open, .toast:
@@ -170,28 +194,30 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     /// the screen, so moving the pointer to the top edge above the pill still opens it, and a click in the gap is a click on the notch.
     public func hitRect(
         for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, bottomHeight: CGFloat = 0, tabCount: Int = 1,
-        in screenFrame: CGRect
+        stripWidth: CGFloat = 0, in screenFrame: CGRect
     ) -> CGRect {
         paddedRect(
-            for: state, contentHeight: contentHeight, bottomHeight: bottomHeight, tabCount: tabCount, padding: Self.hitPadding, in: screenFrame
+            for: state, contentHeight: contentHeight, bottomHeight: bottomHeight, tabCount: tabCount, stripWidth: stripWidth,
+            padding: Self.hitPadding, in: screenFrame
         )
     }
 
     /// The enlarged hit area used while something is being dragged.
     public func dragHitRect(
         for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, bottomHeight: CGFloat = 0, tabCount: Int = 1,
-        in screenFrame: CGRect
+        stripWidth: CGFloat = 0, in screenFrame: CGRect
     ) -> CGRect {
         paddedRect(
-            for: state, contentHeight: contentHeight, bottomHeight: bottomHeight, tabCount: tabCount, padding: Self.dragHitPadding,
-            in: screenFrame
+            for: state, contentHeight: contentHeight, bottomHeight: bottomHeight, tabCount: tabCount, stripWidth: stripWidth,
+            padding: Self.dragHitPadding, in: screenFrame
         )
     }
 
     private func paddedRect(
-        for state: NotchState, contentHeight: CGFloat, bottomHeight: CGFloat, tabCount: Int, padding: CGFloat, in screenFrame: CGRect
+        for state: NotchState, contentHeight: CGFloat, bottomHeight: CGFloat, tabCount: Int, stripWidth: CGFloat, padding: CGFloat,
+        in screenFrame: CGRect
     ) -> CGRect {
-        let size = shapeSize(for: state, contentHeight: contentHeight, bottomHeight: bottomHeight, tabCount: tabCount)
+        let size = shapeSize(for: state, contentHeight: contentHeight, bottomHeight: bottomHeight, tabCount: tabCount, stripWidth: stripWidth)
         let padded = CGRect(
             x: screenFrame.midX + centerOffset - size.width / 2,
             y: screenFrame.maxY - topGap - size.height,
