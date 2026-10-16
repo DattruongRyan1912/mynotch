@@ -22,10 +22,36 @@ struct NotchRootView: View {
     /// What the notch is drawn on: black, the classic look's blur, or Liquid Glass.
     private var surface: NotchSurface { theme?.surface(for: state) ?? .solid }
 
-    /// The open tab, or the tab a toast covers.
+    /// The open tab, or the tab a toast covers: a page, or the grid of the pages in "Khác".
     private var shownTab: NotchTab? {
         guard let id = state.shownTab(tabUnderToast: model.tabUnderToast) else { return nil }
+        if id == NotchPages.moreID { return moreTab() }
         return registry.tabs.first { $0.id == id }
+    }
+
+    /// The "Khác" item of the tab bar, which is also the page that holds the grid of the pages in it; nil while it has none.
+    private func moreTab() -> NotchTab? {
+        let overflow = registry.overflowTabs
+        guard registry.tabs.count > 1, !overflow.isEmpty else { return nil }
+        return NotchTab(
+            id: NotchPages.moreID, title: "Khác", systemImage: "ellipsis.circle",
+            preferredHeight: MoreTabGrid.contentHeight(pageCount: overflow.count),
+            content: AnyView(MoreTabGrid(pages: overflow) { [model] in model.open(tab: $0) })
+        )
+    }
+
+    /// The tab bar: the pages on it, then "Khác" while it holds any. A page in "Khác" shows as that item selected, with the page's own icon
+    /// on it, so the user knows where they are.
+    @ViewBuilder private var tabBar: some View {
+        let pages = registry.pages
+        let tabs = registry.tabs
+        let items = pages.items.compactMap { id in id == NotchPages.moreID ? moreTab() : tabs.first { $0.id == id } }
+        let shown = shownTab
+        let selection = pages.selection(of: shown?.id)
+        TabBar(
+            tabs: items, selected: selection.item,
+            badges: selection.badge == nil ? [:] : [NotchPages.moreID: shown?.systemImage ?? ""]
+        ) { [model] in model.open(tab: $0) }
     }
 
     private var contentHeight: CGFloat { registry.contentHeight(for: state, tabUnderToast: model.tabUnderToast) }
@@ -227,7 +253,8 @@ struct NotchRootView: View {
         let final = NotchTilesLayout.open(
             shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: contentHeight, tabCount: registry.tabs.count),
             topInset: geometry.openTopInset,
-            topRadius: openRadii.top, tabCount: registry.tabs.count, bar: geometry.tabBarCapsule(tabCount: registry.tabs.count)
+            topRadius: openRadii.top, tabCount: registry.tabs.count, bar: geometry.tabBarCapsule(tabCount: registry.tabs.count),
+            items: registry.pages.items.count
         )
         let rest = NotchTilesLayout.rest(collapsedSize: collapsedSize, topRadius: collapsedRadii.top, hasTabBar: final.tabBar != nil)
         let inner = CGSize(
@@ -246,8 +273,8 @@ struct NotchRootView: View {
                         rest: rest.tabBar ?? bar, final: bar, glass: tiles.tabBar, shape: Capsule(), restShape: Capsule(), showsTabs: showsTabs,
                         blurs: plan.blursUnder, atRest: tileIsBack
                     ) {
-                        TabBar(tabs: registry.tabs, selected: shownTab?.id) { model.open(tab: $0) }
-                            .frame(width: TabBarMetrics.width(count: registry.tabs.count), height: TabBarMetrics.iconSize.height)
+                        tabBar
+                            .frame(width: TabBarMetrics.width(count: registry.pages.items.count), height: TabBarMetrics.iconSize.height)
                             // Centred in the capsule, which on a pill is as tall as the pill.
                             .padding(.top, (bar.size.height - TabBarMetrics.iconSize.height) / 2)
                     }
@@ -389,8 +416,7 @@ struct NotchRootView: View {
     private var tabPage: some View {
         VStack(spacing: 0) {
             if registry.tabs.count >= 2 {
-                TabBar(tabs: registry.tabs, selected: shownTab?.id) { model.open(tab: $0) }
-                    .padding(.bottom, NotchTilesLayout.slabTabBarSpacing)
+                tabBar.padding(.bottom, NotchTilesLayout.slabTabBarSpacing)
             }
             openContent
         }

@@ -102,6 +102,7 @@ import Testing
     @Test func aGestureOnTheNotchReachesThePerformerThroughTheInterfaceOnlyWhileTheSettingIsOn() async {
         let harness = RegistryHarness([Module("a", order: 1), Module("b", order: 2)])
         await harness.registry.bootstrap()
+        harness.putEveryTabOnTheBar()
         let interface = NotchInterface(performer: performer)
         let screen = ScreenDescriptor(
             frame: CGRect(x: 0, y: 0, width: 1512, height: 982), safeAreaTop: 32,

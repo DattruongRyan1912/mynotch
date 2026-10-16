@@ -26,6 +26,7 @@ private final class SwipeModule: FeatureModule {
 
     func makeController(systemAllows: @escaping () -> Bool = { true }) async -> NotchWindowController {
         await harness.registry.bootstrap()
+        harness.putEveryTabOnTheBar()
         let screen = ScreenDescriptor(
             frame: CGRect(x: 0, y: 0, width: 1512, height: 982), safeAreaTop: 32,
             auxiliaryTopLeftWidth: 663.5, auxiliaryTopRightWidth: 663.5, menuBarHeight: 32

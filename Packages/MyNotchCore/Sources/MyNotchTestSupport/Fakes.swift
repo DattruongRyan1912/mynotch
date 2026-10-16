@@ -158,3 +158,12 @@ extension RegistryHarness {
         registry.settingsEnvironment(for: id)
     }
 }
+
+extension RegistryHarness {
+    /// Puts every tab that runs on the bar, in module order, and nothing in "Khác": for a test of the tab bar, which would otherwise meet the
+    /// defaults (a page of a module the defaults do not know is in Khác). Call it once the registry has started.
+    public func putEveryTabOnTheBar() {
+        settings.set(registry.tabs.map(\.id), for: ModuleRegistry.tabOrderKey)
+        settings.set([ModuleID]?.some([]), for: ModuleRegistry.tabOverflowKey)
+    }
+}

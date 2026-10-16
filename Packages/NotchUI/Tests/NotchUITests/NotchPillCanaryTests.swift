@@ -56,14 +56,18 @@ struct NotchPillCanaryTests {
 
     func rig(
         shape: NotchGlassShape, clarity: NotchGlassClarity = .balanced, bubbles: Int = 0, style: VirtualNotchStyle = .pill,
-        screen: ScreenDescriptor = NotchGeometryTests.external, pillHeight: CGFloat = 32, tabs: Int = 2
+        screen: ScreenDescriptor = NotchGeometryTests.external, pillHeight: CGFloat = 32, tabs: Int = 2, grouped: Bool = false
     ) async throws -> Rig {
         let geometry = NotchGeometry(
             screen: screen, config: NotchLayoutConfig(virtualNotchStyle: style, opensAsTiles: shape == .tiles, pillHeight: pillHeight)
         )
-        let ids = (0..<tabs).map { ModuleID(stringLiteral: "t\($0)") }
+        // `grouped`: the thirteen pages with the placement they have by default (six on the bar and "Khác").
+        let ids: [ModuleID] = grouped
+            ? ["clipboard", "media", "translation", "aiagents", "calendar", "todo", "screenshot", "shelf", "timer", "performance", "battery", "ports", "windows"]
+            : (0..<tabs).map { ModuleID(stringLiteral: "t\($0)") }
         let harness = RegistryHarness(ids.enumerated().map { PillTabModule($0.element, order: $0.offset) })
         await harness.registry.bootstrap()
+        if !grouped { harness.putEveryTabOnTheBar() }
         harness.settings.set(.liquidGlass, for: InterfaceSettings.look)
         harness.settings.set(shape, for: InterfaceSettings.glassShape)
         harness.settings.set(clarity, for: InterfaceSettings.glassClarity)
@@ -377,6 +381,7 @@ struct NotchPillCanaryTests {
         let geometry = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: style, opensAsTiles: shape == .tiles))
         let harness = RegistryHarness([PillTabModule("a", order: 0), PillTabModule("b", order: 1)])
         await harness.registry.bootstrap()
+        harness.putEveryTabOnTheBar()
         harness.settings.set(.liquidGlass, for: InterfaceSettings.look)
         harness.settings.set(shape, for: InterfaceSettings.glassShape)
         harness.settings.set(clarity, for: InterfaceSettings.glassClarity)
@@ -598,5 +603,39 @@ struct NotchPillCanaryTests {
         // About its centre: the middle of the body, from the top.
         let middleFromTop = rig.hosting.bounds.height - drawn.midY
         #expect(abs(middleFromTop - (geometry.topGap + geometry.notchSize.height / 2)) < 0.6, "\(style) \(height): centred at \(middleFromTop)")
+    }
+
+    // MARK: the bar with a Khác item
+
+    @Test(arguments: [CGFloat(24), 32, 56])
+    func theBarOfTheThirteenIsSevenItemsWideAndOpensAndClosesLikeAnyOtherBar(height: CGFloat) async throws {
+        let geometry = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: .pill, opensAsTiles: true, pillHeight: height))
+        let rig = try await rig(shape: .tiles, pillHeight: height, grouped: true)
+        defer { rig.window.contentView = nil }
+        let pillWidth = geometry.shapeSize(for: .compact).width
+        let barWidth = TabBarMetrics.width(count: 7) + 2 * NotchGlassPlan.tabBarInset.width
+        func capsules(_ elements: [CGRect]) -> [CGRect] {
+            elements.filter {
+                (abs($0.height - height) < 3 && abs($0.minY - geometry.topGap) < 3)
+                    || (abs($0.height - (height + 8)) < 3 && abs($0.minY - (geometry.topGap - 4)) < 3)
+            }
+        }
+        let opening = await sample(rig) { rig.model.open(tab: nil, onPurpose: false) }
+        print("CANARY thirteen pages, pill \(height): \(timeline(opening))")
+        #expect(opening.allSatisfy { !$0.elements.isEmpty && !capsules($0.elements).isEmpty }, "glass the whole way, the capsule at the pill's top and height")
+        let last = try #require(opening.last)
+        let capsule = try #require(capsules(last.elements).first)
+        #expect(abs(capsule.width - barWidth) < 4, "seven items, not thirteen: \(capsule.width) against \(barWidth)")
+        #expect(capsule.width < TabBarMetrics.width(count: 13), "narrower than a bar of every page")
+        // (With a live activity the pill is 313 pt wide and the bar narrower than it, so the capsule narrows into the bar; without one the
+        // pill is 185 pt and the same bar is wider than it.)
+        #expect(barWidth < pillWidth)
+        let widths = opening.compactMap { capsules($0.elements).first?.width }
+        #expect(zip(widths, widths.dropFirst()).allSatisfy { $1 <= $0 + 6 }, "it only narrows, as far as the bar's width")
+        let tops = opening.compactMap { capsules($0.elements).first?.minY }
+        #expect((tops.max() ?? 0) - (tops.min() ?? 0) < 3, "the capsule never moves up or down")
+        // Closing: the layers and the text, as for any bar.
+        let closing = try await textIsAboveTheGlass(rig) { rig.model.close() }
+        #expect(closing.checked > 50 && closing.underneath > 5, "\(closing)")
     }
 }

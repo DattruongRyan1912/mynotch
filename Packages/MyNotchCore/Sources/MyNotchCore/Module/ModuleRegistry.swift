@@ -65,11 +65,36 @@ public final class ModuleRegistry {
     /// do not run stay in it, so they find their place again.
     public static let tabOrderKey = SettingKey<[ModuleID]>("app.tabOrder", default: [])
 
-    /// The tabs of the modules that run, in the user's order (`tabOrderKey`). Reads the setting, so views that read
+    /// The pages the user put in the "Khác" item of the tab bar, as module ids; nil means it was never set, which is not an empty list (the
+    /// user emptied Khác): see `TabGroups`. Ids of modules that do not run stay in it, so they find their place again.
+    public static let tabOverflowKey = SettingKey<[ModuleID]?>("app.tabOverflow", default: nil)
+
+    /// The tabs of the modules that run, in the user's order (`tabOrderKey`), on the bar or in Khác. Reads the setting, so views that read
     /// it follow a change of the order.
     public var tabs: [NotchTab] {
         let order = TabOrder.merged(stored: settings.value(Self.tabOrderKey), available: runningTabs.map(\.id))
         return order.compactMap { id in runningTabs.first { $0.id == id } }
+    }
+
+    /// The tabs that are on the bar, in the user's order (`tabOverflowKey` says which are not).
+    public var barTabs: [NotchTab] {
+        let overflow = overflowIDs
+        return tabs.filter { !overflow.contains($0.id) }
+    }
+
+    /// The tabs in the "Khác" item, in the user's order.
+    public var overflowTabs: [NotchTab] {
+        let overflow = overflowIDs
+        return tabs.filter { overflow.contains($0.id) }
+    }
+
+    /// Whether `id`'s tab is in Khác.
+    public func isOverflow(_ id: ModuleID) -> Bool { overflowIDs.contains(id) }
+
+    private var overflowIDs: Set<ModuleID> {
+        TabGroups.overflow(
+            stored: settings.value(Self.tabOverflowKey), order: settings.value(Self.tabOrderKey), available: runningTabs.map(\.id)
+        )
     }
 
     public static func enabledKey(for descriptor: ModuleDescriptor) -> SettingKey<Bool> {

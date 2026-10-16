@@ -86,7 +86,7 @@ final class NotchWindowController {
         self.feel = feel
         screenFrame = screen.frame
         geometry = NotchGeometry(screen: screen, config: config)
-        model = NotchViewModel(scheduler: scheduler, availableTabs: { [weak registry] in registry?.tabs.map(\.id) ?? [] }, delays: delays)
+        model = NotchViewModel(scheduler: scheduler, availableTabs: { [weak registry] in registry?.pages.selectable ?? [] }, delays: delays)
         panel = NotchPanel(frame: geometry.panelFrame(in: screen.frame))
         hosting = FirstMouseHostingView(
             rootView: NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry, theme: theme)
@@ -188,9 +188,10 @@ final class NotchWindowController {
 
     private func swipeBetweenTabs(phase: NSEvent.Phase, momentumPhase: NSEvent.Phase, deltaX: CGFloat, deltaY: CGFloat) {
         guard let step = swipe.feed(phase: phase, momentumPhase: momentumPhase, deltaX: deltaX, deltaY: deltaY) else { return }
-        let tabs = registry.tabs.map(\.id)
+        // The stops are the pages on the bar and then "Khác", as one: a page in it is that stop.
+        let pages = registry.pages
         guard let target = step.target(
-            state: model.state, tabs: tabs, enabled: swipesBetweenTabs(), systemAllows: systemAllowsSwipe()
+            state: model.state, tabs: pages.items, enabled: swipesBetweenTabs(), systemAllows: systemAllowsSwipe(), stop: pages.item(of:)
         ) else { return }
         NotchLog.record("swipe \(step == .next ? "next" : "previous") \(model.state.logDescription) -> \(target.rawValue)")
         model.open(tab: target)

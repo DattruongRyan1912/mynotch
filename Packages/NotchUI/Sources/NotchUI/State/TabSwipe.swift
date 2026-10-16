@@ -54,9 +54,13 @@ nonisolated struct TabSwipeRecognizer {
 extension TabSwipeRecognizer.Step {
     /// The tab this step leads to from the open notch's tab, in the order of the tab bar; nil when it should do
     /// nothing: swiping is off (the app setting, or the system's own "swipe between pages"), the notch is not open on
-    /// one of `tabs`, or the tab is already the first or last.
-    func target(state: NotchState, tabs: [ModuleID], enabled: Bool, systemAllows: Bool) -> ModuleID? {
-        guard enabled, systemAllows, case .open(let current?) = state, let index = tabs.firstIndex(of: current) else { return nil }
+    /// one of `tabs`, or the tab is already the first or last. `tabs` are the stops of the bar: the pages on it, then "Khác" as one stop,
+    /// and `stop` says which stop a page is: itself, or "Khác" for a page in it, so a swipe from one of those goes to the stop before
+    /// "Khác", and a swipe onto "Khác" opens its grid.
+    func target(
+        state: NotchState, tabs: [ModuleID], enabled: Bool, systemAllows: Bool, stop: (ModuleID) -> ModuleID = { $0 }
+    ) -> ModuleID? {
+        guard enabled, systemAllows, case .open(let page?) = state, let index = tabs.firstIndex(of: stop(page)) else { return nil }
         let neighbour = self == .next ? index + 1 : index - 1
         return tabs.indices.contains(neighbour) ? tabs[neighbour] : nil
     }

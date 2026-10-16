@@ -286,6 +286,7 @@ private final class SwipeModule: FeatureModule {
         harness: RegistryHarness, felt: Felt, sensitivity: @escaping () -> SwipeSensitivity? = { .medium }
     ) async -> NotchWindowController {
         await harness.registry.bootstrap()
+        harness.putEveryTabOnTheBar()
         let screen = ScreenDescriptor(
             frame: CGRect(x: 0, y: 0, width: 1512, height: 982), safeAreaTop: 32,
             auxiliaryTopLeftWidth: 663.5, auxiliaryTopRightWidth: 663.5, menuBarHeight: 32

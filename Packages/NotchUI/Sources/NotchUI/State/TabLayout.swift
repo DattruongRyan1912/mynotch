@@ -7,6 +7,10 @@ extension ModuleRegistry {
     /// the tab asked for, which the registry has held to `NotchTab.heightRange`; `NotchGeometry` holds it to the same range, so
     /// a tab that keeps to it is never cut.
     func contentHeight(for state: NotchState, tabUnderToast: ModuleID?) -> CGFloat {
+        // The grid of "Khác" is as tall as its pages need.
+        if state.shownTab(tabUnderToast: tabUnderToast) == NotchPages.moreID, pages.hasMore {
+            return MoreTabGrid.contentHeight(pageCount: pages.overflow.count)
+        }
         guard let id = state.shownTab(tabUnderToast: tabUnderToast), let tab = tabs.first(where: { $0.id == id }) else {
             return NotchTab.defaultHeight
         }

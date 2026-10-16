@@ -42,6 +42,7 @@ struct NotchTilesLayerCanaryTests {
     ) async throws -> Rig {
         let harness = RegistryHarness([TabModule("a", order: 0), TabModule("b", order: 1)])
         await harness.registry.bootstrap()
+        harness.putEveryTabOnTheBar()
         harness.settings.set(.liquidGlass, for: InterfaceSettings.look)
         harness.settings.set(shape, for: InterfaceSettings.glassShape)
         harness.settings.set(clarity, for: InterfaceSettings.glassClarity)

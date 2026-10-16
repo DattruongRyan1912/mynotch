@@ -75,17 +75,21 @@ nonisolated struct NotchTilesLayout: Equatable, Sendable {
     /// notch's size, `topInset` how far below its top the tab page starts (`NotchGeometry.openTopInset`: under a hardware notch's cutout, or
     /// the padding below the top of a display without one), `topRadius` the radius of the
     /// shape's ears, which the content is inset by (and by `NotchTokens.padding`), and `tabCount` the number of tabs. `bar` says where the
-    /// capsule is (see `NotchGeometry.tabBarCapsule(tabCount:)`). What a tab shows is
+    /// capsule is (see `NotchGeometry.tabBarCapsule(tabCount:)`) and `items` how many items the tab bar has when that is not `tabCount` (the
+    /// pages on the bar and "Khác"). What a tab shows is
     /// `NotchGlassPlan.tilePadding` inside its tile, so the tile reaches that much further out than the content does in one piece, and
     /// `shapeSize` (which is taller by `extraHeight`) leaves the content the room it has there.
-    static func open(shapeSize: CGSize, topInset: CGFloat, topRadius: CGFloat, tabCount: Int, bar placement: Bar? = nil) -> NotchTilesLayout {
+    static func open(
+        shapeSize: CGSize, topInset: CGFloat, topRadius: CGFloat, tabCount: Int, bar placement: Bar? = nil, items: Int? = nil
+    ) -> NotchTilesLayout {
         let inset = topRadius + NotchTokens.padding - NotchGlassPlan.tilePadding
         let width = shapeSize.width - 2 * inset
         var top = topInset
         var bar: Tile?
         if tabCount >= 2 {
             let capsule = placement ?? Bar(top: topInset, height: defaultCapsuleHeight)
-            let size = CGSize(width: TabBarMetrics.width(count: tabCount) + 2 * NotchGlassPlan.tabBarInset.width, height: capsule.height)
+            // As wide as the items of the bar: the pages on it and "Khác", which with pages in it is fewer than the pages there are.
+            let size = CGSize(width: TabBarMetrics.width(count: items ?? tabCount) + 2 * NotchGlassPlan.tabBarInset.width, height: capsule.height)
             bar = Tile(size: size, top: capsule.top)
             top = capsule.top + capsule.height + NotchGlassPlan.tileGap
         }

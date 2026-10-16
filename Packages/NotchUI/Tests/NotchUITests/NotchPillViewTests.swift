@@ -72,19 +72,29 @@ private final class PillModule: FeatureModule {
     static func make(
         _ style: VirtualNotchStyle, on screen: ScreenDescriptor = NotchGeometryTests.external, look: NotchLook = .classic,
         clarity: NotchGlassClarity = .balanced, shape: NotchGlassShape = .slab, tabs: Int = 1, opened: Bool = true, height: CGFloat = 190,
-        pillHeight: CGFloat = 32
+        pillHeight: CGFloat = 32, grouped: Bool = false
     ) async throws -> HostedPill {
         let probe = PillProbe()
-        let modules = [PillModule("probe", order: 0, probe: probe, height: height)]
-            + (1..<max(tabs, 1)).map { PillModule(ModuleID(stringLiteral: "other\($0)"), order: $0, probe: nil) }
+        // `grouped`: the thirteen pages of the notch with the placement they have by default (six on the bar, the rest in "Khác"), and the
+        // probe is the Timer page, which is in Khác; otherwise `tabs` pages, all on the bar, the first of them the probe.
+        let thirteen: [ModuleID] = [
+            "clipboard", "media", "translation", "aiagents", "calendar", "todo", "screenshot", "shelf", "timer", "performance", "battery",
+            "ports", "windows",
+        ]
+        let probeID: ModuleID = grouped ? "timer" : "probe"
+        let modules = grouped
+            ? thirteen.enumerated().map { PillModule($0.element, order: $0.offset, probe: $0.element == probeID ? probe : nil, height: height) }
+            : [PillModule("probe", order: 0, probe: probe, height: height)]
+                + (1..<max(tabs, 1)).map { PillModule(ModuleID(stringLiteral: "other\($0)"), order: $0, probe: nil) }
         let harness = RegistryHarness(modules)
         await harness.registry.bootstrap()
+        if !grouped { harness.putEveryTabOnTheBar() }
         harness.settings.set(look, for: InterfaceSettings.look)
         harness.settings.set(clarity, for: InterfaceSettings.glassClarity)
         harness.settings.set(shape, for: InterfaceSettings.glassShape)
         let theme = NotchTheme(settings: harness.settings, systemAccent: { NotchAccent.Palette.blue.rgb }, notifications: NotificationCenter())
         let model = NotchViewModel(
-            scheduler: harness.scheduler, availableTabs: { [registry = harness.registry] in registry.tabs.map(\.id) }, delays: { (.zero, .zero) }
+            scheduler: harness.scheduler, availableTabs: { [registry = harness.registry] in registry.pages.selectable }, delays: { (.zero, .zero) }
         )
         let tiles = look == .liquidGlass && shape == .tiles
         let geometry = screenGeometry(style, on: screen, tiles: tiles, pillHeight: pillHeight)
@@ -99,8 +109,8 @@ private final class PillModule: FeatureModule {
             pillHeight: pillHeight
         )
         if opened {
-            model.open(tab: "probe")
-            try #require(model.displayState == .open("probe"))
+            model.open(tab: probeID)
+            try #require(model.displayState == .open(probeID))
             try await host.wait("the tab was laid out") { probe.frame != nil }
             try await host.settle()
         } else {
@@ -478,5 +488,52 @@ private final class PillModule: FeatureModule {
                 #expect(abs(b.width - a.width) < 0.01 && abs(b.height - a.height) < 0.01 && abs(b.minX - a.minX) < 0.01, "\(name): the room of one piece")
             }
         }
+    }
+
+    // MARK: grouping under "Khác" leaves the tab its room
+
+    @Test func aPageInKhacHasExactlyTheRoomItHasOnABarOfAllThirteenOnEveryLookAndDisplay() async throws {
+        let displays: [(ScreenDescriptor, VirtualNotchStyle)] = [
+            (NotchGeometryTests.macBook14, .notch), (NotchGeometryTests.external, .notch), (NotchGeometryTests.external, .pill),
+        ]
+        for (screen, style) in displays {
+            for look in Self.looks {
+                let all = try await HostedPill.make(style, on: screen, look: look.0, clarity: look.1, shape: look.2, tabs: 13)
+                defer { all.close() }
+                let grouped = try await HostedPill.make(style, on: screen, look: look.0, clarity: look.1, shape: look.2, grouped: true)
+                defer { grouped.close() }
+                let name = "\(screen.safeAreaTop > 0 ? "MacBook" : "external \(style)") \(look)"
+                // The bar is narrower, which is the point; the tab is where it was, as big as it was.
+                #expect(try #require(grouped.probe.frame) == (try #require(all.probe.frame)), Comment(rawValue: name))
+            }
+        }
+    }
+
+    @Test func theBarOfTheThirteenIsSevenItemsWideWithKhacAndNotThirteen() async throws {
+        let grouped = try await HostedPill.make(.pill, look: .liquidGlass, shape: .tiles, grouped: true)
+        defer { grouped.close() }
+        let pages = grouped.harness.registry.pages
+        #expect(pages.items.count == 7 && pages.count == 13)
+        // The capsule of the pill's bar as the layout makes it: as wide as seven items and their inset, against thirteen's.
+        let geometry = HostedPill.screenGeometry(.pill, tiles: true)
+        func capsule(_ items: Int) -> CGFloat {
+            NotchTilesLayout.open(
+                shapeSize: geometry.shapeSize(for: .open(nil), tabCount: 13), topInset: geometry.openTopInset, topRadius: 0, tabCount: 13,
+                bar: geometry.tabBarCapsule(tabCount: 13), items: items
+            ).tabBar!.size.width
+        }
+        #expect(capsule(pages.items.count) == TabBarMetrics.width(count: 7) + 2 * NotchGlassPlan.tabBarInset.width)
+        #expect(capsule(7) < capsule(13) - 150)
+        // It is as tall as the pill and at its top, and the tile is under it, unchanged by the grouping.
+        let layout7 = NotchTilesLayout.open(
+            shapeSize: geometry.shapeSize(for: .open(nil), tabCount: 13), topInset: geometry.openTopInset, topRadius: 0, tabCount: 13,
+            bar: geometry.tabBarCapsule(tabCount: 13), items: 7
+        )
+        let layout13 = NotchTilesLayout.open(
+            shapeSize: geometry.shapeSize(for: .open(nil), tabCount: 13), topInset: geometry.openTopInset, topRadius: 0, tabCount: 13,
+            bar: geometry.tabBarCapsule(tabCount: 13), items: 13
+        )
+        #expect(layout7.content == layout13.content)
+        #expect(layout7.tabBar?.top == layout13.tabBar?.top && layout7.tabBar?.size.height == layout13.tabBar?.size.height)
     }
 }

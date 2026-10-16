@@ -190,6 +190,7 @@ private final class TopModule: FeatureModule {
 
     func controller(on screen: ScreenDescriptor, _ style: VirtualNotchStyle = .notch) async -> NotchWindowController {
         await harness.registry.bootstrap()
+        harness.putEveryTabOnTheBar()
         return NotchWindowController(
             displayID: 1, screen: screen, config: NotchLayoutConfig(virtualNotchStyle: style), scheduler: harness.scheduler,
             registry: harness.registry, activities: harness.activities,

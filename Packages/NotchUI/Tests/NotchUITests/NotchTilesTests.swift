@@ -72,6 +72,7 @@ private struct OpenNotch {
             + (1..<max(tabs, 1)).map { ProbeModule(ModuleID(stringLiteral: "other\($0)"), order: $0, frame: nil) }
         let harness = RegistryHarness(modules)
         await harness.registry.bootstrap()
+        harness.putEveryTabOnTheBar()
         harness.settings.set(look, for: InterfaceSettings.look)
         harness.settings.set(clarity, for: InterfaceSettings.glassClarity)
         harness.settings.set(shape, for: InterfaceSettings.glassShape)
