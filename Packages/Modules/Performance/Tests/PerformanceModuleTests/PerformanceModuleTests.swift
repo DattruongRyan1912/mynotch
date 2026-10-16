@@ -34,8 +34,10 @@ import Testing
         func appear() { module.actions.appeared() }
         func disappear() { module.actions.disappeared() }
 
-        /// Moves the scheduler's time and the module's clock together.
-        @MainActor func advance(_ seconds: Int) {
+        /// Moves the scheduler's time and the module's clock together, once the read in flight (if any) has finished and
+        /// scheduled the next one: a clock moved before that moves nothing.
+        @MainActor func advance(_ seconds: Int) async {
+            await settle { !module.isReading }
             clock.date = clock.date.addingTimeInterval(TimeInterval(seconds))
             harness.scheduler.advance(by: .seconds(seconds))
         }
@@ -71,7 +73,7 @@ import Testing
         let f = await Fixture()
         #expect(f.harness.registry.state(of: "performance") == .running)
         #expect(f.harness.scheduler.pendingCount == 0)
-        f.advance(60)
+        await f.advance(60)
         await idle()
         #expect(await f.reads() == 0, "starting checks the SMC can be opened and reads nothing")
         #expect(await f.memoryReads() == 0)
@@ -84,12 +86,13 @@ import Testing
         #expect(await f.reads() == 1)
         await settle { !f.module.isReading }
         #expect(f.module.state.thermal == FakeThermalReader.warm)
+        await settle { !f.module.isReading }
         #expect(f.harness.scheduler.pendingCount == 1)
 
-        f.advance(2)
+        await f.advance(2)
         await settle { await f.reads() == 2 }
         #expect(await f.reads() == 2)
-        f.advance(2)
+        await f.advance(2)
         await settle { await f.reads() == 3 }
         #expect(await f.reads() == 3)
     }
@@ -100,7 +103,7 @@ import Testing
         await settle { await f.reads() == 1 }
         f.disappear()
         #expect(f.harness.scheduler.pendingCount == 0)
-        f.advance(30)
+        await f.advance(30)
         await idle()
         #expect(await f.reads() == 1)
         #expect(f.module.state.isTabVisible == false)
@@ -114,7 +117,7 @@ import Testing
         await settle { await f.reads() == 1 }
         f.disappear()
         #expect(f.module.state.isTabVisible)
-        f.advance(2)
+        await f.advance(2)
         await settle { await f.reads() == 2 }
         #expect(await f.reads() == 2)
         f.disappear()
@@ -131,7 +134,7 @@ import Testing
         await f.reader.release()
         await settle { !f.module.isReading }
         #expect(f.harness.scheduler.pendingCount == 0)
-        f.advance(10)
+        await f.advance(10)
         await idle()
         #expect(await f.reads() == 1)
     }
@@ -147,6 +150,7 @@ import Testing
         #expect(await f.reads() == 1)
         await f.reader.release()
         await settle { f.harness.scheduler.pendingCount == 1 }
+        await settle { !f.module.isReading }
         #expect(f.harness.scheduler.pendingCount == 1, "polling carries on")
         #expect(await f.reads() == 1)
     }
@@ -155,11 +159,11 @@ import Testing
         let f = await Fixture()
         f.appear()
         await settle { f.module.state.history.samples.count == 1 }
-        f.advance(2)
+        await f.advance(2)
         await settle { f.module.state.history.samples.count == 2 }
         #expect(f.module.state.history.samples.map(\.value) == [78, 78])
         await f.reader.answer(with: ThermalSnapshot(cpu: 60, gpu: 82, fans: []))
-        f.advance(2)
+        await f.advance(2)
         await settle { f.module.state.history.samples.count == 3 }
         #expect(f.module.state.history.samples.last?.value == 82)
         #expect(f.module.state.history.samples.last?.date == f.clock.date)
@@ -170,12 +174,13 @@ import Testing
         f.appear()
         await settle { await f.reads() == 1 }
         await f.reader.answer(with: nil)
-        f.advance(2)
+        await f.advance(2)
         await settle { await f.reads() == 2 }
         await settle { f.harness.scheduler.pendingCount == 1 }
         await settle { !f.module.isReading }
         #expect(f.module.state.thermal == FakeThermalReader.warm)
         #expect(f.module.state.history.samples.count == 1)
+        await settle { !f.module.isReading }
         #expect(f.harness.scheduler.pendingCount == 1)
     }
 
@@ -196,7 +201,7 @@ import Testing
         #expect(f.harness.scheduler.pendingCount == 0)
         #expect(f.module.state.thermal == nil)
         #expect(f.module.state.history.samples.isEmpty)
-        f.advance(10)
+        await f.advance(10)
         await idle()
         #expect(await f.reads() == 1)
     }
@@ -231,7 +236,7 @@ import Testing
         await settle { await f.reads() == 1 }
         #expect(await f.reads() == 1)
         #expect(f.module.state.isTabVisible == false)
-        f.advance(2)
+        await f.advance(2)
         await settle { await f.reads() == 2 }
         #expect(await f.reads() == 2)
     }
@@ -242,6 +247,7 @@ import Testing
         await settle { await f.reads() == 1 }
         await settle { !f.module.isReading }
         #expect(f.module.state.thermal == FakeThermalReader.warm)
+        await settle { !f.module.isReading }
         #expect(f.harness.scheduler.pendingCount == 1)
     }
 
@@ -253,7 +259,7 @@ import Testing
         #expect(f.harness.activities.current == nil)
         await settle { f.harness.scheduler.pendingCount == 0 }
         #expect(f.harness.scheduler.pendingCount == 0)
-        f.advance(10)
+        await f.advance(10)
         await idle()
         #expect(await f.reads() == 1)
     }
@@ -264,7 +270,7 @@ import Testing
         await settle { await f.reads() == 1 }
         f.harness.settings.set(false, for: Self.stripKey)
         await settle { f.harness.activities.current == nil }
-        f.advance(2)
+        await f.advance(2)
         await settle { await f.reads() == 2 }
         #expect(await f.reads() == 2)
         f.disappear()
@@ -276,8 +282,9 @@ import Testing
         f.appear()
         await settle { await f.reads() == 1 }
         f.disappear()
+        await settle { !f.module.isReading }
         #expect(f.harness.scheduler.pendingCount == 1)
-        f.advance(2)
+        await f.advance(2)
         await settle { await f.reads() == 2 }
         #expect(await f.reads() == 2)
     }
@@ -289,7 +296,7 @@ import Testing
         nonisolated(unsafe) var changes = 0
         withObservationTracking { _ = f.harness.activities.current } onChange: { changes += 1 }
         for expected in 2...4 {
-            f.advance(2)
+            await f.advance(2)
             await settle { await f.reads() == expected }
             await settle { !f.module.isReading }
         }

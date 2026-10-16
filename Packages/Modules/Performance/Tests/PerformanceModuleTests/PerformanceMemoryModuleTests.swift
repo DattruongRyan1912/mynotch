@@ -27,7 +27,7 @@ import Testing
         let f = await Fixture()
         f.appear()
         await settle { await f.memoryReads() == 1 }
-        f.advance(2)
+        await f.advance(2)
         await settle { await f.memoryReads() == 2 }
         #expect(await f.memory.limits == [5, 5])
         #expect(await f.reads() == 2)
@@ -42,7 +42,7 @@ import Testing
         #expect(f.module.state.thermal == nil)
         #expect(f.module.state.usage == nil)
         #expect(f.module.state.processes.isEmpty)
-        f.advance(30)
+        await f.advance(30)
         await idle()
         #expect(await f.memoryReads() == 1)
     }
@@ -66,7 +66,7 @@ import Testing
         f.appear()
         await settle { f.module.state.usage != nil }
         await f.memory.answer(with: MemorySnapshot(usage: nil, processes: []))
-        f.advance(2)
+        await f.advance(2)
         await settle { await f.memoryReads() == 2 }
         await settle { !f.module.isReading }
         await settle { !f.module.isReading }
@@ -78,7 +78,7 @@ import Testing
     @Test func theMemoryStripAloneReadsOnlyTheMemoryAndNoProcesses() async {
         let f = await Fixture(memoryStrip: true)
         await settle { await f.memoryReads() == 1 }
-        f.advance(2)
+        await f.advance(2)
         await settle { await f.memoryReads() == 2 }
         #expect(await f.memory.limits == [0, 0])
         #expect(await f.reads() == 0, "nobody asked for the temperature")
@@ -91,7 +91,7 @@ import Testing
     @Test func theTemperatureStripAloneReadsNoMemory() async {
         let f = await Fixture(strip: true)
         await settle { await f.reads() == 1 }
-        f.advance(2)
+        await f.advance(2)
         await settle { await f.reads() == 2 }
         #expect(await f.memoryReads() == 0)
         #expect(f.module.state.usage == nil)
@@ -109,15 +109,16 @@ import Testing
         let f = await Fixture(memoryStrip: true)
         await settle { await f.memoryReads() == 1 }
         f.appear()
-        f.advance(2)
+        await f.advance(2)
         await settle { f.module.state.processes.count == 5 }
         #expect(await f.memory.limits.last == 5)
         f.disappear()
         #expect(f.module.state.processes.isEmpty)
         #expect(f.module.state.usage == FakeMemoryReader.usage, "the strip still shows it")
-        f.advance(2)
+        await f.advance(2)
         await settle { await f.memoryReads() == 3 }
         #expect(await f.memory.limits.last == 0)
+        await settle { !f.module.isReading }
         #expect(f.harness.scheduler.pendingCount == 1)
     }
 
@@ -169,7 +170,7 @@ import Testing
         nonisolated(unsafe) var changes = 0
         withObservationTracking { _ = f.harness.activities.current } onChange: { changes += 1 }
         for expected in 2...4 {
-            f.advance(2)
+            await f.advance(2)
             await settle { await f.memoryReads() == expected }
             await settle { !f.module.isReading }
         }
