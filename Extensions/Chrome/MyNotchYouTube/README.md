@@ -35,6 +35,8 @@ Cuộc gọi và phát trực tiếp từ camera/micro không phải là nhạc:
 
 Một script thứ hai chạy trong chính trang (MAIN world) chỉ để ghi nhận những gì trang tự khai trong Media Session: tiêu đề/nghệ sĩ/album, trạng thái phát/tạm dừng (`playbackState`), vị trí (`setPositionState`) và những hàm xử lý mà trang đã đăng ký (phát, tạm dừng, tua, bài sau, bài trước). Nhờ vậy nhận ra cả trang phát bằng một `Audio` không nằm trong tài liệu (nhiều trình phát web làm vậy, và sự kiện media của tài liệu không bao giờ thấy nó), và khi bạn bấm nút trong MyNotch, nó gọi đúng hàm xử lý đó của trang, như nút media của Chrome. Khi trang có phần tử `<video>`/`<audio>` trong tài liệu thì phần tử đó là nguồn chính (vị trí chính xác hơn) và Media Session chỉ bổ sung. Script gọi hàm gốc trước và trả kết quả nguyên vẹn, không đọc gì khác của trang.
 
+Extension chỉ chạy ở cửa sổ thường: manifest không khai `incognito`, nên Chrome để **Cho phép ở chế độ ẩn danh** (Allow in Incognito) tắt, và nên để nguyên như vậy. Thư mục extension đã cài nằm trong Application Support của bạn, nên chương trình nào chạy dưới tài khoản của bạn và ghi được vào đó cũng đổi được extension: quyền đọc mọi trang https làm việc đó đáng kể hơn khi extension chỉ đọc YouTube.
+
 Script của YouTube (`content.js`) vẫn nằm cùng mục với script này (Chrome chỉ nạp một file một lần cho mỗi tài liệu, và hai script cần cùng `captions.js` trong cùng một world) nhưng tự kiểm tra địa chỉ và không làm gì ngoài `www.youtube.com`.
 
 ### Quyền truy cập trang web
