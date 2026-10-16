@@ -78,8 +78,8 @@ nonisolated extension NotchGeometry {
         bubbles: Int = 0, listRows: Int = 0, dragging: Bool = false, tabCount: Int = 1, stripWidth: CGFloat = 0, in screenFrame: CGRect
     ) -> PointerZone {
         let bottom = bottomHeight(for: state, strip: strip, listRows: listRows)
-        // The notch is as wide as its strip wants only while the strip shows, which the open list takes the place of.
-        let ask = listRows > 0 ? 0 : stripWidth
+        // The notch is as wide as its strip wants, and the open list under it does not change that: the bubbles stay where they are.
+        let ask = strip > 0 ? stripWidth : 0
         if dragging {
             return dragHitRect(
                 for: state, contentHeight: contentHeight, bottomHeight: bottom, tabCount: tabCount, stripWidth: ask, in: screenFrame
@@ -89,7 +89,7 @@ nonisolated extension NotchGeometry {
             return hitRect(for: state, contentHeight: contentHeight, tabCount: tabCount, in: screenFrame).contains(point) ? .notch : .outside
         }
         let centre = screenFrame.midX + centerOffset
-        let pill = shapeSize(for: .compact)
+        let pill = CGSize(width: compactWidth(stripWidth: ask), height: notchSize.height)
         if listRows > 0 {
             let list = CGRect(
                 x: centre - pill.width / 2 - Self.hitPadding,

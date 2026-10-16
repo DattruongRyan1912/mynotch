@@ -109,8 +109,10 @@ import Testing
             let wide = geometry.shapeSize(for: .compact, bottomHeight: 36, stripWidth: 400)
             #expect(wide.width == geometry.compactWidth(stripWidth: 400))
             #expect(wide.height == geometry.notchSize.height + 36, "the height is the strip's, as before")
-            // No strip under it: nothing to be as wide as.
-            #expect(geometry.shapeSize(for: .compact, bottomHeight: 0, stripWidth: 400).width == geometry.compactWidth)
+            // The width is the strip's whatever is under the notch (the open list is not the strip's, and the notch does not change
+            // when it opens); a caller with no strip passes none.
+            #expect(geometry.shapeSize(for: .compact, bottomHeight: geometry.listHeight(rows: 3), stripWidth: 400).width == geometry.compactWidth(stripWidth: 400))
+            #expect(geometry.shapeSize(for: .compact, bottomHeight: 0, stripWidth: 0).width == geometry.compactWidth)
             for state in [NotchState.closed, .open("a"), .open(nil), .toast] {
                 #expect(geometry.shapeSize(for: state, contentHeight: 190, bottomHeight: 36, stripWidth: 400) == geometry.shapeSize(for: state, contentHeight: 190), "\(state)")
             }
@@ -144,14 +146,28 @@ import Testing
         }
     }
 
-    @Test func theOpenListTakesTheStripsPlaceAndTheNotchIsAsWideAsWithoutAStrip() {
-        let frame = NotchGeometryTests.macBook14.frame
-        let base = macBook.hitRect(for: .compact, in: frame)
-        // With the list open the strip is not shown, so a width it asked for does not apply, to the pill or to the bubbles beside it.
-        let withList = macBook.pointerZone(at: CGPoint(x: base.maxX + 30, y: 982 - 10), state: .compact, strip: 36, bubbles: 2, listRows: 3, stripWidth: 450, in: frame)
-        #expect(withList != .notch)
-        let first = macBook.bubbleScreenFrame(at: 0, in: frame)
-        #expect(macBook.pointerZone(at: CGPoint(x: first.midX, y: first.midY), state: .compact, strip: 36, bubbles: 2, listRows: 3, stripWidth: 450, in: frame) == .bubbles)
+    @Test func theOpenListLeavesTheNotchAsWideAsItsStripAndTheBubblesWhereTheyAreUnderThePointerThatOpenedIt() {
+        // The list opens when the pointer hovers a bubble. If the notch narrowed then, the bubble would slide out from under the pointer, the
+        // list would close, the notch would widen again, and so on.
+        for (screen, geometry) in [(NotchGeometryTests.macBook14, macBook), (NotchGeometryTests.external, notch), (NotchGeometryTests.external, pill)] {
+            let frame = screen.frame
+            let first = geometry.bubbleScreenFrame(at: 0, stripWidth: 450, in: frame)
+            let centre = CGPoint(x: first.midX, y: first.midY)
+            #expect(geometry.pointerZone(at: centre, state: .compact, strip: 36, bubbles: 2, listRows: 0, stripWidth: 450, in: frame) == .bubbles)
+            #expect(
+                geometry.pointerZone(at: centre, state: .compact, strip: 36, bubbles: 2, listRows: 3, stripWidth: 450, in: frame) == .bubbles,
+                "the same bubble, under the same pointer, with the list open"
+            )
+            // The pill is as wide with the list open: its added width is still the notch, and the list hangs under all of it.
+            let wide = geometry.compactWidth(stripWidth: 450)
+            let rightEdge = frame.midX + geometry.centerOffset + wide / 2
+            #expect(geometry.pointerZone(at: CGPoint(x: rightEdge - 6, y: frame.maxY - geometry.topGap - 10), state: .compact, strip: 36, bubbles: 2, listRows: 3, stripWidth: 450, in: frame) == .notch)
+            let underPill = frame.maxY - geometry.topGap - geometry.notchSize.height - 10
+            #expect(geometry.pointerZone(at: CGPoint(x: rightEdge - 6, y: underPill), state: .compact, strip: 36, bubbles: 2, listRows: 3, stripWidth: 450, in: frame) == .list, "the list is as wide as the pill")
+            // With no strip the list does not widen anything.
+            let plain = geometry.bubbleScreenFrame(at: 0, in: frame)
+            #expect(geometry.pointerZone(at: CGPoint(x: plain.midX, y: plain.midY), state: .compact, strip: 0, bubbles: 2, listRows: 3, stripWidth: 450, in: frame) == .bubbles)
+        }
     }
 
     @Test func theBubblesAlwaysFitBesideTheWidestPillAndTheirNumberDoesNotChangeWithTheStrip() {

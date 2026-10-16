@@ -127,9 +127,9 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
 
     /// Full shape size, including the top "ears" that blend into the menu bar. The open notch with tiles is taller by their chrome, which
     /// depends on `tabCount` (see `tilesChrome(tabCount:)`). `bottomHeight` is how far the collapsed
-    /// notch grows downward, for the strip or the open list (see `bottomHeight(for:strip:listRows:)`); other states ignore it. With a
-    /// `bottomHeight` the collapsed notch is as wide as the strip wants, `stripWidth` (see `compactWidth(stripWidth:)`); pass 0 under
-    /// the open list, which is not a strip.
+    /// notch grows downward, for the strip or the open list (see `bottomHeight(for:strip:listRows:)`); other states ignore it. The
+    /// collapsed notch is as wide as the strip wants, `stripWidth` (see `compactWidth(stripWidth:)`; 0 for no strip), whether the strip or
+    /// the list is under it: the notch does not change its width when the list opens.
     public func shapeSize(
         for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, bottomHeight: CGFloat = 0, tabCount: Int = 1,
         stripWidth: CGFloat = 0
@@ -139,9 +139,9 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
         case .closed:
             return CGSize(width: notchSize.width + ears, height: notchSize.height)
         case .compact:
-            // A strip that asks for a width gets it; with no strip (nothing under the notch, or the list) the notch is as wide as it was.
+            // A strip that asks for a width gets it (a caller with no strip passes 0), and the open list under the notch leaves it.
             return CGSize(
-                width: compactWidth(stripWidth: bottomHeight > 0 ? stripWidth : 0),
+                width: compactWidth(stripWidth: stripWidth),
                 height: notchSize.height + self.extraHeight(for: state, requested: bottomHeight)
             )
         case .open, .toast:

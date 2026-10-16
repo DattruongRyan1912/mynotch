@@ -35,11 +35,9 @@ struct NotchRootView: View {
         CompactAccessories(activities: activities, geometry: geometry, isListOpen: model.isListOpen, state: state)
     }
 
-    /// The width the current activity's strip asked for (`View.notchStripWidth`), which the collapsed notch is as wide as; 0 when it has
-    /// not asked, and under the open list, which takes the strip's place and is not one.
-    private func stripWidth(_ accessories: CompactAccessories) -> CGFloat {
-        accessories.listRows > 0 ? 0 : model.stripWidth(for: activities.current?.id)
-    }
+    /// The width the current activity's strip asked for (`View.notchStripWidth`), which the collapsed notch is as wide as, also while the
+    /// list is open under it; 0 when it has no strip or has not asked.
+    private var stripWidth: CGFloat { model.stripWidth(of: activities) }
 
     /// A strip tells the notch the width it wants: kept for its activity, while the strip is the one on show. The strip leaving (the
     /// notch opening, the activity ending, the list opening) reports 0 on its way out, which is not a request.
@@ -119,7 +117,7 @@ struct NotchRootView: View {
         let accessories = accessories
         let bottom = bottomHeight(accessories)
         let size = geometry.shapeSize(
-            for: state, contentHeight: contentHeight, bottomHeight: bottom, tabCount: registry.tabs.count, stripWidth: stripWidth(accessories)
+            for: state, contentHeight: contentHeight, bottomHeight: bottom, tabCount: registry.tabs.count, stripWidth: stripWidth
         )
         let radii = geometry.cornerRadii(for: state)
         let _ = NotchPerf.count(.bodies)
@@ -295,9 +293,7 @@ struct NotchRootView: View {
     /// strip made it, and its body (the top row, which the tiles start as) with it.
     private func collapsedSize(_ collapsed: NotchState) -> CGSize {
         var size = geometry.shapeSize(for: collapsed)
-        if collapsed == .compact, activities.stripHeight > 0 {
-            size.width = geometry.compactWidth(stripWidth: model.stripWidth(for: activities.current?.id))
-        }
+        if collapsed == .compact { size.width = geometry.compactWidth(stripWidth: stripWidth) }
         return size
     }
 
@@ -324,7 +320,7 @@ struct NotchRootView: View {
         if state == .compact {
             ActivityBubbles(
                 slots: ActivitySlot.bubbles(of: activities, capacity: geometry.bubbleCapacity),
-                geometry: geometry, stripWidth: stripWidth(accessories), label: label(for:), activate: activate
+                geometry: geometry, stripWidth: stripWidth, label: label(for:), activate: activate
             )
             .transition(.asymmetric(insertion: .opacity.animation(NotchTokens.enter), removal: .opacity.animation(NotchTokens.leave)))
             .notchLogLifecycle("bubbles")

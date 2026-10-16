@@ -412,6 +412,19 @@ struct NotchPillCanaryTests {
         let bubble = try #require(widening.last?.elements.first { $0.width < 60 })
         let end = geometry.panelSize.width / 2 + after / 2 - geometry.cornerRadii(for: .compact).top
         #expect(abs(bubble.minX - (end + NotchGeometry.bubbleGap)) < 3, "beside the pill with the same gap: \(bubble) after \(end)")
+        // Opening the list (hovering a bubble) leaves the notch as wide as its strip made it, so the bubble stays under the pointer.
+        model.showList()
+        try await poll("the list is open") { model.isListOpen }
+        let listOpen = await sample(rig) {}
+        let widthsWithList = listOpen.compactMap { $0.elements.first { $0.width > 200 } }.map(\.width)
+        #expect(!widthsWithList.isEmpty && widthsWithList.allSatisfy { abs($0 - (after + 8)) < 6 }, "the notch keeps its width with the list open: \(Set(widthsWithList.map { Int($0) }).sorted())")
+        let bubbleWithList = try #require(listOpen.last?.elements.first { $0.width < 60 && $0.height < 60 })
+        #expect(abs(bubbleWithList.minX - bubble.minX) < 3, "and the bubble does not move: \(bubble.minX) -> \(bubbleWithList.minX)")
+        // (No bubble to hover: the list goes, as it does when the other activity ends.)
+        model.bubbleCount = 0
+        try await poll("the list is closed") { !model.isListOpen }
+        model.bubbleCount = 1
+        try await Task.sleep(for: .milliseconds(500))
         // And it narrows back with the spring when the strip asks for much less.
         let narrowing = await sample(rig) { box.width = 330 }
         let back = try #require(narrowing.last?.elements.first { $0.width > 200 })

@@ -321,7 +321,7 @@ final class NotchWindowController {
         return geometry.pointerZone(
             at: point, state: state, contentHeight: registry.contentHeight(for: state, tabUnderToast: model.tabUnderToast),
             strip: activities.stripHeight, bubbles: accessories.bubbles, listRows: accessories.listRows, dragging: dragging,
-            tabCount: registry.tabs.count, stripWidth: model.stripWidth(for: activities.current?.id), in: screenFrame
+            tabCount: registry.tabs.count, stripWidth: model.stripWidth(of: activities), in: screenFrame
         )
     }
 
@@ -396,7 +396,7 @@ final class NotchWindowController {
                     state: state,
                     contentHeight: registry.contentHeight(for: state, tabUnderToast: covered),
                     tabCount: registry.tabs.count,
-                    stripWidth: model.stripWidth(for: activities.current?.id),
+                    stripWidth: model.stripWidth(of: activities),
                     wantsKeyboard: NotchKeyboardPolicy.wantsKeyboard(state: state, tabUnderToast: covered, tabs: registry.tabs),
                     focusesKeyboard: NotchKeyboardPolicy.focusesKeyboard(
                         state: state, tabUnderToast: covered, tabs: registry.tabs, onPurpose: model.isOpenedOnPurpose
