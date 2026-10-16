@@ -12,19 +12,20 @@ nonisolated enum DevPortLabel {
 
 nonisolated enum PortFilter {
     /// The rows the tab shows: UDP only when asked for, then those that match what was typed.
-    static func apply(_ entries: [PortEntry], query: String, showUDP: Bool) -> [PortEntry] {
-        entries.filter { (showUDP || $0.proto == .tcp) && matches($0, query: query) }
+    static func apply(_ entries: [PortEntry], query: String, showUDP: Bool, searchesCommands: Bool = true) -> [PortEntry] {
+        entries.filter { (showUDP || $0.proto == .tcp) && matches($0, query: query, searchesCommands: searchesCommands) }
     }
 
     /// A number matches the start of a port ("80" finds 8080 and 8000); anything else is looked for, ignoring case and accents,
-    /// in the names, the command line and the hint of a well-known port.
-    static func matches(_ entry: PortEntry, query: String) -> Bool {
+    /// in the names, the command line and the hint of a well-known port. A command line that is not shown is not searched either:
+    /// typing a guess and seeing the row stay would give away what the line says.
+    static func matches(_ entry: PortEntry, query: String, searchesCommands: Bool = true) -> Bool {
         var text = query.trimmingCharacters(in: .whitespaces)
         if text.hasPrefix(":") { text.removeFirst() }
         guard !text.isEmpty else { return true }
         if String(entry.port).hasPrefix(text) { return true }
         guard text.contains(where: { !$0.isNumber }) else { return false }
-        let fields = [entry.process.name, entry.process.appName, entry.process.commandLine, DevPortLabel.label(for: entry.port)]
+        let fields = [entry.process.name, entry.process.appName, searchesCommands ? entry.process.commandLine : nil, DevPortLabel.label(for: entry.port)]
         return fields.contains { $0?.localizedStandardContains(text) ?? false }
     }
 }

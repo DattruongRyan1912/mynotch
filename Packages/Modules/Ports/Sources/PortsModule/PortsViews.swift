@@ -131,7 +131,7 @@ private struct PortsList: View {
             Spacer(minLength: 0)
         } else {
             ScrollView {
-                PortsRows(entries: rows, flows: state.flows, actions: actions)
+                PortsRows(entries: rows, flows: state.flows, showsCommandLines: state.showsCommandLines, actions: actions)
             }
             .scrollIndicators(.never)
         }
@@ -142,13 +142,15 @@ private struct PortsList: View {
 struct PortsRows: View {
     let entries: [PortEntry]
     let flows: [Int32: StopFlow]
+    let showsCommandLines: Bool
     let actions: PortsActions
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(entries) { entry in
                 PortRow(
-                    entry: entry, flow: flows[entry.pid].flatMap { $0.entry.id == entry.id ? $0 : nil }, actions: actions,
+                    entry: entry, flow: flows[entry.pid].flatMap { $0.entry.id == entry.id ? $0 : nil },
+                    showsCommandLine: showsCommandLines, actions: actions,
                     // One stop at a time per process: while one is asked or running, its other rows have no button.
                     canStop: actions.canStop(entry) && flows[entry.pid] == nil
                 )
@@ -163,10 +165,14 @@ struct PortsRows: View {
 struct PortRow: View {
     let entry: PortEntry
     let flow: StopFlow?
+    let showsCommandLine: Bool
     let actions: PortsActions
     let canStop: Bool
 
     @State private var isHovering = false
+
+    /// The line under the name: what the process was started with, or nothing while MyNotch is kept out of recordings.
+    static func commandLine(of entry: PortEntry, shown: Bool) -> String? { shown ? entry.process.commandLine : nil }
 
     var body: some View {
         Group {
@@ -201,7 +207,7 @@ struct PortRow: View {
                 }
                 HStack(spacing: 6) {
                     Reach(entry: entry)
-                    if let command = entry.process.commandLine {
+                    if let command = Self.commandLine(of: entry, shown: showsCommandLine) {
                         Text(command)
                             .font(.system(size: 10.5, design: .monospaced))
                             .foregroundStyle(NotchTokens.secondaryText)

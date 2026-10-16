@@ -88,14 +88,18 @@ import Testing
     }
 
     /// The rows on their own: the tab puts them in a scroll view, which an offscreen render draws as nothing.
-    func rows(_ flows: [StopFlow] = [], entries: [PortEntry] = PortsGlassTests.entries) -> AnyView {
-        AnyView(PortsRows(entries: entries, flows: Dictionary(uniqueKeysWithValues: flows.map { ($0.entry.pid, $0) }), actions: .none))
+    func rows(_ flows: [StopFlow] = [], entries: [PortEntry] = PortsGlassTests.entries, showsCommandLines: Bool = true) -> AnyView {
+        AnyView(PortsRows(
+            entries: entries, flows: Dictionary(uniqueKeysWithValues: flows.map { ($0.entry.pid, $0) }), showsCommandLines: showsCommandLines,
+            actions: .none
+        ))
     }
 
     var fixtures: [Fixture] {
         let node = Self.entries[0]
         return [
             Fixture(name: "rows", view: rows(), ink: 1500),
+            Fixture(name: "rows without the command lines", view: rows(showsCommandLines: false), ink: 1000),
             Fixture(name: "rows with the question", view: rows([StopFlow(entry: node, phase: .confirming)]), ink: 1500),
             Fixture(name: "rows with the offer", view: rows([StopFlow(entry: node, phase: .stillRunning)]), ink: 1500),
             Fixture(name: "rows with a refusal", view: rows([StopFlow(entry: node, phase: .refused(.system))]), ink: 1500),
@@ -134,5 +138,12 @@ import Testing
                 #expect(reading.lighter(than: fixture.reach) >= fixture.ink, "\(fixture.name) in \(scheme)")
             }
         }
+    }
+
+    @Test func theCommandLinesAreDrawnOnlyWhenTheyAreShown() throws {
+        let entries = [PortEntry.make(port: 3000, process: .make(pid: 10, name: "node", command: "node server.js --watch --verbose"))]
+        let shown = try read(rows(entries: entries), glass: false, scheme: .dark, size: Self.size).lighter(than: 0.3)
+        let hidden = try read(rows(entries: entries, showsCommandLines: false), glass: false, scheme: .dark, size: Self.size).lighter(than: 0.3)
+        #expect(shown > hidden + 100, "the line is there with it (\(shown)) and not without it (\(hidden))")
     }
 }

@@ -22,8 +22,10 @@ nonisolated enum ProcArguments {
     }
 
     /// `node /Users/me/app/server.js --port 3000` shown as `node server.js --port 3000`: the program and the first file by name,
-    /// so the line is short enough to read in a row.
+    /// so the line is short enough to read in a row. Secrets are masked first (`SecretMask`), so they are not in the line that
+    /// the rest of the module keeps, and a long line is cut after that, not through the middle of one.
     static func display(_ arguments: [String], limit: Int = 200) -> String? {
+        let arguments = SecretMask.mask(arguments)
         guard var program = arguments.first.map({ URL(fileURLWithPath: $0).lastPathComponent }), !program.isEmpty else { return nil }
         var rest = Array(arguments.dropFirst())
         if let first = rest.first, first.hasPrefix("/") { rest[0] = URL(fileURLWithPath: first).lastPathComponent }

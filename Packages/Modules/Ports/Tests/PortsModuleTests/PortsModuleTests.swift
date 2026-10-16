@@ -1,6 +1,7 @@
 import Foundation
 import MyNotchCore
 import MyNotchTestSupport
+import NotchUI
 import SwiftUI
 import Testing
 @testable import PortsModule
@@ -23,11 +24,14 @@ extension StopPolicy {
     let control: FakeProcessControl
     let probe: FakePortProbe
     let outside: Outside
+    /// The notch's app-wide settings the module reads, its own to change from a test.
+    let interface = NotchInterface()
 
     var state: PortsState { module.state }
     var scheduler: ManualScheduler { harness.scheduler }
 
-    init(_ entries: [PortEntry] = [], policy: StopPolicy = .test, running: Bool = true) async {
+    init(_ entries: [PortEntry] = [], policy: StopPolicy = .test, running: Bool = true, hiding: CaptureHiding = .never) async {
+        interface.captureHiding = hiding
         source = FakePortSource(entries)
         control = FakeProcessControl(entries.map(\.process.identity))
         probe = FakePortProbe()
@@ -35,7 +39,8 @@ extension StopPolicy {
         self.outside = outside
         module = PortsModule(
             source: source, control: control, probe: probe, policy: policy,
-            environment: PortsEnvironment(openURL: { outside.opened.append($0) }, copy: { outside.copied.append($0) })
+            environment: PortsEnvironment(openURL: { outside.opened.append($0) }, copy: { outside.copied.append($0) }),
+            interface: interface
         )
         harness = RegistryHarness([module])
         if running { await harness.registry.bootstrap() }
@@ -258,6 +263,68 @@ extension StopPolicy {
         await rig.advance(2)
         #expect(rig.probe.asked == [3000])
         #expect(rig.state.quickAnswer == .free(3000))
+    }
+
+    // MARK: Command lines and screen capture
+
+    let withCommand = PortEntry.make(port: 3000, process: .make(pid: 10, name: "node", command: "node server.js --watch"))
+
+    @Test func theCommandLineIsShownWhileMyNotchIsNotKeptOutOfRecordings() async {
+        let rig = await Rig([withCommand])
+        await rig.showTab()
+        #expect(rig.state.showsCommandLines)
+        #expect(PortRow.commandLine(of: withCommand, shown: rig.state.showsCommandLines) == "node server.js --watch")
+        #expect(rig.state.visibleEntries.count == 1)
+    }
+
+    @Test func onlyTheNeverSettingShowsTheCommandLine() {
+        #expect(PortsModule.showsCommandLines(under: .never))
+        #expect(!PortsModule.showsCommandLines(under: .whenCollapsed))
+        #expect(!PortsModule.showsCommandLines(under: .always))
+        for hiding in CaptureHiding.allCases {
+            #expect(PortsModule.showsCommandLines(under: hiding) == (hiding == .never))
+        }
+    }
+
+    @Test func whenTheSettingKeepsMyNotchOutOfRecordingsARowIsTheNameAlone() async {
+        for hiding in [CaptureHiding.always, .whenCollapsed] {
+            let rig = await Rig([withCommand], hiding: hiding)
+            await rig.showTab()
+            #expect(!rig.state.showsCommandLines, "\(hiding)")
+            #expect(PortRow.commandLine(of: withCommand, shown: rig.state.showsCommandLines) == nil)
+            #expect(rig.state.entries == [withCommand], "the name, port and owner are still there")
+        }
+    }
+
+    @Test func theSettingChangingWhileTheModuleRunsChangesTheRowsAtOnce() async {
+        let rig = await Rig([withCommand])
+        await rig.showTab()
+        rig.interface.captureHiding = .always
+        for _ in 0..<100 where rig.state.showsCommandLines { await Task.yield() }
+        #expect(!rig.state.showsCommandLines)
+        rig.interface.captureHiding = .never
+        for _ in 0..<100 where !rig.state.showsCommandLines { await Task.yield() }
+        #expect(rig.state.showsCommandLines)
+    }
+
+    @Test func aCommandLineThatIsNotShownIsNotSearchedEither() async {
+        let rig = await Rig([withCommand])
+        await rig.showTab()
+        rig.state.filter = "server.js"
+        #expect(rig.state.visibleEntries.count == 1, "found by what it was started with")
+        rig.interface.captureHiding = .always
+        for _ in 0..<100 where rig.state.showsCommandLines { await Task.yield() }
+        #expect(rig.state.visibleEntries.isEmpty, "a guess must not tell what the hidden line says")
+        rig.state.filter = "node"
+        #expect(rig.state.visibleEntries.count == 1, "the name still finds it")
+        #expect(PortFilter.matches(withCommand, query: "server.js", searchesCommands: false) == false)
+    }
+
+    @Test func aStoppedModuleGoesBackToTheDefault() async {
+        let rig = await Rig([withCommand], hiding: .always)
+        #expect(!rig.state.showsCommandLines)
+        await rig.harness.registry.setEnabled(false, for: "ports")
+        #expect(rig.state.showsCommandLines)
     }
 
     // MARK: Settings

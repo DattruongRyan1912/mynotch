@@ -62,6 +62,7 @@ public final class PortsModule: FeatureModule {
     private let probe: any PortProbe
     private let policy: StopPolicy
     private let environment: PortsEnvironment
+    private let interface: NotchInterface
     private var context: ModuleContext?
     /// Bumped when the module stops, so an answer that arrives afterwards is dropped.
     private var generation = 0
@@ -76,20 +77,30 @@ public final class PortsModule: FeatureModule {
 
     /// Nothing here has a default on purpose: a test that built the module without saying what signals go to could reach a real
     /// process. Only `init()` wires the real ones.
-    init(source: any PortSource, control: any ProcessControl, probe: any PortProbe, policy: StopPolicy, environment: PortsEnvironment) {
+    init(
+        source: any PortSource, control: any ProcessControl, probe: any PortProbe, policy: StopPolicy, environment: PortsEnvironment,
+        interface: NotchInterface
+    ) {
         self.source = source
         self.control = control
         self.probe = probe
         self.policy = policy
         self.environment = environment
+        self.interface = interface
     }
 
     public convenience init() {
         self.init(
             source: LibprocPortSource(), control: LibprocProcessControl(), probe: LoopbackBindProbe(), policy: .current,
-            environment: .system
+            environment: .system, interface: .shared
         )
     }
+
+    /// Whether a row may show the arguments of its process. They can hold what the user would not want seen (the secrets that
+    /// `SecretMask` does not know), so when the user keeps MyNotch out of recordings and shared screens, which says that a
+    /// recording or a share is in the picture, a row is the name alone. macOS has no call that says whether a capture is running
+    /// right now, so the user's setting is what stands for it.
+    static func showsCommandLines(under hiding: CaptureHiding) -> Bool { hiding == .never }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
         self.context = context
@@ -97,8 +108,15 @@ public final class PortsModule: FeatureModule {
         let settings = context.settings
         let key = Self.showUDPKey(settings)
         state.showUDP = settings.value(key)
+        state.showsCommandLines = Self.showsCommandLines(under: interface.captureHiding)
         context.run { [weak self] in
             for await _ in Observations({ settings.value(key) }) { self?.state.showUDP = settings.value(key) }
+        }
+        let interface = interface
+        context.run { [weak self] in
+            for await hiding in Observations({ interface.captureHiding }) {
+                self?.state.showsCommandLines = Self.showsCommandLines(under: hiding)
+            }
         }
     }
 
@@ -113,6 +131,7 @@ public final class PortsModule: FeatureModule {
         context = nil
         visibleTabs = 0
         isReading = false
+        state.showsCommandLines = true
         state.entries = []
         state.hasLoaded = false
         state.filter = ""
