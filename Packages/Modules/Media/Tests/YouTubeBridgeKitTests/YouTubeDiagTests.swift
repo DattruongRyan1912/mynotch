@@ -10,6 +10,7 @@ import Testing
         ("sw", "sw-reject untrusted"), ("sw", "sw-reject invalid captions"), ("sw", "sw-reject invalid playback"),
         ("sw", "sw-reject invalid clear"), ("sw", "sw-reject invalid diag"), ("sw", "sw-reject invalid unknown"),
         ("sw", "sw-reject invalid command"), ("sw", "sw-command-no-tab"),
+        ("sw", "sw-msg tab"), ("sw", "sw-reject invalid tab"), ("sw", "sw-reject invalid tabcommand"), ("sw", "sw-tabcommand-no-tab"),
         ("sw", "sw-reconnect after=host-not-found failures=3"), ("sw", "sw-reconnect after=disconnected failures=120"),
         ("sw", "sw-inject tabs=3 injected=2 failed=1"), ("sw", "sw-inject tabs=0 injected=0 failed=0"),
         ("sw", "sw-inject tabs=999999 injected=999999 failed=0"),
@@ -18,6 +19,9 @@ import Testing
         ("content", "content-cc on"), ("content", "content-cc off"),
         ("content", "content-command next ok"), ("content", "content-command next unavailable"),
         ("content", "content-command previous ok"), ("content", "content-command previous unavailable"),
+        ("content", "content-tabcommand play ok"), ("content", "content-tabcommand pause unavailable"),
+        ("content", "content-tabcommand toggle ok"), ("content", "content-tabcommand next unavailable"),
+        ("content", "content-tabcommand previous ok"), ("content", "content-tabcommand seek ok"),
         ("content", "content-send-error no-receiving-end count=2"), ("content", "content-send-error context-invalidated count=100000"),
         ("content", "content-alive videoid-present=true playing=false"),
         ("content", "content-tick-error type-error"),
@@ -203,6 +207,30 @@ import Testing
         for event in ["sw-start v=0.1.3", "sw-reject invalid playback", "sw-msg playback", "sw-access youtube=granted", "content-start", "content-alive videoid-present=true playing=true", "content-command next", "content-command skip ok", ""] {
             #expect(YouTubeDiag(origin: .sw, event: event).commandAnswer == nil, "\(event)")
             #expect(YouTubeDiag(origin: .content, event: event).commandAnswer == nil, "\(event)")
+        }
+    }
+
+    @Test func theAnswersAboutATabCommandAreNotAnswersToASkipThatWaitsForOne() {
+        // The app waits for an answer to each next or previous it sent to YouTube, and a tab's own commands must not end that wait.
+        for event in ["content-tabcommand play ok", "content-tabcommand next unavailable", "content-tabcommand seek ok"] {
+            #expect(YouTubeDiag(origin: .content, event: event).commandAnswer == nil, "\(event)")
+        }
+        #expect(YouTubeDiag(origin: .sw, event: "sw-tabcommand-no-tab").commandAnswer == nil)
+        #expect(YouTubeDiag(origin: .sw, event: "sw-reject invalid tabcommand").commandAnswer == nil)
+    }
+
+    @Test func theTabCommandAnswersAreRefusedWhenTheyDoNotFitTheClosedList() {
+        let refused: [(String, String)] = [
+            ("content", "content-tabcommand"), ("content", "content-tabcommand play"), ("content", "content-tabcommand stop ok"),
+            ("content", "content-tabcommand play maybe"), ("content", "content-tabcommand ok play"), ("content", "content-tabcommand play ok extra"),
+            ("content", "content-tabcommand play  ok"), ("content", "content-tabcommand PLAY ok"), ("content", "content-tabcommand play ok abcdefghijk"),
+            ("content", "content-tabcommand tab=3 play ok"), ("content", "content-tabcommand play ok https://www.youtube.com/watch"),
+            ("sw", "content-tabcommand play ok"), ("page", "content-tabcommand play ok"),
+            ("sw", "sw-tabcommand-no-tab extra"), ("sw", "sw-tabcommand-no-tab tab=1"), ("content", "sw-tabcommand-no-tab"),
+            ("sw", "sw-msg tab abcdefghijk"), ("sw", "sw-msg tab tab=1"), ("sw", "sw-reject invalid tabs"), ("sw", "sw-reject invalid tab-report"),
+        ]
+        for (origin, event) in refused {
+            #expect(Self.decode(where: origin, event: event) == nil, "\(origin): \(event)")
         }
     }
 

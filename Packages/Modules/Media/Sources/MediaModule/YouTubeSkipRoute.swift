@@ -63,3 +63,29 @@ nonisolated extension MediaCommand {
         }
     }
 }
+
+nonisolated extension MediaCommand {
+    /// What a player app is asked through Apple Events; a like has no such command.
+    var appCommand: AppPlayerCommand? {
+        switch self {
+        case .play: .play
+        case .pause: .pause
+        case .togglePlayPause: .togglePlayPause
+        case .nextTrack: .next
+        case .previousTrack: .previous
+        case .likeTrack: nil
+        }
+    }
+
+    /// What a tab is asked through the extension; a like has no such command.
+    var tabAction: TabCommand.Action? {
+        switch self {
+        case .play: .play
+        case .pause: .pause
+        case .togglePlayPause: .toggle
+        case .nextTrack: .next
+        case .previousTrack: .previous
+        case .likeTrack: nil
+        }
+    }
+}

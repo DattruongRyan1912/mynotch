@@ -99,8 +99,17 @@ public final class MediaModule: FeatureModule {
     static let activityID = "nowPlaying"
     static let blockedMessage = "Không đọc được thông tin phát nhạc (macOS đã chặn adapter)"
 
+    /// What the notch follows: the closed notch's activity, the lock screen, the hotkeys, the lyrics and the spectrum. It shows the
+    /// primary source (see `MediaSourceBook`), whoever reports it.
     let store: NowPlayingStore
+    /// What the player shows while the user has chosen a source that is not the primary one; empty otherwise. Only the player's own
+    /// views read it: the bars and the lyrics stay with `store`.
+    let displayStore: NowPlayingStore
+    /// Every source of sound, merged: what the system, Music and Spotify, and the tabs of Chrome say.
+    let sources: MediaSourceHub
     /// nil when the app was built without the adapter; `start` then reports the module unavailable.
+    /// Finds the app behind a bundle id for the chips' icons; tests give their own, so none reaches LaunchServices.
+    private let lookUpApp: @MainActor (String) -> PlayerApp?
     private let makeSource: ((any Scheduler) -> any NowPlayingSource)?
     private let spectrum: any SpectrumSource
     private let lyricsClient: any HTTPClient
@@ -118,6 +127,8 @@ public final class MediaModule: FeatureModule {
     var debugObserve = AppleLyricsDebugTrigger.systemObserve
     #endif
     private var source: (any NowPlayingSource)?
+    /// Folds the adapter's lines into the system's session, which `sources` merges with the rest.
+    private var systemReducer = NowPlayingReducer()
     private var spectrumFeed: SpectrumFeed?
     private var context: ModuleContext?
     private var policy = ActivityPolicy()
@@ -128,6 +139,8 @@ public final class MediaModule: FeatureModule {
     /// Works out the tint of each cover once and keeps it by track; hands it to `store`.
     private let tinter: ArtworkTinter
     private var tintEnabled = true
+    /// Works out the tint of the source the player shows when that is not the primary one.
+    private let displayTinter: ArtworkTinter
     private var lyricsService: LyricsService?
     /// Track the lyrics were asked for (or are shown for); nil while lyrics are off or the track has no key.
     private var lyricsTrack: TrackKey?
@@ -169,8 +182,10 @@ public final class MediaModule: FeatureModule {
     /// Skips sent to the extension and not answered yet, oldest first.
     private var unansweredSkips: [UnansweredSkip] = []
     private var unansweredSkipCount = 0
-    /// The latest seek, until the player reports the position it moved to: quick taps on a seek button start from it.
+    /// The latest seek, until the player reports the position it moved to: quick taps on a seek button start from it. It is for one
+    /// source: another source's progress is not waiting for it.
     private var pendingSeek: PendingSeek?
+    private var pendingSeekSource: MediaSourceID?
     /// The latest press the extension took; it explains a title that is about to change (see `SkipRoute.titleChangeWindow`).
     private var bridgedSkip: SkipRoute.BridgedSkip?
     /// Whether the lock screen view is on offer; its view reads `store`, so it is set once and cleared once.
@@ -190,19 +205,24 @@ public final class MediaModule: FeatureModule {
     public convenience init(adapterScript: URL?, adapterFramework: URL?) {
         // Creating the tap object does nothing yet: it touches Core Audio only when it starts.
         let spectrum = SystemAudioTap(bandCount: NowPlayingBars.barCount)
+        let client = URLSessionHTTPClient()
+        // Reading Music and Spotify sends them Apple Events only once the user lets MyNotch (see `MediaSourceHub`).
+        let controls = Self.systemControls(client: client)
         if let adapterScript, let adapterFramework {
             self.init(
                 makeSource: { scheduler in AdapterProcess(script: adapterScript, framework: adapterFramework, scheduler: scheduler) },
                 spectrum: spectrum,
-                lyricsClient: URLSessionHTTPClient(),
+                lyricsClient: client,
                 tokens: KeychainTokenStore(),
                 signIn: AppleMusicLoginWindow(),
-                volume: .system()
+                volume: .system(),
+                appControls: controls, appEnvironment: .system
             )
         } else {
             self.init(
-                makeSource: nil, spectrum: spectrum, lyricsClient: URLSessionHTTPClient(),
-                tokens: KeychainTokenStore(), signIn: AppleMusicLoginWindow(), volume: .system()
+                makeSource: nil, spectrum: spectrum, lyricsClient: client,
+                tokens: KeychainTokenStore(), signIn: AppleMusicLoginWindow(), volume: .system(),
+                appControls: controls, appEnvironment: .system
             )
         }
     }
@@ -222,13 +242,30 @@ public final class MediaModule: FeatureModule {
         youtubeSetup: YouTubeBridgeSetup? = nil,
         youtubeLog: YouTubeBridgeLog = .silent,
         volume: VolumeModel = VolumeModel(hardware: NoVolumeHardware(), queue: SerialVolumeQueue()),
-        tintExtract: @escaping ArtworkTinter.Extract = ArtworkTinter.backgroundExtract
+        tintExtract: @escaping ArtworkTinter.Extract = ArtworkTinter.backgroundExtract,
+        appControls: [any AppPlayerControl] = [],
+        appEnvironment: MediaAppEnvironment = .inert
     ) {
         self.init(
             makeSource: { _ in source }, spectrum: spectrum, lyricsClient: lyricsClient,
             tokens: tokens, signIn: signIn, volume: volume, lookUpApp: lookUpApp, youtubeSocketPath: youtubeSocketPath,
-            youtubeSetup: youtubeSetup, youtubeLog: youtubeLog, tintExtract: tintExtract
+            youtubeSetup: youtubeSetup, youtubeLog: youtubeLog, tintExtract: tintExtract,
+            appControls: appControls, appEnvironment: appEnvironment
         )
+    }
+
+    /// Music and Spotify through Apple Events, on the system's script queue; Spotify's cover is fetched from its own image service.
+    private static func systemControls(client: any HTTPClient) -> [any AppPlayerControl] {
+        let runner = SystemPlayerScriptRunner()
+        return KnownPlayer.allCases.map { player in
+            AppleScriptPlayerControl(player: player, runner: runner, fetchArtwork: { url in
+                guard SpotifyArtwork.isAllowed(url) else { return nil }
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 5
+                guard let reply = try? await client.send(request), reply.status == 200, reply.body.count <= SpotifyArtwork.maxBytes else { return nil }
+                return reply.body
+            })
+        }
     }
 
     private init(
@@ -242,9 +279,12 @@ public final class MediaModule: FeatureModule {
         youtubeSocketPath: String? = nil,
         youtubeSetup: YouTubeBridgeSetup? = nil,
         youtubeLog: YouTubeBridgeLog = .system,
-        tintExtract: @escaping ArtworkTinter.Extract = ArtworkTinter.backgroundExtract
+        tintExtract: @escaping ArtworkTinter.Extract = ArtworkTinter.backgroundExtract,
+        appControls: [any AppPlayerControl] = [],
+        appEnvironment: MediaAppEnvironment = .inert
     ) {
         self.volume = volume
+        self.lookUpApp = lookUpApp
         self.youtubeSocketPath = youtubeSocketPath
         self.youtubeSetup = youtubeSetup
         self.youtubeLog = youtubeLog
@@ -257,6 +297,10 @@ public final class MediaModule: FeatureModule {
         let store = NowPlayingStore(lookUpApp: lookUpApp)
         self.store = store
         tinter = ArtworkTinter(extract: tintExtract) { [weak store] palette in store?.showTint(palette) }
+        let displayStore = NowPlayingStore(lookUpApp: lookUpApp)
+        self.displayStore = displayStore
+        displayTinter = ArtworkTinter(extract: tintExtract) { [weak displayStore] palette in displayStore?.showTint(palette) }
+        sources = MediaSourceHub(environment: appEnvironment, controls: appControls)
     }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
@@ -265,6 +309,8 @@ public final class MediaModule: FeatureModule {
         }
         self.context = context
         store.reset()
+        displayStore.reset()
+        systemReducer = NowPlayingReducer()
         policy = ActivityPolicy()
         publishedTrack = nil
         publishedStrip = false
@@ -294,7 +340,8 @@ public final class MediaModule: FeatureModule {
         let settings = context.settings
         let keys = MediaSettingsKeys(settings)
         let panel = LyricsPanelHost(
-            store: store, settings: settings, scheduler: context.scheduler, displays: lyricsPanelDisplays, present: presentLyricsPanel
+            store: store, settings: settings, scheduler: context.scheduler, displays: lyricsPanelDisplays, present: presentLyricsPanel,
+            alsoTells: displayStore
         )
         lyricsPanel = panel
         panel.apply()
@@ -328,6 +375,8 @@ public final class MediaModule: FeatureModule {
         context.run { [weak self] in
             for await _ in Observations({ account.status }) { self?.appleStatusChanged() }
         }
+        sources.onChange = { [weak self] change in self?.sourcesChanged(change) }
+        sources.start(scheduler: context.scheduler, permissions: context.permissions)
         let source = makeSource(context.scheduler)
         self.source = source
         store.setCanLike(source.canLike)
@@ -339,12 +388,17 @@ public final class MediaModule: FeatureModule {
 
     public func stop() async {
         tinter.stop()
+        displayTinter.stop()
+        sources.onChange = { _ in }
+        sources.stop()
+        displayStore.reset()
         lyricsPanel?.close()
         lyricsPanel = nil
         source?.stop()
         source = nil
         store.setCanLike(false)
         pendingSeek = nil
+        pendingSeekSource = nil
         volume.stopWatching()
         spectrumFeed?.shutDown()
         spectrumFeed = nil
@@ -374,7 +428,10 @@ public final class MediaModule: FeatureModule {
     public func makeTab() -> NotchTab? {
         NotchTab(
             id: descriptor.id, title: "Media", systemImage: "music.note", preferredHeight: MediaTabView.preferredHeight,
-            content: AnyView(MediaTabView(store: store, actions: actions, volume: volume))
+            content: AnyView(MediaTabView(
+                store: store, actions: tabActions, volume: volume, sources: sources.model, displayStore: displayStore,
+                icons: PlayerAppCache(lookUp: lookUpApp)
+            ))
         )
     }
 
@@ -400,6 +457,7 @@ public final class MediaModule: FeatureModule {
             lyricsPanelClickThrough: environment.settings.binding(keys.lyricsPanelClickThrough),
             youtubeBridge: youtubeBridgeModel(for: environment),
             store: store,
+            sources: sources.model,
             appleAccount: appleAccount,
             connectAppleMusic: { [weak self] in self?.connectAppleMusic() },
             disconnectAppleMusic: { [weak self] in Task { await self?.disconnectAppleMusic() } }
@@ -434,9 +492,10 @@ public final class MediaModule: FeatureModule {
         await signIn.removeWebsiteData()
     }
 
-    /// The lock screen's buttons: the Media tab's, through the same actions.
+    /// The lock screen's buttons: the Media tab's, through the same actions, but for the primary source whatever the tab shows.
     var lockScreenTransport: LockScreenTransport { LockScreenTransport(store: store, actions: actions) }
 
+    /// What the notch follows acts on: the lock screen, the hotkeys. The primary source, whichever the Media tab is showing.
     var actions: MediaActions {
         MediaActions(
             send: { [weak self] command in self?.send(command) },
@@ -446,24 +505,74 @@ public final class MediaModule: FeatureModule {
         )
     }
 
+    /// What the Media tab's controls act on: the source the player shows, which is the primary one until the user chooses another.
+    var tabActions: MediaActions {
+        MediaActions(
+            send: { [weak self] command in self?.send(command, to: self?.sources.book.displayedID) },
+            seek: { [weak self] seconds in self?.seek(toSeconds: seconds, to: self?.sources.book.displayedID) },
+            press: { [weak self] button in self?.press(button, to: self?.sources.book.displayedID) },
+            toggleLyricsPanel: { [weak self] in self?.lyricsPanel?.toggle() }
+        )
+    }
+
+    /// Where a command goes, for the source it is for.
+    private enum Route {
+        /// The system's now-playing session (MediaRemote through the adapter, and for a YouTube video the extension's skip).
+        case system(NowPlayingState)
+        case app(String)
+        case tab(TabRef)
+    }
+
+    /// The source a command is for (the primary one by default) and how to reach it: through the system when the system plays it,
+    /// else through the app's own Apple Events or the extension. With no source at all the system is asked, as it always was.
+    private func route(for id: MediaSourceID?) -> Route {
+        guard let entry = id.flatMap({ sources.book.entry($0) }) ?? sources.book.primary else { return .system(store.state) }
+        if entry.isSystemBacked { return .system(entry.state) }
+        if let tab = entry.tab { return .tab(tab) }
+        if let app = entry.app { return .app(app) }
+        return .system(entry.state)
+    }
+
     /// Next and previous of a video that plays in Chrome go to the extension, which presses the player's own button, when it
     /// has a live session for that video: Chrome ignores MediaRemote's next and previous there. Whatever else is sent
-    /// goes to MediaRemote, as does a press the extension does not take (see `sendToExtension`).
-    func send(_ command: MediaCommand) {
-        if let action = command.youTubeCommand, skipRoute() == .bridge {
-            sendToExtension(command, as: action)
-            return
+    /// goes to MediaRemote, as does a press the extension does not take (see `sendToExtension`). A source the system does not play
+    /// is controlled through its own: Music and Spotify by Apple Events (the first press asks the user), a tab by the extension.
+    func send(_ command: MediaCommand, to id: MediaSourceID? = nil) {
+        switch route(for: id) {
+        case .system(let state):
+            if let action = command.youTubeCommand, skipRoute(for: state) == .bridge {
+                sendToExtension(command, as: action)
+                return
+            }
+            source?.send(command)
+        case .app(let bundleID):
+            if let command = command.appCommand { sources.perform(command, onApp: bundleID) }
+        case .tab(let ref):
+            if let action = command.tabAction { sendToTab(ref, action) }
         }
-        source?.send(command)
     }
 
     /// Where Next and Previous go for what plays now.
     func skipRoute(at now: Date = Date()) -> SkipRoute {
-        SkipRoute.decide(for: store.state, in: captionStore, now: now, after: bridgedSkip)
+        skipRoute(for: store.state, at: now)
+    }
+
+    private func skipRoute(for state: NowPlayingState, at now: Date = Date()) -> SkipRoute {
+        SkipRoute.decide(for: state, in: captionStore, now: now, after: bridgedSkip)
     }
 
     /// The hosts connected to the socket (for tests).
     var youtubeServerConnectionCount: Int { youtubeServer?.connectionCount ?? 0 }
+
+    /// Asks the Chrome that owns the tab to do something to it. Nothing answers for a tab the way the extension does for a skip: the
+    /// page reports what it did, and the player follows.
+    private func sendToTab(_ ref: TabRef, _ action: TabCommand.Action) {
+        guard let youtubeServer, youtubeServer.send(TabCommand(tab: ref.tab, action: action), toConnection: ref.connection) else {
+            youtubeLog("tab command not sent action=\(action.word)")
+            return
+        }
+        youtubeLog("tab command sent action=\(action.word)")
+    }
 
     /// Writes the command to the host and waits `SkipRoute.answerTimeout` for the extension to answer it (it does, with a
     /// diagnostic, whether or not it could do it). Nothing answers when the host or the extension is of a version that does not
@@ -516,27 +625,47 @@ public final class MediaModule: FeatureModule {
         bridgedSkip = nil
     }
 
-    func seek(toSeconds seconds: Double, at now: Date = Date()) {
-        pendingSeek = PendingSeek(seconds: seconds, anchor: store.state.elapsedAnchor, date: now)
-        source?.seek(toSeconds: seconds)
+    func seek(toSeconds seconds: Double, to id: MediaSourceID? = nil, at now: Date = Date()) {
+        let target = id ?? sources.book.primaryID
+        let state = (id.flatMap { sources.book.entry($0) } ?? sources.book.primary)?.state ?? store.state
+        pendingSeek = PendingSeek(seconds: seconds, anchor: state.elapsedAnchor, date: now)
+        pendingSeekSource = target
+        switch route(for: id) {
+        case .system: source?.seek(toSeconds: seconds)
+        case .app(let bundleID): sources.perform(.seek(seconds: seconds), onApp: bundleID)
+        case .tab(let ref): sendToTab(ref, .seek(seconds: seconds))
+        }
     }
 
     /// A button beside play and pause: what it does depends on what the player reports (see `MediaControlButton`), and a
     /// button that cannot be used does nothing. Next and previous go through `send`, so they take the same route as the hotkeys.
-    func press(_ button: MediaControlButton, at now: Date = Date()) {
+    /// `id` is the source it is pressed for: the primary one unless the Media tab shows another.
+    func press(_ button: MediaControlButton, to id: MediaSourceID? = nil, at now: Date = Date()) {
+        let target = id ?? sources.book.primaryID
+        let entry = id.flatMap { sources.book.entry($0) } ?? sources.book.primary
+        let state = entry?.state ?? store.state
         // The volume slider is the row's own: it has no effect on the player and is never open from here.
-        let waiting = pendingSeek.flatMap { $0.isPending(for: store.state, at: now) ? $0.seconds : nil }
-        let context = store.controlContext(hasVolume: volume.isAvailable, volumeIsOpen: false, pendingSeek: waiting)
-        switch button.effect(in: context, at: now) {
-        case .command(let command): send(command)
-        case .seek(let seconds): seek(toSeconds: seconds, at: now)
-        case .shuffle(let mode): source?.setShuffle(mode)
-        case .repeatMode(let mode): source?.setRepeat(mode)
+        let waiting = pendingSeek.flatMap { pendingSeekSource == target && $0.isPending(for: state, at: now) ? $0.seconds : nil }
+        let controlContext = MediaControlContext(
+            state: state, lyricsAreOn: store.lyricsAreOn, lyricsHidden: store.lyricsHidden, canLike: store.canLike && (entry?.isSystemBacked ?? true),
+            hasVolume: volume.isAvailable, volumeIsOpen: false, pendingSeek: waiting
+        )
+        switch button.effect(in: controlContext, at: now) {
+        case .command(let command): send(command, to: id)
+        case .seek(let seconds): seek(toSeconds: seconds, to: id, at: now)
+        case .shuffle(let mode): if isSystemBacked(id) { source?.setShuffle(mode) }
+        case .repeatMode(let mode): if isSystemBacked(id) { source?.setRepeat(mode) }
         case .toggleLyrics:
             store.toggleLyricsHidden()
             refreshActivity()
         case nil: break
         }
+    }
+
+    /// Whether the system plays the source (the primary one by default), so that its shuffle and repeat are the system's to set.
+    private func isSystemBacked(_ id: MediaSourceID?) -> Bool {
+        if case .system = route(for: id) { return true }
+        return false
     }
 
     private func registerHotkeys(_ hotkeys: ModuleHotkeys) {
@@ -547,17 +676,57 @@ public final class MediaModule: FeatureModule {
         hotkeys.register("lyricsPanel", title: "Bật/tắt bảng lời nổi") { [weak self] in self?.lyricsPanel?.toggle() }
     }
 
+    /// A line of the adapter: the system's session changed. It joins the other sources, which work out what the notch follows.
     private func receive(_ line: String) {
         let now = Date()
-        guard store.apply(line: line, receivedAt: now) else { return }
-        evaluate(at: now)
+        guard systemReducer.apply(line: line, receivedAt: now) == .applied else { return }
+        sources.setSystem(systemReducer.state)
+    }
+
+    /// The sources changed: the primary one is what `store` shows, and the player shows the one the user chose. The notch looks again
+    /// at what it follows for every line of the system's session, as it always did, and for anything else only when that changed.
+    private func sourcesChanged(_ change: MediaSourceHub.Change) {
+        let primary = sources.book.primary
+        let changed = store.show(primary?.state ?? .empty, source: primary?.id.rawValue ?? "none")
+        refreshDisplay()
+        guard context != nil, change == .system || changed else { return }
+        evaluate(at: Date())
+    }
+
+    /// The player's own store shows the chosen source while it is not the primary one, and nothing otherwise (the player then reads
+    /// `store`), so that no cover is kept twice.
+    private func refreshDisplay() {
+        guard let shown = sources.book.displayed, shown.id != sources.book.primaryID else {
+            displayStore.show(.empty, source: "none")
+            displayTinter.stop()
+            displayStore.showTint(nil)
+            return
+        }
+        displayStore.show(shown.state, source: shown.id.rawValue)
+        if tintEnabled, shown.state.isActive {
+            displayTinter.update(track: shown.state.trackIdentity, artwork: shown.state.artwork)
+        } else {
+            displayTinter.stop()
+            displayStore.showTint(nil)
+        }
     }
 
     private func sourceFailed(_ reason: String) {
         context?.logger.error("Now playing stopped: \(reason, privacy: .public)")
         // Commands would only start perl processes that fail like the stream did; a restart makes a new source.
         source = nil
-        store.fail(message: Self.blockedMessage)
+        systemReducer = NowPlayingReducer()
+        sources.onChange = { _ in }
+        sources.setSystem(nil)
+        sources.onChange = { [weak self] change in self?.sourcesChanged(change) }
+        // The other sources do not depend on the adapter: they stay, and the tab shows them. Only a notch with nothing else to
+        // show says that the system's now playing could not be read.
+        if let primary = sources.book.primary {
+            store.show(primary.state, source: primary.id.rawValue)
+        } else {
+            store.fail(message: Self.blockedMessage)
+        }
+        refreshDisplay()
         policy = ActivityPolicy(pauseGrace: policy.pauseGrace, hiddenBundleIDs: policy.hiddenBundleIDs)
         cancelDeadline()
         refreshActivity()
@@ -580,16 +749,22 @@ public final class MediaModule: FeatureModule {
         lyricsEnabled = settings.value(keys.lyrics)
         lyricsUnderNotch = settings.value(keys.lyricsUnderNotch)
         youtubeCaptionsEnabled = settings.value(keys.youtubeCaptions)
-        store.setControlLayout(settings.value(keys.controlButtons))
-        store.setKaraokeEnabled(settings.value(keys.karaoke))
+        for shown in [store, displayStore] {
+            shown.setControlLayout(settings.value(keys.controlButtons))
+            shown.setKaraokeEnabled(settings.value(keys.karaoke))
+        }
         tintEnabled = settings.value(keys.tintFromArtwork)
         store.setTintEnabled(tintEnabled)
+        displayStore.setTintEnabled(tintEnabled)
         store.setSpectrumColors(
             mode: settings.value(keys.spectrumColorMode), start: settings.value(keys.spectrumGradientStart),
             end: settings.value(keys.spectrumGradientEnd)
         )
         store.setLyricsOn(lyricsEnabled || youtubeCaptionsEnabled)
+        // Kept in step so that the player keeps its place under the controls (the row is reserved, empty) while it shows another source.
+        displayStore.setLyricsOn(lyricsEnabled || youtubeCaptionsEnabled)
         updateYouTubeBridge()
+        refreshDisplay()
     }
 
     private func evaluate(at now: Date) {
@@ -704,7 +879,11 @@ public final class MediaModule: FeatureModule {
         }
         guard youtubeServer == nil, !youtubeListenFailed else { return }
         let path = youtubeSocketPath ?? YouTubeSocket.path(inStorageDirectory: context.storage.directory)
-        let server = YouTubeBridgeServer(socketPath: path, log: youtubeLog) { [weak self] message in self?.receiveYouTube(message) }
+        let server = YouTubeBridgeServer(
+            socketPath: path, log: youtubeLog,
+            onMessage: { [weak self] message, connection in self?.receiveYouTube(message, connection: connection) },
+            onDisconnect: { [weak self] connection in self?.sources.connectionEnded(connection) }
+        )
         do {
             try server.start()
             youtubeServer = server
@@ -722,6 +901,7 @@ public final class MediaModule: FeatureModule {
         youtubeServer?.stop()
         youtubeServer = nil
         dropUnansweredSkips()
+        sources.forgetTabs()
         youtubeListenFailed = false
         if youtubeBridge.listenFailed { youtubeBridge.listenFailed = false }
         if youtubeBridge.lastPageMessageAt != nil { youtubeBridge.lastPageMessageAt = nil }
@@ -733,7 +913,7 @@ public final class MediaModule: FeatureModule {
 
     /// What the helper passed on. Ignored while the setting is off, as a message still on its way when it was switched
     /// off would be.
-    func receiveYouTube(_ message: YouTubeMessage, at now: Date = Date()) {
+    func receiveYouTube(_ message: YouTubeMessage, connection: Int = 0, at now: Date = Date()) {
         guard youtubeCaptionsEnabled else { return }
         captionStore.apply(message, at: now)
         if message.isFromPage {
@@ -741,6 +921,17 @@ public final class MediaModule: FeatureModule {
             // The page is sending, so Chrome lets the extension read YouTube, whatever was reported before: the notice
             // would otherwise stay when Chrome gives the access without telling the extension.
             if youtubeBridge.accessWithheld { youtubeBridge.accessWithheld = false }
+        }
+        // A page with media of any site is a source of its own; it has no captions, and says nothing of the video the system plays.
+        switch message {
+        case .tab(let tab):
+            sources.receive(tab, connection: connection)
+            return
+        case .tabGone(let tab):
+            sources.tabGone(tab, connection: connection)
+            return
+        default:
+            break
         }
         // A diagnostic decides nothing about lyrics; the service worker's says whether Chrome lets the extension read YouTube.
         if case .diag(let diag) = message {

@@ -11,6 +11,9 @@ struct MediaControlsRow: View {
     let store: NowPlayingStore
     let actions: MediaActions
     let volume: VolumeModel
+    /// The store whose spectrum the bars show, when it is not the one the buttons are for (the player shows another source than the
+    /// notch follows); the bars are the system's sound, whichever source is shown.
+    var barsStore: NowPlayingStore?
     @State private var volumeIsOpen = false
 
     var body: some View {
@@ -21,7 +24,7 @@ struct MediaControlsRow: View {
                 buttons
                     .frame(maxWidth: .infinity)
                     // An overlay, so the buttons stay centred under the progress bar.
-                    .overlay(alignment: .trailing) { NowPlayingBars(store: store) }
+                    .overlay(alignment: .trailing) { NowPlayingBars(store: barsStore ?? store) }
             }
         }
         .frame(maxWidth: .infinity)

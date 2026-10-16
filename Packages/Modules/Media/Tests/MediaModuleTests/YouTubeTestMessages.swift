@@ -34,6 +34,14 @@ enum YouTubeTestMessages {
         .clear(videoID: videoID)
     }
 
+    /// A page with media: `tab` is Chrome's id for it.
+    static func tab(
+        _ tab: Int = 1, title: String = "Page song", site: String = "music.example.com", artist: String? = nil, playing: Bool = true,
+        time: Double = 10, duration: Double? = 200
+    ) -> YouTubeMessage {
+        .tab(BrowserTab(tab: tab, site: site, title: title, artist: artist, isPlaying: playing, time: time, duration: duration))
+    }
+
     static func diag(_ event: String = "sw-start v=0.1.1", from origin: YouTubeDiag.Origin = .sw) -> YouTubeMessage {
         .diag(YouTubeDiag(origin: origin, event: event))
     }
@@ -56,6 +64,14 @@ enum YouTubeTestMessages {
             object = ["v": 1, "type": "clear", "videoId": videoID]
         case .diag(let diag):
             object = ["v": 1, "type": "diag", "where": diag.origin.rawValue, "event": diag.event]
+        case .tab(let tab):
+            object = [
+                "v": 1, "type": "tab", "tab": tab.tab, "site": tab.site, "title": tab.title, "artist": tab.artist ?? "",
+                "album": tab.album ?? "", "state": tab.isPlaying ? "playing" : "paused", "time": tab.time,
+                "duration": tab.duration ?? NSNull(), "rate": tab.rate, "live": tab.isLive,
+            ]
+        case .tabGone(let tab):
+            object = ["v": 1, "type": "tabgone", "tab": tab]
         }
         return try! JSONSerialization.data(withJSONObject: object)
     }

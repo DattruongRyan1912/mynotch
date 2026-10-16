@@ -3,8 +3,8 @@ import Synchronization
 
 /// What the `mynotch-youtube-host` executable does: Chrome starts it for the extension and writes native messages to
 /// its stdin; it checks each one and passes it on to the app over a socket. The other way, the app may send a command
-/// (next or previous, see `YouTubeCommand`) on that socket; the host checks it and writes it to stdout, which is Chrome's
-/// channel back to the extension. Nothing else is ever written to stdout, and nothing to stderr, and the host never
+/// (next or previous, see `YouTubeCommand`, or one for a tab with media, see `TabCommand`) on that socket; the host checks it
+/// and writes it to stdout, which is Chrome's channel back to the extension. Nothing else is ever written to stdout, and nothing to stderr, and the host never
 /// fails: Chrome would only show the extension an error. What it does goes to the unified log instead (see `YouTubeBridgeLog`).
 public enum YouTubeHostCLI {
     /// How often the host tries to reach the app again while it is away, and how soon it notices the app quitting.
@@ -12,9 +12,9 @@ public enum YouTubeHostCLI {
 
     /// Runs until `stdin` ends, which is Chrome closing the extension's port; always returns 0.
     ///
-    /// The host remembers the latest captions of up to three videos, the latest playback and the latest report of the
-    /// extension's access to YouTube, and sends them first whenever it (re)connects, so an app that was started or
-    /// restarted after the page loaded its captions still gets them.
+    /// The host remembers the latest captions of up to three videos, the latest playback, the latest report of the
+    /// extension's access to YouTube and the latest report of each page with media, and sends them first whenever it
+    /// (re)connects, so an app that was started or restarted after the page loaded its captions still gets them.
     /// - Parameters:
     ///   - now: a monotonic clock in seconds, for the age of the playback to replay and for the pace of the log.
     ///   - expectedOwner: the user the socket file must belong to.
@@ -90,12 +90,19 @@ final class HostRelay: Sendable {
     static let maxPlaybackAge: TimeInterval = 10
     /// While the app stays away the log says so again this often, not at every try.
     static let awayReminderInterval: TimeInterval = 30
+    /// Pages with media that are kept for the replay; a page is one only while it reports, so this is a bound, not a count.
+    static let maxTabs = 64
+    /// A page's report older than this is not replayed: a page that plays says so every 5 s and a paused one every 30 s, but a
+    /// tab Chrome has put to sleep may stay quiet for a minute or two, and the app drops a tab it has not heard of in this long.
+    static let maxTabAge: TimeInterval = 150
 
     private struct State {
         var socket: Int32?
         /// Whole frames, oldest first, one per video.
         var captions: [(videoID: String, frame: Data)] = []
         var playback: (frame: Data, receivedAt: TimeInterval)?
+        /// The latest report of each page that has media, oldest first, until the page says it has none or its tab closes.
+        var tabs: [(tab: Int, frame: Data, receivedAt: TimeInterval)] = []
         /// The latest report of the extension's access to YouTube (`sw-access`): said once when its worker starts, which is
         /// about when the host does, so the app may not be there yet.
         var access: Data?
@@ -190,6 +197,12 @@ final class HostRelay: Sendable {
                 state.playback = (frame, now())
             case .clear(let videoID):
                 state.captions.removeAll { $0.videoID == videoID }
+            case .tab(let tab):
+                state.tabs.removeAll { $0.tab == tab.tab }
+                state.tabs.append((tab.tab, frame, now()))
+                if state.tabs.count > Self.maxTabs { state.tabs.removeFirst(state.tabs.count - Self.maxTabs) }
+            case .tabGone(let tab):
+                state.tabs.removeAll { $0.tab == tab }
             case .diag(let diag):
                 // Said live: a diagnostic is about now, so it is not kept for a later connection. Except the access
                 // report, which is a state the app shows until it changes.
@@ -235,6 +248,9 @@ final class HostRelay: Sendable {
             playbackIncluded = true
         }
         if let access = state.access { replay.append(access) }
+        // A page that stopped reporting for good (its tab was discarded, say) is forgotten here, not replayed for ever.
+        state.tabs.removeAll { now() - $0.receivedAt > Self.maxTabAge }
+        replay.append(contentsOf: state.tabs.map(\.frame))
         guard replay.allSatisfy({ UnixStreamSocket.writeAll($0, to: socket) }) else {
             close(socket)
             noteFailedAttempt(&state, reason: "send-failed")
@@ -242,9 +258,10 @@ final class HostRelay: Sendable {
         }
         state.socket = socket
         let after = state.failedAttempts > 0 ? " after-failed-attempts=\(state.failedAttempts)" : ""
+        let tabs = state.tabs.isEmpty ? "" : " replayed-tabs=\(state.tabs.count)"
         state.failedAttempts = 0
         state.lastReminder = nil
-        log("app socket connected replayed-captions=\(captionCount) replayed-playback=\(playbackIncluded)\(after)")
+        log("app socket connected replayed-captions=\(captionCount) replayed-playback=\(playbackIncluded)\(tabs)\(after)")
         readers.enter()
         Thread.detachNewThread { [self] in
             readCommands(from: socket)
@@ -286,12 +303,20 @@ final class HostRelay: Sendable {
 
     /// Writes a command to Chrome, as the checked command: the bytes the app sent are never passed on.
     private func forward(_ frame: Data) {
-        guard let command = YouTubeCommand.decode(frame) else {
+        let json: Data
+        let name: String
+        if let command = YouTubeCommand.decode(frame) {
+            json = command.json
+            name = "action=\(command.rawValue)"
+        } else if let command = TabCommand.decode(frame) {
+            json = command.json
+            name = "tab-action=\(command.action.word)"
+        } else {
             log("command dropped reason=invalid")
             return
         }
-        if commandOutput.write(NativeMessage.frame(command.json)) {
-            log("command forwarded action=\(command.rawValue)")
+        if commandOutput.write(NativeMessage.frame(json)) {
+            log("command forwarded \(name)")
         } else {
             log("command not delivered: stdout closed")
         }

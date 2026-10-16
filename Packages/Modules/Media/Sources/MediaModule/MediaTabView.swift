@@ -12,63 +12,128 @@ struct MediaTabView: View {
     /// The tab's declared height: the player with its lyric row, plus what the notch adds around a tab's content.
     static let preferredHeight = artworkSize + lyricGap + CurrentLyricView.height + NotchTokens.padding + tabBarHeight
 
+    // With two sources or more the chips take a row above the player, and the tab's height does not change: what they take is taken
+    // from the player. Without a lyric row the player is as tall as before, less nothing (the chips and their gap are the lyric row's
+    // room); with one it is a smaller cover beside a column of one line less.
+    static let chipGap: CGFloat = 2
+    /// The cover while the chips and the lyric row are both there.
+    static let compactArtworkSize: CGFloat = artworkSize - 18
+    static let compactLyricGap: CGFloat = 4
+
     let store: NowPlayingStore
     let actions: MediaActions
     let volume: VolumeModel
+    /// The sources, for the chips; nil is a tab with one source, as it always was.
+    var sources: MediaSourceModel?
+    /// What the player shows while the user has chosen a source other than the primary one.
+    var displayStore: NowPlayingStore?
+
+    init(
+        store: NowPlayingStore, actions: MediaActions, volume: VolumeModel, sources: MediaSourceModel? = nil,
+        displayStore: NowPlayingStore? = nil, icons: PlayerAppCache = PlayerAppCache()
+    ) {
+        self.store = store
+        self.actions = actions
+        self.volume = volume
+        self.sources = sources
+        self.displayStore = displayStore
+        _icons = State(initialValue: icons)
+    }
+
+    /// What the player draws: the primary source's store, or the other source's while the user looks at that.
+    private var shown: NowPlayingStore {
+        (sources?.displayIsPrimary ?? true) ? store : (displayStore ?? store)
+    }
+
+    /// Whether the chips are up: there are sources to choose between.
+    private var hasChips: Bool { sources?.showsChips ?? false }
+
+    @State private var isAppeared = false
+    @Environment(\.notchIsOnScreen) private var isOnScreen
+    /// The apps' icons for the chips, looked up once for as long as the tab lives: LaunchServices is too slow for every redraw.
+    @State private var icons: PlayerAppCache
 
     var body: some View {
         Group {
             if let message = store.failureMessage {
                 MediaMessage(systemImage: "exclamationmark.triangle", text: message)
-            } else if store.state.isActive {
+            } else if shown.state.isActive {
                 player
             } else {
                 MediaMessage(systemImage: "music.note", text: "Không có gì đang phát")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The apps are read only while this is on screen: a tab that is not mounted, or a notch that cannot be seen, costs nothing.
+        .onAppear {
+            isAppeared = true
+            sources?.setTabVisible(isOnScreen)
+        }
+        .onDisappear {
+            isAppeared = false
+            sources?.setTabVisible(false)
+        }
+        .onChange(of: isOnScreen) { _, isOnScreen in sources?.setTabVisible(isAppeared && isOnScreen) }
     }
 
     private var player: some View {
         // The lyric row is its own row at the bottom, across the whole tab, so the cover and the controls above it
         // stay where they are whether it holds a line, the note or nothing.
-        VStack(spacing: Self.lyricGap) {
-            coverAndControls
-            CurrentLyricView(store: store, togglePanel: actions.toggleLyricsPanel)
+        let hasLyricRow = shown.lyricRow != .absent
+        let compact = hasChips && hasLyricRow
+        return VStack(spacing: 0) {
+            if let sources, hasChips {
+                MediaSourceChipsView(model: sources, icons: icons)
+                    .padding(.bottom, Self.chipGap)
+            }
+            coverAndControls(compact: compact)
+            // The row's place is kept, but only the primary source has lyrics to put in it: its words, bars and tint.
+            CurrentLyricView(store: shown, togglePanel: actions.toggleLyricsPanel)
+                .padding(.top, hasLyricRow ? (compact ? Self.compactLyricGap : Self.lyricGap) : 0)
         }
         // The cover's colours as a faint glow; a background, so it never changes the size the tab asks for.
-        .background { ArtworkGlow(tint: store.activeTint) }
+        .background { ArtworkGlow(tint: shown.activeTint) }
     }
 
-    private var coverAndControls: some View {
-        HStack(spacing: 14) {
-            ArtworkView(artwork: store.artworkImage, icon: store.appIcon, size: Self.artworkSize, cornerRadius: 12)
+    private func coverAndControls(compact: Bool) -> some View {
+        let size = compact ? Self.compactArtworkSize : Self.artworkSize
+        return HStack(spacing: 14) {
+            ArtworkView(artwork: shown.artworkImage, icon: shown.appIcon, size: size, cornerRadius: compact ? 10 : 12)
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 8) {
-                    Text(store.state.title ?? "")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(NotchTokens.primaryText)
+                if compact {
+                    // One line for what two lines said, and no badge: the chips say which app it is.
+                    Text("\(Text(shown.state.title ?? "").font(.system(size: 14, weight: .semibold)).foregroundStyle(NotchTokens.primaryText))\(Text(subtitle.isEmpty ? "" : "  ·  " + subtitle).font(.system(size: 12)).foregroundStyle(NotchTokens.secondaryText))")
                         .lineLimit(1)
-                    Spacer(minLength: 0)
-                    // Takes its width first, so a long title truncates instead of the app name.
-                    PlayerBadge(store: store)
-                        .layoutPriority(1)
+                } else {
+                    HStack(spacing: 8) {
+                        Text(shown.state.title ?? "")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(NotchTokens.primaryText)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        // Takes its width first, so a long title truncates instead of the app name.
+                        PlayerBadge(store: shown)
+                            .layoutPriority(1)
+                    }
+                    Text(shown.state.artist ?? shown.state.album ?? " ")
+                        .font(.system(size: 12))
+                        .foregroundStyle(NotchTokens.secondaryText)
+                        .lineLimit(1)
                 }
-                Text(store.state.artist ?? store.state.album ?? " ")
-                    .font(.system(size: 12))
-                    .foregroundStyle(NotchTokens.secondaryText)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                PlaybackProgressView(store: store, seek: actions.seek)
+                Spacer(minLength: compact ? 2 : 4)
+                PlaybackProgressView(store: shown, seek: actions.seek)
                 Spacer(minLength: 2)
-                MediaControlsRow(store: store, actions: actions, volume: volume)
+                // The bars show the system's sound, so they stay with the store the notch follows.
+                MediaControlsRow(store: shown, actions: actions, volume: volume, barsStore: store)
             }
             // The cover's height. Not stretched to the space available, which would pull the column out of line
             // with the cover.
-            .frame(minHeight: Self.artworkSize)
+            .frame(minHeight: size)
             .fixedSize(horizontal: false, vertical: true)
         }
     }
+
+    private var subtitle: String { shown.state.artist ?? shown.state.album ?? "" }
 }
 
 /// Progress bar plus elapsed and remaining time. Dragging (or clicking) seeks once, on release:

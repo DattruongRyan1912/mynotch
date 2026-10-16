@@ -10,10 +10,17 @@ struct MediaSettingsView: View {
     static let lyricsExplanation = "Khi bật, tên bài, nghệ sĩ, album và thời lượng của mỗi bài mới (kể cả video phát trong trình duyệt) được gửi tới lrclib.net để lấy lời."
     static let lyricsUnderNotchTitle = "Hiện lời 2 dòng dưới notch"
     static let lyricsUnderNotchExplanation = "Khi có lời đồng bộ và nhạc đang phát, notch thu gọn hiện câu đang hát và câu sắp tới."
+    /// System Settings › Privacy & Security › Automation, where the user lets MyNotch control Music and Spotify.
+    static let automationSettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!
     static let tintTitle = "Màu theo ảnh bìa"
     static let tintExplanation = "Lấy màu chủ đạo của ảnh bìa để nhuộm thanh tiến trình, cột sóng và vầng sáng nền trong tab Media."
     static let karaokeTitle = "Tô theo từng chữ"
     static let karaokeExplanation = "Khi lời có thời gian từng chữ (Apple Music, hoặc lrclib dạng nâng cao), phần đã hát của câu được tô dần ở dưới notch, trong tab Media và trong bảng lời nổi. Lời chỉ có thời gian từng câu vẫn hiện như cũ."
+
+    /// One line: what could not be shown and where to allow it.
+    static func deniedAppsHint(for names: [String]) -> String {
+        "MyNotch chưa được phép điều khiển \(names.joined(separator: " và ")). Bật lại trong Quyền riêng tư & Bảo mật › Tự động hóa."
+    }
 
     @Binding var showActivity: Bool
     @Binding var pauseGraceSeconds: Int
@@ -35,6 +42,8 @@ struct MediaSettingsView: View {
     let youtubeBridge: YouTubeBridgeModel
     /// Only for the permission hint; the module keeps the store for its whole life, running or not.
     let store: NowPlayingStore
+    /// The apps MyNotch is not allowed to control, for the hint under the sources.
+    var sources = MediaSourceModel()
     let appleAccount: AppleMusicAccount
     let connectAppleMusic: () -> Void
     let disconnectAppleMusic: () -> Void
@@ -59,6 +68,14 @@ struct MediaSettingsView: View {
                 } label: {
                     Text("Không nhận được âm thanh hệ thống")
                     Text("Có thể quyền đã bị từ chối. Bật MyNotch trong Quyền riêng tư & Bảo mật › Ghi màn hình & âm thanh hệ thống.")
+                }
+            }
+            if !sources.deniedApps.isEmpty {
+                LabeledContent {
+                    Link("Mở System Settings", destination: Self.automationSettingsURL)
+                } label: {
+                    Text("Nguồn nhạc bị ẩn")
+                    Text(Self.deniedAppsHint(for: sources.deniedApps))
                 }
             }
             Toggle(isOn: $tintFromArtwork) {

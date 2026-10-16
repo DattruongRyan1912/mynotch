@@ -82,7 +82,7 @@ public struct YouTubeDiag: Equatable, Sendable {
     }
 
     /// Codes whose arguments are a closed list of words and nothing else (see `isAllowed`).
-    private static let closedWordCodes: Set<String> = ["content-command"]
+    private static let closedWordCodes: Set<String> = ["content-command", "content-tabcommand"]
 
     // MARK: shapes
 
@@ -99,11 +99,11 @@ public struct YouTubeDiag: Equatable, Sendable {
         case "sw-start":
             return words.count == 1 && value(of: "v", in: words[0]).map { $0 == "unknown" || isVersion($0) } == true
         case "sw-msg":
-            if words.count == 1 { return words[0] == "playback" || words[0] == "clear" }
+            if words.count == 1 { return ["playback", "clear", "tab"].contains(words[0]) }
             return words.count == 2 && words[0] == "captions" && value(of: "events", in: words[1]).map { isNumber($0, digits: 1...5) } == true
         case "sw-reject":
             if words.count == 1 { return words[0] == "untrusted" }
-            return words.count == 2 && words[0] == "invalid" && ["captions", "playback", "clear", "diag", "command", "unknown"].contains(words[1])
+            return words.count == 2 && words[0] == "invalid" && ["captions", "playback", "clear", "diag", "command", "tab", "tabcommand", "unknown"].contains(words[1])
         case "sw-reconnect":
             return words.count == 2 && value(of: "after", in: words[0]).map(isToken) == true
                 && value(of: "failures", in: words[1]).map { isNumber($0, digits: 1...6) } == true
@@ -113,8 +113,11 @@ public struct YouTubeDiag: Equatable, Sendable {
                 && value(of: "failed", in: words[2]).map { isNumber($0, digits: 1...6) } == true
         case "sw-access":
             return words.count == 1 && value(of: "youtube", in: words[0]).map { $0 == "granted" || $0 == "withheld" } == true
-        case "sw-command-no-tab":
+        case "sw-command-no-tab", "sw-tabcommand-no-tab":
             return words.isEmpty
+        case "content-tabcommand":
+            return words.count == 2 && ["play", "pause", "toggle", "next", "previous", "seek"].contains(words[0])
+                && (words[1] == "ok" || words[1] == "unavailable")
         case "content-command":
             return words.count == 2 && (words[0] == "next" || words[0] == "previous") && (words[1] == "ok" || words[1] == "unavailable")
         case "content-cc":

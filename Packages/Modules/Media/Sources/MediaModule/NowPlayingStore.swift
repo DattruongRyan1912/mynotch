@@ -67,8 +67,9 @@ final class NowPlayingStore {
     @ObservationIgnored private(set) lazy var barsHub = SpectrumBarsHub(store: self, scheduler: barsScheduler, now: barsClock)
     @ObservationIgnored private let barsScheduler: any Scheduler
     @ObservationIgnored private let barsClock: () -> Date
-    /// Revision of `artworkImage`'s bytes; the image is decoded only when it changes.
-    @ObservationIgnored private var artworkRevision: Int?
+    /// Which source the cover came from and its revision there; the image is decoded only when either changes. A revision counts
+    /// per source (the adapter's, an app's), so the same number from another source is another image.
+    @ObservationIgnored private var artworkStamp: ArtworkStamp?
     /// Bundle IDs `appName`/`appIcon` were looked up for, so position updates skip the lookup.
     @ObservationIgnored private var appBundleIDs: [String] = []
 
@@ -86,8 +87,19 @@ final class NowPlayingStore {
     @discardableResult
     func apply(line: String, receivedAt: Date) -> Bool {
         guard reducer.apply(line: line, receivedAt: receivedAt) == .applied else { return false }
-        update(reducer.state)
+        update(reducer.state, source: "adapter")
         return true
+    }
+
+    /// Shows what a source reports, when the module works out the sources itself and this store only shows one of them: the primary
+    /// source of the notch, or the one the player shows. `source` names where the state, and the revision of its cover, come from.
+    /// False when the state is the one already shown.
+    @discardableResult
+    func show(_ newState: NowPlayingState, source: String) -> Bool {
+        let changed = newState != state
+        update(newState, source: source)
+        if failureMessage != nil { failureMessage = nil }
+        return changed
     }
 
     /// Seconds into the track at `date`, extrapolated between adapter updates.
@@ -104,7 +116,7 @@ final class NowPlayingStore {
     /// Back to nothing playing, for a fresh start of the source.
     func reset() {
         reducer = NowPlayingReducer()
-        update(.empty)
+        update(.empty, source: "adapter")
         showInActivity(artwork: nil, icon: nil, isPlaying: false)
         showLyrics(nil)
         showTint(nil)
@@ -260,10 +272,11 @@ final class NowPlayingStore {
         spectrumViewCount = max(spectrumViewCount - 1, 0)
     }
 
-    private func update(_ newState: NowPlayingState) {
+    private func update(_ newState: NowPlayingState, source: String) {
         if newState != state { state = newState }
-        if newState.artwork?.revision != artworkRevision {
-            artworkRevision = newState.artwork?.revision
+        let stamp = newState.artwork.map { ArtworkStamp(source: source, revision: $0.revision) }
+        if stamp != artworkStamp {
+            artworkStamp = stamp
             artworkImage = newState.artwork.flatMap { NSImage(data: $0.data) }
         }
         // A browser plays through a helper process; its parent is the app the user recognises.
@@ -285,4 +298,10 @@ final class NowPlayingStore {
         if activityAppIcon !== icon { activityAppIcon = icon }
         if activityIsPlaying != isPlaying { activityIsPlaying = isPlaying }
     }
+}
+
+/// Where a cover came from and which of that source's it is.
+private nonisolated struct ArtworkStamp: Equatable, Sendable {
+    var source: String
+    var revision: Int
 }

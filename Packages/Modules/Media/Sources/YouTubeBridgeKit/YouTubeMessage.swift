@@ -8,6 +8,10 @@ public enum YouTubeMessage: Equatable, Sendable {
     case clear(videoID: String)
     /// The extension reporting on itself, for the logs; not part of the captions flow.
     case diag(YouTubeDiag)
+    /// A page in Chrome with media (any site, not only YouTube) says what that media is doing.
+    case tab(BrowserTab)
+    /// The page has no media to show any more, or its tab is closed.
+    case tabGone(tab: Int)
 
     /// Why a message was refused. Fixed words, so a log line holds nothing of the message.
     public enum Rejection: String, Error, Equatable, Sendable {
@@ -19,6 +23,7 @@ public enum YouTubeMessage: Equatable, Sendable {
         case invalidPlayback = "invalid-playback"
         case invalidClear = "invalid-clear"
         case invalidDiag = "invalid-diag"
+        case invalidTab = "invalid-tab"
     }
 
     public static let version = 1
@@ -36,7 +41,7 @@ public enum YouTubeMessage: Equatable, Sendable {
         case .captions(let captions): captions.videoID
         case .playback(let playback): playback.videoID
         case .clear(let videoID): videoID
-        case .diag: nil
+        case .diag, .tab, .tabGone: nil
         }
     }
 
@@ -55,6 +60,8 @@ public enum YouTubeMessage: Equatable, Sendable {
         case .playback: "playback"
         case .clear: "clear"
         case .diag: "diag"
+        case .tab: "tab"
+        case .tabGone: "tabgone"
         }
     }
 
@@ -83,6 +90,12 @@ public enum YouTubeMessage: Equatable, Sendable {
         case "diag":
             message = (try? decoder.decode(DiagFields.self, from: data)).flatMap(diag)
             rejection = .invalidDiag
+        case "tab":
+            message = (try? decoder.decode(TabFields.self, from: data)).flatMap(tab)
+            rejection = .invalidTab
+        case "tabgone":
+            message = (try? decoder.decode(TabGoneFields.self, from: data)).flatMap { isTabID($0.tab) ? .tabGone(tab: $0.tab) : nil }
+            rejection = .invalidTab
         default:
             return .failure(.unknownType)
         }
@@ -121,6 +134,23 @@ public enum YouTubeMessage: Equatable, Sendable {
         var videoId: String
     }
 
+    private struct TabFields: Decodable {
+        var tab: Int
+        var site: String
+        var title: String
+        var artist: String?
+        var album: String?
+        var state: String
+        var time: Double
+        var duration: Double?
+        var rate: Double
+        var live: Bool
+    }
+
+    private struct TabGoneFields: Decodable {
+        var tab: Int
+    }
+
     private struct DiagFields: Decodable {
         var origin: String
         var event: String
@@ -155,6 +185,32 @@ public enum YouTubeMessage: Equatable, Sendable {
         let title = normalised(fields.title, limit: maxTitleLength)
         guard isVideoID(fields.videoId), !title.isEmpty, fields.time >= 0, fields.rate > 0, fields.rate <= maxRate else { return nil }
         return .playback(YouTubePlayback(videoID: fields.videoId, title: title, time: fields.time, isPlaying: fields.playing, rate: fields.rate))
+    }
+
+    private static func tab(_ fields: TabFields) -> YouTubeMessage? {
+        let title = normalised(fields.title, limit: maxTitleLength)
+        guard isTabID(fields.tab), !title.isEmpty, isSite(fields.site), fields.state == "playing" || fields.state == "paused",
+              (0...BrowserTab.maxSeconds).contains(fields.time), fields.rate > 0, fields.rate <= maxRate,
+              fields.duration.map({ (0...BrowserTab.maxSeconds).contains($0) }) ?? true
+        else { return nil }
+        let artist = normalised(fields.artist ?? "", limit: BrowserTab.maxNameLength)
+        let album = normalised(fields.album ?? "", limit: BrowserTab.maxNameLength)
+        return .tab(BrowserTab(
+            tab: fields.tab, site: fields.site, title: title, artist: artist.isEmpty ? nil : artist, album: album.isEmpty ? nil : album,
+            isPlaying: fields.state == "playing", time: fields.time, duration: fields.duration, rate: fields.rate, isLive: fields.live
+        ))
+    }
+
+    static func isTabID(_ id: Int) -> Bool { (0...BrowserTab.maxTabID).contains(id) }
+
+    /// A host name as a page's location has it: nothing, or lowercase letters, digits, dots and dashes, starting and ending with a
+    /// letter or a digit, at most 100 characters. Never a path or a port.
+    static func isSite(_ text: String) -> Bool {
+        guard !text.isEmpty else { return true }
+        let bytes = Array(text.utf8)
+        func isEdge(_ byte: UInt8) -> Bool { (48...57).contains(byte) || (97...122).contains(byte) }
+        return bytes.count <= 100 && isEdge(bytes[0]) && isEdge(bytes[bytes.count - 1])
+            && bytes.allSatisfy { isEdge($0) || $0 == 46 || $0 == 45 }
     }
 
     private static func diag(_ fields: DiagFields) -> YouTubeMessage? {

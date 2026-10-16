@@ -7,8 +7,11 @@ import YouTubeBridgeKit
 /// messages that passed. The socket is the user's alone (mode 0600 in a 0700 folder, and a peer of another user is
 /// refused), and anything that is not a valid protocol message is ignored.
 ///
-/// The one thing that goes the other way is a command (`YouTubeCommand`): `send` writes it, as a frame, to the host whose
-/// page last reported playback, which is the one that can act on it.
+/// What goes the other way is a command: a `YouTubeCommand` (`send`) is written, as a frame, to the host whose page last
+/// reported playback, which is the one that can act on it; a `TabCommand` is written to the connection the caller names, the
+/// one the tab's reports came in on. Each message is handed on with the connection it came in on (several Chromes, one per
+/// profile, may be connected, and their tab ids are not one set of numbers), and the end of a connection is told too, so
+/// that what came from it can be forgotten.
 ///
 /// What it does goes to the log (`YouTubeBridgeLog`): connections, a count of the frames by type every 10 s, why a
 /// frame was refused. Never what was in a frame.
@@ -116,14 +119,27 @@ final class YouTubeBridgeServer {
         /// The sockets do not block, and a frame is a few dozen bytes, so this never waits for the host.
         func sendToPlaybackConnection(_ frame: Data) -> Bool {
             state.withLock { state in
-                // Under the lock, so the descriptor is still open: it is closed only after its source is cancelled and removed.
-                guard state.isOpen, let fd = state.playbackConnection, state.connections[fd] != nil else { return false }
-                let written = frame.withUnsafeBytes { Foundation.send(fd, $0.baseAddress, $0.count, 0) }
-                if written == frame.count { return true }
-                // The host sees the end and the read source takes the connection out.
-                shutdown(fd, SHUT_RDWR)
-                return false
+                guard state.isOpen, let fd = state.playbackConnection else { return false }
+                return Self.write(frame, to: fd, in: state)
             }
+        }
+
+        /// Writes `frame` to connection `fd`, like `sendToPlaybackConnection`; false when it is not a connection of this session.
+        func send(_ frame: Data, toConnection fd: Int32) -> Bool {
+            state.withLock { state in
+                guard state.isOpen else { return false }
+                return Self.write(frame, to: fd, in: state)
+            }
+        }
+
+        /// Under the lock, so the descriptor is still open: it is closed only after its source is cancelled and removed.
+        private static func write(_ frame: Data, to fd: Int32, in state: State) -> Bool {
+            guard state.connections[fd] != nil else { return false }
+            let written = frame.withUnsafeBytes { Foundation.send(fd, $0.baseAddress, $0.count, 0) }
+            if written == frame.count { return true }
+            // The host sees the end and the read source takes the connection out.
+            shutdown(fd, SHUT_RDWR)
+            return false
         }
 
         func close() {
@@ -146,9 +162,15 @@ final class YouTubeBridgeServer {
         var buffer = [UInt8](repeating: 0, count: 64 << 10)
     }
 
+    /// A message and the connection it came in on (the descriptor's number, which is told to `Disconnected` when it ends).
+    typealias Received = @MainActor @Sendable (YouTubeMessage, _ connection: Int) -> Void
+    /// A connection has ended: what came from it is no longer there.
+    typealias Disconnected = @MainActor @Sendable (_ connection: Int) -> Void
+
     let socketPath: String
     /// Runs on the main actor, in the order the frames were read.
-    private let onMessage: @MainActor @Sendable (YouTubeMessage) -> Void
+    private let onMessage: Received
+    private let onDisconnect: Disconnected
     private let log: YouTubeBridgeLog
     /// A monotonic clock in seconds, for the pace of the log.
     private let now: @Sendable () -> TimeInterval
@@ -159,12 +181,24 @@ final class YouTubeBridgeServer {
         socketPath: String,
         log: YouTubeBridgeLog = .system,
         now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-        onMessage: @escaping @MainActor @Sendable (YouTubeMessage) -> Void
+        onMessage: @escaping Received,
+        onDisconnect: @escaping Disconnected = { _ in }
     ) {
         self.socketPath = socketPath
         self.log = log
         self.now = now
         self.onMessage = onMessage
+        self.onDisconnect = onDisconnect
+    }
+
+    /// For a caller that does not tell connections apart.
+    convenience init(
+        socketPath: String,
+        log: YouTubeBridgeLog = .system,
+        now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        onMessage: @escaping @MainActor @Sendable (YouTubeMessage) -> Void
+    ) {
+        self.init(socketPath: socketPath, log: log, now: now, onMessage: { message, _ in onMessage(message) })
     }
 
     /// Replaces a socket file a crashed run left behind. The folder is made private to the user.
@@ -197,9 +231,10 @@ final class YouTubeBridgeServer {
         }
         let session = Session(log: log, now: now)
         let onMessage = onMessage
+        let onDisconnect = onDisconnect
         let queue = queue
         // `@Sendable` keeps the handlers off the main actor, which is the default here: they run on the private queue.
-        let accept: @Sendable () -> Void = { Self.accept(fd, into: session, queue: queue, onMessage: onMessage) }
+        let accept: @Sendable () -> Void = { Self.accept(fd, into: session, queue: queue, onMessage: onMessage, onDisconnect: onDisconnect) }
         let listener = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
         listener.setEventHandler(handler: accept)
         let cancelHandler: @Sendable () -> Void = { close(fd) }
@@ -224,6 +259,13 @@ final class YouTubeBridgeServer {
     /// to; nothing is retried or sent to another host.
     func send(_ command: YouTubeCommand) -> Bool {
         session?.sendToPlaybackConnection(command.frame) ?? false
+    }
+
+    /// Asks the host on `connection` (the one the tab's reports came in on) to do `command` to its tab. False when that
+    /// connection is gone or cannot be written to; nothing is retried or sent to another host.
+    func send(_ command: TabCommand, toConnection connection: Int) -> Bool {
+        guard let fd = Int32(exactly: connection) else { return false }
+        return session?.send(command.frame, toConnection: fd) ?? false
     }
 
     /// The clients connected right now (for tests).
@@ -253,7 +295,7 @@ final class YouTubeBridgeServer {
 
     /// Takes in every connection waiting.
     private nonisolated static func accept(
-        _ listener: Int32, into session: Session, queue: DispatchQueue, onMessage: @escaping @MainActor @Sendable (YouTubeMessage) -> Void
+        _ listener: Int32, into session: Session, queue: DispatchQueue, onMessage: @escaping Received, onDisconnect: @escaping Disconnected
     ) {
         while true {
             let fd = Foundation.accept(listener, nil, nil)
@@ -280,6 +322,8 @@ final class YouTubeBridgeServer {
                     session.remove(fd)
                     session.writeSummary(force: true)
                     session.log("app connection closed: \(reason)")
+                    // After what the connection sent, and before anything a later connection with the same number sends.
+                    DispatchQueue.main.async { MainActor.assumeIsolated { if session.isOpen { onDisconnect(Int(fd)) } } }
                 }
             }
             source.setEventHandler(handler: handler)
@@ -296,7 +340,7 @@ final class YouTubeBridgeServer {
     /// Reads what a client has sent and hands on its messages. The reason, when the connection is over: the client
     /// closed it, or broke the framing. nil while it goes on.
     private nonisolated static func drain(
-        _ fd: Int32, reader: Reader, onMessage: @escaping @MainActor @Sendable (YouTubeMessage) -> Void, session: Session
+        _ fd: Int32, reader: Reader, onMessage: @escaping Received, session: Session
     ) -> String? {
         while true {
             let count = recv(fd, &reader.buffer, reader.buffer.count, 0)
@@ -319,14 +363,14 @@ final class YouTubeBridgeServer {
     /// Checks one frame: a valid message goes to the main actor, any other is counted with the reason (announced once
     /// per reason every 10 s), and the log gets a summary when one is due.
     private nonisolated static func receive(
-        _ frame: Data, from fd: Int32, onMessage: @escaping @MainActor @Sendable (YouTubeMessage) -> Void, session: Session
+        _ frame: Data, from fd: Int32, onMessage: @escaping Received, session: Session
     ) {
         switch YouTubeMessage.check(frame) {
         case .success(let message):
             session.tally.count(message.typeName)
             // Before the message is handed on, so that whoever acts on it can already answer on this connection.
             if case .playback = message { session.playbackArrived(on: fd) }
-            DispatchQueue.main.async { MainActor.assumeIsolated { if session.isOpen { onMessage(message) } } }
+            DispatchQueue.main.async { MainActor.assumeIsolated { if session.isOpen { onMessage(message, Int(fd)) } } }
         case .failure(let rejection):
             session.tally.lose(rejection.rawValue)
             if session.tally.announces(rejection.rawValue) { session.log("app rejected frame: \(rejection.rawValue)") }

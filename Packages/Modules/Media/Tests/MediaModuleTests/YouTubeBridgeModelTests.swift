@@ -168,6 +168,7 @@ import Testing
     // MARK: strings
 
     @Test func theRowsSayWhatTheyDoAndWhatLeavesTheMac() {
+        #expect(YouTubeBridgeModel.tabSourcesHint.contains("tab Chrome") && YouTubeBridgeModel.tabSourcesHint.contains("không có địa chỉ trang hay ảnh bìa"))
         #expect(YouTubeBridgeRows.title == "Phụ đề YouTube làm lời")
         #expect(
             YouTubeBridgeRows.title + ": " + YouTubeBridgeRows.explanation

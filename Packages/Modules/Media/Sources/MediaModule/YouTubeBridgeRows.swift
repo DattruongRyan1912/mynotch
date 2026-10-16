@@ -26,6 +26,7 @@ struct YouTubeBridgeRows: View {
                 }
             }
             Text(YouTubeBridgeModel.skipHint).font(.caption).foregroundStyle(.secondary)
+            Text(YouTubeBridgeModel.tabSourcesHint).font(.caption).foregroundStyle(.secondary)
             if model.listenFailed {
                 Text(YouTubeBridgeModel.listenFailureMessage).font(.caption).foregroundStyle(.red)
             }

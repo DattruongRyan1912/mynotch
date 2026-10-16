@@ -8,14 +8,18 @@ final class LyricsPanelHost {
     let controller: LyricsPanelController
     let model = LyricsPanelModel()
     private let store: NowPlayingStore
+    /// Another store whose button wants to know too: the player shows it while it is not the primary source's.
+    private let alsoTells: NowPlayingStore?
     private let settings: ModuleSettings
     private let keys: MediaSettingsKeys
 
     init(
         store: NowPlayingStore, settings: ModuleSettings, scheduler: any Scheduler,
-        displays: @escaping @MainActor () -> [PanelDisplay], present: @escaping (NSPanel) -> Void
+        displays: @escaping @MainActor () -> [PanelDisplay], present: @escaping (NSPanel) -> Void,
+        alsoTells: NowPlayingStore? = nil
     ) {
         self.store = store
+        self.alsoTells = alsoTells
         self.settings = settings
         let keys = MediaSettingsKeys(settings)
         self.keys = keys
@@ -32,6 +36,7 @@ final class LyricsPanelHost {
         controller.apply(opacity: settings.value(keys.lyricsPanelOpacity), clickThrough: settings.value(keys.lyricsPanelClickThrough))
         let isShown = settings.value(keys.lyricsPanel)
         store.setLyricsPanelShown(isShown)
+        alsoTells?.setLyricsPanelShown(isShown)
         if isShown {
             if !controller.isShown {
                 controller.show(content: AnyView(LyricsPanelView(store: store, model: model, presence: controller.presence)))
@@ -56,5 +61,6 @@ final class LyricsPanelHost {
     func close() {
         controller.hide()
         store.setLyricsPanelShown(false)
+        alsoTells?.setLyricsPanelShown(false)
     }
 }
