@@ -101,6 +101,25 @@ private let allPages: [ModuleID] = [
         #expect(TabGroups.moving("x", to: .bar, at: 0, in: start) == .init(bar: ["x", "a", "b", "c"], overflow: ["y"]))
     }
 
+    @Test func aPageDroppedOnARowGoesJustBeforeThatRowWhicheverWayItCame() {
+        // Downward in the same section: the page lands before the row it was dropped on, not after it.
+        #expect(TabGroups.moving("a", before: "c", in: start) == .init(bar: ["b", "a", "c"], overflow: ["x", "y"]))
+        #expect(TabGroups.moving("a", before: "b", in: start) == .init(bar: ["a", "b", "c"], overflow: ["x", "y"]), "just above where it is: no move")
+        // Upward.
+        #expect(TabGroups.moving("c", before: "a", in: start) == .init(bar: ["c", "a", "b"], overflow: ["x", "y"]))
+        #expect(TabGroups.moving("y", before: "x", in: start) == .init(bar: ["a", "b", "c"], overflow: ["y", "x"]))
+        #expect(TabGroups.moving("x", before: "y", in: start) == .init(bar: ["a", "b", "c"], overflow: ["x", "y"]))
+        // From the other section.
+        #expect(TabGroups.moving("x", before: "b", in: start) == .init(bar: ["a", "x", "b", "c"], overflow: ["y"]))
+        #expect(TabGroups.moving("b", before: "y", in: start) == .init(bar: ["a", "c"], overflow: ["x", "b", "y"]))
+    }
+
+    @Test func aDropOnItselfOrOnSomethingThatIsNotThereChangesNothing() {
+        #expect(TabGroups.moving("b", before: "b", in: start) == start)
+        #expect(TabGroups.moving("zzz", before: "a", in: start) == start)
+        #expect(TabGroups.moving("a", before: "zzz", in: start) == start)
+    }
+
     @Test func theIndexIsHeldToTheSectionAndAnUnknownPageChangesNothing() {
         #expect(TabGroups.moving("a", to: .overflow, at: 99, in: start) == .init(bar: ["b", "c"], overflow: ["x", "y", "a"]))
         #expect(TabGroups.moving("a", to: .overflow, at: -4, in: start) == .init(bar: ["b", "c"], overflow: ["a", "x", "y"]))

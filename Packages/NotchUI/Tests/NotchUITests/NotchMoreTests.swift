@@ -377,3 +377,91 @@ private func harness(_ ids: [ModuleID] = thirteen) async -> RegistryHarness {
         }
     }
 }
+
+// MARK: the real root view, drawn
+
+/// The tab bar as the root view wires it, drawn offscreen in the classic look: thirteen pages with the placement they have by default, so
+/// the bar is six pages and Khác. This is what proves the width of the slab's bar and what it marks, as the pieces above prove their parts.
+@Suite struct NotchMoreRootRenderTests {
+    let geometry = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig())
+
+    /// The root view drawn at the panel's size, open on `page`.
+    func render(opening page: ModuleID) async throws -> NSBitmapImageRep {
+        let harness = await harness()
+        let model = NotchViewModel(
+            scheduler: harness.scheduler, availableTabs: { [registry = harness.registry] in registry.pages.selectable }, delays: { (.zero, .zero) }
+        )
+        model.open(tab: page)
+        try #require(model.displayState == .open(page))
+        let view = NotchRootView(model: model, activities: harness.activities, registry: harness.registry, geometry: geometry)
+            .frame(width: geometry.panelSize.width, height: geometry.panelSize.height)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 1
+        return NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
+    }
+
+    /// The row of the tab bar: under the top inset, as tall as an item.
+    var barRows: Range<Int> { Int(geometry.openTopInset)..<Int(geometry.openTopInset + TabBarMetrics.iconSize.height) }
+
+    func pixel(_ bitmap: NSBitmapImageRep, _ x: Int, _ y: Int) -> NSColor {
+        bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) ?? .black
+    }
+
+    func isLit(_ color: NSColor) -> Bool { color.alphaComponent > 0.5 && max(color.redComponent, color.greenComponent, color.blueComponent) > 0.25 }
+
+    /// Where the lit pixels of the bar's row begin and end.
+    func litExtent(_ bitmap: NSBitmapImageRep) -> ClosedRange<Int>? {
+        var xs: [Int] = []
+        // (Not the notch's own edge, whose antialiasing is not black.)
+        let inside = Int(geometry.panelSize.width - geometry.shapeSize(for: .open(nil)).width) / 2 + 8
+        for x in inside..<(bitmap.pixelsWide - inside) where barRows.contains(where: { isLit(pixel(bitmap, x, $0)) }) { xs.append(x) }
+        return xs.first.flatMap { first in xs.last.map { first...$0 } }
+    }
+
+    /// The cell of item `index` of the bar (`items` of them, centred on the notch), in x.
+    func cell(_ index: Int, of items: Int) -> Range<Int> {
+        let width = TabBarMetrics.width(count: items)
+        let left = (geometry.panelSize.width - width) / 2 + CGFloat(index) * (TabBarMetrics.iconSize.width + TabBarMetrics.spacing)
+        return Int(left)..<Int(left + TabBarMetrics.iconSize.width)
+    }
+
+    /// How many pixels of `cell` are the accent behind a selected item (a dim accent, mostly blue) or the badge's circle (the accent, bright).
+    func accentPixels(_ bitmap: NSBitmapImageRep, in cell: Range<Int>, bright: Bool) -> Int {
+        var count = 0
+        for x in cell { for y in barRows {
+            let color = pixel(bitmap, x, y)
+            let strong = color.blueComponent > 0.85 && color.redComponent < 0.7
+            let dim = color.blueComponent > 0.2 && color.blueComponent < 0.6 && color.blueComponent > 1.6 * color.greenComponent
+            if bright ? strong : dim { count += 1 }
+        } }
+        return count
+    }
+
+    @Test func theBarIsSevenItemsWideNotThirteen() async throws {
+        let bitmap = try await render(opening: "media")
+        let extent = try #require(litExtent(bitmap))
+        // Seven cells of 30 and six gaps of 6 are 246 pt; the glyphs do not reach the cells' edges. Thirteen would be 450.
+        #expect((190...246).contains(extent.count), "the lit part of the bar is \(extent.count) pt wide")
+        #expect(Double(extent.lowerBound + extent.upperBound) / 2 - geometry.panelSize.width / 2 < 3, "centred")
+    }
+
+    @Test func aPageInKhacMarksTheKhacItemAndBadgesItWhileAPageOnTheBarDoesNot() async throws {
+        let inKhac = try await render(opening: "timer")
+        let onBar = try await render(opening: "media")
+        let khac = cell(6, of: 7)
+        #expect(accentPixels(inKhac, in: khac, bright: false) > 150, "the accent behind the Khác item")
+        #expect(accentPixels(inKhac, in: khac, bright: true) > 15, "and the badge, in its corner")
+        #expect(accentPixels(onBar, in: khac, bright: false) < 10 && accentPixels(onBar, in: khac, bright: true) < 3, "a page on the bar leaves Khác plain")
+        // The page on the bar is the one marked, and the others are not.
+        #expect(accentPixels(onBar, in: cell(1, of: 7), bright: false) > 150)
+        #expect(accentPixels(inKhac, in: cell(1, of: 7), bright: false) < 10)
+        #expect(accentPixels(inKhac, in: cell(5, of: 7), bright: false) < 10, "nor the page next to Khác")
+    }
+
+    @Test func theGridOfKhacMarksTheItemWithNoBadge() async throws {
+        let grid = try await render(opening: NotchPages.moreID)
+        let khac = cell(6, of: 7)
+        #expect(accentPixels(grid, in: khac, bright: false) > 150)
+        #expect(accentPixels(grid, in: khac, bright: true) < 3, "nothing to badge it with: it is the grid")
+    }
+}

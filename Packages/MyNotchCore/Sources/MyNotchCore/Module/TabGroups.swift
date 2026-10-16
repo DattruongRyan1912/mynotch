@@ -53,6 +53,17 @@ nonisolated public enum TabGroups {
         return moved
     }
 
+    /// `page` dropped on the row of `target`: it goes to the side `target` is on, just before it, whichever way it came (from above or below it
+    /// in the same section, or from the other one). Dropped on itself, or with a page or a target that is not there, nothing changes.
+    public static func moving(_ page: ModuleID, before target: ModuleID, in arrangement: Arrangement) -> Arrangement {
+        let everyone = arrangement.bar + arrangement.overflow
+        guard page != target, everyone.contains(page), everyone.contains(target) else { return arrangement }
+        let side: Side = arrangement.bar.contains(target) ? .bar : .overflow
+        // The place is counted in the section without `page`, which is where `moving(_:to:at:in:)` counts it.
+        let remaining = (side == .bar ? arrangement.bar : arrangement.overflow).filter { $0 != page }
+        return moving(page, to: side, at: remaining.firstIndex(of: target) ?? remaining.count, in: arrangement)
+    }
+
     /// What to store once the user arranged the pages on screen as `visible`: the order of every page (the bar's, then Khác's, with what is
     /// stored but not on screen after them, as `TabOrder.updated`), and the ids in Khác: those on screen, and those that were in Khác but
     /// are not on screen (a module that is off), so they find their place again. A module that is off and was never placed keeps its

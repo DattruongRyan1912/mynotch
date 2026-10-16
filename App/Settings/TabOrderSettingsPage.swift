@@ -41,16 +41,16 @@ struct TabOrderSettingsPage: View {
     /// The rows of one side, which is also where a page dragged into it lands: before the row it is dropped on, or at the end.
     @ViewBuilder private func rows(_ tabs: [NotchTab], on side: TabGroups.Side, in arrangement: TabGroups.Arrangement) -> some View {
         ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
-            row(tab, index: index, on: side, in: arrangement)
+            row(tab, index: index, of: tabs.count, on: side, in: arrangement)
         }
         if tabs.isEmpty {
             Text(side == .bar ? "Kéo một trang lên đây." : "Kéo một trang vào đây để gom vào mục Khác.")
                 .foregroundStyle(.secondary)
-                .dropDestination(for: String.self) { dropped, _ in accept(dropped, on: side, at: 0, in: arrangement) }
+                .dropDestination(for: String.self) { dropped, _ in accept(dropped, on: side, in: arrangement) }
         }
     }
 
-    private func row(_ tab: NotchTab, index: Int, on side: TabGroups.Side, in arrangement: TabGroups.Arrangement) -> some View {
+    private func row(_ tab: NotchTab, index: Int, of count: Int, on side: TabGroups.Side, in arrangement: TabGroups.Arrangement) -> some View {
         let other = side.other
         return HStack {
             Label(tab.title, systemImage: tab.systemImage)
@@ -61,8 +61,14 @@ struct TabOrderSettingsPage: View {
         }
         .contentShape(Rectangle())
         .draggable(tab.id.rawValue)
-        .dropDestination(for: String.self) { dropped, _ in accept(dropped, on: side, at: index, in: arrangement) }
-        .contextMenu { Button(other.moveTitle) { move(tab.id, to: other, in: arrangement) } }
+        .dropDestination(for: String.self) { dropped, _ in accept(dropped, before: tab.id, in: arrangement) }
+        .contextMenu {
+            // Reordering never depends on dragging: the menu moves a page a place up or down, and to the other section.
+            Button("Chuyển lên") { move(tab.id, to: side, at: index - 1, in: arrangement) }.disabled(index == 0)
+            Button("Chuyển xuống") { move(tab.id, to: side, at: index + 1, in: arrangement) }.disabled(index == count - 1)
+            Divider()
+            Button(other.moveTitle) { move(tab.id, to: other, in: arrangement) }
+        }
         .accessibilityAction(named: "Chuyển lên") { move(tab.id, to: side, at: index - 1, in: arrangement) }
         .accessibilityAction(named: "Chuyển xuống") { move(tab.id, to: side, at: index + 1, in: arrangement) }
         .accessibilityAction(named: other.moveTitle) { move(tab.id, to: other, in: arrangement) }
@@ -73,12 +79,22 @@ struct TabOrderSettingsPage: View {
         save(TabGroups.moving(page, to: side, at: index, in: arrangement))
     }
 
-    /// A page dropped on `side` at `index`. False for what is not a page that is listed.
-    @discardableResult private func accept(_ dropped: [String], on side: TabGroups.Side, at index: Int, in arrangement: TabGroups.Arrangement) -> Bool {
-        guard let page = dropped.first.flatMap({ ModuleID(rawValue: $0) }),
-              arrangement.bar.contains(page) || arrangement.overflow.contains(page) else { return false }
-        move(page, to: side, at: index, in: arrangement)
+    /// A page dropped on an empty `side`, which is where it lands. False for what is not a page that is listed.
+    @discardableResult private func accept(_ dropped: [String], on side: TabGroups.Side, in arrangement: TabGroups.Arrangement) -> Bool {
+        guard let page = listed(dropped, in: arrangement) else { return false }
+        move(page, to: side, at: 0, in: arrangement)
         return true
+    }
+
+    /// A page dropped on the row of `target`, which is where it lands: just before it.
+    @discardableResult private func accept(_ dropped: [String], before target: ModuleID, in arrangement: TabGroups.Arrangement) -> Bool {
+        guard let page = listed(dropped, in: arrangement) else { return false }
+        save(TabGroups.moving(page, before: target, in: arrangement))
+        return true
+    }
+
+    private func listed(_ dropped: [String], in arrangement: TabGroups.Arrangement) -> ModuleID? {
+        dropped.first.flatMap { ModuleID(rawValue: $0) }.flatMap { arrangement.bar.contains($0) || arrangement.overflow.contains($0) ? $0 : nil }
     }
 
     /// Stores `visible` as the order and the placement, keeping the place of the modules that are not on screen.
