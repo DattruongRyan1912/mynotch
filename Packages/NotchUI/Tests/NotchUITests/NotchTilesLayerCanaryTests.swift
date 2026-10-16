@@ -36,12 +36,19 @@ struct NotchTilesLayerCanaryTests {
         let settings: SettingsStore
     }
 
-    func rig(shape: NotchGlassShape, bubbles: Int = 0) async throws -> Rig {
+    func rig(
+        shape: NotchGlassShape, bubbles: Int = 0, clarity: NotchGlassClarity = .balanced, recipe: NotchClearRecipeSwitch = .default,
+        window appearance: NSAppearance.Name? = nil
+    ) async throws -> Rig {
         let harness = RegistryHarness([TabModule("a", order: 0), TabModule("b", order: 1)])
         await harness.registry.bootstrap()
         harness.settings.set(.liquidGlass, for: InterfaceSettings.look)
         harness.settings.set(shape, for: InterfaceSettings.glassShape)
-        let theme = NotchTheme(settings: harness.settings, systemAccent: { NotchAccent.Palette.blue.rgb }, notifications: NotificationCenter())
+        harness.settings.set(clarity, for: InterfaceSettings.glassClarity)
+        let theme = NotchTheme(
+            settings: harness.settings, systemAccent: { NotchAccent.Palette.blue.rgb }, notifications: NotificationCenter(), lookState: nil,
+            clearRecipe: recipe
+        )
         let model = NotchViewModel(scheduler: harness.scheduler, availableTabs: { ["a", "b"] }, delays: { (.zero, .zero) })
         model.hasActivity = true
         harness.activities.set(
@@ -62,6 +69,7 @@ struct NotchTilesLayerCanaryTests {
             rootView: NotchRootView(model: model, activities: harness.activities, registry: harness.registry, geometry: geometry, theme: theme)
         )
         let window = NSWindow(contentRect: CGRect(origin: .zero, size: geometry.panelSize), styleMask: .borderless, backing: .buffered, defer: true)
+        if let appearance { window.appearance = NSAppearance(named: appearance) }
         window.contentView = hosting
         try await Task.sleep(for: .milliseconds(600))
         return Rig(harness: harness, model: model, hosting: hosting, window: window, settings: harness.settings)
@@ -317,5 +325,71 @@ struct NotchTilesLayerCanaryTests {
             print("CANARY collapsed, \(bubbles) bubbles: slab \(elements(slab.hosting).count), tiles \(elements(tiles.hosting).count) after open and close")
             #expect(elements(tiles.hosting).count == elements(slab.hosting).count, "\(bubbles) bubbles, after open and close")
         }
+    }
+
+    // MARK: the candidates for the clear glass (U3g, temporary) reach the glass layers
+
+    /// What the window server is given for the glass: the `glassBackground` filter's blur radius and face colour matrix (the white and
+    /// black points the blurred backdrop is mapped to), whether a tint fill layer is there, and the blur radius of every material
+    /// backdrop (a `gaussianBlur` filter) under it.
+    func glassFacts(_ hosting: NSView) -> (blur: Double, white: Double, black: Double, fills: Int, materials: [Double]) {
+        var facts = (blur: -1.0, white: -1.0, black: -1.0, fills: 0, materials: [Double]())
+        _ = layers(hosting.layer) { layer in
+            let name = NSStringFromClass(type(of: layer))
+            if name == "CABackdropLayer" {
+                for case let filter as NSObject in layer.filters ?? [] {
+                    switch filter.value(forKey: "name") as? String {
+                    case "glassBackground":
+                        facts.blur = (filter.value(forKey: "inputBlurRadius") as? Double) ?? -1
+                        facts.white = (filter.value(forKey: "inputFaceColorMatrixWhite") as? Double) ?? -1
+                        facts.black = (filter.value(forKey: "inputFaceColorMatrixBlack") as? Double) ?? -1
+                    case "gaussianBlur": facts.materials.append((filter.value(forKey: "inputRadius") as? Double) ?? -1)
+                    default: break
+                    }
+                }
+            }
+            if name == "CASDFLayer", let effect = layer.value(forKey: "effect") as? NSObject, NSStringFromClass(type(of: effect)) == "CASDFFillEffect" {
+                facts.fills += 1
+            }
+            return false
+        }
+        return facts
+    }
+
+    @Test func eachCandidateForTheClearGlassReachesTheGlassTheWayItIsMeant() async throws {
+        func facts(_ clarity: NotchGlassClarity, _ recipe: NotchClearRecipe, tint: Double = 0.12, shape: NotchGlassShape = .slab) async throws -> (blur: Double, white: Double, black: Double, fills: Int, materials: [Double]) {
+            let rig = try await rig(
+                shape: shape, clarity: clarity, recipe: NotchClearRecipeSwitch(recipe: recipe, tint: tint), window: .darkAqua
+            )
+            defer { rig.window.contentView = nil }
+            if shape == .tiles {
+                rig.model.open(tab: nil, onPurpose: false)
+                try await poll("the tiles, with a material under each and the notch's own gone") { glassFacts(rig.hosting).materials.count == 2 }
+            }
+            let found = glassFacts(rig.hosting)
+            print("CANARY recipe \(clarity) \(recipe) \(shape): blur \(found.blur), white/black \(found.white)/\(found.black), fills \(found.fills), materials \(found.materials)")
+            return found
+        }
+        let balanced = try await facts(.balanced, .regularLight)
+        let raw = try await facts(.clear, .raw)
+        let light = try await facts(.clear, .regularLight)
+        let tint = try await facts(.clear, .regularTint)
+        let over = try await facts(.clear, .clearOverBlur)
+        let regularOver = try await facts(.clear, .regularOverBlur)
+        // The numbers depend on the size of the glass (the open notch's are about twice these), so they are compared, not fixed. Balanced
+        // is regular glass in a dark window whatever recipe is set; today's clear glass keeps more contrast (a lower black point and a
+        // higher white point) and has a larger nominal blur radius at twice the resolution.
+        #expect(balanced.fills == 0 && balanced.materials.isEmpty && raw.fills == 0 && raw.materials.isEmpty)
+        #expect(raw.black < balanced.black && raw.white > balanced.white && raw.blur > balanced.blur)
+        // Forced light reaches the glass: the same blur, a lighter map (the window is dark).
+        #expect(light.blur == balanced.blur && light.black > balanced.black && light.white > balanced.white && light.materials.isEmpty)
+        // The tint is a fill on top of the regular glass's own map.
+        #expect(tint.blur == balanced.blur && tint.black == balanced.black && tint.white == balanced.white && tint.fills > balanced.fills)
+        // The blur recipes put a material (radius 60) under the glass and keep the glass of their own kind.
+        #expect(over.materials == [60] && over.blur == raw.blur && over.black == raw.black && over.white == raw.white)
+        #expect(regularOver.materials == [60] && regularOver.blur == balanced.blur && regularOver.black == balanced.black)
+        // The tiles carry it too: one material under each tile's glass.
+        let tiles = try await facts(.clear, .clearOverBlur, shape: .tiles)
+        #expect(tiles.materials.count == 2 && tiles.materials.allSatisfy { $0 == 60 }, "\(tiles.materials)")
     }
 }

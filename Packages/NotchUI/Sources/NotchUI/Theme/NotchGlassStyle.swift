@@ -9,10 +9,13 @@ nonisolated public enum NotchGlassClarity: String, Codable, Sendable, CaseIterab
     /// page full of text the notch's own text is hard to read; opt-in.
     case clear
 
-    var glass: Glass {
+    var glass: Glass { glass(under: .default) }
+
+    /// The glass under `recipe`, the temporary candidates for the clear one (U3g); the balanced glass does not read it.
+    func glass(under recipe: NotchClearRecipeSwitch) -> Glass {
         switch self {
         case .balanced: .regular
-        case .clear: .clear
+        case .clear: recipe.clearGlass
         }
     }
 }
@@ -32,6 +35,8 @@ nonisolated public enum NotchGlassShape: String, Codable, Sendable, CaseIterable
 nonisolated struct NotchGlassStyle: Equatable, Sendable {
     var clarity = NotchGlassClarity.balanced
     var shape = NotchGlassShape.slab
+    /// Temporary (U3g): what "Trong vắt" is made of. Only read when `clarity` is `clear`.
+    var clearRecipe = NotchClearRecipeSwitch.default
 
     static let `default` = NotchGlassStyle()
 }
@@ -43,7 +48,8 @@ nonisolated struct NotchGlassStyle: Equatable, Sendable {
 ///
 ///     defaults write io.lucasvu.mynotch debug.glass.inactive -int 1
 ///
-/// It is read once, when a notch is made, and is not shown in the settings. It is the only `debug.glass.*` key read.
+/// It is read once, when a notch is made, and is not shown in the settings. Apart from the temporary candidates for the clear glass
+/// (`NotchClearRecipe`, U3g, which step 2 removes) it is the only `debug.glass.*` key read.
 nonisolated enum NotchGlassSupport {
     static let inactiveKey = "debug.glass.inactive"
 

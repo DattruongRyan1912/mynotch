@@ -13,15 +13,18 @@ private final class ProbeFrame {
     var appeared = 0
     /// The glass plan the tab's content last saw in its environment, which is what the notch is drawn from.
     var plan: NotchGlassPlan?
+    /// The colour scheme the tab's content last saw.
+    var scheme: ColorScheme?
 }
 
 /// A tab's content that reports where it is, that it appeared, and the glass plan around it.
 private struct TabProbe: View {
     let frame: ProbeFrame
     @Environment(\.notchGlassPlan) private var plan
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let _ = (frame.plan = plan)
+        let _ = (frame.plan = plan, frame.scheme = scheme)
         Color.clear
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { [frame] in frame.value = $0 }
             .onAppear { [frame] in frame.appeared += 1 }
@@ -59,7 +62,8 @@ private struct OpenNotch {
 
     /// Builds it and lays it out.
     static func make(
-        look: NotchLook, clarity: NotchGlassClarity = .balanced, shape: NotchGlassShape = .slab, tinted: Bool = false, tabs: Int = 1
+        look: NotchLook, clarity: NotchGlassClarity = .balanced, shape: NotchGlassShape = .slab, tinted: Bool = false, tabs: Int = 1,
+        clearRecipe: NotchClearRecipeSwitch = .default, window appearance: NSAppearance.Name = .aqua
     ) async throws -> OpenNotch {
         let geometry = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig())
         let frame = ProbeFrame()
@@ -71,7 +75,10 @@ private struct OpenNotch {
         harness.settings.set(clarity, for: InterfaceSettings.glassClarity)
         harness.settings.set(shape, for: InterfaceSettings.glassShape)
         harness.settings.set(tinted, for: InterfaceSettings.glassTint)
-        let theme = NotchTheme(settings: harness.settings, systemAccent: { NotchAccent.Palette.blue.rgb }, notifications: NotificationCenter())
+        let theme = NotchTheme(
+            settings: harness.settings, systemAccent: { NotchAccent.Palette.blue.rgb }, notifications: NotificationCenter(), lookState: nil,
+            clearRecipe: clearRecipe
+        )
         let model = NotchViewModel(
             scheduler: harness.scheduler, availableTabs: { [registry = harness.registry] in registry.tabs.map(\.id) }, delays: { (.zero, .zero) }
         )
@@ -81,7 +88,7 @@ private struct OpenNotch {
             rootView: NotchRootView(model: model, activities: harness.activities, registry: harness.registry, geometry: geometry, theme: theme)
         )
         let window = NSWindow(contentRect: CGRect(origin: .zero, size: geometry.panelSize), styleMask: .borderless, backing: .buffered, defer: true)
-        window.appearance = NSAppearance(named: .aqua)
+        window.appearance = NSAppearance(named: appearance)
         window.contentView = hosting
         let notch = OpenNotch(hosting: hosting, window: window, frame: frame, geometry: geometry, model: model, settings: harness.settings)
         try await notch.wait("the tab was laid out") { frame.value != nil }
@@ -425,5 +432,28 @@ private struct OpenNotch {
         #expect(tall != short, "the animation is keyed on the layout, which differs")
         #expect(tall.content.size.height - short.content.size.height == 120)
         #expect(tall.tabBar == short.tabBar)
+    }
+}
+
+/// TEMPORARY (U3g step 1), with `NotchClearRecipeTests`: a candidate for the clear glass that forces the notch's colour scheme does
+/// reach the content in the open notch, on both shapes; no other recipe does.
+@Suite struct NotchClearRecipeHostedTests {
+    @Test func regularLightForcesTheNotchsSchemeIntoItsContentWhateverTheWindowHasAndNothingElseDoes() async throws {
+        for appearance in [NSAppearance.Name.darkAqua, .aqua] {
+            for (clarity, recipe, forced) in [
+                (NotchGlassClarity.clear, NotchClearRecipe.regularLight, ColorScheme.light),
+                (.clear, .raw, nil), (.clear, .regularTint, nil), (.clear, .clearOverBlur, nil), (.balanced, .regularLight, nil),
+            ] as [(NotchGlassClarity, NotchClearRecipe, ColorScheme?)] {
+                for shape in NotchGlassShape.allCases {
+                    let notch = try await OpenNotch.make(
+                        look: .liquidGlass, clarity: clarity, shape: shape, clearRecipe: NotchClearRecipeSwitch(recipe: recipe), window: appearance
+                    )
+                    defer { notch.close() }
+                    try await notch.wait("the tab saw its scheme") { notch.frame.scheme != nil }
+                    let window: ColorScheme = appearance == .darkAqua ? .dark : .light
+                    #expect(notch.frame.scheme == (forced ?? window), "\(appearance.rawValue) \(clarity) \(recipe) \(shape)")
+                }
+            }
+        }
     }
 }

@@ -122,6 +122,7 @@ struct NotchRootView: View {
                         .frame(width: size.width, height: size.height)
                         // Above the animation below, so the glass takes its shape and size from the same spring as the notch.
                         .notchGlass(plan.notch, in: shape, namespace: glassNamespace)
+                        .background { if let material = plan.materialUnder, plan.panelHasGlass { shape.fill(material.material) } }
                         .contentShape(shape)
                         // Once open, taps belong to the tab content; the root tap only opens the notch.
                         .gesture(TapGesture().onEnded { model.click() }, including: isOpen ? .subviews : .all)
@@ -142,6 +143,10 @@ struct NotchRootView: View {
         .environment(\.notchSurface, surface)
         .environment(\.notchGlassNamespace, surface.isLiquidGlass ? glassNamespace : nil)
         .environment(\.notchGlassPlan, plan)
+        // Temporary (U3g): a candidate for the clear glass forces the notch's colour scheme, which its glass and everything in it follow.
+        .transformEnvironment(\.colorScheme) { scheme in
+            if let forced = plan.forcedScheme { scheme = forced }
+        }
     }
 
     /// The drag targeting the notch reports: only the end of a drag is forwarded.
@@ -198,7 +203,10 @@ struct NotchRootView: View {
                 .animation(NotchTokens.spring, value: layout)
 
             if registry.tabs.count >= 2, let bar = current.tabBar {
-                tile(bar, rest: rest.tabBar ?? bar, final: final.tabBar ?? bar, glass: tiles.tabBar, shape: Capsule(), key: current, showsTabs: showsTabs) {
+                tile(
+                    bar, rest: rest.tabBar ?? bar, final: final.tabBar ?? bar, glass: tiles.tabBar, shape: Capsule(), key: current,
+                    showsTabs: showsTabs, blurs: plan.materialUnder
+                ) {
                     TabBar(tabs: registry.tabs, selected: shownTab?.id) { model.open(tab: $0) }
                         .frame(width: TabBarMetrics.width(count: registry.tabs.count), height: TabBarMetrics.iconSize.height)
                         .padding(.top, NotchGlassPlan.tabBarInset.height)
@@ -206,7 +214,8 @@ struct NotchRootView: View {
             }
             tile(
                 current.content, rest: rest.content, final: final.content, glass: tiles.content,
-                shape: RoundedRectangle(cornerRadius: concentricTileRadius, style: .continuous), key: current, showsTabs: showsTabs
+                shape: RoundedRectangle(cornerRadius: concentricTileRadius, style: .continuous), key: current, showsTabs: showsTabs,
+                blurs: plan.materialUnder
             ) {
                 openContent
                     .frame(width: max(inner.width, 0), height: max(inner.height, 0))
@@ -222,6 +231,7 @@ struct NotchRootView: View {
                 .clipShape(glassShape)
                 .frame(width: glassSize.width, height: glassSize.height)
                 .notchGlass(plan.notch, in: glassShape, namespace: glassNamespace)
+                .background { if let material = plan.materialUnder, plan.panelHasGlass { glassShape.fill(material.material) } }
                 .animation(NotchTokens.spring, value: layout)
         }
         .contentShape(fullShape)
@@ -233,10 +243,10 @@ struct NotchRootView: View {
     /// One tile: see `NotchTile`. Its content is laid out at the size it has when the notch is open, and is there while the tab is.
     private func tile<S: Shape, Content: View>(
         _ tile: NotchTilesLayout.Tile, rest: NotchTilesLayout.Tile, final: NotchTilesLayout.Tile, glass: NotchGlassPlan.Shape, shape: S,
-        key: NotchTilesLayout, showsTabs: Bool, @ViewBuilder content: () -> Content
+        key: NotchTilesLayout, showsTabs: Bool, blurs: NotchBlurMaterial?, @ViewBuilder content: () -> Content
     ) -> some View {
         NotchTile(
-            tile: tile, rest: rest, final: final, glass: glass, shape: shape, key: key, showsTabs: showsTabs, isOpen: isOpen,
+            tile: tile, rest: rest, final: final, glass: glass, shape: shape, key: key, showsTabs: showsTabs, blurs: blurs, isOpen: isOpen,
             phase: isOpen ? .open : (showsTabs ? .covered : .closing),
             handle: NotchHandle(model: model), namespace: glassNamespace, content: content()
         )
@@ -375,6 +385,8 @@ private struct NotchTile<S: Shape, Content: View>: View {
     let shape: S
     let key: NotchTilesLayout
     let showsTabs: Bool
+    /// Temporary (U3g): a material is drawn under the tile's glass while it is glass.
+    let blurs: NotchBlurMaterial?
     let isOpen: Bool
     let phase: NotchTilesLayout.Phase
     let handle: NotchHandle
@@ -406,6 +418,7 @@ private struct NotchTile<S: Shape, Content: View>: View {
                 wantsGlass = phase == .closing ? wantsGlass && wants : wants
             }
             .notchGlass(wantsGlass ? glass : NotchGlassPlan.Shape(id: glass.id, glass: .identity), in: shape, namespace: namespace)
+            .background { if let blurs, wantsGlass { shape.fill(blurs.material) } }
             .padding(.top, tile.top)
             .animation(NotchTokens.spring, value: key)
     }

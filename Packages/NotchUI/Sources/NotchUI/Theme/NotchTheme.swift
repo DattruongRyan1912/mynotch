@@ -16,6 +16,8 @@ public final class NotchTheme {
     @ObservationIgnored private let settings: SettingsStore
     @ObservationIgnored private let systemAccent: () -> NotchAccent.RGB
     @ObservationIgnored private let notifications: NotificationCenter
+    /// Temporary (U3g): what "Trong vắt" is made of; fixed for the theme's life.
+    @ObservationIgnored private let clearRecipe: NotchClearRecipeSwitch
     @ObservationIgnored private var observer: (any NSObjectProtocol)?
     @ObservationIgnored private var lookFollower: Task<Void, Never>?
     /// What macOS told about its colours so far; a view that read the accent depends on it.
@@ -35,8 +37,10 @@ public final class NotchTheme {
         settings: SettingsStore,
         systemAccent: @escaping () -> NotchAccent.RGB = { SystemAccent.current() },
         notifications: NotificationCenter = .default,
-        lookState: NotchLookState?
+        lookState: NotchLookState?,
+        clearRecipe: NotchClearRecipeSwitch = .default
     ) {
+        self.clearRecipe = clearRecipe
         self.settings = settings
         self.systemAccent = systemAccent
         self.notifications = notifications
@@ -82,7 +86,7 @@ public final class NotchTheme {
     public var glassShape: NotchGlassShape { settings.value(InterfaceSettings.glassShape) }
 
     /// Both, for the plan. Reading it in a view's body makes the view redraw when either changes.
-    var glassStyle: NotchGlassStyle { NotchGlassStyle(clarity: glassClarity, shape: glassShape) }
+    var glassStyle: NotchGlassStyle { NotchGlassStyle(clarity: glassClarity, shape: glassShape, clearRecipe: clearRecipe) }
 
     /// What the notch's shape is filled with in `state`. Reading it in a view's body makes the view redraw when the look, the
     /// tint or the classic blur changes.
