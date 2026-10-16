@@ -47,6 +47,9 @@
   var MIN_SECONDS = 5;
   // A repeat of the same state is not sent again while the position is where it should be, within this many seconds.
   var SAME_POSITION_SECONDS = 0.5;
+  // A player that is emptied (YouTube does it at every next video, and for adverts) is given this long to play again before the
+  // page is said to have no media: a track change is not the media going away, and the app would drop what the user pinned.
+  var EMPTIED_GRACE_MS = 2500;
   var MEDIA_EVENTS = ["play", "playing", "pause", "ended", "emptied", "seeked", "ratechange", "loadedmetadata", "durationchange"];
 
   var doc = root.document;
@@ -55,6 +58,7 @@
     reported: false, // a report went out and no end since
     last: null, // { key, time, at } of the last report
     session: null, // what the page script last said of the Media Session, and when (see onPageMessage)
+    emptiedAt: 0, // when the element shown was emptied, until it plays again or the grace is over
     timer: 0,
     messages: null, // chrome.runtime.onMessage, where the command listener is registered
     stopped: false
@@ -73,6 +77,19 @@
 
   function isConnected(el) {
     return el.isConnected !== false;
+  }
+
+  /**
+   * The document's title as the page shows it. On YouTube it is cleaned of the notification counter and the " - YouTube" suffix, and
+   * the shell's bare "YouTube" is no title; anywhere else it is what the page says, since the system's now playing says that too and
+   * the two must read the same for a page with no Media Session to be one source in MyNotch, not two.
+   */
+  function documentTitle() {
+    if (root.location.origin === "https://www.youtube.com") {
+      var title = C.cleanTitle(doc.title);
+      return title === "YouTube" ? "" : title;
+    }
+    return T.cleanText(doc.title, T.MAX_TITLE);
   }
 
   /** What the page's Media Session says, read live; else what the page script last told us. null when the page has no title in it. */
@@ -120,8 +137,8 @@
   /** The report for the element, or null while there is no title to give (the page has not set one yet). */
   function buildElement(el) {
     var session = readSession();
-    var title = session ? session.title : C.cleanTitle(doc.title);
-    if (!title || title === "YouTube") return null;
+    var title = session ? session.title : documentTitle();
+    if (!title) return null;
     var duration = el.duration;
     var rate = finite(el.playbackRate, 1);
     return {
@@ -241,6 +258,7 @@
   function end() {
     var reported = state.reported;
     state.el = null;
+    state.emptiedAt = 0;
     state.last = null;
     state.reported = false;
     stopTimer();
@@ -265,12 +283,19 @@
 
   function claim(el) {
     state.el = el;
+    state.emptiedAt = 0;
     startTimer();
     report(true);
   }
 
   function tick() {
     try {
+      var el = state.el;
+      if (el && state.emptiedAt && Date.now() - state.emptiedAt >= EMPTIED_GRACE_MS && !isPlaying(el)) {
+        end();
+        afterElementGone();
+        return;
+      }
       report(false);
     } catch (error) {
       /* the next tick tries again */
@@ -283,16 +308,24 @@
       if (!isMedia(el)) return;
       if (event.type === "play" || event.type === "playing") {
         // The latest to play is the one shown, and a player that was already shown keeps its place.
-        if (el === state.el) report(false);
-        else if (isEligible(el)) claim(el);
+        if (el === state.el) {
+          state.emptiedAt = 0;
+          report(false);
+        } else if (isEligible(el)) {
+          claim(el);
+        }
         return;
       }
       if (el !== state.el) return;
-      // What the report left out of a change, it sends only when it is one: a repeat of the same state is not sent again.
-      if (event.type === "emptied" || ((event.type === "durationchange" || event.type === "loadedmetadata") && !isEligible(el))) {
+      if (event.type === "emptied") {
+        // Not yet the end: it is most likely the next video loading into the same element. The tick ends it if nothing plays.
+        state.emptiedAt = Date.now();
+        report(false);
+      } else if ((event.type === "durationchange" || event.type === "loadedmetadata") && !isEligible(el)) {
         end();
         afterElementGone();
       } else {
+        // What the report left out of a change, it sends only when it is one: a repeat of the same state is not sent again.
         report(false);
       }
     } catch (error) {

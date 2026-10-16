@@ -36,7 +36,7 @@ function fakeMedia(overrides = {}) {
 }
 
 /** A page with just enough DOM for tabs.js, a manual clock and a manual interval. */
-function makePage({ title = "Placeholder page", hostname = "music.example.com", media = [], metadata = null } = {}) {
+function makePage({ title = "Placeholder page", hostname = "music.example.com", media = [], metadata = null, origin = ORIGIN } = {}) {
   const page = {
     sent: [],
     diags: [],
@@ -68,7 +68,7 @@ function makePage({ title = "Placeholder page", hostname = "music.example.com", 
   page.context = createContext({
     __now: 1000000,
     document,
-    location: { href: `${ORIGIN}/album?x=secret#frag`, origin: ORIGIN, hostname },
+    location: { href: `${origin}/album?x=secret#frag`, origin, hostname },
     navigator: {
       get mediaSession() {
         return page.noSession
@@ -218,18 +218,38 @@ test("the title is the Media Session's, else what its page script last said, els
   assert.equal(page.take().at(-1).title, "Other - Site");
 });
 
-test("a page whose title is empty, or is only YouTube's shell, says nothing until it has one", () => {
+test("a page whose title is empty says nothing until it has one", () => {
   const el = video();
   const page = makePage({ media: [el], title: "" });
   page.start();
   page.emit(el, "play");
   assert.deepEqual(page.take(), []);
-  page.title = "YouTube";
+  page.title = "   ";
   page.advance(1000);
   assert.deepEqual(page.take(), []);
   page.title = "Now it has one";
   page.advance(1000);
   assert.equal(page.take()[0].title, "Now it has one");
+});
+
+test("on YouTube the title loses the counter and the suffix and the shell's bare name is no title; anywhere else it is what the page says", () => {
+  const youtube = makePage({ media: [video()], origin: "https://www.youtube.com", hostname: "www.youtube.com", title: "YouTube" });
+  youtube.start();
+  youtube.emit(youtube.media[0], "play");
+  assert.deepEqual(youtube.take(), [], "the shell before the video's own title");
+  youtube.title = "(3) A video - YouTube";
+  youtube.advance(1000);
+  assert.equal(youtube.take()[0].title, "A video");
+
+  // The system's now playing says the page's own title; a page that is not YouTube must give the same words or it is two chips.
+  const other = makePage({ media: [video()], title: "(3) Inbox - Mail - YouTube" });
+  other.start();
+  other.emit(other.media[0], "play");
+  assert.equal(other.take()[0].title, "(3) Inbox - Mail - YouTube");
+  const bare = makePage({ media: [video()], title: "YouTube" });
+  bare.start();
+  bare.emit(bare.media[0], "play");
+  assert.equal(bare.take()[0].title, "YouTube", "a page called YouTube that is not YouTube");
 });
 
 test("a muted loop, a silent element and a very short clip are not shown, unless the page says it is a player", () => {
@@ -397,14 +417,63 @@ test("the page has no media any more: it says so once, when the element leaves, 
   page.emit(other, "play");
   page.take();
   page.emit(other, "emptied");
-  assert.deepEqual(page.take(), [{ v: 1, type: "tab-end" }]);
+  other.paused = true;
+  page.advance(2000);
+  assert.equal(page.take().some((message) => message.type === "tab-end"), false, "not yet: it may be the next video loading");
+  page.advance(1000);
+  assert.equal(page.take().filter((message) => message.type === "tab-end").length, 1, "nothing played again in time");
 
+  other.paused = false;
   page.emit(other, "play");
   page.take();
   page.fire("pagehide");
   assert.deepEqual(page.take(), [{ v: 1, type: "tab-end" }]);
   page.fire("pagehide");
   assert.deepEqual(page.take(), [], "nothing to end any more");
+});
+
+test("an element that is emptied and plays again at once (the next video) never ends the page, so nothing the user chose is lost", () => {
+  const el = video();
+  const page = makePage({ media: [el] });
+  page.start();
+  page.emit(el, "play");
+  page.take();
+  for (let video = 0; video < 3; video++) {
+    page.emit(el, "emptied");
+    page.advance(1000);
+    page.emit(el, "loadedmetadata");
+    page.emit(el, "play");
+    page.emit(el, "playing");
+    page.advance(1000);
+  }
+  const sent = page.take();
+  assert.equal(sent.some((message) => message.type === "tab-end"), false, JSON.stringify(sent.map((message) => message.type)));
+  assert.equal(page.live().length, 1, "and it is still being reported");
+  // Long after, nothing is left of the grace either: an emptied player that plays has no end pending.
+  page.advance(10000);
+  assert.equal(page.take().some((message) => message.type === "tab-end"), false);
+});
+
+test("an emptied element that is playing again when the grace is over is not ended", () => {
+  const el = video();
+  const page = makePage({ media: [el] });
+  page.start();
+  page.emit(el, "play");
+  page.take();
+  page.emit(el, "emptied"); // and the next video starts without a play event of its own
+  page.advance(3000);
+  assert.equal(page.take().some((message) => message.type === "tab-end"), false, "it plays: it is the media");
+});
+
+test("leaving the page and an element that is taken out of the document end the page at once, with no grace", () => {
+  const el = video();
+  const page = makePage({ media: [el] });
+  page.start();
+  page.emit(el, "play");
+  page.take();
+  page.emit(el, "emptied");
+  page.fire("pagehide");
+  assert.deepEqual(page.take().map((message) => message.type), ["tab-end"]);
 });
 
 test("a pagehide with nothing to end sends nothing", () => {
@@ -786,9 +855,14 @@ test("when the element goes and the session still says it plays, the session is 
   page.playSession({ title: "Session song", position: { position: 12, duration: 100, rate: 1, at: page.context.__now } });
   page.take();
   page.emit(el, "emptied");
+  el.paused = true;
+  page.advance(3000);
   const sent = page.take();
-  assert.deepEqual(sent.map((message) => message.type), ["tab-end", "tab-report"], "the element's end, then the session's report");
-  assert.equal(sent[1].time, 12);
+  const types = sent.map((message) => message.type);
+  assert.equal(types.filter((type) => type === "tab-end").length, 1, "the element's end, once its grace is over");
+  assert.equal(types.at(-1), "tab-report", "then the session's report");
+  assert.equal(sent.at(-1).title, "Session song");
+  assert.ok(sent.at(-1).time >= 12, "from where the session said it was");
   assert.equal(page.live().length, 1);
 
   el.isConnected = false; // a removed element behaves alike
