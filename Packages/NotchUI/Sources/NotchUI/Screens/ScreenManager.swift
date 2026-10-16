@@ -14,6 +14,9 @@ public final class ScreenManager {
     /// The accent and look every notch is drawn with. It also keeps the text tokens in step with the look (`NotchLookState`).
     private lazy var theme = NotchTheme(settings: settings, lookState: .shared)
     private var controllers: [String: NotchWindowController] = [:]
+    /// The black menu bar of the displays the user chose. It has its own setting, so neither the display mode nor hiding the notch
+    /// from the menu bar applies to it; fullscreen does, always, because the menu bar is not there.
+    private lazy var menuBands = MenuBarBands(interface: interface)
     private var fullscreenDisplays: Set<CGDirectDisplayID> = []
     /// The display the user is working on, for the display mode that follows them.
     private lazy var activeDisplay = ActiveDisplay(scheduler: scheduler) { [weak self] in self?.activeDisplayChanged() }
@@ -156,6 +159,16 @@ public final class ScreenManager {
             controller.setVisible(visible)
         }
         interface.notches = NotchInterface.visibleNotches(among: controllers.values.map { ($0.display, $0.isVisible) })
+        applyMenuBands()
+    }
+
+    /// Runs with every sync of the displays and every fullscreen check, which also come with Space changes, app switches and a menu bar
+    /// that was hidden or shown, so the band is read afresh from the screens each time; it changes nothing that has not changed.
+    private func applyMenuBands() {
+        menuBands.update(
+            mode: settings.value(InterfaceSettings.blackMenuBar),
+            screens: NSScreen.screens.compactMap(MenuBarBandScreen.init), fullscreen: fullscreenDisplays
+        )
     }
 
     private func pointerMoved(to point: CGPoint, dragTypes: [String]) {
@@ -174,7 +187,9 @@ public final class ScreenManager {
             }
         }
         Task { [weak self, settings] in
-            for await _ in Observations({ (settings.value(InterfaceSettings.displayMode), settings.value(InterfaceSettings.hideInFullscreen)) }) {
+            for await _ in Observations({
+                (settings.value(InterfaceSettings.displayMode), settings.value(InterfaceSettings.hideInFullscreen), settings.value(InterfaceSettings.blackMenuBar))
+            }) {
                 self?.applyVisibility()
             }
         }

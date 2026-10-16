@@ -19,6 +19,15 @@ nonisolated public enum VirtualNotchStyle: String, Codable, Sendable, CaseIterab
     case pill
 }
 
+/// Whether MyNotch paints the menu bar black, and on which displays (`interface.blackMenuBar`): a MacBook's notch is then no longer
+/// a hole in a coloured bar.
+nonisolated public enum BlackMenuBar: String, Codable, Sendable, CaseIterable {
+    case off
+    /// Only the displays with a hardware notch.
+    case notchedScreens
+    case allScreens
+}
+
 /// Global interface settings (`interface.*`).
 public enum InterfaceSettings {
     public static let displayMode = SettingKey("interface.displayMode", default: DisplayMode.all)
@@ -40,6 +49,8 @@ public enum InterfaceSettings {
     public static let openDelayMs = SettingKey("interface.openDelayMs", default: 150, clampedTo: 0...1000)
     public static let closeDelayMs = SettingKey("interface.closeDelayMs", default: 300, clampedTo: 0...1000)
     public static let hideInFullscreen = SettingKey("interface.hideInFullscreen", default: true)
+    /// A black band laid over the menu bar of the chosen displays (see `MenuBarBands`).
+    public static let blackMenuBar = SettingKey("interface.blackMenuBar", default: BlackMenuBar.off)
     /// Whether the notch's windows stay out of screen recordings and shared screens.
     public static let hideFromCapture = SettingKey("interface.hideFromCapture", default: CaptureHiding.never)
     /// A two-finger sideways swipe on the open notch moves to the previous or next tab.

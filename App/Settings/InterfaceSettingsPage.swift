@@ -20,6 +20,15 @@ struct InterfaceSettingsPage: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("Ẩn khi app đang fullscreen", isOn: settings.binding(InterfaceSettings.hideInFullscreen))
             }
+            Section("Thanh menu") {
+                Picker("Tô đen thanh menu", selection: settings.binding(InterfaceSettings.blackMenuBar)) {
+                    Text("Tắt").tag(BlackMenuBar.off)
+                    Text("Chỉ màn hình có tai thỏ").tag(BlackMenuBar.notchedScreens)
+                    Text("Mọi màn hình").tag(BlackMenuBar.allScreens)
+                }
+                Text("Phủ một dải đen lên thanh menu để phần khuyết của máy liền với thanh. Dải đen tự ẩn khi app đang fullscreen hoặc khi thanh menu tự ẩn, và không che cửa sổ nào. Màu chữ trên thanh menu do macOS chọn.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Kích thước notch ảo (màn hình không có notch)") {
                 Picker("Kiểu", selection: settings.binding(InterfaceSettings.virtualNotchStyle)) {
                     Text("Notch (sát mép trên)").tag(VirtualNotchStyle.notch)
