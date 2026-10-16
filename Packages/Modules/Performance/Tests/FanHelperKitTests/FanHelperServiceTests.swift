@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import FanHelperKit
 
@@ -50,6 +51,24 @@ struct FanKeysChannel: SMCChannel {
             connection.resume()
             return true
         }
+    }
+
+    final class Served: Sendable {
+        private let names = Mutex<[String]>([])
+        func record(_ name: String) { names.withLock { $0.append(name) } }
+        var value: [String] { names.withLock { $0 } }
+    }
+
+    @Test func eachRequestThatIsServedIsReportedByName() async {
+        let served = Served()
+        let service = FanHelperService(buildID: "abc", openChannel: { FanKeysChannel() }, onRequest: { served.record($0) })
+        let (proxy, close) = connect(to: service)
+        defer { close() }
+        _ = await withCheckedContinuation { continuation in proxy.ping { continuation.resume(returning: $0) } }
+        _ = await withCheckedContinuation { (continuation: CheckedContinuation<([FanHelperFan], String?), Never>) in
+            proxy.readFans { continuation.resume(returning: ($0, $1)) }
+        }
+        #expect(served.value == ["ping", "readFans"])
     }
 
     @Test func aPingAnswersWithTheVersionTheBuildTheUserAndTheProcess() async throws {

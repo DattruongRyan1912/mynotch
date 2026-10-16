@@ -29,7 +29,9 @@ nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
             idle.connectionClosed()
         }
         connection.resume()
-        log.info("connection accepted from pid \(connection.processIdentifier, privacy: .public)")
+        // Received, not served: the system turns the connection away on its own when the requirement is not met, and nothing
+        // below is called for it; "served" lines are the proof that a request got through.
+        log.info("connection received from pid \(connection.processIdentifier, privacy: .public), requirement applied")
         return true
     }
 }
@@ -47,7 +49,8 @@ let idle = IdleExit(after: 20) {
     log.info("idle, exiting")
     exit(EXIT_SUCCESS)
 }
-let delegate = ListenerDelegate(service: FanHelperService(buildID: buildID), idle: idle)
+let service = FanHelperService(buildID: buildID, onRequest: { request in log.info("served \(request, privacy: .public)") })
+let delegate = ListenerDelegate(service: service, idle: idle)
 let listener = NSXPCListener(machServiceName: FanHelperIdentity.machServiceName)
 listener.delegate = delegate
 listener.resume()
