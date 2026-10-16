@@ -9,6 +9,8 @@ public final class ScreenManager {
     private let settings: SettingsStore
     private let scheduler: any Scheduler
     private let interface: NotchInterface
+    /// Gives the memory back to the system once the notch has collapsed or a window has closed; started with the notches.
+    private let memoryRelief: MemoryRelief
     /// The accent and look every notch is drawn with. It also keeps the text tokens in step with the look (`NotchLookState`).
     private lazy var theme = NotchTheme(settings: settings, lookState: .shared)
     private var controllers: [String: NotchWindowController] = [:]
@@ -49,13 +51,14 @@ public final class ScreenManager {
     /// `interface` is where modules learn about the notches and the capture setting; the app uses the shared one.
     public init(
         registry: ModuleRegistry, activities: ActivityCenter, settings: SettingsStore, scheduler: any Scheduler,
-        interface: NotchInterface = .shared
+        interface: NotchInterface = .shared, memoryRelief: MemoryRelief? = nil
     ) {
         self.registry = registry
         self.activities = activities
         self.settings = settings
         self.scheduler = scheduler
         self.interface = interface
+        self.memoryRelief = memoryRelief ?? MemoryRelief(scheduler: scheduler)
     }
 
     /// Starts observing displays, pointer and settings. Call once; later calls are ignored.
@@ -74,6 +77,7 @@ public final class ScreenManager {
         hoverTracker.start()
         fullscreenDetector.start()
         observeSettings()
+        memoryRelief.start { [weak self] in self?.isAnyNotchExpanded ?? false }
     }
 
     /// Visible controller for the screen under the pointer, else the visible one on the main screen, else any visible one.
