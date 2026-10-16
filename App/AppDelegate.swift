@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var activities = ActivityCenter(scheduler: scheduler)
     private let lockScreen = LockScreenContentCenter()
     private lazy var registry = ModuleRegistry(
-        modules: ModuleList.make(), settings: settings, activities: activities, lockScreen: lockScreen,
+        modules: ModuleList.make(activities: activities), settings: settings, activities: activities, lockScreen: lockScreen,
         permissions: permissions, hotkeys: hotkeys, presenter: coordinator,
         scheduler: scheduler, storageRoot: .standard(bundleID: Bundle.main.bundleIdentifier ?? "io.lucasvu.mynotch"),
         services: services

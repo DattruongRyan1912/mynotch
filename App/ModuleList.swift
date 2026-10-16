@@ -6,6 +6,7 @@ import LockScreenModule
 import MediaModule
 import MyNotchCore
 import PerformanceModule
+import PetModule
 import PortsModule
 import ScreenshotModule
 import ShelfModule
@@ -18,7 +19,8 @@ import WindowLayoutModule
 
 /// The ONLY place modules are wired into the app. Add one line per new module.
 enum ModuleList {
-    static func make() -> [any FeatureModule] {
+    /// `activities` is the center every module publishes to; the cat reads it to know when the notch is free.
+    static func make(activities: ActivityCenter) -> [any FeatureModule] {
         [
             ClipboardModule(),
             MediaModule(adapterScript: MediaAdapterLocation.scriptURL, adapterFramework: MediaAdapterLocation.frameworkURL),
@@ -32,6 +34,7 @@ enum ModuleList {
             TimerModule(),
             PerformanceModule(),
             PortsModule(),
+            PetModule(activities: activities),
             ShelfModule(),
             SystemActivitiesModule(),
             LockScreenModule(),

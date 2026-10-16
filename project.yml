@@ -40,6 +40,8 @@ packages:
     path: Packages/Modules/Media
   PerformanceModule:
     path: Packages/Modules/Performance
+  PetModule:
+    path: Packages/Modules/Pet
   PortsModule:
     path: Packages/Modules/Ports
   ScreenshotModule:
@@ -95,6 +97,7 @@ targets:
       - package: LockScreenModule
       - package: MediaModule
       - package: PerformanceModule
+      - package: PetModule
       - package: PortsModule
       - package: ScreenshotModule
       - package: ShelfModule
