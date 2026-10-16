@@ -41,6 +41,7 @@ export function loadPure(name, exportName) {
 
 export const loadCaptions = () => loadPure("captions.js", "__mynotchCaptions");
 export const loadBridge = () => loadPure("bridge.js", "__mynotchBridge");
+export const loadTabs = () => loadPure("tabmessages.js", "__mynotchTabs");
 
 /** Lets pending promise callbacks run. */
 export async function flush(times = 8) {
@@ -51,10 +52,10 @@ export async function flush(times = 8) {
 export const ID_TOKEN = /(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{11}(?![A-Za-z0-9_-])/;
 
 /**
- * What the id-lookalike scan looks at. The arguments of `content-command` are a closed list of words, one of which
+ * What the id-lookalike scan looks at. The arguments of `content-command` and `content-tabcommand` are a closed list of words, one of which
  * ("unavailable") is exactly 11 letters long, so only its code is scanned, as in captions.js and YouTubeDiag.swift.
  */
-export const scannedForIds = (event) => (event.startsWith("content-command ") ? "content-command" : event);
+export const scannedForIds = (event) => (/^content-(?:tab)?command /.test(event) ? event.split(" ")[0] : event);
 
 /**
  * What every diag message must satisfy, wherever it was produced: a valid protocol message with

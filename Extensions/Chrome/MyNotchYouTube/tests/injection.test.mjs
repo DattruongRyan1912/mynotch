@@ -12,12 +12,19 @@ class FakeXhr {
   addEventListener() {}
 }
 
-function makeWorlds() {
+function makeWorlds(origin = ORIGIN) {
   const sent = [];
   const posted = [];
   const isolated = createContext({
-    document: { title: "Placeholder - YouTube", querySelector: () => null, getElementById: () => null },
-    location: { href: `${ORIGIN}/`, origin: ORIGIN },
+    document: {
+      title: "Placeholder - YouTube",
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      getElementById: () => null,
+      addEventListener() {},
+      removeEventListener() {}
+    },
+    location: { href: `${origin}/`, origin, hostname: new URL(origin).hostname },
     chrome: {
       runtime: {
         id: "extension-id",
@@ -33,8 +40,9 @@ function makeWorlds() {
     clearInterval() {}
   });
   const main = createContext({
-    location: { href: `${ORIGIN}/`, origin: ORIGIN },
+    location: { href: `${origin}/`, origin },
     postMessage: (message) => posted.push(plain(message)),
+    addEventListener() {},
     setTimeout() {},
     fetch: () => Promise.resolve(),
     XMLHttpRequest: FakeXhr
@@ -68,4 +76,20 @@ test("with a file listed in both entries (the old manifest) content.js says cont
   injectLikeChrome(old, { MAIN: worlds.main, ISOLATED: worlds.isolated });
   const events = worlds.sent.filter((message) => message.type === "diag").map((message) => message.event);
   assert.deepEqual(events, ["content-no-lib"]);
+});
+
+test("on a page that is not YouTube the manifest's scripts leave YouTube's content script silent and start the media tab script", () => {
+  const worlds = makeWorlds("https://music.example.com");
+  worlds.isolated.chrome.runtime.onMessage = { addListener() {}, removeListener() {} };
+  const originalFetch = worlds.main.fetch;
+  const ran = injectLikeChrome(
+    { content_scripts: manifest.content_scripts.filter((entry) => !entry.matches.includes("https://www.youtube.com/*")) },
+    { MAIN: worlds.main, ISOLATED: worlds.isolated }
+  );
+  assert.deepEqual(ran.ISOLATED, ["captions.js", "tabmessages.js", "content.js", "tabs.js"]);
+  assert.deepEqual(ran.MAIN, ["mediasession-page.js"]);
+  assert.deepEqual(worlds.sent, [], "nothing is said by a page with no media: no content-start, no content-no-lib");
+  assert.equal(worlds.main.fetch, originalFetch, "and nothing wraps fetch");
+  assert.equal(vm.runInContext("typeof Symbol.for('io.lucasvu.mynotch.tab.content') + typeof globalThis[Symbol.for('io.lucasvu.mynotch.tab.content')]", worlds.isolated), "symbolobject", "the media tab script is in place");
+  assert.equal(vm.runInContext("typeof globalThis[Symbol.for('io.lucasvu.mynotch.yt.content')]", worlds.isolated), "undefined", "and YouTube's is not");
 });

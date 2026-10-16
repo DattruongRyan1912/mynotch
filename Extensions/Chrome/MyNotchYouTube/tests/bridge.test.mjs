@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assertSafeDiag, flush, loadBridge, loadCaptions, readSource } from "./helpers.mjs";
+import { assertSafeDiag, flush, loadBridge, loadCaptions, loadTabs, readSource } from "./helpers.mjs";
 
 const B = loadBridge();
 const C = loadCaptions();
+const T = loadTabs();
 const A = "aaaaaaaaaaa";
 const Z = "zzzzzzzzzzz";
 
@@ -251,6 +252,7 @@ function relayHarness(overrides = {}) {
   h.relay = B.createRelay({
     bridge: h.bridge,
     captions: C,
+    tabs: T,
     ownId: OWN,
     now: () => h.time,
     version: "0.1.1",
@@ -461,14 +463,24 @@ function injectorHarness({ tabs = [], rejectFor = [], throwFor = [], rejectIsola
   return h;
 }
 
-test("injector: every YouTube tab gets the manifest's two scripts, in order and worlds, in the top frame only", async () => {
-  const h = injectorHarness({ tabs: [{ id: 7 }] });
+const YOUTUBE_URL = "https://www.youtube.com/watch?v=aaaaaaaaaaa";
+const YOUTUBE_MAIN = { files: ["captions-page.js", "page.js"], world: "MAIN" };
+const ALL_ISOLATED = { files: ["captions.js", "tabmessages.js", "content.js", "tabs.js"], world: "ISOLATED" };
+const ALL_MAIN = { files: ["mediasession-page.js"], world: "MAIN" };
+
+test("injector: every tab gets the manifest's entries that name its address, in order and worlds, in the top frame only", async () => {
+  const h = injectorHarness({ tabs: [{ id: 7, url: YOUTUBE_URL }] });
   const result = await h.injector.injectIntoOpenTabs();
 
-  assert.deepEqual(h.queries, [{ url: ["https://www.youtube.com/*"] }], "matched by URL; no tabs permission needed");
+  assert.deepEqual(
+    h.queries,
+    [{ url: ["https://www.youtube.com/*", "http://*/*", "https://*/*"] }],
+    "matched by URL; no tabs permission needed"
+  );
   assert.deepEqual(h.calls, [
-    { target: { tabId: 7 }, files: ["captions-page.js", "page.js"], world: "MAIN" },
-    { target: { tabId: 7 }, files: ["captions.js", "content.js"], world: "ISOLATED" }
+    { target: { tabId: 7 }, ...YOUTUBE_MAIN },
+    { target: { tabId: 7 }, ...ALL_ISOLATED },
+    { target: { tabId: 7 }, ...ALL_MAIN }
   ]);
   for (const call of h.calls) {
     assert.equal(call.target.allFrames, undefined, "frame 0 only, like the manifest (no all_frames)");
@@ -477,14 +489,32 @@ test("injector: every YouTube tab gets the manifest's two scripts, in order and 
   assert.deepEqual(h.events, [
     "start 7 MAIN captions-page.js+page.js",
     "end 7 MAIN captions-page.js+page.js",
-    "start 7 ISOLATED captions.js+content.js",
-    "end 7 ISOLATED captions.js+content.js"
-  ], "the second injection starts only after the first one finished");
+    "start 7 ISOLATED captions.js+tabmessages.js+content.js+tabs.js",
+    "end 7 ISOLATED captions.js+tabmessages.js+content.js+tabs.js",
+    "start 7 MAIN mediasession-page.js",
+    "end 7 MAIN mediasession-page.js"
+  ], "each injection starts only after the one before it finished");
   assert.deepEqual(result, { tabs: 1, injected: 1, failed: 0 });
 });
 
-test("injector: no file is injected twice into a tab (Chrome would run it in one world only)", async () => {
+test("injector: a tab that is not on YouTube gets none of the YouTube page's scripts (they would wrap fetch on every site)", async () => {
+  const h = injectorHarness({ tabs: [{ id: 8, url: "https://music.example.com/album?x=1#top" }, { id: 9, url: "http://localhost:3000/player" }] });
+  await h.injector.injectIntoOpenTabs();
+  // The tabs go in parallel; what matters is each tab's own order.
+  const of = (tabId) => h.calls.filter((call) => call.target.tabId === tabId);
+  assert.deepEqual(of(8), [{ target: { tabId: 8 }, ...ALL_ISOLATED }, { target: { tabId: 8 }, ...ALL_MAIN }]);
+  assert.deepEqual(of(9), [{ target: { tabId: 9 }, ...ALL_ISOLATED }, { target: { tabId: 9 }, ...ALL_MAIN }]);
+  assert.equal(h.calls.some((call) => call.files.includes("page.js") || call.files.includes("captions-page.js")), false);
+});
+
+test("injector: a tab whose address is not known gets what the manifest has, since nothing can tell it apart", async () => {
   const h = injectorHarness({ tabs: [{ id: 7 }] });
+  await h.injector.injectIntoOpenTabs();
+  assert.deepEqual(h.calls.map(({ target, ...rest }) => rest), [YOUTUBE_MAIN, ALL_ISOLATED, ALL_MAIN]);
+});
+
+test("injector: no file is injected twice into a tab (Chrome would run it in one world only)", async () => {
+  const h = injectorHarness({ tabs: [{ id: 7, url: YOUTUBE_URL }] });
   await h.injector.injectIntoOpenTabs();
   const files = h.calls.flatMap((call) => call.files);
   assert.deepEqual(files, [...new Set(files)], files.join(", "));
@@ -498,13 +528,52 @@ test("injector: the scripts, worlds and URLs come from the manifest, not from a 
       { matches: ["https://a.example/*", "https://b.example/*"], js: ["three.js"] }
     ]
   };
-  const h = injectorHarness({ tabs: [{ id: 1 }], manifest });
+  const h = injectorHarness({ tabs: [{ id: 1 }, { id: 2, url: "https://b.example/x" }], manifest });
   await h.injector.injectIntoOpenTabs();
   assert.deepEqual(h.queries, [{ url: ["https://a.example/*", "https://b.example/*"] }]);
-  assert.deepEqual(h.calls, [
+  const of = (tabId) => h.calls.filter((call) => call.target.tabId === tabId);
+  assert.deepEqual(of(1), [
     { target: { tabId: 1 }, files: ["one.js", "two.js"], world: "MAIN" },
     { target: { tabId: 1 }, files: ["three.js"], world: "ISOLATED" }
   ]);
+  assert.deepEqual(of(2), [{ target: { tabId: 2 }, files: ["three.js"], world: "ISOLATED" }]);
+});
+
+test("matchesPattern follows Chrome's match patterns: scheme, host, subdomains, path and query, never the port or the fragment", () => {
+  const yes = [
+    ["https://www.youtube.com/*", "https://www.youtube.com/watch?v=a"],
+    ["https://www.youtube.com/*", "https://www.youtube.com/"],
+    ["http://*/*", "http://localhost:8080/player"],
+    ["https://*/*", "https://a.b.example.com/x#frag"],
+    ["*://*/*", "http://example.com/"],
+    ["*://*/*", "https://example.com/"],
+    ["https://*.example.com/*", "https://example.com/"],
+    ["https://*.example.com/*", "https://a.b.example.com/x"],
+    ["https://example.com/a/*/c", "https://example.com/a/b/c"],
+    ["https://example.com/watch?v=*", "https://example.com/watch?v=1&x=2"],
+    ["<all_urls>", "https://example.com/"],
+    ["<all_urls>", "http://example.com/"]
+  ];
+  const no = [
+    ["https://www.youtube.com/*", "https://music.youtube.com/"],
+    ["https://www.youtube.com/*", "http://www.youtube.com/"],
+    ["https://www.youtube.com/*", "https://www.youtube.com.evil.example/"],
+    ["https://www.youtube.com/*", "https://evil.example/https://www.youtube.com/"],
+    ["http://*/*", "https://example.com/"],
+    ["https://*/*", "ftp://example.com/"],
+    ["https://*.example.com/*", "https://notexample.com/"],
+    ["https://*.example.com/*", "https://example.com.evil.example/"],
+    ["https://example.com/a/*/c", "https://example.com/a/b/d"],
+    ["https://example.com/a", "https://example.com/a/b"],
+    ["<all_urls>", "chrome://extensions/"],
+    ["<all_urls>", "about:blank"],
+    ["https://example.com", "https://example.com/"],
+    ["not a pattern", "https://example.com/"],
+    ["https://*/*", "not a url"],
+    ["https://*/*", undefined]
+  ];
+  for (const [pattern, url] of yes) assert.equal(B.matchesPattern(pattern, url), true, `${pattern} ${url}`);
+  for (const [pattern, url] of no) assert.equal(B.matchesPattern(pattern, url), false, `${pattern} ${url}`);
 });
 
 test("injector: one diag after the pass, numbers only, valid for the closed grammar", async () => {
@@ -990,4 +1059,198 @@ test("command: the answers are not rate limited: every no-tab report and every c
   h.relay.onMessage(content("content-start"), senderInTab(7));
   const events = h.ports[0].diags.filter((message) => message.where === "content").map((message) => message.event);
   assert.deepEqual(events, ["content-command next ok", "content-command next ok", "content-command previous unavailable", "content-start"]);
+});
+
+// ---- media tabs: any page reports what its media does; the app can ask the tab to act ----------------
+
+const WEB_SENDER = (tabId, url = "https://music.example.com/album") => ({ id: OWN, url, tab: { id: tabId }, frameId: 0 });
+const tabReport = (overrides = {}) => ({
+  v: 1,
+  type: "tab-report",
+  site: "music.example.com",
+  title: "Song",
+  artist: "Artist",
+  album: "",
+  state: "playing",
+  time: 12.5,
+  duration: 200,
+  rate: 1,
+  live: false,
+  ...overrides
+});
+const tabOf = (tabId, overrides = {}) => {
+  const { type, ...fields } = tabReport(overrides);
+  return { v: 1, type: "tab", tab: tabId, ...fields };
+};
+const PLAY = (tab, extra = {}) => ({ v: 1, type: "tabcommand", tab, action: "play", ...extra });
+
+test("tab: a report from the extension's own script in a web page goes on as `tab` with the tab's id, whatever site it is", () => {
+  const h = commandHarness();
+  h.relay.onMessage(tabReport(), WEB_SENDER(7));
+  h.relay.onMessage(tabReport({ site: "localhost" }), WEB_SENDER(8, "http://localhost:3000/player"));
+  assert.deepEqual(h.ports[0].posted, [tabOf(7), tabOf(8, { site: "localhost" })]);
+  assert.deepEqual(swDiags(h.ports[0]), ["sw-start v=0.1.1", "sw-msg tab"]);
+});
+
+test("tab: only the fields of the protocol leave the worker; the page cannot add anything to what is relayed", () => {
+  const h = commandHarness();
+  h.relay.onMessage({ ...tabReport(), url: "https://example.invalid/?token=secret", artwork: "https://example.invalid/a.png", tab: 99 }, WEB_SENDER(7));
+  const [message] = h.ports[0].posted;
+  assert.deepEqual(Object.keys(message).sort(), ["album", "artist", "duration", "live", "rate", "site", "state", "tab", "time", "title", "type", "v"]);
+  assert.equal(message.tab, 7, "the tab is the sender's, never the message's");
+});
+
+test("tab: a sender that is not the extension's script in a tab's top frame on a web page is rejected", () => {
+  const h = commandHarness();
+  for (const sender of [
+    { id: "otherextensionidotherextensionid", url: "https://music.example.com/", tab: { id: 7 }, frameId: 0 },
+    { id: OWN, url: "https://music.example.com/", frameId: 0 }, // not in a tab
+    { id: OWN, url: "https://music.example.com/", tab: { id: 7 }, frameId: 3 }, // not the top frame
+    { id: OWN, url: "https://music.example.com/", tab: { id: -1 }, frameId: 0 },
+    { id: OWN, url: "https://music.example.com/", tab: { id: "7" }, frameId: 0 },
+    { id: OWN, url: "chrome-extension://abc/page.html", tab: { id: 7 }, frameId: 0 },
+    { id: OWN, url: "file:///Users/x/song.mp3", tab: { id: 7 }, frameId: 0 },
+    { id: OWN, url: "about:blank", tab: { id: 7 }, frameId: 0 },
+    { id: OWN, tab: { id: 7 }, frameId: 0 },
+    null,
+    undefined
+  ]) {
+    h.relay.onMessage(tabReport(), sender);
+    h.relay.onMessage({ v: 1, type: "tab-end" }, sender);
+  }
+  assert.deepEqual(h.ports[0].posted, []);
+  assert.deepEqual(swDiags(h.ports[0]), ["sw-start v=0.1.1", "sw-reject untrusted"], "rate limited like every rejection");
+  assert.equal(B.isTrustedTabSender(WEB_SENDER(7), OWN), true);
+  assert.equal(B.isTrustedTabSender({ id: OWN, url: "https://music.example.com/", tab: { id: 7 } }, OWN), true, "a message of the top frame has no frameId in some Chrome versions");
+});
+
+test("tab: an invalid report is refused by its type word only, never echoing its content", () => {
+  const h = commandHarness();
+  h.relay.onMessage(tabReport({ title: "" }), WEB_SENDER(7));
+  h.relay.onMessage(tabReport({ state: "stopped" }), WEB_SENDER(7));
+  h.relay.onMessage({ v: 1, type: "tab-end", extra: 1 }, WEB_SENDER(7)); // extra fields are cleaned, not refused
+  h.advance(5000);
+  h.relay.onMessage({ v: 2, type: "tab-report" }, WEB_SENDER(7));
+  assert.deepEqual(h.ports[0].posted, []);
+  assert.deepEqual(swDiags(h.ports[0]), ["sw-start v=0.1.1", "sw-reject invalid tab", "sw-reject invalid tab"]);
+});
+
+test("tab: `tab-end` and a closed tab tell the app once, and only about a tab it was told of", () => {
+  const h = commandHarness();
+  h.relay.onMessage({ v: 1, type: "tab-end" }, WEB_SENDER(7)); // never reported
+  h.relay.onTabRemoved(7);
+  assert.deepEqual(h.ports[0].posted, []);
+
+  h.relay.onMessage(tabReport(), WEB_SENDER(7));
+  h.relay.onMessage(tabReport(), WEB_SENDER(8));
+  h.relay.onMessage({ v: 1, type: "tab-end" }, WEB_SENDER(7));
+  h.relay.onMessage({ v: 1, type: "tab-end" }, WEB_SENDER(7)); // repeated
+  h.relay.onTabRemoved(7);
+  h.relay.onTabRemoved(8);
+  h.relay.onTabRemoved(8);
+  h.relay.onTabRemoved("8");
+  h.relay.onTabRemoved(undefined);
+  assert.deepEqual(h.ports[0].posted.map((message) => [message.type, message.tab]), [
+    ["tab", 7], ["tab", 8], ["tabgone", 7], ["tabgone", 8]
+  ]);
+  assert.deepEqual(h.ports[0].posted.at(-1), { v: 1, type: "tabgone", tab: 8 });
+});
+
+test("tab: a worker that restarted still tells the app about a tab it sends a command to and finds gone", async () => {
+  const h = commandHarness({ sendToTab: () => Promise.reject(new Error("Could not establish connection. Receiving end does not exist.")) });
+  h.ports[0].receive(PLAY(21));
+  await flush();
+  assert.deepEqual(h.ports[0].posted, [{ v: 1, type: "tabgone", tab: 21 }]);
+  assert.equal(swDiags(h.ports[0]).at(-1), "sw-tabcommand-no-tab");
+});
+
+test("tab: no more than 64 tabs are shown at once", () => {
+  const h = commandHarness();
+  for (let tab = 1; tab <= 70; tab++) h.relay.onMessage(tabReport(), WEB_SENDER(tab));
+  assert.equal(h.ports[0].posted.filter((message) => message.type === "tab").length, 64);
+  h.relay.onMessage(tabReport({ time: 99 }), WEB_SENDER(3)); // a tab already shown keeps reporting
+  assert.equal(h.ports[0].posted.at(-1).time, 99);
+  h.relay.onTabRemoved(1);
+  h.relay.onMessage(tabReport(), WEB_SENDER(71)); // and a place that frees up is taken
+  assert.equal(h.ports[0].posted.at(-1).tab, 71);
+});
+
+test("tab: a tab's reports do not move the tab that gets Next and Previous, and are not replayed after a reconnect", async () => {
+  const h = commandHarness();
+  h.relay.onMessage(playback(), senderInTab(7));
+  h.relay.onMessage(tabReport(), WEB_SENDER(9));
+  h.ports[0].receive(NEXT);
+  await flush();
+  assert.deepEqual(h.toTabs.map((sent) => sent.tabId), [7]);
+
+  h.relay.onMessage(captions(A), senderInTab(7));
+  h.ports[0].disconnect("Native host has exited.");
+  h.advance(5000);
+  h.relay.onMessage(playback(), senderInTab(7));
+  assert.deepEqual(h.ports[1].posted.map((message) => message.type), ["captions", "playback"], "the stored captions, no tab");
+});
+
+test("tab: what a media tab's script says of a command is relayed from any page, unlimited; a forgery is not", () => {
+  const h = commandHarness();
+  const answer = (event, where = "content") => ({ v: 1, type: "diag", where, event });
+  h.relay.onMessage(answer("content-tabcommand play ok"), WEB_SENDER(7));
+  h.relay.onMessage(answer("content-tabcommand play ok"), WEB_SENDER(7)); // no 5 s limit: the log is for finding what went wrong
+  h.relay.onMessage(answer("content-tabcommand next unavailable"), WEB_SENDER(8, "https://other.example/"));
+  assert.deepEqual(h.ports[0].diags.slice(1).map((message) => [message.where, message.event]), [
+    ["content", "content-tabcommand play ok"],
+    ["content", "content-tabcommand play ok"],
+    ["content", "content-tabcommand next unavailable"]
+  ]);
+  const before = h.ports[0].diags.length;
+  h.relay.onMessage(answer("content-tabcommand play ok"), { id: "otherextensionidotherextensionid", url: "https://x.example/", tab: { id: 1 }, frameId: 0 });
+  h.relay.onMessage(answer("content-tabcommand play ok", "sw"), WEB_SENDER(7)); // the worker's part is not a page's to speak for
+  h.relay.onMessage(answer("content-tabcommand play ok https://example.invalid/"), WEB_SENDER(7));
+  assert.deepEqual(h.ports[0].diags.slice(before).map((message) => message.event), ["sw-reject untrusted", "sw-reject invalid diag"]);
+});
+
+test("tabcommand: it goes to the tab it names, as the validated command only, and is not reported when it was delivered", async () => {
+  const h = commandHarness();
+  const given = PLAY(7);
+  h.ports[0].receive(given);
+  h.ports[0].receive({ v: 1, type: "tabcommand", tab: 9, action: "seek", seconds: 61.23456 });
+  await flush();
+  assert.deepEqual(h.toTabs, [
+    { tabId: 7, message: { v: 1, type: "tabcommand", tab: 7, action: "play" } },
+    { tabId: 9, message: { v: 1, type: "tabcommand", tab: 9, action: "seek", seconds: 61.235 } }
+  ]);
+  assert.notEqual(h.toTabs[0].message, given);
+  assert.deepEqual(swDiags(h.ports[0]), ["sw-start v=0.1.1"]);
+});
+
+test("tabcommand: an invalid one is reported as such and never reaches a tab; a command for the old kind of tab does not count", async () => {
+  const h = commandHarness();
+  for (const bad of [PLAY(7, { url: "https://example.invalid/" }), { ...PLAY(7), action: "stop" }, { ...PLAY(7), tab: -1 }, { ...PLAY(7), seconds: 3 }, { v: 1, type: "tabcommand", tab: 7, action: "seek" }]) {
+    h.ports[0].receive(bad);
+  }
+  await flush();
+  assert.deepEqual(h.toTabs, []);
+  assert.equal(swDiags(h.ports[0]).at(-1), "sw-reject invalid tabcommand");
+  // A tab report is not a command, from the host or anywhere else.
+  h.advance(5000);
+  h.ports[0].receive(tabReport());
+  await flush();
+  assert.equal(swDiags(h.ports[0]).at(-1), "sw-reject invalid command");
+  assert.deepEqual(h.toTabs, []);
+});
+
+test("tabcommand: a relay without a way to reach tabs says so instead of throwing", async () => {
+  const h = relayHarness();
+  h.onHost = (message) => h.relay.onHostMessage(message);
+  h.relay.start();
+  h.ports[0].receive(PLAY(7));
+  await flush();
+  assert.equal(swDiags(h.ports[0]).at(-1), "sw-tabcommand-no-tab");
+});
+
+test("the access watcher is about YouTube only, however many sites the extension may read", async () => {
+  const h = accessHarness();
+  await h.watcher.start();
+  assert.deepEqual(h.queries, [{ origins: ["https://www.youtube.com/*"] }]);
+  assert.deepEqual(B.WATCHED_ORIGINS, ["https://www.youtube.com/*"]);
+  assert.ok(MANIFEST.content_scripts[0].matches.includes(B.WATCHED_ORIGINS[0]), "and it is the YouTube entry's pattern");
 });

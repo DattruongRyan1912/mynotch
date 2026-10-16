@@ -1,19 +1,24 @@
 # MyNotch YouTube Bridge
 
-Extension Chrome nhỏ (Manifest V3) chuyển phụ đề mà YouTube đã tải sẵn trong trang sang ứng dụng MyNotch trên cùng máy, để notch hiển thị làm lời bài hát đồng bộ.
+Extension Chrome nhỏ (Manifest V3) làm hai việc cho ứng dụng MyNotch trên cùng máy:
+
+1. Chuyển phụ đề mà YouTube đã tải sẵn trong trang sang MyNotch, để notch hiển thị làm lời bài hát đồng bộ.
+2. Báo cho MyNotch biết tab nào đang phát hoặc đang tạm dừng âm thanh/video (trên mọi trang web), để tab Media của notch cho bạn chuyển giữa các nguồn đang phát (Music, Spotify, các tab Chrome) và điều khiển từng nguồn.
 
 ## Cách hoạt động
 
 - Khi bạn bật phụ đề (CC) trên một video YouTube, trình phát tự tải phụ đề. Extension chỉ đọc bản sao của phản hồi đó trong trang, không tự gọi mạng và không liên lạc với YouTube.
 - Dữ liệu đi qua Native Messaging tới `mynotch-youtube-host` rồi tới MyNotch, toàn bộ nằm trong máy bạn.
 
-**Được gửi cho MyNotch:** mã video, tiêu đề video, vị trí phát hiện tại, trạng thái phát/tạm dừng, tốc độ phát và nội dung phụ đề (thời điểm, độ dài, chữ).
+**Được gửi cho MyNotch (YouTube):** mã video, tiêu đề video, vị trí phát hiện tại, trạng thái phát/tạm dừng, tốc độ phát và nội dung phụ đề (thời điểm, độ dài, chữ).
+
+**Được gửi cho MyNotch (mọi trang có media):** tên miền của trang (chỉ tên miền, ví dụ `music.example.com`, không có đường dẫn), tiêu đề, nghệ sĩ và album mà trang tự khai trong Media Session (nếu không có thì tiêu đề tài liệu), trạng thái phát/tạm dừng, vị trí, độ dài, tốc độ phát và có phải phát trực tiếp hay không.
 
 **Chẩn đoán:** extension cũng gửi vài mã chẩn đoán rất ngắn (extension đã khởi động, Chrome có cho extension đọc YouTube hay không, số tab YouTube đang mở đã được nạp script, kết nối với host thế nào, số sự kiện phụ đề đã đọc, lỗi gửi tin, lệnh Bài sau/Bài trước đã làm được hay không). Chúng chỉ gồm mã cố định và con số, không chứa tiêu đề, URL, mã video hay chữ của phụ đề, và MyNotch chỉ ghi chúng vào nhật ký hệ thống của máy.
 
-**Nhận từ MyNotch:** đúng hai lệnh cố định, "Bài sau" (`next`) và "Bài trước" (`previous`), khi bạn bấm nút trên notch hoặc dùng phím tắt. Lệnh đi từ MyNotch qua host tới extension; extension kiểm tra lại, rồi chuyển cho tab YouTube vừa báo trạng thái phát gần nhất. Không có lệnh nào khác và không có trường nào chứa chữ tự do.
+**Nhận từ MyNotch:** hai loại lệnh cố định, đều là bộ đóng (không có trường nào chứa chữ tự do). Một là "Bài sau" (`next`) và "Bài trước" (`previous`) cho YouTube, khi bạn bấm nút trên notch hoặc dùng phím tắt: extension kiểm tra lại rồi chuyển cho tab YouTube vừa báo trạng thái phát gần nhất. Hai là lệnh cho một tab cụ thể mà notch đang hiển thị: `play`, `pause`, `toggle`, `next`, `previous` hoặc `seek` (kèm số giây). Mỗi bước (MyNotch, host, service worker, script trong trang) kiểm tra lại và chỉ chuyển tiếp lệnh mình đã kiểm tra.
 
-**Không bao giờ gửi:** URL (kể cả URL phụ đề có token), cookie, thông tin tài khoản hay bất cứ thứ gì ngoài các trường trên.
+**Không bao giờ gửi:** URL (kể cả URL phụ đề có token và địa chỉ trang), đường dẫn, cookie, thông tin tài khoản, ảnh bìa, biểu tượng trang hay bất cứ thứ gì ngoài các trường trên. Extension không tự gọi mạng: nó không tải ảnh bìa hay favicon, nên tab Chrome mà macOS không coi là "đang phát" sẽ hiện biểu tượng Chrome và tên miền thay cho ảnh bìa.
 
 ## Cài đặt
 
@@ -22,13 +27,21 @@ Extension Chrome nhỏ (Manifest V3) chuyển phụ đề mà YouTube đã tải
 3. Bấm **Load unpacked** và chọn thư mục `~/Library/Application Support/io.lucasvu.mynotch/ChromeExtension`.
 4. Mở một video trên `www.youtube.com` và **bật phụ đề (CC)**. Không bật CC thì không có phụ đề nào được gửi; khi xem video, extension vẫn gửi các trường phát lại đã nêu ở trên (mã video, tiêu đề, vị trí, trạng thái phát, tốc độ), và chỉ những trường đó.
 
+### Quyền đọc mọi trang web
+
+Để biết tab nào đang phát media, extension cần chạy một script nhỏ trên mọi trang `http` và `https` (khung chính), nên manifest xin quyền trang web `http://*/*` và `https://*/*`. Script này không làm gì trên trang không có media: chỉ có vài trình nghe sự kiện media (không có bộ đếm thời gian), và nó chỉ bắt đầu báo khi một phần tử `<video>` hoặc `<audio>` bắt đầu phát. Video tắt tiếng, âm thanh giao diện và clip dưới 5 giây bị bỏ qua, trừ khi trang tự đặt tiêu đề trong Media Session (nghĩa là nó là trình phát). Video/audio nằm trong iframe không được báo.
+
+Một script thứ hai chạy trong chính trang (MAIN world) chỉ để ghi nhận hai thứ của Media Session: tiêu đề/nghệ sĩ/album mà trang đặt và việc trang có xử lý "bài sau/bài trước" hay không; khi bạn bấm Bài sau/Bài trước trong MyNotch, nó gọi đúng hàm xử lý đó của trang, như nút media của Chrome. Nó gọi hàm gốc trước và trả kết quả nguyên vẹn, không đọc gì khác của trang.
+
+Script của YouTube (`content.js`) vẫn nằm cùng mục với script này (Chrome chỉ nạp một file một lần cho mỗi tài liệu, và hai script cần cùng `captions.js` trong cùng một world) nhưng tự kiểm tra địa chỉ và không làm gì ngoài `www.youtube.com`.
+
 ### Quyền truy cập trang web
 
 Chrome cho đặt quyền truy cập trang web của từng extension. Nếu để **Khi nhấp** (On click), Chrome không nạp extension vào YouTube nên không có gì được gửi sang MyNotch, và extension không thể tự sửa việc đó. Hãy mở `chrome://extensions`, bấm **Details** ở "MyNotch YouTube Bridge", chọn **Quyền truy cập trang web** (Site access) là **Trên tất cả trang web** (hoặc **Trên các trang web cụ thể** rồi thêm `www.youtube.com`). Extension báo trạng thái này cho MyNotch, và MyNotch hiện lời nhắc trong Cài đặt khi Chrome đang chặn.
 
 ### Tab YouTube đã mở sẵn
 
-Chrome chỉ nạp script của extension vào trang mở sau khi extension có mặt. Vì vậy sau khi cài, cập nhật hoặc tải lại extension, và khi bạn vừa cho phép truy cập YouTube, extension tự nạp lại script vào các tab `www.youtube.com` đang mở (quyền `scripting`, chỉ trên YouTube) để không phải tải lại từng tab. Phụ đề mà trang đã tải trước đó không đọc lại được: chúng xuất hiện khi trình phát tải phụ đề lần nữa (tắt rồi bật lại CC, đổi ngôn ngữ phụ đề hoặc chuyển video).
+Chrome chỉ nạp script của extension vào trang mở sau khi extension có mặt. Vì vậy sau khi cài, cập nhật hoặc tải lại extension, và khi bạn vừa cho phép truy cập YouTube, extension tự nạp lại script vào các tab đang mở (quyền `scripting`; mỗi script chỉ vào những tab mà phạm vi của nó nêu: script YouTube chỉ vào tab `www.youtube.com`, script media vào mọi trang web) để không phải tải lại từng tab. Lời nhắc "Chrome đang chặn" trong MyNotch chỉ nói về quyền đọc YouTube. Phụ đề mà trang đã tải trước đó không đọc lại được: chúng xuất hiện khi trình phát tải phụ đề lần nữa (tắt rồi bật lại CC, đổi ngôn ngữ phụ đề hoặc chuyển video).
 
 ### Bài sau và Bài trước
 
@@ -37,6 +50,12 @@ YouTube tự gỡ các nút "bài sau/bài trước" khỏi điều khiển medi
 Script không tạo sự kiện bàn phím nào và không làm gì khi quảng cáo đang chạy. Mỗi lệnh để lại một mã chẩn đoán (`content-command next ok` hoặc `unavailable`); nếu tab đã đóng, service worker báo `sw-command-no-tab` và bỏ lệnh. Các mã trả lời này không bị giới hạn tần suất vì MyNotch chờ mỗi lệnh một câu trả lời: không thấy gì sau 1 giây (host hoặc extension là bản cũ chưa biết lệnh) thì MyNotch dùng phím media của macOS cho lần bấm đó. Khi extension đã trả lời, kể cả `unavailable`, MyNotch không thử cách nào khác.
 
 Mã extension (id) cố định nhờ khoá công khai trong `manifest.json`, id nằm trong file `EXTENSION_ID`. Cầu nối của MyNotch chỉ cho phép đúng id này kết nối.
+
+### Nguồn nhạc từ các tab
+
+Mỗi tab có media là một nguồn trong tab Media của notch. Khi trang phát, tạm dừng, tua hoặc đổi bài, script báo ngay; khi đang phát nó báo lại mỗi 5 giây, khi đang tạm dừng mỗi 30 giây (MyNotch giữ một tab vài phút không có tin). Khi trang không còn media, khi bạn rời trang hoặc đóng tab, MyNotch được báo là tab đó đã hết. Service worker không giữ danh sách tab nào ngoài bộ nhớ.
+
+Với YouTube, "Bài sau/Bài trước" cho một tab cụ thể vẫn là các cú bấm nút của trình phát (như phần trên); với trang khác là hàm xử lý Media Session của chính trang đó, nếu có. Khi trang không có, lệnh báo `unavailable` (mã chẩn đoán `content-tabcommand next unavailable`) và không làm gì thêm.
 
 ## Gỡ bỏ
 
@@ -52,3 +71,5 @@ node --test Extensions/Chrome/MyNotchYouTube/tests/
 ```
 
 `captions-page.js` là bản sao y hệt của `captions.js` dành cho MAIN world: Chrome chỉ nạp một file một lần cho mỗi tài liệu dù nó nằm trong nhiều mục `content_scripts`, nên cùng một file không thể có mặt ở cả hai world. Sau mỗi lần sửa `captions.js`, chạy `cp captions.js captions-page.js` (test báo lỗi nếu hai file khác nhau, và nếu một file xuất hiện ở hai mục).
+
+Các file: `tabmessages.js` (thông điệp về tab media, thuần hàm, dùng ở script trang và service worker), `tabs.js` (script báo media của tab, isolated world), `mediasession-page.js` (MAIN world, Media Session của trang), `content.js` (YouTube), `page.js` (YouTube MAIN), `bridge.js` và `background.js` (service worker). Khi đổi phiên bản trong `manifest.json`, đổi cả ghim trong `tests/manifest.test.mjs`. Không đổi `key` trong manifest: id extension nằm trong `allowed_origins` của host.

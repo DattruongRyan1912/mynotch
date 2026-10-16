@@ -13,11 +13,16 @@
  * travels the other way, a command from the app (next or previous) that the native host writes to
  * its stdout, and passes it to the tab that last sent a playback message.
  *
- * createInjector() runs the manifest's content scripts in the YouTube tabs that were already open
- * when the extension was installed, updated or reloaded (Chrome only injects into pages that load
- * afterwards).
+ * Pages other than YouTube report their media too (tabs.js): the relay trusts such a report from this extension's own content
+ * script in the top frame of any http(s) tab, adds the tab's id, and passes it on as `tab`; `tabgone` follows when the page
+ * says it has no media or the tab is closed. The app's `tabcommand` goes to the tab it names, as the validated command.
  *
- * createAccessWatcher() reports whether Chrome granted the extension access to YouTube. The user
+ * createInjector() runs the manifest's content scripts in the tabs that were already open
+ * when the extension was installed, updated or reloaded (Chrome only injects into pages that load
+ * afterwards), each entry only into the tabs its own match patterns name.
+ *
+ * createAccessWatcher() reports whether Chrome granted the extension access to YouTube (only YouTube: the captions and the
+ * skip buttons need it, and the notice in MyNotch's settings is about that). The user
  * can set the extension's site access to "On click", which withholds the host permission: Chrome
  * then injects no content script and the extension is silent. It also tells when that changes.
  *
@@ -34,6 +39,10 @@
   var LOG_INTERVAL_MS = 60000;
   var MAX_STORED_CAPTIONS = 8;
   var ALLOWED_PAGE_PREFIX = "https://www.youtube.com/";
+  // What the access notice is about: the extension's access to YouTube, whatever it has on other sites.
+  var WATCHED_ORIGINS = ["https://www.youtube.com/*"];
+  // The tabs with media the worker tells the app about at one time; a page beyond this is not shown.
+  var MAX_TABS = 64;
   var DIAG_WINDOW_MS = 5000;
 
   /**
@@ -168,6 +177,10 @@
     return { handle: handle, ensureConnected: ensureConnected, state: state };
   }
 
+  function isObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+
   /** Only messages from this extension's own content scripts on a youtube.com page are relayed. */
   function isTrustedSender(sender, ownId) {
     return Boolean(
@@ -175,6 +188,21 @@
         sender.id === ownId &&
         typeof sender.url === "string" &&
         sender.url.indexOf(ALLOWED_PAGE_PREFIX) === 0
+    );
+  }
+
+  /**
+   * A report about media may come from this extension's own content script in the top frame of any web page: a tab, an
+   * http(s) address and no other frame. The page itself cannot send one.
+   */
+  function isTrustedTabSender(sender, ownId) {
+    return Boolean(
+      sender &&
+        sender.id === ownId &&
+        typeof sender.url === "string" &&
+        /^https?:\/\//.test(sender.url) &&
+        tabIdOf(sender) !== null &&
+        (sender.frameId === undefined || sender.frameId === 0)
     );
   }
 
@@ -186,14 +214,16 @@
 
   /**
    * Message handler of the service worker.
-   * deps: bridge, captions (captions.js API), ownId, now() -> ms, version, log(text), and for commands
-   * sendToTab(tabId, message) -> Promise (chrome.tabs.sendMessage to the tab's top frame).
+   * deps: bridge, captions (captions.js API), tabs (tabmessages.js API), ownId, now() -> ms, version, log(text), and for
+   * commands sendToTab(tabId, message) -> Promise (chrome.tabs.sendMessage to the tab's top frame).
    */
   function createRelay(deps) {
     var C = deps.captions;
+    var T = deps.tabs;
     var allow = C.createDiagLimiter(deps.now, DIAG_WINDOW_MS);
     var states = {}; // kind -> the last state event sent by reportState
     var playbackTab = null; // the tab that last sent a playback message; in memory only, never stored
+    var mediaTabs = new Set(); // the tabs the app has been told about with `tab` and not yet `tabgone`; in memory only
 
     /**
      * The answer to a command, as a diagnostic that is never rate limited: the app waits for one per command and
@@ -232,7 +262,60 @@
       deps.log("sw-start v=" + version);
     }
 
+    /** A tab's report that it has media, or none any more; never throws. */
+    function onTabMessage(message, sender) {
+      if (!isTrustedTabSender(sender, deps.ownId)) {
+        report("sw-reject untrusted");
+        return;
+      }
+      var tabId = tabIdOf(sender);
+      if (message.type === "tab-end") {
+        if (!T.validateEnd(message)) report("sw-reject invalid tab");
+        else forgetTab(tabId);
+        return;
+      }
+      var tab = T.buildTab(tabId, message);
+      if (!tab) {
+        report("sw-reject invalid tab");
+        return;
+      }
+      if (!mediaTabs.has(tabId) && mediaTabs.size >= MAX_TABS) return;
+      mediaTabs.add(tabId);
+      report("sw-msg tab");
+      deps.bridge.handle(tab);
+    }
+
+    /** The tab has no media any more, or is closed: the app is told once, and only about a tab it was told of. */
+    function forgetTab(tabId) {
+      if (mediaTabs.delete(tabId)) tellGone(tabId);
+    }
+
+    function tellGone(tabId) {
+      var gone = T.buildGone(tabId);
+      if (gone) deps.bridge.handle(gone);
+    }
+
+    /** chrome.tabs.onRemoved. */
+    function onTabRemoved(tabId) {
+      if (typeof tabId === "number") forgetTab(tabId);
+    }
+
+    function isTabCommandAnswer(message) {
+      return isObject(message) && message.type === "diag" && typeof message.event === "string" && message.event.indexOf("content-tabcommand ") === 0;
+    }
+
     function onMessage(message, sender) {
+      if (isObject(message) && (message.type === "tab-report" || message.type === "tab-end")) {
+        onTabMessage(message, sender);
+        return;
+      }
+      // What a media tab's script says of a command it was given may come from any page, and is not rate limited.
+      if (isTabCommandAnswer(message) && isTrustedTabSender(sender, deps.ownId)) {
+        var answered = C.validateMessage(message);
+        if (answered && answered.where === "content") deps.bridge.handle(answered);
+        else report("sw-reject invalid diag");
+        return;
+      }
       if (!isTrustedSender(sender, deps.ownId)) {
         report("sw-reject untrusted");
         return;
@@ -262,6 +345,10 @@
      * (or none yet) is dropped and reported, and nothing else is tried.
      */
     function onHostMessage(message) {
+      if (isObject(message) && message.type === "tabcommand") {
+        onTabCommand(message);
+        return;
+      }
       var command = C.validateCommand(message);
       if (!command) {
         answer("sw-reject invalid command");
@@ -280,14 +367,45 @@
       });
     }
 
-    return { start: start, onMessage: onMessage, onHostMessage: onHostMessage, report: report, reportState: reportState };
+    /**
+     * The app asks a tab to play, pause, seek or skip. The app only names tabs it was told about, so the worker does not
+     * keep a list to check them against (it forgets everything when it restarts); the tab either has the media script,
+     * which does it, or does not, and then the app is told that nothing took it and the tab is forgotten.
+     */
+    function onTabCommand(message) {
+      var command = T.validateTabCommand(message);
+      if (!command) {
+        answer("sw-reject invalid tabcommand");
+        return;
+      }
+      if (typeof deps.sendToTab !== "function") {
+        answer("sw-tabcommand-no-tab");
+        return;
+      }
+      new Promise(function (resolve) {
+        resolve(deps.sendToTab(command.tab, command));
+      }).then(undefined, function () {
+        mediaTabs.delete(command.tab);
+        tellGone(command.tab); // the app still shows it, and nothing else will tell it
+        answer("sw-tabcommand-no-tab");
+      });
+    }
+
+    return {
+      start: start,
+      onMessage: onMessage,
+      onHostMessage: onHostMessage,
+      onTabRemoved: onTabRemoved,
+      report: report,
+      reportState: reportState
+    };
   }
 
-  /** The manifest's content scripts as executeScript injections, in their declared order and worlds. */
+  /** The manifest's content scripts as executeScript injections, in their declared order and worlds, each with its own match patterns. */
   function injectionsOf(manifest) {
     var entries = (manifest && manifest.content_scripts) || [];
     return entries.map(function (entry) {
-      return { files: entry.js.slice(), world: entry.world === "MAIN" ? "MAIN" : "ISOLATED" };
+      return { files: entry.js.slice(), world: entry.world === "MAIN" ? "MAIN" : "ISOLATED", matches: entry.matches.slice() };
     });
   }
 
@@ -302,10 +420,48 @@
     return patterns;
   }
 
+  function escapeRegExp(text) {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  /**
+   * Whether a Chrome match pattern (`<all_urls>`, or scheme://host/path with `*` for a scheme, a host or a run of the path,
+   * and `*.` for a host and its subdomains) names `url`. The port and the fragment do not count, as in Chrome.
+   */
+  function matchesPattern(pattern, url) {
+    var target;
+    try {
+      var parsed = new URL(url);
+      target = { scheme: parsed.protocol.slice(0, -1), host: parsed.hostname, path: parsed.pathname + parsed.search };
+    } catch (e) {
+      return false;
+    }
+    if (pattern === "<all_urls>") return /^(?:https?|ftp|file)$/.test(target.scheme);
+    var parts = /^(\*|https?|ftp|file):\/\/(\*|\*\.[^/*]+|[^/*]*)(\/.*)$/.exec(pattern);
+    if (!parts) return false;
+    if (parts[1] === "*" ? !/^https?$/.test(target.scheme) : parts[1] !== target.scheme) return false;
+    var host = parts[2];
+    if (host.indexOf("*.") === 0) {
+      var base = host.slice(2);
+      if (target.host !== base && !target.host.endsWith("." + base)) return false;
+    } else if (host !== "*" && host !== target.host) {
+      return false;
+    }
+    return new RegExp("^" + escapeRegExp(parts[3]).replace(/\\\*/g, ".*") + "$").test(target.path);
+  }
+
+  function matchesAny(patterns, url) {
+    return patterns.some(function (pattern) {
+      return matchesPattern(pattern, url);
+    });
+  }
+
   /**
    * Injects the content scripts into the matching tabs that are already open, so the bridge does not
-   * wait for the user to reload each YouTube tab after the extension was installed, updated or
-   * reloaded. The scripts guard themselves against running twice (content.js and page.js).
+   * wait for the user to reload each tab after the extension was installed, updated or
+   * reloaded. Each entry of the manifest goes only into the tabs its own patterns name (the YouTube
+   * scripts into YouTube tabs, the media tab scripts into any web page). The scripts guard themselves
+   * against running twice (content.js, tabs.js and page.js).
    * deps: manifest, queryTabs(query) -> Promise<tab[]>, executeScript(injection) -> Promise,
    * report(event) for the `sw-inject` diagnostic, log(text).
    */
@@ -316,7 +472,11 @@
     function injectTab(tab) {
       if (!tab || typeof tab.id !== "number") return Promise.resolve(false);
       var target = { tabId: tab.id }; // the top frame only, like the manifest (no all_frames)
-      return injections
+      // A tab whose address is not known (no access to it) cannot be told apart, so it gets what the manifest has.
+      var mine = injections.filter(function (injection) {
+        return typeof tab.url !== "string" || matchesAny(injection.matches, tab.url);
+      });
+      return mine
         .reduce(function (previous, injection) {
           return previous.then(function () {
             return deps.executeScript({ target: target, files: injection.files, world: injection.world });
@@ -346,7 +506,7 @@
           });
         })
         .catch(function () {
-          deps.log("sw-inject could not list the open YouTube tabs");
+          deps.log("sw-inject could not list the open tabs");
           return null;
         });
     }
@@ -363,7 +523,7 @@
 
   /**
    * Reports `sw-access youtube=granted|withheld` and notices when access is granted later.
-   * deps: manifest, contains(query) -> Promise<boolean> (chrome.permissions.contains),
+   * deps: contains(query) -> Promise<boolean> (chrome.permissions.contains),
    * report(event), onGranted() for access that was not there before, log(text).
    */
   function createAccessWatcher(deps) {
@@ -372,7 +532,7 @@
     /** Reads the access and reports it. Resolves to true when it was not granted before and is now, null when unreadable. */
     function update() {
       return new Promise(function (resolve) {
-        resolve(deps.contains({ origins: matchesOf(deps.manifest) }));
+        resolve(deps.contains({ origins: WATCHED_ORIGINS.slice() }));
       }).then(
         function (answer) {
           var now = answer === true;
@@ -411,7 +571,10 @@
     createRelay: createRelay,
     createInjector: createInjector,
     createAccessWatcher: createAccessWatcher,
-    isTrustedSender: isTrustedSender
+    WATCHED_ORIGINS: WATCHED_ORIGINS,
+    matchesPattern: matchesPattern,
+    isTrustedSender: isTrustedSender,
+    isTrustedTabSender: isTrustedTabSender
   };
 
   if (typeof module === "object" && module !== null && module.exports) {

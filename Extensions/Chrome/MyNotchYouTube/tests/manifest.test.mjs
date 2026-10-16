@@ -16,29 +16,45 @@ function idFromKey(base64Key) {
 test("manifest has the expected MV3 fields", () => {
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.name, "MyNotch YouTube Bridge");
-  assert.equal(manifest.version, "0.1.3");
+  assert.equal(manifest.version, "0.2.0");
   assert.match(manifest.description, /^[\x20-\x7e]+$/, "English (ASCII) description");
   assert.ok(manifest.description.length > 20 && manifest.description.length <= 132);
-  // `scripting` is for injecting the content scripts into the YouTube tabs that were open before the
-  // extension loaded; the host permission below is what lets it do so (and match them by URL), so
-  // there is no `tabs` permission.
+  // `scripting` is for injecting the content scripts into the tabs that were open before the extension loaded;
+  // the host permissions below are what let it do so (and match them by URL), so there is no `tabs` permission.
+  // Web pages need them because any page may play media that MyNotch shows; it is only ever text that leaves a page.
   assert.deepEqual(manifest.permissions, ["nativeMessaging", "scripting"]);
-  assert.deepEqual(manifest.host_permissions, ["https://www.youtube.com/*"]);
+  assert.deepEqual(manifest.host_permissions, ["http://*/*", "https://*/*"]);
   assert.equal(manifest.background.service_worker, "background.js");
   assert.ok(Number(manifest.minimum_chrome_version) >= 111, "world: MAIN content scripts need Chrome 111");
 });
 
-test("content scripts: page.js in the MAIN world, content.js isolated, both at document_start", () => {
-  const [main, isolated, ...rest] = manifest.content_scripts;
+test("content scripts: page.js in the MAIN world on YouTube only; on every web page the isolated scripts and the Media Session hook; all at document_start, the top frame", () => {
+  const [main, isolated, session, ...rest] = manifest.content_scripts;
   assert.deepEqual(rest, []);
   assert.deepEqual(main.matches, ["https://www.youtube.com/*"]);
   assert.deepEqual(main.js, ["captions-page.js", "page.js"]);
   assert.equal(main.world, "MAIN");
   assert.equal(main.run_at, "document_start");
-  assert.deepEqual(isolated.matches, ["https://www.youtube.com/*"]);
-  assert.deepEqual(isolated.js, ["captions.js", "content.js"]);
+  // content.js is YouTube's, and does nothing on any other page (it checks the origin); it is listed here because Chrome
+  // runs a file once per document, in one world, and the media tab script needs the same captions.js in this world.
+  assert.deepEqual(isolated.matches, ["http://*/*", "https://*/*"]);
+  assert.deepEqual(isolated.js, ["captions.js", "tabmessages.js", "content.js", "tabs.js"]);
   assert.ok(isolated.world === undefined || isolated.world === "ISOLATED");
   assert.equal(isolated.run_at, "document_start");
+  assert.deepEqual(session.matches, ["http://*/*", "https://*/*"]);
+  assert.deepEqual(session.js, ["mediasession-page.js"]);
+  assert.equal(session.world, "MAIN");
+  assert.equal(session.run_at, "document_start");
+  for (const entry of manifest.content_scripts) {
+    assert.equal(entry.all_frames, undefined, "the top frame only");
+    assert.equal(entry.match_about_blank, undefined);
+    assert.equal(entry.match_origin_as_fallback, undefined);
+  }
+});
+
+test("the extension's id and the host's allowed origin are untouched by the change of permissions", () => {
+  assert.equal(manifest.key.length, 392);
+  assert.ok(manifest.key.startsWith("MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArhpwZaHc"));
 });
 
 test("every file the manifest and the service worker reference exists", () => {
@@ -77,7 +93,7 @@ test("no private key or other secret material is part of the extension folder", 
 });
 
 test("the scripts never touch the network themselves", () => {
-  for (const file of ["captions.js", "content.js", "background.js", "bridge.js"]) {
+  for (const file of ["captions.js", "content.js", "background.js", "bridge.js", "tabmessages.js", "tabs.js", "mediasession-page.js"]) {
     const source = readSource(file);
     assert.equal(/\bfetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon|EventSource/.test(source), false, file);
   }

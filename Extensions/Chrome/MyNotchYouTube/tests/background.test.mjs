@@ -12,7 +12,7 @@ const PLAYBACK = { v: 1, type: "playback", videoId: "aaaaaaaaaaa", title: "Place
 function startWorker({ connectThrows = null, tabs = [], rejectFor = [], queryThrows = null, access = true, noTabs = [] } = {}) {
   const worker = {
     connects: [], ports: [], listeners: [], installedListeners: [], addedListeners: [], removedListeners: [], infos: [],
-    warnings: [], now: 1000000, queries: [], injections: [], accessQueries: [], access, tabMessages: [], noTabs
+    warnings: [], now: 1000000, queries: [], injections: [], accessQueries: [], access, tabMessages: [], noTabs, removedTabListeners: []
   };
   const chrome = {
     runtime: {
@@ -52,6 +52,7 @@ function startWorker({ connectThrows = null, tabs = [], rejectFor = [], queryThr
       onRemoved: { addListener: (fn) => worker.removedListeners.push(fn) }
     },
     tabs: {
+      onRemoved: { addListener: (fn) => worker.removedTabListeners.push(fn) },
       sendMessage(tabId, message, options) {
         worker.tabMessages.push(plain({ tabId, message, options }));
         if (worker.noTabs.includes(tabId)) return Promise.reject(new Error("Could not establish connection. Receiving end does not exist."));
@@ -159,8 +160,11 @@ test("every message is acknowledged so the sender's promise resolves", () => {
 
 // ---- injection into the tabs that were open before the extension loaded -----------------------------
 
+const YOUTUBE_TAB = (id) => ({ id, url: "https://www.youtube.com/watch?v=aaaaaaaaaaa" });
 const MAIN_INJECTION = { files: ["captions-page.js", "page.js"], world: "MAIN" };
-const ISOLATED_INJECTION = { files: ["captions.js", "content.js"], world: "ISOLATED" };
+const ISOLATED_INJECTION = { files: ["captions.js", "tabmessages.js", "content.js", "tabs.js"], world: "ISOLATED" };
+const SESSION_INJECTION = { files: ["mediasession-page.js"], world: "MAIN" };
+const ALL_URLS = ["https://www.youtube.com/*", "http://*/*", "https://*/*"];
 
 test("the worker listens for onInstalled from the moment it starts, and injects nothing before it fires", () => {
   const worker = startWorker({ tabs: [{ id: 1 }] });
@@ -169,22 +173,16 @@ test("the worker listens for onInstalled from the moment it starts, and injects 
   assert.deepEqual(worker.injections, []);
 });
 
-test("after an update the open YouTube tabs get both scripts and the host gets one sw-inject diag", async () => {
-  const worker = startWorker({ tabs: [{ id: 11 }, { id: 12 }, { id: 13 }], rejectFor: [12] });
+test("after an update the open tabs get the scripts that name them and the host gets one sw-inject diag", async () => {
+  const worker = startWorker({ tabs: [YOUTUBE_TAB(11), YOUTUBE_TAB(12), YOUTUBE_TAB(13)], rejectFor: [12] });
   worker.installedListeners[0]({ reason: "update", previousVersion: "0.1.1" });
   await flush();
 
-  assert.deepEqual(worker.queries, [{ url: ["https://www.youtube.com/*"] }]);
-  assert.deepEqual(
-    worker.injections.map(({ target, ...rest }) => [target.tabId, rest]),
-    [
-      [11, MAIN_INJECTION],
-      [12, MAIN_INJECTION],
-      [13, MAIN_INJECTION],
-      [11, ISOLATED_INJECTION],
-      [13, ISOLATED_INJECTION]
-    ]
-  );
+  assert.deepEqual(worker.queries, [{ url: ALL_URLS }]);
+  const of = (tabId) => worker.injections.filter(({ target }) => target.tabId === tabId).map(({ target, ...rest }) => rest);
+  assert.deepEqual(of(11), [MAIN_INJECTION, ISOLATED_INJECTION, SESSION_INJECTION]);
+  assert.deepEqual(of(12), [MAIN_INJECTION], "the first injection failed, so the others are not tried");
+  assert.deepEqual(of(13), [MAIN_INJECTION, ISOLATED_INJECTION, SESSION_INJECTION]);
   assert.deepEqual(worker.diags().map((message) => message.event), [
     `sw-start v=${VERSION}`,
     "sw-access youtube=granted",
@@ -194,11 +192,11 @@ test("after an update the open YouTube tabs get both scripts and the host gets o
   assert.deepEqual(worker.warnings, []);
 });
 
-test("after an install the open YouTube tabs are injected too", async () => {
-  const worker = startWorker({ tabs: [{ id: 5 }] });
+test("after an install the open tabs are injected too, a page that is not YouTube without the YouTube page's scripts", async () => {
+  const worker = startWorker({ tabs: [{ id: 5, url: "https://music.example.com/" }] });
   worker.installedListeners[0]({ reason: "install" });
   await flush();
-  assert.equal(worker.injections.length, 2);
+  assert.deepEqual(worker.injections.map(({ target, ...rest }) => rest), [ISOLATED_INJECTION, SESSION_INJECTION]);
   assert.equal(worker.diags().at(-1).event, "sw-inject tabs=1 injected=1 failed=0");
 });
 
@@ -243,7 +241,7 @@ test("the worker reports whether Chrome granted it access to YouTube right after
 });
 
 test("permission changes are listened for from the start, and a grant injects the tabs that were waiting", async () => {
-  const worker = startWorker({ access: false, tabs: [{ id: 21 }, { id: 22 }] });
+  const worker = startWorker({ access: false, tabs: [YOUTUBE_TAB(21), YOUTUBE_TAB(22)] });
   assert.equal(worker.addedListeners.length, 1, "onAdded registered synchronously");
   assert.equal(worker.removedListeners.length, 1, "onRemoved registered synchronously");
   await flush();
@@ -253,9 +251,10 @@ test("permission changes are listened for from the start, and a grant injects th
   worker.addedListeners[0]({ origins: ["https://www.youtube.com/*"] });
   await flush();
   assert.deepEqual(
-    worker.injections.map(({ target, ...rest }) => [target.tabId, rest.world]),
-    [[21, "MAIN"], [22, "MAIN"], [21, "ISOLATED"], [22, "ISOLATED"]]
+    worker.injections.filter(({ target }) => target.tabId === 21).map(({ world }) => world),
+    ["MAIN", "ISOLATED", "MAIN"]
   );
+  assert.deepEqual(worker.injections.filter(({ target }) => target.tabId === 22).length, 3);
   assert.deepEqual(
     worker.diags().map((message) => message.event).slice(1),
     ["sw-access youtube=withheld", "sw-access youtube=granted", "sw-inject tabs=2 injected=2 failed=0"],
@@ -347,4 +346,69 @@ test("an invalid command from the host is reported as such and never reaches the
   await flush();
   assert.deepEqual(worker.tabMessages, []);
   assert.equal(worker.diags().at(-1).event, "sw-reject invalid command");
+});
+
+
+// ---- media tabs: the pages report, the app asks --------------------------------------------------------
+
+const WEB_SENDER = (tabId, url = "https://music.example.com/album") => ({ id: OWN, url, tab: { id: tabId }, frameId: 0 });
+const REPORT = {
+  v: 1, type: "tab-report", site: "music.example.com", title: "Song", artist: "Artist", album: "", state: "playing",
+  time: 12.5, duration: 200, rate: 1, live: false
+};
+
+test("the worker listens for closed tabs from the moment it starts (no permission is needed for it)", () => {
+  const worker = startWorker();
+  assert.equal(worker.removedTabListeners.length, 1, "registered synchronously, as MV3 requires");
+  assert.equal(readSource("manifest.json").includes('"tabs"'), false);
+});
+
+test("a report from a page on any site reaches the host as `tab` with the tab's id, and closing the tab says it is gone", async () => {
+  const worker = startWorker();
+  await flush(); // the access report is on its way as the worker starts
+  worker.listeners[0](REPORT, WEB_SENDER(41, "https://music.example.com/private-path?token=xyz"));
+  worker.removedTabListeners[0](41);
+  worker.removedTabListeners[0](42); // a tab that never had media
+  await flush();
+  assert.deepEqual(worker.protocol().map((message) => [message.type, message.tab]), [["tab", 41], ["tabgone", 41]]);
+  assert.equal(worker.protocol()[0].title, "Song");
+  assert.deepEqual(worker.diags().map((message) => message.event), [`sw-start v=${VERSION}`, "sw-access youtube=granted", "sw-msg tab"]);
+  for (const message of worker.diags()) assertSafeDiag(message, "sw");
+  // The host gets the site's host name and nothing of the page's address.
+  for (const secret of ["private-path", "token", "xyz", "https", "://"]) {
+    assert.equal(JSON.stringify(worker.ports[0].messages).includes(secret), false, secret);
+  }
+});
+
+test("a tabcommand the host writes goes to the top frame of the tab it names, and what a tab says of it reaches the host", async () => {
+  const worker = startWorker();
+  worker.ports[0].receive({ v: 1, type: "tabcommand", tab: 41, action: "seek", seconds: 30 });
+  await flush();
+  assert.deepEqual(worker.tabMessages, [
+    { tabId: 41, message: { v: 1, type: "tabcommand", tab: 41, action: "seek", seconds: 30 }, options: { frameId: 0 } }
+  ]);
+  worker.listeners[0]({ v: 1, type: "diag", where: "content", event: "content-tabcommand seek ok" }, WEB_SENDER(41));
+  assert.equal(worker.diags().at(-1).event, "content-tabcommand seek ok");
+  assertSafeDiag(worker.diags().at(-1), "content");
+});
+
+test("a tab that is gone: the command is dropped, the app is told the tab is gone, and the worker reports sw-tabcommand-no-tab", async () => {
+  const worker = startWorker({ noTabs: [41] });
+  await flush();
+  worker.ports[0].receive({ v: 1, type: "tabcommand", tab: 41, action: "play" });
+  await flush();
+  assert.deepEqual(worker.protocol().map((message) => [message.type, message.tab]), [["tabgone", 41]]);
+  assert.equal(worker.diags().at(-1).event, "sw-tabcommand-no-tab");
+  assertSafeDiag(worker.diags().at(-1), "sw");
+});
+
+test("a page's script cannot send a command, nor can a page pose as the worker", async () => {
+  const worker = startWorker();
+  await flush();
+  worker.listeners[0]({ v: 1, type: "tabcommand", tab: 41, action: "play" }, WEB_SENDER(41));
+  worker.listeners[0]({ v: 1, type: "diag", where: "sw", event: "sw-tabcommand-no-tab" }, WEB_SENDER(41));
+  await flush();
+  assert.deepEqual(worker.tabMessages, []);
+  assert.deepEqual(worker.protocol(), []);
+  assert.equal(worker.diags().at(-1).event, "sw-reject untrusted", "an unknown message from a web page is not trusted");
 });

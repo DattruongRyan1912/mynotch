@@ -5,18 +5,21 @@
  * to the native host through bridge.js. All connection and relay logic lives in bridge.js; this
  * file only wires it to the chrome.* APIs. The worker connects to the host as soon as it starts
  * and reports short diagnostic events (no titles, URLs or ids) to the host as `diag` messages.
- * After an install or an update it also injects the content scripts into the YouTube tabs that
+ * After an install or an update it also injects the content scripts into the tabs that
  * were already open, which Chrome does not do on its own, and it says whether Chrome withholds
  * the extension's access to YouTube (site access "On click"), injecting once that is granted.
- * The one thing the host can say to the worker is a command from the app (next or previous): the
- * worker validates it and passes it to the tab that last sent playback.
+ * Pages report their media (tabs.js) and the worker passes each report on with the tab's id; a tab that is
+ * closed is reported gone. What the host can say to the worker is a command from the app: next or previous
+ * for the YouTube captions' sake (to the tab that last sent playback), or a `tabcommand` for a media tab
+ * (to the tab it names). The worker validates it and passes on the command it validated.
  */
-importScripts("captions.js", "bridge.js");
+importScripts("captions.js", "tabmessages.js", "bridge.js");
 
 (function () {
   "use strict";
 
   var C = self.__mynotchCaptions;
+  var T = self.__mynotchTabs;
   var B = self.__mynotchBridge;
 
   function log(text) {
@@ -48,6 +51,7 @@ importScripts("captions.js", "bridge.js");
   var relay = B.createRelay({
     bridge: bridge,
     captions: C,
+    tabs: T,
     ownId: chrome.runtime.id,
     now: function () {
       return Date.now();
@@ -73,7 +77,6 @@ importScripts("captions.js", "bridge.js");
   });
 
   var access = B.createAccessWatcher({
-    manifest: chrome.runtime.getManifest(),
     contains: function (query) {
       return chrome.permissions.contains(query);
     },
@@ -93,6 +96,10 @@ importScripts("captions.js", "bridge.js");
   });
   chrome.permissions.onRemoved.addListener(function () {
     access.onChanged();
+  });
+  // A tab that is closed has no media any more: the app is told, if it was told about the tab (no permission is needed).
+  chrome.tabs.onRemoved.addListener(function (tabId) {
+    relay.onTabRemoved(tabId);
   });
 
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {

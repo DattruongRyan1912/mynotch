@@ -9,6 +9,7 @@
  *  - Reports its own health as `diag` events (start, video found/missing, CC state, send errors,
  *    a 30 s "alive" line, exceptions of the 1 s tick) and relays the page script's `diag` events.
  *    Diag events are fixed codes plus numbers and booleans: no titles, URLs or video ids.
+ *  - Does nothing outside www.youtube.com (the manifest also runs it on other pages, for the media tab script's sake).
  *  - Carries out the two commands the app can give through the service worker, `next` and `previous`,
  *    the way a user would: it clicks the player's own button (previous restarts the video when the
  *    player has no usable previous button and the video is more than 3 s in). It never makes up
@@ -19,8 +20,14 @@
 (function (root) {
   "use strict";
 
+  // The manifest runs the isolated scripts on every page, because the media tab script (tabs.js) shares their entry, but this one
+  // is the YouTube bridge's: anywhere else it does nothing, and not even a diagnostic.
+  if (!root.location || root.location.origin !== "https://www.youtube.com") return;
+
   var C = root.__mynotchCaptions;
   var STARTED = Symbol.for("io.lucasvu.mynotch.yt.content");
+  // What the media tab script (tabs.js) calls for a next or a previous in a YouTube tab: the clicks below, `(action) => boolean`.
+  var SKIP = Symbol.for("io.lucasvu.mynotch.tab.skip");
   if (!C) {
     reportMissingLibrary();
     return;
@@ -401,8 +408,15 @@
     return !state.stopped && Boolean(root.chrome && root.chrome.runtime && root.chrome.runtime.id);
   }
 
+  /** The tab script's next and previous: what a command of the app does, for the tab the user chose in MyNotch. */
+  function skipHook(action) {
+    return perform(action);
+  }
+
   function shutdown() {
     state.stopped = true;
+    // Only our own hook: a newer copy that replaced this one has put its own there.
+    if (root[SKIP] === skipHook) delete root[SKIP];
     if (state.timer) root.clearInterval(state.timer);
     state.timer = 0;
     unbindVideo();
@@ -418,6 +432,7 @@
   }
 
   root[STARTED] = { isAlive: isAlive, stop: shutdown };
+  root[SKIP] = skipHook;
   state.messages = runtimeMessages();
   if (state.messages) state.messages.addListener(onRuntimeMessage);
   root.addEventListener("message", onPageMessage, false);

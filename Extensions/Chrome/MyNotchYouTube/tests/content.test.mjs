@@ -1314,3 +1314,62 @@ test("a click that throws is unavailable too", () => {
   assert.doesNotThrow(() => page.command(NEXT));
   assert.deepEqual(commandDiags(page), ["content-command next unavailable"]);
 });
+
+// ---- the manifest also runs content.js on other pages, for the media tab script's sake ---------------------
+
+const HOOK = "globalThis[Symbol.for('io.lucasvu.mynotch.tab.skip')]";
+
+test("off YouTube content.js does nothing at all: no listener, no timer, no message, not even a diagnostic", () => {
+  for (const origin of ["https://music.example.com", "http://www.youtube.com", "https://music.youtube.com", "https://www.youtube.com.evil.example"]) {
+    const page = makePage({ url: `${origin}/watch?v=${ID}` });
+    page.location.origin = origin;
+    page.start();
+    assert.deepEqual(page.sent, [], origin);
+    assert.deepEqual(page.diags, [], origin);
+    assert.deepEqual(page.intervals, [], origin);
+    assert.deepEqual(page.windowListeners, {}, origin);
+    assert.deepEqual(page.runtimeListeners, [], origin);
+    assert.equal(vm.runInContext(`typeof ${HOOK} + typeof globalThis[Symbol.for('io.lucasvu.mynotch.yt.content')]`, page.context), "undefinedundefined", origin);
+  }
+});
+
+test("off YouTube even a missing captions library is not reported (the page is not ours to speak for)", () => {
+  const page = makePage({ url: "https://music.example.com/" });
+  page.location.origin = "https://music.example.com";
+  runScripts(page.context, ["content.js"]);
+  assert.deepEqual(page.sent, []);
+  assert.deepEqual(page.diags, []);
+});
+
+test("the media tab script's next and previous: content.js leaves its button clicks under a hook, and takes them away again", () => {
+  const page = startedPage();
+  assert.equal(vm.runInContext(`typeof ${HOOK}`, page.context), "function");
+  page.nextButton = fakeButton();
+  assert.equal(vm.runInContext(`${HOOK}("next")`, page.context), true);
+  assert.equal(page.nextButton.clicks, 1);
+  page.video.currentTime = 2;
+  assert.equal(vm.runInContext(`${HOOK}("previous")`, page.context), false, "no previous button, video not past 3 s into: unavailable");
+  page.video.currentTime = 40;
+  assert.equal(vm.runInContext(`${HOOK}("previous")`, page.context), true, "no previous button, past 3 s into: restarted");
+  assert.equal(page.video.currentTime, 0);
+  page.ad = true;
+  assert.equal(vm.runInContext(`${HOOK}("next")`, page.context), false, "an advert plays");
+  assert.equal(page.nextButton.clicks, 1);
+  // The hook is the click, not an answer to the app: the tab script says what happened for a tab's command.
+  assert.deepEqual(commandDiags(page), []);
+
+  vm.runInContext("globalThis[Symbol.for('io.lucasvu.mynotch.yt.content')].stop()", page.context);
+  assert.equal(vm.runInContext(`typeof ${HOOK}`, page.context), "undefined");
+});
+
+test("a replacing copy's hook is not taken away by the copy it replaced shutting down", () => {
+  const page = startedPage();
+  const first = vm.runInContext("globalThis[Symbol.for('io.lucasvu.mynotch.yt.content')]", page.context);
+  page.runtime.id = undefined; // the first copy is an orphan
+  page.start();
+  page.runtime.id = "extension-id";
+  const second = vm.runInContext(HOOK, page.context);
+  assert.equal(typeof second, "function");
+  first.stop(); // already stopped by the replacement: harmless
+  assert.equal(vm.runInContext(HOOK, page.context), second, "the new copy's hook is still there");
+});

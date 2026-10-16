@@ -318,15 +318,17 @@
   var FETCH_XHR = /^ fetch=(?:true|false) xhr=(?:true|false)$/;
   var DIAG_ARGS = {
     "sw-start": /^ v=(?:[0-9]{1,4}(?:\.[0-9]{1,4}){0,3}|unknown)$/,
-    "sw-msg": /^ (?:captions events=[0-9]{1,5}|playback|clear)$/,
-    "sw-reject": /^ (?:untrusted|invalid (?:captions|playback|clear|diag|command|unknown))$/,
+    "sw-msg": /^ (?:captions events=[0-9]{1,5}|playback|clear|tab)$/,
+    "sw-reject": /^ (?:untrusted|invalid (?:captions|playback|clear|diag|command|tab|tabcommand|unknown))$/,
     "sw-reconnect": /^ after=[a-z0-9-]{1,80} failures=[0-9]{1,6}$/,
     "sw-access": /^ youtube=(?:granted|withheld)$/,
     "sw-inject": /^ tabs=[0-9]{1,6} injected=[0-9]{1,6} failed=[0-9]{1,6}$/,
     "sw-command-no-tab": NO_ARGS,
+    "sw-tabcommand-no-tab": NO_ARGS,
     "content-start": NO_ARGS,
     "content-no-lib": NO_ARGS,
     "content-command": /^ (?:next|previous) (?:ok|unavailable)$/,
+    "content-tabcommand": /^ (?:play|pause|toggle|next|previous|seek) (?:ok|unavailable)$/,
     "content-video-found": NO_ARGS,
     "content-video-missing": NO_ARGS,
     "content-cc": /^ (?:on|off)$/,
@@ -344,7 +346,7 @@
   };
   // Codes whose arguments are a closed list of words and nothing else. The 11-character scan below does not look at
   // their arguments, because one of the words ("unavailable") is exactly 11 letters long; it still looks at the code.
-  var CLOSED_WORDS = { "content-command": true };
+  var CLOSED_WORDS = { "content-command": true, "content-tabcommand": true };
   var MESSAGE_TYPES = { captions: true, playback: true, clear: true, diag: true };
   // Known Chrome error texts become fixed codes (none is exactly 11 characters long).
   var ERROR_CODES = [
