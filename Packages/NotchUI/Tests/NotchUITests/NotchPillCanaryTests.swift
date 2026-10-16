@@ -485,4 +485,118 @@ struct NotchPillCanaryTests {
         let rest = try #require(closing.last?.elements)
         #expect(rest.count == 1 && abs(rest[0].width - (pillWidth + 8)) < 6, "back to the pill's glass alone: \(rest)")
     }
+
+    // MARK: one glass layer and the text above it
+
+    /// The glass layers of the tree in the order they are drawn (a later one is above an earlier one), each with the frames of its elements.
+    func glassLayers(_ hosting: NSView) -> [(layer: CALayer, elements: [CGRect])] {
+        var found: [(CALayer, [CGRect])] = []
+        func walk(_ layer: CALayer) {
+            if NSStringFromClass(type(of: layer)) == "SwiftUI.SDFLayer" {
+                let frames = layers(layer) { NSStringFromClass(type(of: $0)) == "CASDFElementLayer" }.map { element -> CGRect in
+                    let presented = element.presentation() ?? element
+                    return presented.convert(presented.bounds, to: nil)
+                }
+                found.append((layer, frames))
+            }
+            for sub in layer.sublayers ?? [] { walk(sub) }
+        }
+        if let root = hosting.layer { walk(root) }
+        return found
+    }
+
+    /// Whether, inside the glass layer `glass`, what is drawn after every glass element is a portal (which is how the content of a glass
+    /// view is shown above the glass). The layers are in draw order.
+    func contentIsPortalledAboveEveryElement(of glass: CALayer) -> Bool {
+        var index = 0
+        var lastElement = -1, firstPortal = Int.max
+        func walk(_ layer: CALayer) {
+            index += 1
+            let name = NSStringFromClass(type(of: layer))
+            if name == "CASDFElementLayer" { lastElement = index }
+            if name.hasSuffix("SDFPortalLayer") { firstPortal = min(firstPortal, index) }
+            for sub in layer.sublayers ?? [] { walk(sub) }
+        }
+        walk(glass)
+        return lastElement > 0 && firstPortal != Int.max && firstPortal > lastElement
+    }
+
+    /// Runs `change` and for 1.2 s after it checks, every few ms, that the pill's text (the red probe of its leading view) is drawn above
+    /// all the glass: all the glass is in one layer, whose content is portalled above every element of it, and no element of a layer drawn
+    /// later is over the probe. Returns how many samples had the probe and how many of them had glass under it, which is what makes the check
+    /// worth anything.
+    func textIsAboveTheGlass(_ rig: Rig, during change: () -> Void) async throws -> (checked: Int, underneath: Int) {
+        change()
+        let start = Date()
+        var checked = 0, underneath = 0
+        while Date().timeIntervalSince(start) < 1.2 {
+            try await Task.sleep(for: .milliseconds(4))
+            let probes = layers(rig.hosting.layer) {
+                guard let cg = $0.backgroundColor, let rgb = NSColor(cgColor: cg)?.usingColorSpace(.sRGB), rgb.alphaComponent > 0.5 else { return false }
+                return Int(rgb.redComponent * 255) == 255 && Int(rgb.greenComponent * 255) == 0
+            }
+            guard let probe = probes.first else { continue }
+            let frame = probe.convert(probe.bounds, to: nil)
+            let all = glassLayers(rig.hosting)
+            var own = probe.superlayer
+            while let layer = own, NSStringFromClass(type(of: layer)) != "SwiftUI.SDFLayer" { own = layer.superlayer }
+            let ownLayer = try #require(own, "the text is inside a glass layer")
+            let index = try #require(all.firstIndex { $0.layer === ownLayer }, "the text is inside a glass layer")
+            checked += 1
+            #expect(all.filter { !$0.elements.isEmpty }.count <= 1, "one glass layer: shapes that are in two do not blend and stack")
+            #expect(contentIsPortalledAboveEveryElement(of: ownLayer), "the text is shown above every element of its layer")
+            for later in all[(index + 1)...] { #expect(!later.elements.contains { $0.intersects(frame) }, "glass above the text: \(later.elements)") }
+            if all[..<index].contains(where: { $0.elements.contains { $0.intersects(frame) } })
+                || all[index].elements.filter({ $0.intersects(frame) }).count > 1 {
+                underneath += 1
+            }
+        }
+        return (checked, underneath)
+    }
+
+    @Test(arguments: [CGFloat(24), 32, 56], [2, 12])
+    func theTilesOfAPillAreOneGlassLayerWithThePillAndTheTextStaysAboveAllOfItWhileItOpensAndCloses(height: CGFloat, tabs: Int) async throws {
+        let rig = try await rig(shape: .tiles, pillHeight: height, tabs: tabs)
+        defer { rig.window.contentView = nil }
+        // The collapsed pill, with its text over the glass.
+        let resting = try await textIsAboveTheGlass(rig) {}
+        #expect(resting.checked > 50 && resting.underneath == 0, "\(resting)")
+        // Opening: the capsule and the tile come out of the pill's body, where the text is: the text is under glass then (the tiles'),
+        // which is what the strip's own view being gone from the tree is for, so it is checked from the first frame of the close.
+        rig.model.open(tab: nil, onPurpose: false)
+        try await poll("the tiles are out") { elements(rig.hosting).contains { $0.width > 500 } }
+        try await Task.sleep(for: .milliseconds(700))
+        let closing = try await textIsAboveTheGlass(rig) { rig.model.close() }
+        #expect(closing.checked > 100, "the text was there to check in \(closing.checked) samples")
+        // Not vacuous: for part of the close the tiles' glass is under the text.
+        #expect(closing.underneath > 10, "glass was under the text in \(closing.underneath) samples")
+        // And at rest again.
+        let rested = try await textIsAboveTheGlass(rig) {}
+        #expect(rested.checked > 50 && rested.underneath == 0, "\(rested)")
+    }
+
+    // MARK: the collapsed content on a tall pill
+
+    @Test(arguments: [CGFloat(24), 32, 44, 56], [VirtualNotchStyle.pill, .notch])
+    func theLeadingViewIsDrawnBiggerOnATallPillAboutItsCentreAndAsItWasOnAnythingElse(height: CGFloat, style: VirtualNotchStyle) async throws {
+        let geometry = NotchGeometry(
+            screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: style, pillHeight: height)
+        )
+        let rig = try await rig(shape: .slab, style: style, pillHeight: height)
+        defer { rig.window.contentView = nil }
+        // (A notch is the menu bar's height, 25 pt, whatever the pill's height is.)
+        let probes = layers(rig.hosting.layer) {
+            guard let cg = $0.backgroundColor, let rgb = NSColor(cgColor: cg)?.usingColorSpace(.sRGB), rgb.alphaComponent > 0.5 else { return false }
+            return Int(rgb.redComponent * 255) == 255 && Int(rgb.greenComponent * 255) == 0
+        }
+        let probe = try #require(probes.first)
+        let drawn = probe.convert(probe.bounds, to: nil)
+        // The probe is 20 x 12 (the rig's leading view); a pill draws it `collapsedContentScale` times as big, and a notch as it is.
+        let scale = style == .pill ? 1 + 0.25 * max(0, min(height, 56) - 32) / 24 : 1
+        #expect(abs(geometry.collapsedContentScale - scale) < 1e-9)
+        #expect(abs(drawn.width - 20 * scale) < 0.6 && abs(drawn.height - 12 * scale) < 0.6, "\(style) \(height): drawn \(drawn.size) at \(scale)")
+        // About its centre: the middle of the body, from the top.
+        let middleFromTop = rig.hosting.bounds.height - drawn.midY
+        #expect(abs(middleFromTop - (geometry.topGap + geometry.notchSize.height / 2)) < 0.6, "\(style) \(height): centred at \(middleFromTop)")
+    }
 }
