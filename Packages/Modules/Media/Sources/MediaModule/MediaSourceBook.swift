@@ -11,10 +11,15 @@ import Foundation
 ///   otherwise the source that started playing most recently. Pausing a source never takes the place from it unless another
 ///   source plays, and a source that goes away hands it on to the one playing, or else the one that was playing last.
 /// - **Shown** in the player: the source the user chose with a chip while it is there, else the primary.
+/// - **A source that blinks.** The system's session is empty for a moment between two tracks, and a player's element is emptied at
+///   the next video: that is not a source going away. What the user chose (the pin, the shown source) is kept for `releaseGrace`
+///   after its source is missing, with the last state it had, and released only when it has stayed away that long.
 nonisolated struct MediaSourceBook: Sendable {
     /// A tab that has not been heard from for this long is not there any more. A page that plays reports every 5 s and a paused one
     /// every 30 s, but Chrome may let a tab it put to sleep stay quiet for a minute or two.
     static let tabLiveWindow: TimeInterval = 150
+    /// How long a source the user pinned or chose may be missing before the choice is let go.
+    static let releaseGrace: TimeInterval = 1.5
 
     private(set) var entries: [MediaSourceEntry] = []
     private(set) var primaryID: MediaSourceID?
@@ -27,6 +32,12 @@ nonisolated struct MediaSourceBook: Sendable {
         var heardAt: Date
     }
 
+    /// A source the user chose that is missing now, as it was when it went, and since when.
+    private struct Missing: Sendable {
+        var entry: MediaSourceEntry
+        var since: Date
+    }
+
     private var system: NowPlayingState?
     private var apps: [String: NowPlayingState] = [:]
     private var tabs: [TabRef: TabSession] = [:]
@@ -36,6 +47,7 @@ nonisolated struct MediaSourceBook: Sendable {
     private var playingSince: [MediaSourceID: Date] = [:]
     private var lastPlayed: [MediaSourceID: Date] = [:]
     private var firstSeen: [MediaSourceID: Date] = [:]
+    private var missing: [MediaSourceID: Missing] = [:]
 
     var primary: MediaSourceEntry? { primaryID.flatMap(entry(_:)) }
 
@@ -48,8 +60,10 @@ nonisolated struct MediaSourceBook: Sendable {
     /// The tab source with this reference, whether or not the system plays it.
     func entry(forTab ref: TabRef) -> MediaSourceEntry? { entry(.tab(ref)) }
 
-    /// When the next tab will go stale, so that one timer is enough; nil while there is none.
-    var nextExpiry: Date? { tabs.values.map { $0.heardAt + Self.tabLiveWindow }.min() }
+    /// When the next tab will go stale or the next missing choice will be let go, so that one timer is enough; nil while there is none.
+    var nextExpiry: Date? {
+        (tabs.values.map { $0.heardAt + Self.tabLiveWindow } + missing.values.map { $0.since + Self.releaseGrace }).min()
+    }
 
     // MARK: what the sources report
 
@@ -84,7 +98,8 @@ nonisolated struct MediaSourceBook: Sendable {
         refresh(at: now)
     }
 
-    /// Drops the tabs that have not been heard from for `tabLiveWindow`.
+    /// Drops the tabs that have not been heard from for `tabLiveWindow`, and lets go of the choices whose source has been missing for
+    /// `releaseGrace`.
     mutating func expireTabs(at now: Date) {
         tabs = tabs.filter { now.timeIntervalSince($0.value.heardAt) < Self.tabLiveWindow }
         refresh(at: now)
@@ -130,12 +145,40 @@ nonisolated struct MediaSourceBook: Sendable {
     // MARK: working it out
 
     private mutating func refresh(at now: Date) {
-        let merged = mergedEntries()
+        var merged = mergedEntries()
+        keepChoices(in: &merged, at: now)
         remember(merged, at: now)
-        if let pinnedID, !merged.contains(where: { $0.id == pinnedID }) { self.pinnedID = nil }
         primaryID = choosePrimary(from: merged)
-        if let selectedID, !merged.contains(where: { $0.id == selectedID }) || selectedID == primaryID { self.selectedID = nil }
+        if let selectedID, selectedID == primaryID { self.selectedID = nil }
         entries = merged.sorted(by: { isOrdered($0, before: $1) })
+    }
+
+    /// A pinned or chosen source that is missing stays, as it last was, until it has been missing for `releaseGrace`; one that comes
+    /// back in time was never gone. What is not pinned or chosen is gone at once.
+    private mutating func keepChoices(in merged: inout [MediaSourceEntry], at now: Date) {
+        let live = Set(merged.map(\.id))
+        let chosen = Set([pinnedID, selectedID].compactMap { $0 })
+        for id in missing.keys where live.contains(id) || !chosen.contains(id) { missing[id] = nil }
+        for id in chosen where !live.contains(id) {
+            if let gone = missing[id] {
+                if now.timeIntervalSince(gone.since) < Self.releaseGrace {
+                    merged.append(gone.entry)
+                } else {
+                    release(id)
+                }
+            } else if let last = entries.first(where: { $0.id == id }) {
+                missing[id] = Missing(entry: last, since: now)
+                merged.append(last)
+            } else {
+                release(id)
+            }
+        }
+    }
+
+    private mutating func release(_ id: MediaSourceID) {
+        if pinnedID == id { pinnedID = nil }
+        if selectedID == id { selectedID = nil }
+        missing[id] = nil
     }
 
     private func mergedEntries() -> [MediaSourceEntry] {
@@ -167,16 +210,21 @@ nonisolated struct MediaSourceBook: Sendable {
     }
 
     /// The tab that plays what the system plays: the same title once normalised. Of several, one that plays, then the one heard from last.
+    /// Failing that, when the titles differ (a page and Chrome may word one title two ways, and they differ for a moment as a video
+    /// changes) the one tab that plays, if exactly one does: a browser session no tab explains is rather that tab than a second chip.
     private func tab(playing system: NowPlayingState) -> TabRef? {
         guard let title = system.title else { return nil }
         let wanted = YouTubeCaptionMatcher.normalised(title)
-        return tabs
+        let same = tabs
             .filter { YouTubeCaptionMatcher.normalised($0.value.state.title ?? "") == wanted }
             .max { lhs, rhs in
                 let left = (lhs.value.state.isPlaying ? 1 : 0, lhs.value.heardAt, lhs.key.tab)
                 let right = (rhs.value.state.isPlaying ? 1 : 0, rhs.value.heardAt, rhs.key.tab)
                 return left < right
-            }?.key
+            }
+        if let same { return same.key }
+        let playing = tabs.filter { $0.value.state.isPlaying }
+        return playing.count == 1 ? playing.keys.first : nil
     }
 
     private mutating func remember(_ merged: [MediaSourceEntry], at now: Date) {

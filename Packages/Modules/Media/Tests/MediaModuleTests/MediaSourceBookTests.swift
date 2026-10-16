@@ -105,10 +105,42 @@ import Testing
     }
 
     @Test mutating func aBrowserSessionNoTabAccountsForIsTheBrowsersOwnSource() {
-        book.setTab(TabRef(connection: 1, tab: 1), state: Self.tabState("Another"), at: at(0))
+        book.setTab(TabRef(connection: 1, tab: 1), state: Self.tabState("Another", playing: false), at: at(0))
         book.setSystem(Self.chromeSession("Not a tab we know"), at: at(1))
         #expect(Set(ids) == [.app(Self.chrome), .tab(TabRef(connection: 1, tab: 1))])
         #expect(book.entry(.app(Self.chrome))?.isSystemBacked == true)
+    }
+
+    @Test mutating func aBrowserSessionWhoseTitleDiffersIsTheOnlyTabThatPlaysWhenExactlyOneDoes() {
+        // A page and Chrome may word one title two ways (and differ for a moment as a video changes): not two chips.
+        let playing = TabRef(connection: 1, tab: 1)
+        book.setTab(playing, state: Self.tabState("(3) Inbox - Mail", playing: true), at: at(0))
+        book.setTab(TabRef(connection: 1, tab: 2), state: Self.tabState("Paused page", playing: false), at: at(0))
+        book.setSystem(Self.chromeSession("Inbox - Mail"), at: at(1))
+        #expect(book.entries.count == 2)
+        #expect(book.entry(.tab(playing))?.isSystemBacked == true)
+        #expect(book.entry(.app(Self.chrome)) == nil)
+    }
+
+    @Test mutating func withTwoTabsPlayingOrNoneADifferingTitleIsNotGuessed() {
+        book.setTab(TabRef(connection: 1, tab: 1), state: Self.tabState("One", playing: true), at: at(0))
+        book.setTab(TabRef(connection: 1, tab: 2), state: Self.tabState("Two", playing: true), at: at(0))
+        book.setSystem(Self.chromeSession("Neither"), at: at(1))
+        #expect(book.entries.count == 3)
+        #expect(book.entry(.app(Self.chrome))?.isSystemBacked == true)
+        var none = MediaSourceBook()
+        none.setTab(TabRef(connection: 1, tab: 1), state: Self.tabState("One", playing: false), at: at(0))
+        none.setSystem(Self.chromeSession("Neither"), at: at(1))
+        #expect(none.entries.count == 2)
+        #expect(none.entry(.app(Self.chrome)) != nil)
+    }
+
+    @Test mutating func aTitleThatMatchesIsPreferredToTheOneTabThatPlays() {
+        let matching = TabRef(connection: 1, tab: 1)
+        book.setTab(matching, state: Self.tabState("Same", playing: false), at: at(0))
+        book.setTab(TabRef(connection: 1, tab: 2), state: Self.tabState("Other", playing: true), at: at(0))
+        book.setSystem(Self.chromeSession("Same"), at: at(1))
+        #expect(book.entry(.tab(matching))?.isSystemBacked == true)
     }
 
     @Test mutating func ofTwoTabsWithOneTitleTheOneThatPlaysThenTheOneHeardFromLastIsTheSystems() {
@@ -236,17 +268,51 @@ import Testing
         #expect(book.pinnedID == .app(Self.music))
     }
 
-    @Test mutating func thePinIsReleasedWhenThatSourceGoesAway() {
+    @Test mutating func thePinIsReleasedWhenThatSourceHasBeenAwayForTheGraceAndNotBefore() {
         book.setApp(Self.music, state: Self.state(Self.music), at: at(0))
         book.setApp(Self.spotify, state: Self.state(Self.spotify), at: at(1))
         book.pin(.app(Self.music), at: at(2))
         book.setApp(Self.music, state: nil, at: at(3))
+        // Still pinned, with what it last was: it may only be a blink.
+        #expect(book.pinnedID == .app(Self.music))
+        #expect(book.primaryID == .app(Self.music))
+        #expect(book.nextExpiry == at(3 + MediaSourceBook.releaseGrace))
+        book.expireTabs(at: at(3 + MediaSourceBook.releaseGrace - 0.1))
+        #expect(book.pinnedID == .app(Self.music))
+        book.expireTabs(at: at(3 + MediaSourceBook.releaseGrace))
         #expect(book.pinnedID == nil)
         #expect(book.primaryID == .app(Self.spotify))
+        #expect(book.nextExpiry == nil)
         // When it comes back it is not pinned any more: the user's choice was for that source's life.
-        book.setApp(Self.music, state: Self.state(Self.music), at: at(4))
+        book.setApp(Self.music, state: Self.state(Self.music), at: at(10))
         #expect(book.pinnedID == nil)
         #expect(book.primaryID == .app(Self.music), "the latest to start, as with any other")
+    }
+
+    @Test mutating func aPinnedSourceThatBlinksOutAndBackKeepsItsPinAndTheNotchDoesNotFlip() {
+        // The system's session is empty for a moment between two tracks. Something else plays meanwhile.
+        book.setApp(Self.music, state: Self.state(Self.music), at: at(0))
+        book.setSystem(Self.state("org.videolan.vlc", "Movie"), at: at(1))
+        book.pin(.app("org.videolan.vlc"), at: at(2))
+        #expect(book.primaryID == .app("org.videolan.vlc"))
+        book.setSystem(nil, at: at(3))
+        #expect(book.primaryID == .app("org.videolan.vlc"), "it did not go: the notch stays where it was, with what it last showed")
+        #expect(book.primary?.state.title == "Movie")
+        #expect(book.pinnedID == .app("org.videolan.vlc"))
+        book.setSystem(Self.state("org.videolan.vlc", "Next movie"), at: at(3.3))
+        #expect(book.pinnedID == .app("org.videolan.vlc"))
+        #expect(book.primaryID == .app("org.videolan.vlc"))
+        #expect(book.primary?.state.title == "Next movie", "and now it is live again, with the new track")
+        #expect(book.nextExpiry == nil, "nothing is missing any more")
+        book.expireTabs(at: at(20))
+        #expect(book.pinnedID == .app("org.videolan.vlc"))
+    }
+
+    @Test mutating func aBlinkingSourceThatWasNeitherPinnedNorChosenIsGoneAtOnce() {
+        book.setSystem(Self.state("org.videolan.vlc", "Movie"), at: at(0))
+        book.setSystem(nil, at: at(1))
+        #expect(book.entries.isEmpty)
+        #expect(book.nextExpiry == nil)
     }
 
     @Test mutating func unpinningReturnsToTheAutomaticChoiceAndPinningAnotherMovesThePin() {
@@ -342,15 +408,29 @@ import Testing
         #expect(book.displayedID == .app(Self.music))
     }
 
-    @Test mutating func aChosenSourceThatGoesAwayLeavesThePlayerOnThePrimary() {
+    @Test mutating func aChosenSourceThatGoesAwayLeavesThePlayerOnThePrimaryOnceItHasBeenAwayForTheGrace() {
         book.setApp(Self.music, state: Self.state(Self.music), at: at(0))
         book.setApp(Self.spotify, state: Self.state(Self.spotify), at: at(1))
         book.select(.app(Self.music), at: at(2))
         book.setApp(Self.music, state: nil, at: at(3))
+        #expect(book.selectedID == .app(Self.music), "a blink is not a source going away")
+        #expect(book.displayedID == .app(Self.music))
+        book.expireTabs(at: at(3 + MediaSourceBook.releaseGrace))
         #expect(book.selectedID == nil)
         #expect(book.displayedID == .app(Self.spotify))
-        book.select(.app(Self.music), at: at(4))
+        book.select(.app(Self.music), at: at(10))
         #expect(book.selectedID == nil, "a source that is not there cannot be chosen")
+    }
+
+    @Test mutating func aChosenSourceThatComesBackInTimeIsStillChosen() {
+        book.setApp(Self.music, state: Self.state(Self.music, "One"), at: at(0))
+        book.setApp(Self.spotify, state: Self.state(Self.spotify), at: at(1))
+        book.select(.app(Self.music), at: at(2))
+        book.setApp(Self.music, state: nil, at: at(3))
+        book.setApp(Self.music, state: Self.state(Self.music, "Two"), at: at(3.4))
+        #expect(book.displayedID == .app(Self.music))
+        #expect(book.displayed?.state.title == "Two")
+        #expect(book.nextExpiry == nil)
     }
 
     // MARK: apps the user did not allow

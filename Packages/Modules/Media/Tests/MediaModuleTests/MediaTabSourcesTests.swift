@@ -138,6 +138,10 @@ import Testing
         let ref = try #require(tabEntries.first?.tab)
         module.sources.model.togglePin(.tab(ref))
         client = nil
+        // The end of the connection is told: the pinned page is missing now, and the book waits out the grace.
+        await settle { module.sources.book.nextExpiry.map { $0 < Date().addingTimeInterval(10) } == true }
+        // The pinned page is kept for a moment (it could be a blink), then it is gone with its Chrome.
+        harness.scheduler.advance(by: .seconds(MediaSourceBook.releaseGrace + 0.5))
         await settle { tabEntries.isEmpty }
         #expect(tabEntries.isEmpty, "the connection ended: its pages are gone")
         #expect(module.sources.book.pinnedID == nil)

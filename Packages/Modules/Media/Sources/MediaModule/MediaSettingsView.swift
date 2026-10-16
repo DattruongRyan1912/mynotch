@@ -10,6 +10,8 @@ struct MediaSettingsView: View {
     static let lyricsExplanation = "Khi bật, tên bài, nghệ sĩ, album và thời lượng của mỗi bài mới (kể cả video phát trong trình duyệt) được gửi tới lrclib.net để lấy lời."
     static let lyricsUnderNotchTitle = "Hiện lời 2 dòng dưới notch"
     static let lyricsUnderNotchExplanation = "Khi có lời đồng bộ và nhạc đang phát, notch thu gọn hiện câu đang hát và câu sắp tới."
+    /// What the sources in the Media tab read and what, besides Apple Events, leaves the Mac for them: Spotify's cover.
+    static let sourcesExplanation = "Tab Media hiện cả Music, Spotify và các tab Chrome đang phát. Music và Spotify được đọc qua thông báo của chính chúng và, khi bạn cho phép, qua Apple Events; ảnh bìa Spotify được tải từ scdn.co của Spotify."
     /// System Settings › Privacy & Security › Automation, where the user lets MyNotch control Music and Spotify.
     static let automationSettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!
     static let tintTitle = "Màu theo ảnh bìa"
@@ -70,6 +72,7 @@ struct MediaSettingsView: View {
                     Text("Có thể quyền đã bị từ chối. Bật MyNotch trong Quyền riêng tư & Bảo mật › Ghi màn hình & âm thanh hệ thống.")
                 }
             }
+            Text(Self.sourcesExplanation).font(.caption).foregroundStyle(.secondary)
             if !sources.deniedApps.isEmpty {
                 LabeledContent {
                     Link("Mở System Settings", destination: Self.automationSettingsURL)

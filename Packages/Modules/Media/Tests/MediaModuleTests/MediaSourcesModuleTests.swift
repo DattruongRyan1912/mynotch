@@ -199,6 +199,9 @@ import Testing
         await musicPausedSpotifyPlaying()
         module.sources.model.togglePin(.app(Self.musicID))
         environment.quit(Self.musicID)
+        #expect(module.sources.book.pinnedID == .app(Self.musicID), "kept for a moment, as a blink would be")
+        #expect(store.state.title == "Music song")
+        harness.scheduler.advance(by: .seconds(MediaSourceBook.releaseGrace + 0.5))
         #expect(module.sources.book.pinnedID == nil)
         #expect(store.state.title == "Spotify song")
         environment.music("Paused", name: "Music song")
@@ -288,6 +291,8 @@ import Testing
         #expect(module.sources.model.deniedApps == ["Music"])
         #expect(MediaSettingsView.deniedAppsHint(for: ["Music"]) == "MyNotch chưa được phép điều khiển Music. Bật lại trong Quyền riêng tư & Bảo mật › Tự động hóa.")
         #expect(MediaSettingsView.deniedAppsHint(for: ["Music", "Spotify"]).contains("Music và Spotify"))
+        // What else leaves the Mac for the sources is said too: Spotify's cover, from Spotify's own image service.
+        #expect(MediaSettingsView.sourcesExplanation.contains("scdn.co") && MediaSettingsView.sourcesExplanation.contains("Apple Events"))
         source.emit(AdapterLines.track("Playing", artist: "A", bundle: Self.musicID))
         #expect(store.state.title == "Playing")
         #expect(module.sources.book.entries.map(\.isSystemBacked) == [true])

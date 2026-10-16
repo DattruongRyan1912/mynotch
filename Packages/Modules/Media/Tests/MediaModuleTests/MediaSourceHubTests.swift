@@ -529,6 +529,50 @@ import YouTubeBridgeKit
         #expect(ids.isEmpty)
     }
 
+    // MARK: a source that blinks, and one that goes
+
+    @Test func aPinnedSourceThatQuitsIsKeptForTheGraceByOneTimerAndThenLetGo() {
+        start()
+        environment.music("Playing")
+        environment.spotify("Playing")
+        hub.togglePin(.app("com.apple.Music"))
+        environment.quit("com.apple.Music")
+        #expect(hub.book.pinnedID == .app("com.apple.Music"))
+        #expect(hub.model.chips.map(\.id).contains(.app("com.apple.Music")), "its chip does not blink out")
+        #expect(scheduler.pendingCount == 1, "one timer, for the end of the grace")
+        scheduler.advance(by: .seconds(MediaSourceBook.releaseGrace - 0.5))
+        #expect(hub.book.pinnedID == .app("com.apple.Music"))
+        scheduler.advance(by: .seconds(1))
+        #expect(hub.book.pinnedID == nil)
+        #expect(hub.model.chips.map(\.id) == [.app("com.spotify.client")])
+        #expect(scheduler.pendingCount == 0)
+    }
+
+    @Test func aPinnedSourceTheSystemReportsThatBlinksBetweenTracksKeepsItsPinAndItsChip() {
+        start()
+        environment.spotify("Playing")
+        hub.setSystem(NowPlayingState(bundleIdentifier: "org.videolan.vlc", title: "Movie", isPlaying: true))
+        hub.togglePin(.app("org.videolan.vlc"))
+        hub.setSystem(nil)
+        #expect(hub.book.pinnedID == .app("org.videolan.vlc"))
+        #expect(hub.model.primaryID == .app("org.videolan.vlc"))
+        hub.setSystem(NowPlayingState(bundleIdentifier: "org.videolan.vlc", title: "Next movie", isPlaying: true))
+        scheduler.advance(by: .seconds(MediaSourceBook.releaseGrace + 1))
+        #expect(hub.book.pinnedID == .app("org.videolan.vlc"))
+        #expect(hub.model.primaryID == .app("org.videolan.vlc"))
+        #expect(scheduler.pendingCount == 0)
+    }
+
+    @Test func aPageAndChromeThatWordATitleDifferentlyAreOneChipWhileOnePageIsTheOneThatPlays() {
+        start()
+        hub.receive(tab(1, title: "(3) Inbox - Mail"), connection: 1)
+        hub.setSystem(NowPlayingState(
+            bundleIdentifier: "com.google.Chrome.helper", parentApplicationBundleIdentifier: "com.google.Chrome", title: "Inbox - Mail", isPlaying: true
+        ))
+        #expect(ids == [.tab(TabRef(connection: 1, tab: 1))])
+        #expect(!hub.model.showsChips, "one source, no chips")
+    }
+
     // MARK: stopping
 
     @Test func stoppingLetsGoOfEverythingAndForgetsWhatTheUserChose() async {
