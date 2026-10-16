@@ -138,7 +138,7 @@ final class FakeMCPApp: Sendable {
     private static func readLine(_ client: Int32, _ shared: Shared) -> Data? {
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 1_024)
-        let deadline = Date().addingTimeInterval(10)
+        let deadline = Date().addingTimeInterval(120)
         while Date() < deadline, !shared.isStopped {
             var poller = pollfd(fd: client, events: Int16(POLLIN), revents: 0)
             guard poll(&poller, 1, 50) > 0 else { continue }

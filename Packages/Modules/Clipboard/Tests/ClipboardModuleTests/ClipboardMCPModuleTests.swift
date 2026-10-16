@@ -83,7 +83,7 @@ import Testing
 
     func ask(_ request: ClipboardMCPRequest) async -> ClipboardMCPClient.Outcome {
         let path = socketPath
-        return await Task.detached { ClipboardMCPClient.send(request, socketPath: path, timeout: 60) }.value
+        return await Task.detached { ClipboardMCPClient.send(request, socketPath: path, timeout: 600) }.value
     }
 
     func search(_ query: String) -> ClipboardMCPRequest {

@@ -52,7 +52,6 @@ final class ClipboardMCPServer {
         }
 
         private let listener: Int32
-        private let workQueue = DispatchQueue(label: "io.lucasvu.mynotch.clipboard-mcp.work", attributes: .concurrent)
         private let requestTimeout: TimeInterval
         private let maxConnections: Int
         private let servedUser: uid_t
@@ -87,7 +86,10 @@ final class ClipboardMCPServer {
                     close(client)
                     continue
                 }
-                workQueue.async { [self] in serve(client) }
+                // One serial queue for each helper. A serial queue is a thread of its own when it is asked for, where a concurrent
+                // queue shares the global pool, which anything that blocks in the app can fill: the helper would then wait behind it.
+                let queue = DispatchQueue(label: "io.lucasvu.mynotch.clipboard-mcp.work", qos: .userInitiated)
+                queue.async { [self] in serve(client, on: queue) }
             }
         }
 
@@ -104,7 +106,7 @@ final class ClipboardMCPServer {
             counts.withLock { $0.connections -= 1 }
         }
 
-        private func serve(_ client: Int32) {
+        private func serve(_ client: Int32, on queue: DispatchQueue) {
             let read = MCPSocketIO.readLine(from: client, maxLength: ClipboardMCPWire.maxRequestLength, until: MCPDeadline(after: requestTimeout))
             guard case .line(let line) = read else {
                 finish(client)
@@ -112,7 +114,7 @@ final class ClipboardMCPServer {
             }
             counts.withLock { $0.requestsRead += 1 }
             deliver(line) { [self] reply in
-                workQueue.async { [self] in
+                queue.async { [self] in
                     if let reply, let bytes = ClipboardMCPWire.replyLine(reply) {
                         _ = MCPSocketIO.writeAll(bytes, to: client, until: MCPDeadline(after: 5))
                     }
@@ -198,7 +200,9 @@ final class ClipboardMCPServer {
                 }
             }
         }
-        let source = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: DispatchQueue(label: "io.lucasvu.mynotch.clipboard-mcp.accept"))
+        let source = DispatchSource.makeReadSource(
+            fileDescriptor: descriptor, queue: DispatchQueue(label: "io.lucasvu.mynotch.clipboard-mcp.accept", qos: .userInitiated)
+        )
         let eventHandler: @Sendable () -> Void = { acceptor.acceptPending() }
         source.setEventHandler(handler: eventHandler)
         let cancelHandler: @Sendable () -> Void = { close(descriptor) }

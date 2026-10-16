@@ -174,6 +174,10 @@ nonisolated final class LinkGate: @unchecked Sendable {
 
 /// How a limit runs out in a test: when the test says, not when a clock does. A busy machine can make a real timer fire before work that was
 /// about to finish, and the limits of the code are not what these tests are about when they are not the point.
+///
+/// The `.timeLimit` of a test that uses these is only there to end a hang (a handler that sleeps for an hour when nothing cancels it), and it
+/// is long for that reason: on a machine with other builds running, a whole run of this package lasts a minute or two, and a test that is
+/// waiting for a thread of the pool, as every one of them does between two steps, lasts nearly as long. A limit of a minute failed two of them.
 nonisolated enum LinkTimers {
     /// Never runs out.
     static let never: ClipboardLinkFetcher.Sleep = { _ in try await Task.sleep(for: .seconds(3600)) }

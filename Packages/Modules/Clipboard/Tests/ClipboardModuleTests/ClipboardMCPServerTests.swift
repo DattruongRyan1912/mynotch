@@ -34,15 +34,22 @@ import Testing
         }
     }
 
-    /// Runs `work`, which blocks, on a thread of its own: the pool that `async` code runs on has few threads, and tests that wait
-    /// for sockets must not use them up.
+    /// Runs `work`, which blocks, on a thread of its own. Neither the pool that `async` code runs on, which has few threads, nor the
+    /// global dispatch pool will do: the other tests of the run can fill both with work that waits, and a wait of this test that
+    /// has to queue behind them outlasts a limit of the server's, such as the one a connection that says nothing is given.
     func onAThread<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
         await withCheckedContinuation { continuation in
-            DispatchQueue.global().async { continuation.resume(returning: work()) }
+            Self.detached { continuation.resume(returning: work()) }
         }
     }
 
-    func ask(_ path: String? = nil, timeout: TimeInterval = 60) async -> ClipboardMCPClient.Outcome {
+    static func detached(_ work: @escaping @Sendable () -> Void) {
+        let thread = Thread(block: work)
+        thread.qualityOfService = .userInitiated
+        thread.start()
+    }
+
+    func ask(_ path: String? = nil, timeout: TimeInterval = 600) async -> ClipboardMCPClient.Outcome {
         let path = path ?? folder.socketPath
         let request = request
         return await onAThread { ClipboardMCPClient.send(request, socketPath: path, timeout: timeout) }
@@ -81,9 +88,16 @@ import Testing
         }
     }
 
-    /// The handler runs on the main actor, which other tests keep busy: a generous wait costs nothing when it is free.
-    func waitUntil(_ condition: () -> Bool) async {
-        for _ in 0..<3_000 where !condition() { try? await Task.sleep(for: .milliseconds(10)) }
+    /// Waits for `condition`, which the test then has to `#require`: a wait that ran out is a failure of the test, and not something
+    /// to find out from a count that is off by the time it is looked at. The handler runs on the main actor, which other tests keep
+    /// busy, so the limit is long: it costs nothing when the machine is free.
+    func waitUntil(seconds: Double = 120, _ condition: () -> Bool) async -> Bool {
+        let end = ContinuousClock.now + .seconds(seconds)
+        while !condition() {
+            guard ContinuousClock.now < end else { return false }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return true
     }
 
     func mode(of path: String) -> Int {
@@ -118,12 +132,12 @@ import Testing
         let request = request
         let outcomes = Mutex<[ClipboardMCPClient.Outcome]>([])
         for _ in 0..<6 {
-            DispatchQueue.global().async {
-                let outcome = ClipboardMCPClient.send(request, socketPath: path, timeout: 60)
+            Self.detached {
+                let outcome = ClipboardMCPClient.send(request, socketPath: path, timeout: 600)
                 outcomes.withLock { $0.append(outcome) }
             }
         }
-        await waitUntil { outcomes.withLock { $0.count } == 6 }
+        try #require(await waitUntil { outcomes.withLock { $0.count } == 6 })
         #expect(outcomes.withLock { $0 } == Array(repeating: .reply(answer), count: 6))
         server.stop()
     }
@@ -214,7 +228,7 @@ import Testing
         try server.start()
         let descriptor = try #require(connectRaw())
         defer { close(descriptor) }
-        #expect(await readUntilClosed(descriptor, seconds: 8) == Data())
+        #expect(await readUntilClosed(descriptor) == Data())
         #expect(seen.lines.isEmpty)
         server.stop()
     }
@@ -226,7 +240,7 @@ import Testing
         defer { close(descriptor) }
         let bytes = Array(#"{"arguments":{"query""#.utf8)
         _ = write(descriptor, bytes, bytes.count)
-        #expect(await readUntilClosed(descriptor, seconds: 8) == Data())
+        #expect(await readUntilClosed(descriptor) == Data())
         #expect(seen.lines.isEmpty)
         server.stop()
     }
@@ -236,19 +250,20 @@ import Testing
         try server.start()
         let descriptor = try #require(connectRaw())
         close(descriptor)
-        await waitUntil { server.connectionCount == 0 }
-        #expect(server.connectionCount == 0)
+        try #require(await waitUntil { server.connectionCount == 0 })
         #expect(await ask() == .reply(answer))
         server.stop()
     }
 
     @Test func helpersOverTheLimitAreRefusedAndTheOnesWaitingAreNotDisturbed() async throws {
-        let server = makeServer(timeout: 30, maxConnections: 2)
+        // The two that wait must still be waiting when the test looks at them again, however long a busy machine keeps it from looking: the
+        // limit that would end them is not what this test is about, so it is far longer than the test can take. They are closed below.
+        let server = makeServer(timeout: 600, maxConnections: 2)
         try server.start()
         let first = try #require(connectRaw())
         let second = try #require(connectRaw())
         defer { close(first); close(second) }
-        await waitUntil { server.connectionCount == 2 }
+        try #require(await waitUntil { server.connectionCount == 2 })
         let third = try #require(connectRaw())
         defer { close(third) }
         #expect(await readUntilClosed(third) == Data())
@@ -287,16 +302,17 @@ import Testing
         let path = folder.socketPath
         let request = request
         let pending = Mutex<ClipboardMCPClient.Outcome?>(nil)
-        DispatchQueue.global().async {
-            let outcome = ClipboardMCPClient.send(request, socketPath: path, timeout: 60)
+        Self.detached {
+            let outcome = ClipboardMCPClient.send(request, socketPath: path, timeout: 600)
             pending.withLock { $0 = outcome }
         }
-        // The main thread is held, so the request is read and queued for it, and cannot run before the server stops.
+        // The main thread is held (this wait does not give it up), so the request is read and queued for it, and cannot run before the
+        // server stops. The wait is long: a busy machine may take a while to get the helper's request to the server.
         let start = DispatchTime.now().uptimeNanoseconds
-        while server.requestsRead == 0, DispatchTime.now().uptimeNanoseconds - start < 8_000_000_000 { usleep(2_000) }
-        #expect(server.requestsRead == 1)
+        while server.requestsRead == 0, DispatchTime.now().uptimeNanoseconds - start < 120_000_000_000 { usleep(2_000) }
+        try #require(server.requestsRead == 1)
         server.stop()
-        await waitUntil { pending.withLock { $0 } != nil }
+        try #require(await waitUntil { pending.withLock { $0 } != nil })
         #expect(pending.withLock { $0 } == .noAnswer)
         #expect(seen.lines.isEmpty)
     }

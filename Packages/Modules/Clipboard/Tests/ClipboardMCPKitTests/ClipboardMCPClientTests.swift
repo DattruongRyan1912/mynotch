@@ -8,7 +8,8 @@ import Testing
 
     var answerLine: String { String(decoding: ClipboardMCPWire.replyLine(answer) ?? Data(), as: UTF8.self) }
 
-    /// How long `body` ran, in seconds.
+    /// How long `body` ran, in seconds. Bounds on it are loose (a minute, for waits of a fraction of a second): they say that a wait ends, and
+    /// a busy machine, where a thread may wait seconds to run, is not a reason to say it does not.
     func elapsed(_ body: () -> Void) -> TimeInterval {
         let start = DispatchTime.now().uptimeNanoseconds
         body()
@@ -51,7 +52,7 @@ import Testing
         let seconds = elapsed { outcome = ClipboardMCPClient.send(request, socketPath: app.socketPath, timeout: 0.4) }
         #expect(outcome == .noAnswer)
         #expect(seconds >= 0.35)
-        #expect(seconds < 8)
+        #expect(seconds < 60)
     }
 
     @Test func anAppThatNeverReadsTheRequestIsWaitedForOnlyUntilTheTimeout() throws {
@@ -59,15 +60,17 @@ import Testing
         var outcome: ClipboardMCPClient.Outcome?
         let seconds = elapsed { outcome = ClipboardMCPClient.send(request, socketPath: app.socketPath, timeout: 0.3) }
         #expect(outcome == .noAnswer)
-        #expect(seconds < 8)
+        #expect(seconds < 60)
     }
 
     @Test func anAppThatHangsUpIsNoAnswerAtOnce() throws {
         let app = try FakeMCPApp(behavior: .hangUp)
         var outcome: ClipboardMCPClient.Outcome?
-        let seconds = elapsed { outcome = ClipboardMCPClient.send(request, socketPath: app.socketPath, timeout: 30) }
+        // "At once" is far from the limit it is told: a busy machine may take seconds to get the client to run, and a limit near them would
+        // make the wait look like the answer.
+        let seconds = elapsed { outcome = ClipboardMCPClient.send(request, socketPath: app.socketPath, timeout: 300) }
         #expect(outcome == .noAnswer)
-        #expect(seconds < 8)
+        #expect(seconds < 60)
     }
 
     @Test func aReplyThatIsNotAnAnswerIsNoAnswer() throws {

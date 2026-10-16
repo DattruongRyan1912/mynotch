@@ -165,9 +165,14 @@ import Testing
         ]
         for piece in pieces {
             let text = String(repeating: piece, count: 512 * 1024 / piece.utf8.count)
-            let start = ContinuousClock.now
-            _ = ClipboardLinkHead.parse(Data(text.utf8), contentType: nil, pageURL: page)
-            #expect(ContinuousClock.now - start < .seconds(3), "\(piece)")
+            // The time this thread spends running, not the time that goes by: a machine with other work on it makes a parse that takes a
+            // fraction of a second last for seconds, and a limit on that would fail a parse that is linear. A parse that is not linear
+            // takes minutes of running on this much text.
+            let data = Data(text.utf8)
+            let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+            _ = ClipboardLinkHead.parse(data, contentType: nil, pageURL: page)
+            let ran = Duration.nanoseconds(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start)
+            #expect(ran < .seconds(3), "\(piece): \(ran)")
         }
     }
 

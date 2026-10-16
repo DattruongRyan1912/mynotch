@@ -230,7 +230,7 @@ import Testing
         #expect(try current(url).linkPreview?.title == "Đã sửa")
     }
 
-    @Test(.timeLimit(.minutes(1))) func aTimeOutIsAFailureToo() async throws {
+    @Test(.timeLimit(.minutes(5))) func aTimeOutIsAFailureToo() async throws {
         let hanging = LinkFlag()
         let slow = FakeLinkTransport { _ in
             hanging.raise()

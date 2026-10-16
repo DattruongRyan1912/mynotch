@@ -65,7 +65,7 @@ nonisolated final class StubURLProtocol: URLProtocol {
 /// another test.
 @Suite nonisolated struct ClipboardLinkNetworkTests {
     /// A long limit, so that the time a busy machine takes is not what a test is about; the brief's five seconds is checked on its own.
-    let network = ClipboardLinkNetwork(timeout: 120, adjusting: { $0.protocolClasses = [StubURLProtocol.self] })
+    let network = ClipboardLinkNetwork(timeout: 1_200, adjusting: { $0.protocolClasses = [StubURLProtocol.self] })
 
     func page(_ url: String, limit: Int = 512 * 1024) -> ClipboardLinkRequest {
         ClipboardLinkRequest(url: URL(string: url)!, kind: .page, byteLimit: limit)

@@ -29,7 +29,7 @@ import Testing
                 calls.exports.append((options, url))
                 if let value = calls.reportsAndWaits {
                     progress(value)
-                    try await Task.sleep(for: .seconds(60))
+                    try await Task.sleep(for: .seconds(3600))
                 }
                 return try calls.exportOutcome.get()
             },
@@ -37,14 +37,14 @@ import Testing
                 calls.plans.append(url)
                 if let value = calls.reportsAndWaits {
                     progress(value)
-                    try await Task.sleep(for: .seconds(60))
+                    try await Task.sleep(for: .seconds(3600))
                 }
                 let summary = try calls.planOutcome.get()
                 return ClipboardRestoreOffer(summary: summary) { policy, progress in
                     calls.commits.append(policy)
                     if let value = calls.reportsAndWaits {
                         progress(value)
-                        try await Task.sleep(for: .seconds(60))
+                        try await Task.sleep(for: .seconds(3600))
                     }
                     return try calls.commitOutcome.get()
                 }
@@ -53,8 +53,16 @@ import Testing
         ))
     }
 
-    func waitUntil(_ condition: () -> Bool) async {
-        for _ in 0..<2_000 where !condition() { await Task.yield() }
+    /// Waits for `condition` for as long as a busy machine can need, and answers whether it came true. A count of yields is not a time: on a
+    /// machine with other work on it the task that makes the condition true can be a long way from its turn, and a wait that ran out first
+    /// would go on to a step that needs it.
+    func waitUntil(seconds: Double = 120, _ condition: () -> Bool) async -> Bool {
+        let end = ContinuousClock.now + .seconds(seconds)
+        while !condition() {
+            guard ContinuousClock.now < end else { return false }
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        return true
     }
 
     /// A restore read and waiting for the choice.
@@ -188,7 +196,7 @@ import Testing
 
         model.startExport(ClipboardBackupOptions(), to: url)
         #expect(model.isWorking)
-        await waitUntil { model.status == .working(title: "Đang sao lưu…", fraction: 0.4) }
+        #expect(await waitUntil { model.status == .working(title: "Đang sao lưu…", fraction: 0.4) })
 
         #expect(model.status == .working(title: "Đang sao lưu…", fraction: 0.4))
         model.cancel()
@@ -199,7 +207,7 @@ import Testing
         let model = makeModel()
         calls.reportsAndWaits = 0.1
         model.startRestore(from: url)
-        await waitUntil { model.status == .working(title: "Đang đọc tệp…", fraction: 0.1) }
+        #expect(await waitUntil { model.status == .working(title: "Đang đọc tệp…", fraction: 0.1) })
         #expect(model.status == .working(title: "Đang đọc tệp…", fraction: 0.1))
         model.cancel()
         await model.task?.value
@@ -208,7 +216,7 @@ import Testing
         await choosing(model)
         calls.reportsAndWaits = 0.2
         model.confirmRestore(.applyLimits)
-        await waitUntil { model.status == .working(title: "Đang khôi phục…", fraction: 0.2) }
+        #expect(await waitUntil { model.status == .working(title: "Đang khôi phục…", fraction: 0.2) })
         #expect(model.status == .working(title: "Đang khôi phục…", fraction: 0.2))
         model.cancel()
         await model.task?.value
@@ -218,7 +226,7 @@ import Testing
         let model = makeModel()
         calls.reportsAndWaits = 0.2
         model.startRestore(from: url)
-        await waitUntil { model.status == .working(title: "Đang đọc tệp…", fraction: 0.2) }
+        #expect(await waitUntil { model.status == .working(title: "Đang đọc tệp…", fraction: 0.2) })
 
         model.cancel()
         await model.task?.value
@@ -231,7 +239,7 @@ import Testing
         await choosing(model)
         calls.reportsAndWaits = 0.3
         model.confirmRestore(.keepAll)
-        await waitUntil { model.status == .working(title: "Đang khôi phục…", fraction: 0.3) }
+        #expect(await waitUntil { model.status == .working(title: "Đang khôi phục…", fraction: 0.3) })
 
         model.cancel()
         await model.task?.value
@@ -245,7 +253,7 @@ import Testing
         model.startExport(ClipboardBackupOptions(), to: url)
         model.startExport(ClipboardBackupOptions(), to: url)
         model.startRestore(from: url)
-        await waitUntil { model.status == .working(title: "Đang sao lưu…", fraction: 0.3) }
+        #expect(await waitUntil { model.status == .working(title: "Đang sao lưu…", fraction: 0.3) })
 
         #expect(calls.exports.count == 1 && calls.plans.isEmpty)
         model.cancel()
@@ -256,7 +264,7 @@ import Testing
         let model = makeModel()
         calls.reportsAndWaits = 0.6
         model.startExport(ClipboardBackupOptions(), to: url)
-        await waitUntil { model.status == .working(title: "Đang sao lưu…", fraction: 0.6) }
+        #expect(await waitUntil { model.status == .working(title: "Đang sao lưu…", fraction: 0.6) })
 
         model.progressChanged(0.2)
 
@@ -274,7 +282,7 @@ import Testing
 
         calls.reportsAndWaits = 0.5
         model.startExport(ClipboardBackupOptions(), to: url)
-        await waitUntil { model.status == .working(title: "Đang sao lưu…", fraction: 0.5) }
+        #expect(await waitUntil { model.status == .working(title: "Đang sao lưu…", fraction: 0.5) })
         model.dismiss()
         #expect(model.isWorking)
         model.cancel()

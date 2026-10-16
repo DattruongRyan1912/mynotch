@@ -241,7 +241,7 @@ import Testing
 
         let path = socketFolder + "/mcp.sock"
         func count(_ query: String) async -> Int? {
-            let outcome = await Task.detached { ClipboardMCPClient.send(.search(ClipboardMCPSearch(query: query)), socketPath: path, timeout: 60) }.value
+            let outcome = await Task.detached { ClipboardMCPClient.send(.search(ClipboardMCPSearch(query: query)), socketPath: path, timeout: 600) }.value
             guard case .reply(.success(let result)) = outcome else { return nil }
             return result["count"]?.int
         }

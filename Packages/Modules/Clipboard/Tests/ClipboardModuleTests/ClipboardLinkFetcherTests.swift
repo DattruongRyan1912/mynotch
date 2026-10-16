@@ -292,7 +292,7 @@ import Testing
     // MARK: Time
 
     /// What a time limit is for: work that never ends. The limit runs out once the work has begun to hang, whatever the machine is doing.
-    @Test(.timeLimit(.minutes(1))) func aRequestThatNeverAnswersIsGivenUpOn() async throws {
+    @Test(.timeLimit(.minutes(5))) func aRequestThatNeverAnswersIsGivenUpOn() async throws {
         let hanging = LinkFlag()
         transport.setHandler { _ in
             hanging.raise()
@@ -306,7 +306,7 @@ import Testing
         #expect(transport.requests.count == 1)
     }
 
-    @Test(.timeLimit(.minutes(1))) func aLookupThatNeverAnswersIsGivenUpOn() async throws {
+    @Test(.timeLimit(.minutes(5))) func aLookupThatNeverAnswersIsGivenUpOn() async throws {
         let hanging = LinkFlag()
         transport.setLookupHandler { _ in
             hanging.raise()
@@ -322,7 +322,7 @@ import Testing
 
     /// Every request answers, none runs out of time, and the whole still does: a server that answers each just in time would never reach
     /// the limit of any one of them.
-    @Test(.timeLimit(.minutes(1))) func theWholeHasATimeLimitToo() async throws {
+    @Test(.timeLimit(.minutes(5))) func theWholeHasATimeLimitToo() async throws {
         let hanging = LinkFlag()
         transport.setHandler { request in
             if request.kind == .page { return .html("<head><title>Đã có tiêu đề</title><link rel=icon href=/a.png><link rel=icon href=/b.png></head>") }
@@ -337,7 +337,7 @@ import Testing
         #expect(outcome == .failed)
     }
 
-    @Test(.timeLimit(.minutes(1))) func aCancelledFetchEndsAsAFailure() async throws {
+    @Test(.timeLimit(.minutes(5))) func aCancelledFetchEndsAsAFailure() async throws {
         let started = LinkFlag()
         transport.setHandler { _ in
             started.raise()

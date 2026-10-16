@@ -105,7 +105,7 @@ import Testing
     // MARK: Over a real socket
 
     private func session(socketPath: String) -> MCPSession {
-        let runner = ClipboardMCPHelper.ToolRunner(socketPath: socketPath, timeout: 60)
+        let runner = ClipboardMCPHelper.ToolRunner(socketPath: socketPath, timeout: 600)
         return MCPSession(info: ClipboardMCPTools.serverInfo, tools: ClipboardMCPTools.definitions, callTool: runner.call)
     }
 
