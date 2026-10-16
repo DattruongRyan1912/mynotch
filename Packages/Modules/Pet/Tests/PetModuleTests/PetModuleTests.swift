@@ -108,15 +108,15 @@ import Testing
         #expect(harness.activities.current?.module == "pet")
     }
 
-    @Test func itIsAtTheLowestPriorityThereIsAndAsksForNoStrip() async throws {
+    @Test func itIsAtTheLowestPriorityThereIsAndHasAStripUnderTheNotchForTheCatToPlayOn() async throws {
         let harness = PetHarness()
         await harness.start()
         harness.advance(2)
         let activity = try #require(harness.cat).activity
         #expect(activity.priority == .low)
-        #expect(activity.bottom == nil)
-        #expect(activity.bottomHeight == 0)
-        #expect(!activity.hasBottom, "so the notch grows downward by nothing")
+        #expect(activity.bottom != nil)
+        #expect(activity.bottomHeight == 26)
+        #expect(activity.hasBottom, "so the notch grows downward by the strip's height and no more")
         #expect(activity.expiresAfter == nil)
         #expect(activity.id == "cat")
         #expect(activity.summary != nil)
@@ -219,7 +219,7 @@ import Testing
         let settings = try #require(harness.settingsEnvironment(for: "pet")).settings
         let keys = PetSettingsKeys(settings)
         #expect(settings.value(keys.show))
-        #expect(!settings.value(keys.bothWings))
+        #expect(settings.value(keys.coat) == .tabby)
         #expect(!settings.value(keys.meow))
         #expect(settings.value(keys.sleepMinutes) == 5)
         #expect(keys.show.name == "module.pet.show")
@@ -251,14 +251,14 @@ import Testing
         await harness.start()
         let stage = try #require(harness.madeStage)
         #expect(stage.tuning.sleepAfter == 300)
-        #expect(!stage.bothWings)
+        #expect(stage.coat == .tabby)
         #expect(!stage.playsMeow)
         harness.setting("sleepMinutes", 10)
-        harness.setting("bothWings", true)
+        harness.setting("coat", CatCoat.tuxedo)
         harness.setting("meow", true)
         await harness.settle(until: { stage.playsMeow })
         #expect(stage.tuning.sleepAfter == 600)
-        #expect(stage.bothWings)
+        #expect(stage.coat == .tuxedo)
         #expect(stage.playsMeow)
         harness.setting("sleepMinutes", 2)
         await harness.settle(until: { stage.tuning.sleepAfter == 120 })
@@ -295,28 +295,36 @@ import Testing
         #expect(!stage.isTicking)
     }
 
-    @Test func theViewsOfTheCatAsTheNotchBuildsThemAskForNothing() async throws {
+    @Test func theStripAsTheNotchBuildsItAsksForNothingAndTheWingsAreEmpty() async throws {
         let harness = PetHarness()
         await harness.start()
         harness.advance(2)
         let activity = try #require(harness.cat).activity
         let stage = try #require(harness.madeStage)
         let counter = CatSpriteViewTests.Counter()
-        let view = HStack(spacing: 0) {
-            activity.leading.frame(width: 64)
-            Spacer(minLength: 185)
-            activity.trailing.frame(width: 64)
+        // As the notch lays the activity out: the wings, and the strip under them as wide as the notch.
+        let view = VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                activity.leading.frame(width: 64)
+                Spacer(minLength: 185)
+                activity.trailing.frame(width: 64)
+            }
+            .frame(height: 32)
+            activity.bottom.map { $0.frame(height: activity.bottomHeight) }
         }
-        .frame(width: 313, height: 32)
+        .frame(width: 300)
         .onNotchStripWidth { counter.stripWidths.append($0) }
         let hosting = NSHostingView(rootView: view)
-        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 313, height: 32), styleMask: .borderless, backing: .buffered, defer: true)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 300, height: 58), styleMask: .borderless, backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
         window.contentView = hosting
         hosting.layoutSubtreeIfNeeded()
-        #expect(stage.attachedHosts.count == 2, "both wings have a cat view in them")
+        #expect(stage.attachedHosts.count == 1, "one cat view, in the strip")
         #expect(counter.stripWidths.allSatisfy { $0 == 0 })
-        #expect(hosting.fittingSize == CGSize(width: 313, height: 32))
+        #expect(hosting.fittingSize == CGSize(width: 300, height: 58))
+        let cat = try #require(stage.attachedHosts.first)
+        #expect(cat.convert(cat.bounds, to: hosting).height == 26)
+        #expect(cat.convert(cat.bounds, to: hosting).width == 300)
         window.contentView = nil
         #expect(!stage.isAlive)
     }

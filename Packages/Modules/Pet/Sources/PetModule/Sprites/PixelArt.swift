@@ -48,7 +48,7 @@ nonisolated struct PixelFrame: Equatable, Sendable {
         cells = Array(repeating: PixelPalette.clear, count: width * height)
     }
 
-    private init(width: Int, height: Int, cells: [Character]) {
+    init(width: Int, height: Int, cells: [Character]) {
         self.width = width
         self.height = height
         self.cells = cells
@@ -85,17 +85,57 @@ nonisolated struct PixelFrame: Equatable, Sendable {
         return PixelFrame(width: width, height: height, cells: cells)
     }
 
+    /// The picture with `margin` clear pixels added on every side.
+    func padded(by margin: Int) -> PixelFrame {
+        var larger = PixelFrame(width: width + 2 * margin, height: height + 2 * margin)
+        larger = larger.drawing(self, atX: margin, y: margin)
+        return larger
+    }
+
+    /// The picture with a clear margin of one pixel added on every side and `rim` drawn in every pixel of it that touches the picture,
+    /// corners included: a line of light all round the cat, which is what makes a dark cat read on a black notch.
+    func rimmed(with rim: Character) -> PixelFrame {
+        let base = padded(by: 1)
+        var cells = base.cells
+        for row in 0..<base.height {
+            for column in 0..<base.width where base[column, row] == PixelPalette.clear {
+                let touches = (-1...1).contains { dy in
+                    (-1...1).contains { dx in
+                        let (x, y) = (column + dx, row + dy)
+                        return (dx != 0 || dy != 0) && (0..<base.width).contains(x) && (0..<base.height).contains(y)
+                            && base[x, y] != PixelPalette.clear
+                    }
+                }
+                if touches { cells[row * base.width + column] = rim }
+            }
+        }
+        return PixelFrame(width: base.width, height: base.height, cells: cells)
+    }
+
     /// How many pixels are not clear.
     var inkCount: Int { cells.reduce(0) { $0 + ($1 == PixelPalette.clear ? 0 : 1) } }
 }
 
-/// A looping run of frames, played at `fps`.
+/// A run of frames, played at `fps`: over and over, or once through and then held on the last.
 nonisolated struct PixelAnimation: Equatable, Sendable {
     let frames: [PixelFrame]
     let fps: Double
+    var loops = true
+    /// How far, in points, the thing drawn goes forward in each frame when it is going somewhere: the pace of a walk is this and `fps`.
+    var advance = 0.0
+
+    init(frames: [PixelFrame], fps: Double, loops: Bool = true, advance: Double = 0) {
+        self.frames = frames
+        self.fps = fps
+        self.loops = loops
+        self.advance = advance
+    }
 
     /// Time one pass takes, in seconds.
     var duration: TimeInterval { Double(frames.count) / fps }
+
+    /// How fast it goes, in points a second, while it plays.
+    var speed: Double { advance * fps }
 }
 
 /// A strip of frames side by side in one image, which a layer plays by moving its `contentsRect` along it.
@@ -110,6 +150,9 @@ nonisolated struct PixelStrip {
     let frameHeight: Int
     let frameCount: Int
     let image: CGImage
+
+    /// What the image holds in memory.
+    var byteCount: Int { image.width * image.height * 4 }
 
     /// nil only when the system cannot make an image of this size.
     init?(frames: [PixelFrame], palette: PixelPalette) {

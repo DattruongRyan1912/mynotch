@@ -1,351 +1,113 @@
 import Foundation
 
-/// What the cat does, as pictures. Each frame is 20 x 16 pixels, drawn by hand as text and put together from a few pieces (a head, a
-/// body, a tail, a paw), so that the head of the walking cat is the head of the sitting one. They face right; the cat that walks left is
-/// the same frames mirrored.
+/// What the cat does, as pictures. The cat is drawn on a board of 30 by 22 pixels and given a light rim all round, which makes frames
+/// of 32 by 24: one pixel to the point on the notch, so two or three device pixels to a pixel of the cat on any display.
+///
+/// It is drawn in letters (see `CatCoat`), side on when it is going somewhere and facing the viewer when it is not. Its head is typed out
+/// (`head`); its body, legs and tail are put together from numbers by `CatCanvas`, which is what lets an animation have as many
+/// different frames as it needs.
 nonisolated enum CatArt {
-    static let width = 20
-    static let height = 16
+    static let width = CatCanvas.width + 2
+    static let height = CatCanvas.height + 2
 
-    /// A cat the colour of marmalade with a dark brown line round it, so it reads on black, on light glass, and on a wallpaper.
-    static let palette = PixelPalette(colors: [
-        "K": 0x4A2A17,  // outline
-        "O": 0xF0A14E,  // coat
-        "D": 0xC4702A,  // stripes, the legs on the far side
-        "W": 0xFDECD2,  // chest, paws, muzzle
-        "P": 0xF590B0,  // nose, ears, tongue
-        "E": 0x161212,  // eyes
-        "Z": 0xA8D6FF,  // sleep
-        "H": 0xFF5C8A,  // hearts
-        "N": 0xFFD23F,  // music
-        "S": 0xCFD8E3,  // a run's streaks
-    ])
+    typealias Point = (x: Double, y: Double)
 
-    // MARK: Pieces
+    // MARK: The face
 
-    private static let headOpen = [
-        ".K....K.",
-        "KPK..KPK",
-        "KOOOOOOK",
-        "KOEOOEOK",
-        "KOEOOEOK",
-        "KOWPPWOK",
-        ".KKKKKK.",
-    ]
-    private static let headBlink = [
-        ".K....K.",
-        "KPK..KPK",
-        "KOOOOOOK",
-        "KOOOOOOK",
-        "KOKOOKOK",
-        "KOWPPWOK",
-        ".KKKKKK.",
-    ]
-    private static let headHappy = [
-        ".K....K.",
-        "KPK..KPK",
-        "KOOOOOOK",
-        "KOKOOKOK",
-        "KPOOOOPK",
-        "KOWPPWOK",
-        ".KKKKKK.",
-    ]
-    private static let headYawn = [
-        ".K....K.",
-        "KPK..KPK",
-        "KOOOOOOK",
-        "KOKOOKOK",
-        "KOOKKOOK",
-        "KOOPPOOK",
-        ".KKKKKK.",
-    ]
-    private static let headStartled = [
-        ".K....K.",
-        "KPK..KPK",
-        "KOOOOOOK",
-        "KEEOOEEK",
-        "KEEOOEEK",
-        "KOOPPOOK",
-        ".KKKKKK.",
-    ]
-
-    private static let torsoWalk = [
-        ".KKKKKKKKKK.",
-        "KOODOODOOOOK",
-        "KOOOOOOOOOOK",
-        "KOOOOOOOOWWK",
-        ".KOOOOOOOOK.",
-    ]
-    /// Legs under `torsoWalk`: the last row has a paw only on the legs that are down.
-    private static let legsTop = ["DDOO....DDOO", "DDOO....DDOO"]
-    private static let pawsStep0 = "WW........WW"
-    private static let pawsStep1 = "WWWW....WWWW"
-    private static let pawsStep2 = "..WW....WW.."
-
-    private static let tailUp = [
-        "DD..",
-        "OD..",
-        ".OO.",
-        ".OO.",
-        "..OO",
-        "..OO",
-        "..OO",
-        "..OO",
-    ]
-    private static let tailMid = [
-        "....",
-        "....",
-        "DD..",
-        "OO..",
-        "OO..",
-        ".OO.",
-        "..OO",
-        "..OO",
-    ]
-    private static let tailLow = [
-        "....",
-        "....",
-        "....",
-        "....",
-        "....",
-        "....",
-        "DD..",
-        "OOOO",
-    ]
-
-    private static let torsoSit = [
-        "....KKKK...",
-        "...KOOODK..",
-        "..KOODOOOK.",
-        ".KOOOOOOOWK",
-        "KODOOOOOWWK",
-        "KOOOOOOOWWK",
-        "KOOOOOOOWWK",
-        "KOOOOOOKWWK",
-        "KKKKKKKKKKK",
-    ]
-    private static let tailSitDown = [
-        "........",
-        "........",
-        "........",
-        "........",
-        "........",
-        "........",
-        "........",
-        "KOOOOO..",
-        "DDDDDD..",
-    ]
-
-    private static let pawLifted = [
-        "WW",
-        "WW",
-        "KK",
-    ]
-    private static let tongue = [
-        "P",
-    ]
-
-    private static let loaf = [
-        "..KKKKKKKK..",
-        ".KOODOODOOK.",
-        "KODOOOOOOOOK",
-        "KOOOOOOOOOOK",
-        ".KKKKKKKKKK.",
-    ]
-    private static let tailLoaf = [
-        "KKKK",
-        "DOOK",
-        "DDDD",
-    ]
-
-    private static let zed = [
-        "ZZZZ",
-        "..Z.",
-        ".Z..",
-        "ZZZZ",
-    ]
-    private static let heart = [
-        ".H.H.",
-        "HHHHH",
-        ".HHH.",
-        "..H..",
-    ]
-    private static let note = [
-        ".NN",
-        ".N.",
-        "NN.",
-        "NN.",
-    ]
-    private static let streak = [
-        "SSS",
-    ]
-
-    // MARK: Building
-
-    private static func piece(_ rows: [String]) -> PixelFrame {
-        do { return try PixelFrame(rows: rows, palette: palette) } catch { fatalError("The cat's art is malformed: \(error)") }
+    enum Face {
+        case open, blink, happy, yawn, wide, lookLeft, lookRight, lookUp, sleep, squint
     }
 
-    private static var blank: PixelFrame { PixelFrame(width: width, height: height) }
-
-    private struct Placed {
-        let rows: [String]
-        let x: Int
-        let y: Int
-    }
-
-    /// The pieces drawn from the back to the front, on a clear frame.
-    private static func frame(_ pieces: [Placed]) -> PixelFrame {
-        pieces.reduce(blank) { $0.drawing(piece($1.rows), atX: $1.x, y: $1.y) }
-    }
-
-    /// A walking cat: its tail, its body with the legs of this step, its head, all `lift` pixels higher than the ground.
-    private static func walking(paws: String, tail: [String], head: [String], lift: Int = 0, streaks: Bool = false) -> PixelFrame {
-        var pieces = [
-            Placed(rows: tail, x: 0, y: 3 - lift),
-            Placed(rows: torsoWalk + legsTop + [paws], x: 2, y: 8 - lift),
-            Placed(rows: head, x: 12, y: 3 - lift),
+    /// The head, 13 by 11, facing the viewer: pointed ears with pink in them, a round head, eyes with a shine in them, a pink nose, a mouth.
+    static func head(_ face: Face) -> [String] {
+        var rows = [
+            ".KK.......KK.",
+            "KPPK.....KPPK",
+            "KPPPKKKKKPPPK",
+            "KOOOOOOOOOOOK",
+            "KOODOOOOODOOK",
+            "KOLEOOOOOLEOK",
+            "KOEEOOOOOEEOK",
+            "KOOOOPPPOOOOK",
+            "KOOWWWKWWWOOK",
+            ".KOOOOOOOOOK.",
+            "..KKKKKKKKK..",
         ]
-        if streaks {
-            pieces.append(Placed(rows: streak, x: 0, y: 11 - lift))
-            pieces.append(Placed(rows: streak, x: 1, y: 14 - lift))
+        switch face {
+        case .open: break
+        case .blink, .sleep:
+            rows[5] = "KOOOOOOOOOOOK"
+            rows[6] = "KOKKOOOOOKKOK"
+        case .squint:
+            rows[5] = "KOOOOOOOOOOOK"
+            rows[6] = "KOEEOOOOOEEOK"
+        case .happy:
+            rows[5] = "KOOKOOOOOKOOK"
+            rows[6] = "KOKOKOOOKOKOK"
+            rows[7] = "KOPOOPPPOOPOK"
+        case .yawn:
+            rows[5] = "KOOOOOOOOOOOK"
+            rows[6] = "KOKKOOOOOKKOK"
+            rows[7] = "KOOOOPPPOOOOK"
+            rows[8] = "KOOWKPPPKWOOK"
+        case .wide:
+            rows[5] = "KOLEEOOOLEEOK"
+            rows[6] = "KOEEEOOOEEEOK"
+            rows[8] = "KOOWWKPKWWOOK"
+        case .lookLeft:
+            rows[5] = "KLEOOOOOLEOOK"
+            rows[6] = "KEEOOOOOEEOOK"
+        case .lookRight:
+            rows[5] = "KOOLEOOOOOLEK"
+            rows[6] = "KOOEEOOOOOEEK"
+        case .lookUp:
+            rows[4] = "KOLEOOOOOLEOK"
+            rows[5] = "KOEEOOOOOEEOK"
+            rows[6] = "KOOOOOOOOOOOK"
         }
-        return frame(pieces)
+        return rows
     }
 
-    private static func sitting(tail: [String], head: [String], dy: Int = 0, extras: [Placed] = []) -> PixelFrame {
-        frame([
-            Placed(rows: tail, x: 0, y: 7 + dy),
-            Placed(rows: torsoSit, x: 4, y: 7 + dy),
-            Placed(rows: head, x: 12, y: 3 + dy),
-        ] + extras)
+    // MARK: Finishing
+
+    enum Whiskers {
+        case both, right, none
     }
 
-    private static func curled(breath: Int, extras: [Placed]) -> PixelFrame {
-        frame([
-            Placed(rows: loaf, x: 0, y: 10 + breath),
-            Placed(rows: tailLoaf, x: 0, y: 13),
-            Placed(rows: headBlink, x: 12, y: 8 + breath),
-        ] + extras)
-    }
-
-    // MARK: Animations
-
-    /// The cat sitting with its tail down, flicking it now and then.
-    static let sit = PixelAnimation(
-        frames: [
-            sitting(tail: tailSitDown, head: headOpen), sitting(tail: tailSitDown, head: headOpen),
-            sitting(tail: tailSitDown, head: headOpen), sitting(tail: tailSitDown, head: headOpen),
-            sitting(tail: tailUp, head: headOpen), sitting(tail: tailSitDown, head: headOpen),
-        ],
-        fps: 4
-    )
-
-    /// Eyes shut for a moment: held while it lasts.
-    static let blink = PixelAnimation(frames: [sitting(tail: tailSitDown, head: headBlink)], fps: 4)
-
-    static let walk = PixelAnimation(
-        frames: [
-            walking(paws: pawsStep0, tail: tailUp, head: headOpen),
-            walking(paws: pawsStep1, tail: tailMid, head: headOpen),
-            walking(paws: pawsStep2, tail: tailUp, head: headOpen),
-            walking(paws: pawsStep1, tail: tailMid, head: headOpen),
-        ],
-        fps: 8
-    )
-
-    /// Legs gathered, then all out of the ground, with streaks behind it.
-    static let run = PixelAnimation(
-        frames: [
-            walking(paws: pawsStep0, tail: tailLow, head: headOpen, streaks: true),
-            walking(paws: "............", tail: tailLow, head: headOpen, lift: 1, streaks: true),
-            walking(paws: pawsStep2, tail: tailLow, head: headOpen, streaks: true),
-            walking(paws: "............", tail: tailLow, head: headOpen, lift: 1, streaks: true),
-        ],
-        fps: 12
-    )
-
-    static let lick = PixelAnimation(
-        frames: [
-            sitting(tail: tailSitDown, head: headBlink),
-            sitting(tail: tailSitDown, head: headBlink, extras: [Placed(rows: pawLifted, x: 16, y: 10)]),
-            sitting(tail: tailSitDown, head: headBlink, extras: [Placed(rows: pawLifted, x: 16, y: 8)]),
-            sitting(tail: tailSitDown, head: headBlink, extras: [Placed(rows: pawLifted, x: 16, y: 9)]),
-        ],
-        fps: 6
-    )
-
-    static let yawn = PixelAnimation(
-        frames: [
-            sitting(tail: tailSitDown, head: headOpen),
-            sitting(tail: tailSitDown, head: headBlink),
-            sitting(tail: tailSitDown, head: headYawn),
-            sitting(tail: tailSitDown, head: headYawn),
-            sitting(tail: tailSitDown, head: headBlink),
-        ],
-        fps: 4
-    )
-
-    /// Curled up, breathing, a z rising over it and another after it.
-    static let sleep = PixelAnimation(
-        frames: [
-            curled(breath: 0, extras: [Placed(rows: zed, x: 14, y: 4)]),
-            curled(breath: 0, extras: [Placed(rows: zed, x: 15, y: 3), Placed(rows: zed, x: 11, y: 5)]),
-            curled(breath: 1, extras: [Placed(rows: zed, x: 16, y: 1), Placed(rows: zed, x: 12, y: 3)]),
-            curled(breath: 1, extras: [Placed(rows: zed, x: 13, y: 1)]),
-        ],
-        fps: 2
-    )
-
-    /// Down to crouch, up, at the top of the jump with the tail up, down again.
-    static let startled = PixelAnimation(
-        frames: [
-            sitting(tail: tailSitDown, head: headStartled, dy: 1),
-            sitting(tail: tailUp, head: headStartled, dy: -2),
-            sitting(tail: tailUp, head: headStartled, dy: -3),
-            sitting(tail: tailSitDown, head: headStartled, dy: 0),
-        ],
-        fps: 8
-    )
-
-    /// Bobbing, with a note drifting up behind its head.
-    static let dance = PixelAnimation(
-        frames: [
-            sitting(tail: tailUp, head: headHappy, extras: [Placed(rows: note, x: 7, y: 3)]),
-            sitting(tail: tailMid, head: headHappy, dy: -1, extras: [Placed(rows: note, x: 8, y: 2)]),
-            sitting(tail: tailUp, head: headHappy, extras: [Placed(rows: note, x: 6, y: 1)]),
-            sitting(tail: tailMid, head: headHappy, dy: -1, extras: [Placed(rows: note, x: 7, y: 0)]),
-        ],
-        fps: 6
-    )
-
-    /// Eyes shut with pleasure, a heart drifting up behind its head.
-    static let purr = PixelAnimation(
-        frames: [
-            sitting(tail: tailUp, head: headHappy, extras: [Placed(rows: heart, x: 7, y: 3)]),
-            sitting(tail: tailMid, head: headHappy, extras: [Placed(rows: heart, x: 8, y: 2)]),
-            sitting(tail: tailUp, head: headHappy, extras: [Placed(rows: heart, x: 6, y: 1)]),
-            sitting(tail: tailMid, head: headHappy, extras: [Placed(rows: heart, x: 7, y: 0)]),
-        ],
-        fps: 6
-    )
-
-    /// The sitting cat with its eyes open, then shut: what a cat that does not move at all (Reduce Motion) shows.
-    static let restingFrames = [sit.frames[0], blink.frames[0]]
-
-    /// Every animation by what the cat is doing.
-    static func animation(for pose: CatPose) -> PixelAnimation {
-        switch pose {
-        case .sit: sit
-        case .blink: blink
-        case .walk: walk
-        case .run: run
-        case .lick: lick
-        case .yawn: yawn
-        case .sleep: sleep
-        case .startled: startled
-        case .dance: dance
-        case .purr: purr
+    /// The board with its light rim, and whiskers over the rim (they would be three pixels wide if they had one): `head` is where the head
+    /// was put on the board.
+    static func finish(_ canvas: CatCanvas, head: (x: Int, y: Int), whiskers: Whiskers = .both) -> PixelFrame {
+        var frame = canvas.frame.rimmed(with: "R")
+        guard whiskers != .none else { return frame }
+        // The head's left and right edges on the finished frame, at the row of the mouth.
+        let (left, right) = (head.x + 1, head.x + 13)
+        let row = head.y + 1 + 8
+        var cells: [(Int, Int)] = []
+        for step in 0..<3 {
+            if whiskers == .both {
+                cells.append((left - step, row - 1))
+                cells.append((left - step, row + 1 + (step == 2 ? 1 : 0)))
+            }
+            cells.append((right + step, row - 1))
+            cells.append((right + step, row + 1 + (step == 2 ? 1 : 0)))
         }
+        for (x, y) in cells where (0..<frame.width).contains(x) && (0..<frame.height).contains(y) {
+            frame = frame.drawing(PixelFrame(width: 1, height: 1, cells: ["V"]), atX: x, y: y)
+        }
+        return frame
+    }
+
+    // MARK: Particles
+
+    static let heart = [".H.H.", "HHHHH", ".HHH.", "..H.."]
+    static let zed = ["ZZZZ", "..Z.", ".Z..", "ZZZZ"]
+    static let note = [".NN", ".N.", "NN.", "NN."]
+    static let bang = ["BB", "BB", "BB", "BB", "..", "BB"]
+    static let sweat = [".S.", "SSS", "SSS"]
+
+    // MARK: Parts
+
+    static func stripes(_ canvas: inout CatCanvas, xs: [Int], top: Int, length: Int = 2) {
+        for x in xs { canvas.recolour(x: x...x, y: top...(top + length - 1), from: "O", to: "D") }
     }
 }

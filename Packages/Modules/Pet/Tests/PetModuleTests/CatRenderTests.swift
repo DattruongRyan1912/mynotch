@@ -5,32 +5,35 @@ import Testing
 @testable import PetModule
 
 /// The cat as the render server plays it, rendered offscreen by a `CARenderer` into a texture of its own (nothing on the screen, no
-/// window): the real view's layer with its real animation, at moments through the loops, against a plain layer showing the one picture
-/// that should be there, drawn the way any layer draws an image.
+/// window): the real view's layers with their real animations, at moments through the loops, against a plain layer showing the one
+/// picture that should be there, drawn the way any layer draws an image.
 @Suite(.enabled(if: MTLCreateSystemDefaultDevice() != nil), .serialized) @MainActor struct CatRenderTests {
-    static let side = 64
+    static let ground = CGColor(gray: 0.1, alpha: 1)
 
     /// Renders `layer` at media times and hands back BGRA bytes, rows as the texture has them.
     final class Offscreen {
         let queue: MTLCommandQueue
         let texture: MTLTexture
         let renderer: CARenderer
+        let width: Int
+        let height: Int
 
-        init?(layer: CALayer) {
+        init?(layer: CALayer, width: Int, height: Int) {
             guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else { return nil }
-            let description = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: CatRenderTests.side, height: CatRenderTests.side, mipmapped: false)
+            let description = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
             description.usage = [.renderTarget, .shaderRead]
             description.storageMode = .shared
             guard let texture = device.makeTexture(descriptor: description) else { return nil }
             self.queue = queue
             self.texture = texture
+            self.width = width
+            self.height = height
             renderer = CARenderer(mtlTexture: texture, options: [kCARendererMetalCommandQueue: queue])
             renderer.layer = layer
-            renderer.bounds = CGRect(x: 0, y: 0, width: CatRenderTests.side, height: CatRenderTests.side)
+            renderer.bounds = CGRect(x: 0, y: 0, width: width, height: height)
         }
 
         func render(atTime time: CFTimeInterval) -> [UInt8] {
-            let side = CatRenderTests.side
             renderer.beginFrame(atTime: time, timeStamp: nil)
             renderer.addUpdate(renderer.updateBounds())
             renderer.render()
@@ -38,91 +41,99 @@ import Testing
             let fence = queue.makeCommandBuffer()
             fence?.commit()
             fence?.waitUntilCompleted()
-            var bytes = [UInt8](repeating: 0, count: side * side * 4)
-            texture.getBytes(&bytes, bytesPerRow: side * 4, from: MTLRegionMake2D(0, 0, side, side), mipmapLevel: 0)
+            var bytes = [UInt8](repeating: 0, count: width * height * 4)
+            texture.getBytes(&bytes, bytesPerRow: width * 4, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
             return bytes
         }
     }
-
-    static let ground = CGColor(gray: 0.1, alpha: 1)
 
     /// How many bytes differ: a failure says that, not the two textures.
     func difference(_ first: [UInt8], _ second: [UInt8]) -> Int {
         first.count != second.count ? Int.max : zip(first, second).filter { $0 != $1 }.count
     }
 
-    /// The real view, 64 by 64 at 1x, so that a sprite pixel is three texture pixels, with the cat sitting at (2, 2).
-    func scene(pose: CatPose, facing: Facing) -> (CatSpriteView, Offscreen, CFTimeInterval)? {
+    /// The real view, 64 by 40 points, scaled up `scale` times by the layer above it as a Retina display scales, with the cat sitting at
+    /// its lane's left end.
+    func scene(move: CatMove, facing: Facing, coat: CatCoat = .tabby, scale: Int = 1) -> (CatSpriteView, Offscreen, CFTimeInterval)? {
         let stage = CatStage(scheduler: ManualSchedulerStub.make())
-        let host = CatSpriteView(stage: stage, role: .trailing)
-        host.backingScaleOverride = 1
-        host.frame = CGRect(x: 0, y: 0, width: Self.side, height: Self.side)
+        let host = CatSpriteView(stage: stage)
+        host.frame = CGRect(x: 0, y: 0, width: 64, height: 40)
         host.layer?.backgroundColor = Self.ground
-        let lane = WalkLane(minX: 2, maxX: 2, clipsToWings: true, restingX: 2)
-        host.show(plan: CatPlan(pose: pose, facing: facing, from: 0, to: 0, began: 0, duration: 99), lane: lane, elapsed: 0)
-        guard let layer = host.layer, let offscreen = Offscreen(layer: layer) else { return nil }
+        host.show(plan: CatPlan(move: move, facing: facing, from: 0, to: 0, began: 0, duration: 99), elapsed: 0, coat: coat)
+        let root = CALayer()
+        root.bounds = CGRect(x: 0, y: 0, width: 64, height: 40)
+        root.anchorPoint = .zero
+        root.position = .zero
+        root.setAffineTransform(CGAffineTransform(scaleX: CGFloat(scale), y: CGFloat(scale)))
+        guard let layer = host.layer else { return nil }
+        root.addSublayer(layer)
+        guard let offscreen = Offscreen(layer: root, width: 64 * scale, height: 40 * scale) else { return nil }
         // Pin the loop to the layer's own time, so that a frame rendered `seconds` later is `seconds` into the animation.
         let begin = host.sprite.convertTime(CACurrentMediaTime(), from: nil)
-        guard let frames = host.sprite.animation(forKey: CatSpriteView.framesKey)?.copy() as? CAKeyframeAnimation else { return nil }
-        frames.beginTime = begin
-        host.sprite.add(frames, forKey: CatSpriteView.framesKey)
+        guard let added = host.sprite.animation(forKey: CatSpriteView.framesKey)?.copy() as? CAKeyframeAnimation else { return nil }
+        added.beginTime = begin
+        host.sprite.add(added, forKey: CatSpriteView.framesKey)
         CATransaction.flush()
         return (host, offscreen, begin)
     }
 
-    /// A plain layer with `frame` of the pose's strip as its contents: what showing the right picture looks like.
-    func reference(pose: CatPose, facing: Facing, frame: Int) -> Offscreen? {
-        let strip = CatSheets.shared.strip(for: pose, facing: facing)
+    /// A plain layer with `frame` of the move's strip as its contents: what showing the right picture looks like.
+    func reference(move: CatMove, facing: Facing, coat: CatCoat = .tabby, frame: Int, scale: Int = 1) -> Offscreen? {
+        let strip = CatSheets.shared.strip(for: move, facing: facing, coat: coat)
         let cell = strip.frameWidth + 2 * PixelStrip.margin
         let crop = CGRect(x: frame * cell + PixelStrip.margin, y: PixelStrip.margin, width: strip.frameWidth, height: strip.frameHeight)
         guard let picture = strip.image.cropping(to: crop) else { return nil }
         let root = CALayer()
-        root.bounds = CGRect(x: 0, y: 0, width: Self.side, height: Self.side)
+        root.bounds = CGRect(x: 0, y: 0, width: 64, height: 40)
         root.anchorPoint = .zero
         root.position = .zero
         root.backgroundColor = Self.ground
+        root.setAffineTransform(CGAffineTransform(scaleX: CGFloat(scale), y: CGFloat(scale)))
         let sprite = CALayer()
         sprite.anchorPoint = .zero
-        sprite.bounds = CGRect(x: 0, y: 0, width: CGFloat(CatArt.width * 3), height: CGFloat(CatArt.height * 3))
-        sprite.position = CGPoint(x: 2, y: SpriteMetrics.floor)
+        sprite.bounds = CGRect(x: 0, y: 0, width: 32, height: 24)
+        sprite.position = CGPoint(x: WalkLane(width: 64, spriteWidth: 32).minX, y: CatSpriteView.floor)
         sprite.contents = picture
         sprite.contentsGravity = .resize
         sprite.magnificationFilter = .nearest
         sprite.minificationFilter = .nearest
         root.addSublayer(sprite)
         // Handed to a renderer first and committed after, as a layer is that the renderer is to draw.
-        let offscreen = Offscreen(layer: root)
+        let offscreen = Offscreen(layer: root, width: 64 * scale, height: 40 * scale)
         CATransaction.flush()
         return offscreen
     }
 
     @Test func eachMomentOfEachAnimationShowsTheFrameThatShouldBeThereAndTheSameAsAPlainLayerShowingIt() throws {
         var compared = 0
-        for (pose, facing) in [(CatPose.walk, Facing.right), (.walk, .left), (.run, .right), (.sit, .right), (.sleep, .right), (.purr, .left)] {
-            let (_, offscreen, begin) = try #require(scene(pose: pose, facing: facing))
-            let animation = CatArt.animation(for: pose)
-            let slot = animation.duration / Double(animation.frames.count)
+        for (move, facing) in [
+            (CatMove.walk, Facing.right), (.walk, .left), (.trot, .right), (.sit, .right), (.sleep, .right), (.purr, .left),
+            (.groom, .right), (.stretch, .left), (.startled, .right), (.dance, .right),
+        ] {
+            // The host's lane puts the cat at 6 points from the left; the reference puts it there too.
+            let (_, offscreen, begin) = try #require(scene(move: move, facing: facing))
+            let slot = 1 / move.fps
             var previous: [UInt8] = []
             var distinct = 0
-            // Two loops, in the middle of every frame's turn.
-            for index in 0..<(2 * animation.frames.count) {
+            // Two passes, in the middle of every frame's turn (a move played once is held on its last frame after the first).
+            for index in 0..<(2 * move.frameCount) {
                 let rendered = offscreen.render(atTime: begin + (Double(index) + 0.5) * slot)
-                let expected = try #require(reference(pose: pose, facing: facing, frame: index % animation.frames.count))
-                    .render(atTime: CACurrentMediaTime())
+                let shown = move.loops ? index % move.frameCount : min(index, move.frameCount - 1)
+                let expected = try #require(reference(move: move, facing: facing, frame: shown)).render(atTime: CACurrentMediaTime())
                 let differing = difference(rendered, expected)
-                #expect(differing == 0, "\(pose) \(facing) at frame \(index % animation.frames.count) of turn \(index): \(differing) bytes differ")
+                #expect(differing == 0, "\(move) \(facing) at frame \(shown) of turn \(index): \(differing) bytes differ")
                 if rendered != previous { distinct += 1 }
                 previous = rendered
                 compared += 1
             }
-            #expect(distinct > 1, "\(pose) \(facing) moves")
+            if move.frameCount > 1 { #expect(distinct > 1, "\(move) \(facing) moves") }
         }
-        #expect(compared == 2 * (4 + 4 + 4 + 6 + 4 + 4))
+        #expect(compared > 100)
     }
 
     @Test func theFramesAreHeldForTheirWholeSlotAndStepAtItsEdge() throws {
-        let (_, offscreen, begin) = try #require(scene(pose: .walk, facing: .right))
-        let slot = CatArt.walk.duration / 4
+        let (_, offscreen, begin) = try #require(scene(move: .walk, facing: .right))
+        let slot = 1 / CatMove.walk.fps
         let early = offscreen.render(atTime: begin + 0.1 * slot)
         let late = offscreen.render(atTime: begin + 0.9 * slot)
         let next = offscreen.render(atTime: begin + 1.1 * slot)
@@ -130,84 +141,113 @@ import Testing
         #expect(difference(early, next) > 100, "and a new picture in the next slot")
     }
 
-    @Test func everyPixelOfTheSpriteIsAWholeBlockOfThreeByThreeTexturePixelsOfOneColour() throws {
-        let (_, offscreen, begin) = try #require(scene(pose: .sit, facing: .right))
+    @Test(arguments: [2, 3]) func everyPixelOfTheCatIsAWholeBlockOfDevicePixelsOfOneColourOnADisplayThatScalesBy(scale: Int) throws {
+        let (_, offscreen, begin) = try #require(scene(move: .sit, facing: .right, scale: scale))
         let bytes = offscreen.render(atTime: begin + 0.01)
-        let side = Self.side
-        func colour(_ x: Int, _ y: Int) -> [UInt8] { Array(bytes[(y * side + x) * 4..<(y * side + x) * 4 + 4]) }
-        // The sprite is 60 by 48 texture pixels at x from 2; which rows depends on the way the renderer lays the texture out, so both
-        // are tried, and one of them has to be crisp throughout.
+        let width = offscreen.width
+        func colour(_ x: Int, _ y: Int) -> [UInt8] { Array(bytes[(y * width + x) * 4..<(y * width + x) * 4 + 4]) }
+        let (left, floor) = (6 * scale, 1 * scale)
+        let (rows, columns) = (24, 32)
+        // Which rows the picture's rows are on depends on the way the renderer lays its texture out, so both are tried, and one of them
+        // has to be crisp throughout.
         var crisp = [true, true]
-        for (index, top) in [side - 2 - 48, 2].enumerated() {
-            for row in 0..<CatArt.height {
-                for column in 0..<CatArt.width {
-                    let block = (0..<3).flatMap { dy in (0..<3).map { dx in colour(2 + column * 3 + dx, top + row * 3 + dy) } }
+        for (index, top) in [offscreen.height - floor - rows * scale, floor].enumerated() {
+            for row in 0..<rows {
+                for column in 0..<columns {
+                    let block = (0..<scale).flatMap { dy in (0..<scale).map { dx in colour(left + column * scale + dx, top + row * scale + dy) } }
                     if Set(block).count != 1 { crisp[index] = false }
                 }
             }
         }
-        #expect(crisp.contains(true), "no sprite pixel is smeared across its neighbours")
+        #expect(crisp.contains(true), "no pixel of the cat is smeared across its neighbours at \(scale)x")
     }
 
-    @Test func theSpritesPixelsAreTheFramesPixelsInThePalettesColours() throws {
-        let (_, offscreen, begin) = try #require(scene(pose: .sit, facing: .right))
-        let bytes = offscreen.render(atTime: begin + 0.01)
-        let side = Self.side
-        let frame = CatArt.sit.frames[0]
-        // The ground, as the texture has it: the corner is outside the cat.
-        let ground = Array(bytes[0..<3])
-        func matches(top: Int, flipped: Bool) -> Int {
-            var count = 0
-            for row in 0..<frame.height {
-                for column in 0..<frame.width {
-                    let shown = flipped ? frame.height - 1 - row : row
-                    let offset = ((top + shown * 3 + 1) * side + 2 + column * 3 + 1) * 4
-                    let pixel = Array(bytes[offset..<offset + 4])
-                    if let rgb = CatArt.palette.colors[frame[column, row]] {
-                        let expected: [UInt8] = [UInt8(rgb & 0xFF), UInt8((rgb >> 8) & 0xFF), UInt8((rgb >> 16) & 0xFF)]
-                        // Blue, green, red: within a step or two of the palette's own, since the layer may be colour-managed.
-                        if zip(pixel.prefix(3), expected).allSatisfy({ abs(Int($0) - Int($1)) <= 6 }) { count += 1 }
-                    } else if Array(pixel.prefix(3)) == ground {
-                        count += 1
+    @Test func thePixelsAreTheFramesPixelsInEveryCoatsColours() throws {
+        for coat in CatCoat.allCases {
+            let (_, offscreen, begin) = try #require(scene(move: .sit, facing: .right, coat: coat))
+            let bytes = offscreen.render(atTime: begin + 0.01)
+            let (width, height) = (offscreen.width, offscreen.height)
+            let frame = CatArt.animation(for: .sit).frames[0]
+            // The ground, as the texture has it: the corner is outside the cat.
+            let ground = Array(bytes[0..<3])
+            func matches(top: Int, flipped: Bool) -> Int {
+                var count = 0
+                for row in 0..<frame.height {
+                    for column in 0..<frame.width {
+                        let shown = flipped ? frame.height - 1 - row : row
+                        let offset = ((top + shown) * width + 6 + column) * 4
+                        let pixel = Array(bytes[offset..<offset + 4])
+                        if let rgb = coat.palette.colors[frame[column, row]] {
+                            let expected: [UInt8] = [UInt8(rgb & 0xFF), UInt8((rgb >> 8) & 0xFF), UInt8((rgb >> 16) & 0xFF)]
+                            // Blue, green, red: within a few steps of the palette's own, since the layer may be colour-managed.
+                            if zip(pixel.prefix(3), expected).allSatisfy({ abs(Int($0) - Int($1)) <= 6 }) { count += 1 }
+                        } else if Array(pixel.prefix(3)) == ground {
+                            count += 1
+                        }
                     }
                 }
+                return count
             }
-            return count
+            // The renderer may lay its texture out with the layer's bottom at either end; the picture is the right way up in both.
+            let best = max(matches(top: height - 1 - 24, flipped: false), matches(top: 1, flipped: true))
+            #expect(best == CatArt.width * CatArt.height, "\(coat): \(best) of \(CatArt.width * CatArt.height) pixels are the sprite's")
         }
-        // The renderer may lay its texture out with the layer's bottom at either end; the picture is the right way up in both.
-        let best = max(matches(top: side - 2 - 48, flipped: false), matches(top: 2, flipped: true))
-        #expect(best == CatArt.width * CatArt.height, "\(best) of \(CatArt.width * CatArt.height) pixels are the sprite's")
     }
 
-    @Test func aCatThatIsClippedToItsWingIsNotDrawnOutsideIt() throws {
+    @Test func aMothThatFliesOutOfTheStripIsCutOffByItsEdge() throws {
         let stage = CatStage(scheduler: ManualSchedulerStub.make())
-        let host = CatSpriteView(stage: stage, role: .trailing)
-        host.backingScaleOverride = 1
-        // A wing narrower than the cat: 20 points of a cat that is 60 wide.
-        host.frame = CGRect(x: 0, y: 0, width: 20, height: Self.side)
+        let host = CatSpriteView(stage: stage)
+        host.frame = CGRect(x: 0, y: 0, width: 64, height: 40)
         host.layer?.backgroundColor = Self.ground
-        let lane = WalkLane(minX: 2, maxX: 2, clipsToWings: true, restingX: 2)
-        host.show(plan: CatPlan(pose: .sit, facing: .right, from: 0, to: 0, began: 0, duration: 9), lane: lane, elapsed: 0)
+        // A moth well past the strip's right end: it is on the strip's layer, and the rest of the texture is beyond it.
+        host.show(plan: CatPlan(move: .sit, facing: .right, from: 0, to: 0, began: 0, duration: 9, prop: CatProp(kind: .moth, from: 2.6, to: 2.6)), elapsed: 0, coat: .tabby)
         let root = CALayer()
-        root.bounds = CGRect(x: 0, y: 0, width: Self.side, height: Self.side)
+        root.bounds = CGRect(x: 0, y: 0, width: 96, height: 40)
         root.anchorPoint = .zero
         root.position = .zero
         root.addSublayer(try #require(host.layer))
-        let offscreen = try #require(Offscreen(layer: root))
+        let offscreen = try #require(Offscreen(layer: root, width: 96, height: 40))
         CATransaction.flush()
         let bytes = offscreen.render(atTime: CACurrentMediaTime())
-        let side = Self.side
-        // Nothing but the ground past the wing's right edge, at column 20.
-        var drawnOutside = 0
-        for y in 0..<side {
-            for x in 21..<side where bytes[(y * side + x) * 4 + 3] != 0 { drawnOutside += 1 }
+        var outside = 0
+        var inside = 0
+        for y in 0..<40 {
+            for x in 0..<96 where bytes[(y * 96 + x) * 4 + 3] != 0 { if x >= 64 { outside += 1 } else { inside += 1 } }
         }
-        #expect(drawnOutside == 0)
-        // And the view's own part does have cat in it.
-        var drawnInside = 0
-        for y in 0..<side {
-            for x in 0..<20 where bytes[(y * side + x) * 4 + 3] != 0 { drawnInside += 1 }
+        #expect(outside == 0, "nothing past the strip's edge")
+        #expect(inside > 64 * 20, "the strip itself is drawn")
+        // And the moth is partly in the strip: a pale pixel of a wing near its right edge.
+        var wing = 0
+        for y in 0..<40 { for x in 56..<64 where bytes[(y * 96 + x) * 4 + 2] > 200 && bytes[(y * 96 + x) * 4 + 1] > 190 { wing += 1 } }
+        #expect(wing > 0, "the part of the moth that is still on the strip")
+    }
+
+    @Test func theYarnRollsThroughItsFramesAndTheMothFlutters() throws {
+        for (kind, animation) in [(PropKind.yarn, PropArt.yarn), (.moth, PropArt.moth)] {
+            let stage = CatStage(scheduler: ManualSchedulerStub.make())
+            let host = CatSpriteView(stage: stage)
+            host.frame = CGRect(x: 0, y: 0, width: 64, height: 40)
+            host.layer?.backgroundColor = Self.ground
+            host.show(plan: CatPlan(move: .sit, facing: .right, from: 0, to: 0, began: 0, duration: 99, prop: CatProp(kind: kind, from: 0.4, to: kind == .yarn ? 0.9 : 0.4)), elapsed: 0, coat: .tabby)
+            let root = CALayer()
+            root.bounds = CGRect(x: 0, y: 0, width: 64, height: 40)
+            root.anchorPoint = .zero
+            root.position = .zero
+            root.addSublayer(try #require(host.layer))
+            let offscreen = try #require(Offscreen(layer: root, width: 64, height: 40))
+            let begin = host.prop.convertTime(CACurrentMediaTime(), from: nil)
+            for key in [CatSpriteView.framesKey, CatSpriteView.walkKey, CatSpriteView.bobKey] {
+                guard let added = host.prop.animation(forKey: key)?.copy() as? CAKeyframeAnimation else { continue }
+                added.beginTime = begin
+                host.prop.add(added, forKey: key)
+            }
+            _ = try #require(host.prop.animation(forKey: CatSpriteView.framesKey))
+            CATransaction.flush()
+            var seen = Set<[UInt8]>()
+            for index in 0..<animation.frames.count {
+                seen.insert(offscreen.render(atTime: begin + (Double(index) + 0.5) / animation.fps))
+            }
+            #expect(seen.count == animation.frames.count, "\(kind): a picture for each frame")
         }
-        #expect(drawnInside > 100)
     }
 }

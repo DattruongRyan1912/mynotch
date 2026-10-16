@@ -4,202 +4,272 @@ import SwiftUI
 import Testing
 @testable import PetModule
 
-/// The view's layer and animations, driven directly with plans of the test's own.
+/// The view's layers and animations, driven directly with plans of the test's own.
 @Suite(.serialized) @MainActor struct CatSpriteViewTests {
-    /// A lane across the right wing of the rig's notch, in the window's coordinates.
-    func lane(of rig: StageRig, clips: Bool = true) -> WalkLane {
-        let wing = rig.trailing.windowFrame
-        return WalkLane(minX: wing.minX + 2, maxX: wing.maxX - 38, clipsToWings: clips, restingX: wing.midX - 15)
+    func plan(
+        _ move: CatMove, from: Double = 0.3, to: Double? = nil, duration: TimeInterval = 3, scale: Double = 1, delay: Double = 0,
+        prop: CatProp? = nil, facing: Facing = .right
+    ) -> CatPlan {
+        CatPlan(move: move, facing: facing, from: from, to: to ?? from, began: 0, duration: duration, fpsScale: scale, delay: delay, prop: prop)
     }
 
-    func framesAnimation(of host: CatSpriteView) throws -> CAKeyframeAnimation {
-        try #require(host.sprite.animation(forKey: CatSpriteView.framesKey) as? CAKeyframeAnimation)
+    func frames(of layer: CALayer) throws -> CAKeyframeAnimation {
+        try #require(layer.animation(forKey: CatSpriteView.framesKey) as? CAKeyframeAnimation)
     }
 
-    func walkAnimation(of host: CatSpriteView) throws -> CAKeyframeAnimation {
-        try #require(host.sprite.animation(forKey: CatSpriteView.walkKey) as? CAKeyframeAnimation)
+    func walk(of layer: CALayer) throws -> CAKeyframeAnimation {
+        try #require(layer.animation(forKey: CatSpriteView.walkKey) as? CAKeyframeAnimation)
     }
 
-    @Test func theCatIsDrawnWithNearestNeighbourFilteringAtAWholeNumberOfDevicePixelsToASpritePixel() throws {
+    func places(_ animation: CAKeyframeAnimation) -> [CGFloat] {
+        (animation.values as? [NSNumber])?.map { CGFloat($0.doubleValue) } ?? []
+    }
+
+    @Test func theCatIsDrawnWithNearestNeighbourFilteringOnePixelToThePoint() throws {
         let rig = StageRig()
-        let host = rig.trailing
-        host.show(plan: CatPlan(pose: .sit, facing: .right, from: 0, to: 0, began: 0, duration: 3), lane: lane(of: rig), elapsed: 0)
-        #expect(host.sprite.magnificationFilter == .nearest)
-        #expect(host.sprite.minificationFilter == .nearest)
+        let host = rig.host
+        host.show(plan: plan(.sit), elapsed: 0, coat: .tabby)
+        #expect(host.sprite.magnificationFilter == .nearest && host.sprite.minificationFilter == .nearest)
         #expect(host.sprite.contentsGravity == .resize)
         #expect(host.sprite.contents != nil)
-        // 32 points at 2x: three device pixels to a sprite pixel, so a cat of 30 by 24 points.
-        #expect(host.metrics.pixelScale == 3)
-        #expect(host.sprite.bounds.size == CGSize(width: 30, height: 24))
-        #expect(host.sprite.bounds.width * 2 == CGFloat(CatArt.width * 3))
-        #expect(host.sprite.position.y == SpriteMetrics.floor)
-        #expect(host.sprite.position.x * 2 == (host.sprite.position.x * 2).rounded(), "on a device pixel")
+        #expect(host.sprite.bounds.size == CGSize(width: 32, height: 24), "one pixel of the picture to the point: two on a Retina display")
+        #expect(host.sprite.position.y == CatSpriteView.floor)
+        #expect(host.sprite.position.x == host.sprite.position.x.rounded(), "on a whole point")
         #expect(host.sprite.anchorPoint == .zero)
+        #expect(host.sprite.bounds.height + CatSpriteView.floor <= host.bounds.height)
+        #expect(host.prop.magnificationFilter == .nearest)
     }
 
     @Test func theFramesAreOneKeyframeAnimationOfTheContentsRectThatHoldsEachFrameAndNeverBlendsThem() throws {
         let rig = StageRig()
-        let host = rig.trailing
-        host.show(plan: CatPlan(pose: .walk, facing: .right, from: 0, to: 0, began: 0, duration: 3), lane: lane(of: rig), elapsed: 0)
-        let frames = try framesAnimation(of: host)
-        #expect(frames.keyPath == "contentsRect")
-        #expect(frames.calculationMode == .discrete)
-        #expect(frames.repeatCount == .infinity)
-        #expect(frames.values?.count == CatArt.walk.frames.count)
-        #expect(frames.duration == CatArt.walk.duration)
-        let strip = CatSheets.shared.strip(for: .walk, facing: .right)
-        let shown: [CGRect] = (frames.values as? [NSValue])?.map(\.rectValue) ?? []
-        let expected: [CGRect] = (0..<4).map { strip.contentsRect(of: $0) }
+        let host = rig.host
+        host.show(plan: plan(.walk), elapsed: 0, coat: .tabby)
+        let animation = try frames(of: host.sprite)
+        #expect(animation.keyPath == "contentsRect")
+        #expect(animation.calculationMode == .discrete)
+        #expect(animation.repeatCount == .infinity)
+        #expect(animation.values?.count == 8)
+        #expect(animation.duration == CatMove.walk.passDuration)
+        let strip = CatSheets.shared.strip(for: .walk, facing: .right, coat: .tabby)
+        let shown: [CGRect] = (animation.values as? [NSValue])?.map(\.rectValue) ?? []
+        let expected: [CGRect] = (0..<8).map { strip.contentsRect(of: $0) }
         #expect(shown == expected)
-        #expect(host.sprite.animationKeys() == [CatSpriteView.framesKey], "a cat that stands still has the frames and nothing else")
+        #expect(host.sprite.animationKeys() == [CatSpriteView.framesKey], "a cat that does not go anywhere has the frames and nothing else")
+    }
+
+    @Test func aMoveThatIsPlayedOnceIsPlayedOnceAndHeldOnItsLastFrame() throws {
+        let rig = StageRig()
+        for move in CatMove.allCases where !move.loops {
+            rig.host.show(plan: plan(move), elapsed: 0, coat: .tabby)
+            let animation = try frames(of: rig.host.sprite)
+            #expect(animation.repeatCount == 0 || animation.repeatCount == 1, "\(move)")
+            #expect(animation.fillMode == .forwards && !animation.isRemovedOnCompletion, "\(move)")
+            #expect(abs(animation.duration - move.passDuration) < 1e-9)
+        }
+        for move in CatMove.allCases where move.loops {
+            rig.host.show(plan: plan(move), elapsed: 0, coat: .tabby)
+            #expect(try frames(of: rig.host.sprite).repeatCount == .infinity, "\(move)")
+        }
     }
 
     @Test func theFramesRunAtTheirOwnRateAndNeverAskTheDisplayForMoreThanTwentyFour() throws {
         let rig = StageRig()
-        let host = rig.trailing
-        for pose in CatPose.allCases {
-            host.show(plan: CatPlan(pose: pose, facing: .right, from: 0, to: 0, began: 0, duration: 3), lane: lane(of: rig), elapsed: 0)
-            let range = try framesAnimation(of: host).preferredFrameRateRange
-            #expect(range.maximum <= CatSpriteView.frameRateCeiling, "\(pose)")
+        for move in CatMove.allCases {
+            rig.host.show(plan: plan(move), elapsed: 0, coat: .tabby)
+            let range = try frames(of: rig.host.sprite).preferredFrameRateRange
+            #expect(range.maximum <= CatSpriteView.frameRateCeiling, "\(move)")
             let preferred = try #require(range.preferred)
-            #expect(preferred <= 12, "\(pose)")
-            #expect(preferred == Float(max(CatArt.animation(for: pose).fps, 4)), "\(pose)")
+            #expect(preferred <= 15, "\(move)")
+            #expect(preferred == Float(max(move.fps, 4)), "\(move)")
         }
     }
 
     @Test func aCatThatRunsHarderPlaysItsFramesFaster() throws {
         let rig = StageRig()
-        let host = rig.trailing
-        host.show(plan: CatPlan(pose: .run, facing: .right, from: 0, to: 0, began: 0, duration: 3, fpsScale: 1), lane: lane(of: rig), elapsed: 0)
-        let slow = try framesAnimation(of: host)
-        host.show(plan: CatPlan(pose: .run, facing: .right, from: 0, to: 0, began: 0, duration: 3, fpsScale: 1.5), lane: lane(of: rig), elapsed: 0)
-        let fast = try framesAnimation(of: host)
+        rig.host.show(plan: plan(.frantic, scale: 1), elapsed: 0, coat: .tabby)
+        let slow = try frames(of: rig.host.sprite)
+        rig.host.show(plan: plan(.frantic, scale: 1.5), elapsed: 0, coat: .tabby)
+        let fast = try frames(of: rig.host.sprite)
         #expect(abs(slow.duration / fast.duration - 1.5) < 1e-9)
-        let (fastRate, slowRate) = (try #require(fast.preferredFrameRateRange.preferred), try #require(slow.preferredFrameRateRange.preferred))
-        #expect(fastRate > slowRate)
+        #expect(try #require(fast.preferredFrameRateRange.preferred) > (try #require(slow.preferredFrameRateRange.preferred)))
     }
 
-    @Test func aWalkMovesTheFootOneSpritePixelAtATimeAndHoldsEachPlaceUntilTheNextStep() throws {
+    @Test func aWalkMovesTheFootAFewPointsAtATimeAtTheMovesPaceAndHoldsEachPlaceUntilTheNextStep() throws {
         let rig = StageRig()
-        let host = rig.trailing
-        let lane = lane(of: rig)
-        host.show(plan: CatPlan(pose: .walk, facing: .right, from: 0, to: 1, began: 0, duration: 2), lane: lane, elapsed: 0)
-        let walk = try walkAnimation(of: host)
-        #expect(walk.keyPath == "position.x")
-        #expect(walk.calculationMode == .discrete)
-        #expect(walk.duration == 2)
-        let places = (walk.values as? [NSNumber])?.map { CGFloat($0.doubleValue) } ?? []
-        #expect(places.count > 5)
-        for (before, after) in zip(places, places.dropFirst()) {
-            #expect(abs((after - before) - host.metrics.step) < 1e-9, "one sprite pixel: \(after - before)")
-        }
-        for place in places { #expect(place * 2 == (place * 2).rounded(), "on a device pixel: \(place)") }
-        // From the left end of the lane to as near its right end as whole steps get.
-        let origin = host.windowFrame.minX
-        #expect(places.first == (lane.minX - origin))
-        #expect(abs((places.last ?? 0) - (lane.maxX - origin)) <= host.metrics.step / 2 + 1e-9)
-        // What the layer holds when the animation is done is where the walk ended.
-        #expect(host.sprite.position.x == places.last)
-        #expect(walk.fillMode == .forwards)
-        #expect(!walk.isRemovedOnCompletion)
+        let host = rig.host
+        let lane = host.lane
+        let distance = (0.9 - 0.1) * Double(lane.travel)
+        host.show(plan: plan(.walk, from: 0.1, to: 0.9, duration: distance / CatMove.walk.speed), elapsed: 0, coat: .tabby)
+        let animation = try walk(of: host.sprite)
+        #expect(animation.keyPath == "position.x")
+        #expect(animation.calculationMode == .discrete)
+        let stops = places(animation)
+        #expect(stops.count > 20)
+        // Two points a frame, which is the pace of a walk: twelve of those a second.
+        for (before, after) in zip(stops, stops.dropFirst()) { #expect(abs((after - before) - 2) < 1e-9, "\(after - before)") }
+        for place in stops { #expect(place == place.rounded()) }
+        #expect(stops.first == lane.x(at: 0.1).rounded())
+        #expect(abs((stops.last ?? 0) - lane.x(at: 0.9)) <= 1.5)
+        #expect(host.sprite.position.x == stops.last)
+        #expect(animation.fillMode == .forwards && !animation.isRemovedOnCompletion)
         #expect(Set(host.sprite.animationKeys() ?? []) == [CatSpriteView.framesKey, CatSpriteView.walkKey])
+        // The steps come twelve a second.
+        #expect(abs(Double(stops.count) / animation.duration - 12) < 1)
+    }
+
+    @Test func aTrotAndAChaseTakeBiggerStepsAtTheSameRate() throws {
+        let rig = StageRig()
+        for move in [CatMove.trot, .chase, .frantic] {
+            let distance = 0.8 * Double(rig.host.lane.travel)
+            rig.host.show(plan: plan(move, from: 0.1, to: 0.9, duration: distance / move.speed), elapsed: 0, coat: .tabby)
+            let stops = places(try walk(of: rig.host.sprite))
+            let step = stops[1] - stops[0]
+            #expect(abs(step - move.advance) < 1e-9, "\(move)")
+        }
     }
 
     @Test func aWalkToTheLeftStepsTheOtherWayAndIsPlayedFromTheMirrorImage() throws {
         let rig = StageRig()
-        let host = rig.trailing
-        host.show(plan: CatPlan(pose: .walk, facing: .left, from: 1, to: 0, began: 0, duration: 2), lane: lane(of: rig), elapsed: 0)
-        let places = (try walkAnimation(of: host).values as? [NSNumber])?.map { CGFloat($0.doubleValue) } ?? []
-        #expect(places == places.sorted(by: >))
-        let left = CatSheets.shared.strip(for: .walk, facing: .left)
-        #expect(host.sprite.contents as AnyObject === left.image)
-        let right = CatSheets.shared.strip(for: .walk, facing: .right)
-        #expect(host.sprite.contents as AnyObject !== right.image)
+        rig.host.show(plan: plan(.walk, from: 0.9, to: 0.1, duration: 8, facing: .left), elapsed: 0, coat: .tabby)
+        let stops = places(try walk(of: rig.host.sprite))
+        #expect(stops == stops.sorted(by: >))
+        #expect(rig.host.sprite.contents as AnyObject === CatSheets.shared.strip(for: .walk, facing: .left, coat: .tabby).image)
+        #expect(rig.host.sprite.contents as AnyObject !== CatSheets.shared.strip(for: .walk, facing: .right, coat: .tabby).image)
+    }
+
+    @Test func aPounceCrouchesInPlaceAndThenLeaps() throws {
+        let rig = StageRig()
+        rig.host.show(plan: plan(.pounce, from: 0.3, to: 0.5, duration: 0.8, delay: 0.625), elapsed: 0, coat: .tabby)
+        let stops = places(try walk(of: rig.host.sprite))
+        let from = rig.host.lane.x(at: 0.3).rounded()
+        let held = stops.prefix { $0 == from }.count
+        #expect(Double(held) / Double(stops.count) > 0.5, "most of the plan is the crouch: \(held) of \(stops.count)")
+        #expect(stops.last == rig.host.lane.x(at: 0.5).rounded() || abs((stops.last ?? 0) - rig.host.lane.x(at: 0.5)) <= 2)
     }
 
     @Test func walkStopsAreEvenlySpacedAndNeverSkipPastTheEnd() {
-        let upward: [CGFloat] = (0...7).map { CGFloat($0) * 1.5 }
-        let downward: [CGFloat] = (0...7).map { (10 as CGFloat) - CGFloat($0) * 1.5 }
-        #expect(CatSpriteView.walkStops(from: 0, to: 10, step: 1.5) == upward)
-        #expect(CatSpriteView.walkStops(from: 10, to: 0, step: 1.5) == downward)
-        #expect(CatSpriteView.walkStops(from: 3, to: 3, step: 1.5) == [3])
-        #expect(CatSpriteView.walkStops(from: 0, to: 0.2, step: 1.5) == [0, 1.5], "a step is the least it moves")
+        let upward: [CGFloat] = (0...5).map { CGFloat($0) * 2 }
+        let downward: [CGFloat] = (0...5).map { (10 as CGFloat) - CGFloat($0) * 2 }
+        #expect(CatSpriteView.walkStops(from: 0, to: 10, step: 2) == upward)
+        #expect(CatSpriteView.walkStops(from: 10, to: 0, step: 2) == downward)
+        #expect(CatSpriteView.walkStops(from: 3, to: 3, step: 2) == [3])
+        #expect(CatSpriteView.walkStops(from: 0, to: 0.2, step: 2) == [0, 2], "a step is the least it moves")
         #expect(CatSpriteView.walkStops(from: 0, to: 5, step: 0) == [0])
     }
 
     @Test func aPlanThatIsAlreadyUnderWayIsPlayedFromWhereItIs() throws {
         let rig = StageRig()
-        let host = rig.trailing
-        host.show(plan: CatPlan(pose: .walk, facing: .right, from: 0, to: 1, began: 0, duration: 4), lane: lane(of: rig), elapsed: 1.3)
-        let frames = try framesAnimation(of: host)
-        #expect(abs(frames.timeOffset - 1.3.truncatingRemainder(dividingBy: CatArt.walk.duration)) < 1e-9)
-        #expect(abs(try walkAnimation(of: host).timeOffset - 1.3) < 1e-9)
-        // And one that has run past its end is held at the end rather than asked for a time it does not have.
-        host.show(plan: CatPlan(pose: .walk, facing: .right, from: 0, to: 1, began: 0, duration: 4), lane: lane(of: rig), elapsed: 9)
-        #expect(try walkAnimation(of: host).timeOffset == 4)
+        rig.host.show(plan: plan(.walk, from: 0.1, to: 0.9, duration: 10), elapsed: 1.3, coat: .tabby)
+        let animation = try frames(of: rig.host.sprite)
+        #expect(abs(animation.timeOffset - 1.3.truncatingRemainder(dividingBy: CatMove.walk.passDuration)) < 1e-9)
+        #expect(abs(try walk(of: rig.host.sprite).timeOffset - 1.3) < 1e-9)
+        // One that has run past its end is held at the end rather than asked for a time it does not have.
+        rig.host.show(plan: plan(.walk, from: 0.1, to: 0.9, duration: 4), elapsed: 9, coat: .tabby)
+        #expect(try walk(of: rig.host.sprite).timeOffset == 4)
+        rig.host.show(plan: plan(.yawn), elapsed: 99, coat: .tabby)
+        #expect(try frames(of: rig.host.sprite).timeOffset == CatMove.yawn.passDuration, "a move played once is held on its last frame")
     }
 
     @Test func aNewPlanTakesTheOldAnimationsAwayFirst() throws {
         let rig = StageRig()
-        let host = rig.trailing
-        host.show(plan: CatPlan(pose: .walk, facing: .right, from: 0, to: 1, began: 0, duration: 2), lane: lane(of: rig), elapsed: 0)
-        #expect(host.sprite.animation(forKey: CatSpriteView.walkKey) != nil)
-        host.show(plan: CatPlan(pose: .sit, facing: .right, from: 1, to: 1, began: 2, duration: 3), lane: lane(of: rig), elapsed: 0)
-        #expect(host.sprite.animation(forKey: CatSpriteView.walkKey) == nil, "no walk left over from the plan before")
-        #expect(host.sprite.animationKeys() == [CatSpriteView.framesKey])
+        rig.host.show(plan: plan(.walk, from: 0.1, to: 0.9, duration: 8), elapsed: 0, coat: .tabby)
+        #expect(rig.host.sprite.animation(forKey: CatSpriteView.walkKey) != nil)
+        rig.host.show(plan: plan(.sit), elapsed: 0, coat: .tabby)
+        #expect(rig.host.sprite.animation(forKey: CatSpriteView.walkKey) == nil, "no walk left over from the plan before")
+        #expect(rig.host.sprite.animationKeys() == [CatSpriteView.framesKey])
     }
 
-    @Test func stoppingTakesTheCatAndEveryAnimationAway() {
+    @Test func stoppingTakesTheCatTheMothAndEveryAnimationAway() {
         let rig = StageRig()
-        let host = rig.trailing
-        host.show(plan: CatPlan(pose: .walk, facing: .right, from: 0, to: 1, began: 0, duration: 2), lane: lane(of: rig), elapsed: 0)
-        host.stopShowing()
-        #expect(!host.isAnimating)
-        #expect(!host.isShowingCat)
+        rig.host.show(plan: plan(.chase, from: 0.1, to: 0.9, duration: 4, prop: CatProp(kind: .moth, from: 0.2, to: 1.2)), elapsed: 0, coat: .tabby)
+        #expect(rig.host.isShowingProp && rig.host.isAnimating)
+        rig.host.stopShowing()
+        #expect(!rig.host.isAnimating)
+        #expect(!rig.host.isShowingCat && !rig.host.isShowingProp)
     }
 
-    @Test func aLaneThatCrossesTheCameraClipsTheViewAndOneInsideAPillDoesNot() {
+    // MARK: Props
+
+    @Test func aMothFlutterGoesAcrossTheStripAndBobsOnTheWay() throws {
         let rig = StageRig()
-        let host = rig.trailing
-        host.show(plan: CatPlan(pose: .sit, facing: .right, from: 0, to: 0, began: 0, duration: 3), lane: lane(of: rig, clips: true), elapsed: 0)
-        #expect(host.layer?.masksToBounds == true)
-        host.show(plan: CatPlan(pose: .sit, facing: .right, from: 0, to: 0, began: 0, duration: 3), lane: lane(of: rig, clips: false), elapsed: 0)
-        #expect(host.layer?.masksToBounds == false)
+        let lane = rig.host.lane
+        let item = CatProp(kind: .moth, from: 0.2, to: 1.2)
+        rig.host.show(plan: plan(.chase, from: 0.1, to: 0.9, duration: 4, prop: item), elapsed: 0, coat: .tabby)
+        let host = rig.host
+        let wings = try frames(of: host.prop)
+        #expect(wings.values?.count == 2 && wings.repeatCount == .infinity)
+        #expect(abs(wings.duration - PropArt.moth.duration) < 1e-9)
+        let across = places(try walk(of: host.prop))
+        #expect(across.first == lane.unboundedX(at: 0.2).rounded())
+        #expect((across.last ?? 0) > lane.maxX, "it leaves at the end of the strip, and the strip's edge cuts it off")
+        let bob = try #require(host.prop.animation(forKey: CatSpriteView.bobKey) as? CAKeyframeAnimation)
+        #expect(bob.keyPath == "position.y" && bob.repeatCount == .infinity)
+        let heights = (bob.values as? [NSNumber])?.map { CGFloat($0.doubleValue) } ?? []
+        #expect(Set(heights).count > 3, "it bobs")
+        for height in heights { #expect(height > CatSpriteView.mothHeight - 3 && height + 7 < host.bounds.height, "\(height)") }
+        #expect(host.prop.bounds.size == CGSize(width: 11, height: 7))
+    }
+
+    @Test func aBallOfYarnLiesStillOrRollsAndTurnsWhileItRolls() throws {
+        let rig = StageRig()
+        let host = rig.host
+        let lane = host.lane
+        host.show(plan: plan(.walk, from: 0.1, to: 0.3, duration: 3, prop: CatProp(kind: .yarn, from: 0.5, to: 0.5)), elapsed: 0, coat: .tabby)
+        #expect(host.isShowingProp)
+        #expect(host.prop.animationKeys() == nil || host.prop.animationKeys()?.isEmpty == true, "nothing runs for a ball that lies")
+        #expect(host.prop.position.x == lane.unboundedX(at: 0.5).rounded())
+        #expect(host.prop.position.y == CatSpriteView.floor)
+        #expect(host.prop.bounds.size == CGSize(width: 12, height: 12))
+
+        host.show(plan: plan(.yarn, from: 0.4, duration: 1.6, prop: CatProp(kind: .yarn, from: 0.5, to: 0.62)), elapsed: 0, coat: .tabby)
+        let turning = try frames(of: host.prop)
+        #expect(turning.values?.count == 4)
+        let stops = places(try walk(of: host.prop))
+        #expect(stops.first == lane.unboundedX(at: 0.5).rounded())
+        #expect(abs((stops.last ?? 0) - lane.unboundedX(at: 0.62)) <= 2)
+        #expect(host.prop.position.x == stops.last, "it stays where it stopped")
+    }
+
+    @Test func aPlanWithNothingToPlayWithHidesWhatWasThere() {
+        let rig = StageRig()
+        rig.host.show(plan: plan(.yarn, prop: CatProp(kind: .yarn, from: 0.5, to: 0.6)), elapsed: 0, coat: .tabby)
+        #expect(rig.host.isShowingProp)
+        rig.host.show(plan: plan(.sit), elapsed: 0, coat: .tabby)
+        #expect(!rig.host.isShowingProp)
+        #expect(rig.host.prop.animationKeys() == nil || rig.host.prop.animationKeys()?.isEmpty == true)
     }
 
     // MARK: Hits
 
-    @Test func onlyTheCatTakesAClickAndTheRestOfTheWingLeavesItToTheNotch() throws {
+    @Test func onlyTheCatTakesAClickAndTheRestOfTheStripLeavesItToTheNotch() throws {
         let rig = StageRig()
         rig.show()
-        let host = rig.trailing
+        let host = rig.host
         let sprite = host.sprite.frame
         let inside = host.convert(CGPoint(x: sprite.midX, y: sprite.midY), to: host.superview)
         #expect(host.hitTest(inside) === host)
-        // The wing's far corner, away from the cat.
-        let away = host.convert(CGPoint(x: host.bounds.maxX - 1, y: host.bounds.maxY - 1), to: host.superview)
-        let cat = host.convert(sprite, to: host.superview)
-        if !cat.insetBy(dx: -3, dy: -3).contains(away) { #expect(host.hitTest(away) == nil) }
-        let corner = host.convert(CGPoint(x: host.bounds.minX + 0.5, y: host.bounds.maxY - 0.5), to: host.superview)
-        #expect(host.hitTest(corner) == nil || cat.insetBy(dx: -3, dy: -3).contains(corner))
-        // Outside the view altogether: not its click.
+        // A point on the strip a long way from the cat.
+        let farX = sprite.midX < host.bounds.midX ? host.bounds.maxX - 6 : host.bounds.minX + 6
+        let away = host.convert(CGPoint(x: farX, y: 13), to: host.superview)
+        #expect(host.hitTest(away) == nil)
         #expect(host.hitTest(CGPoint(x: -500, y: -500)) == nil)
+        // A moth is no part of the cat, and takes no clicks.
+        host.show(plan: plan(.chase, from: 0.1, to: 0.9, duration: 4, prop: CatProp(kind: .moth, from: 0.5, to: 1.2)), elapsed: 0, coat: .tabby)
+        let propPoint = host.convert(CGPoint(x: host.prop.frame.midX, y: host.prop.frame.midY), to: host.superview)
+        #expect(host.hitTest(propPoint) == nil || host.sprite.frame.insetBy(dx: -2, dy: -2).contains(host.convert(propPoint, from: host.superview)))
     }
 
-    @Test func aWingWithNoCatInItTakesNoClicks() {
+    @Test func aStripWithNoCatInItTakesNoClicks() {
         let rig = StageRig()
         rig.show()
-        let host = rig.leading
-        #expect(!host.isShowingCat)
-        #expect(host.hitTest(host.convert(CGPoint(x: host.bounds.midX, y: host.bounds.midY), to: host.superview)) == nil)
         rig.hide()
-        #expect(rig.trailing.hitTest(CGPoint(x: 280, y: 10)) == nil)
+        #expect(rig.host.hitTest(CGPoint(x: 150, y: 10)) == nil)
     }
 
     @Test func theFirstClickIsTakenEvenThoughTheNotchIsNeverActive() {
         let rig = StageRig()
-        #expect(rig.trailing.acceptsFirstMouse(for: nil))
-        #expect(!rig.trailing.mouseDownCanMoveWindow)
+        #expect(rig.host.acceptsFirstMouse(for: nil))
+        #expect(!rig.host.mouseDownCanMoveWindow)
     }
 
     // MARK: In SwiftUI
@@ -211,79 +281,54 @@ import Testing
         var stripWidths: [CGFloat] = []
     }
 
-    /// Both wings as the collapsed notch lays them out, under a tap that opens the notch.
-    struct Wings: View {
+    /// The strip as the collapsed notch lays it out, under a tap that opens the notch.
+    struct Strip: View {
         let stage: CatStage
         let counter: Counter
         var onScreen = true
 
         var body: some View {
             let _ = counter.bodies += 1
-            HStack(spacing: 0) {
-                CatWingView(stage: stage, role: .leading).frame(width: 64)
-                Spacer(minLength: 185)
-                CatWingView(stage: stage, role: .trailing).frame(width: 64)
-            }
-            .frame(width: 313, height: 32)
-            .environment(\.notchIsOnScreen, onScreen)
-            .onNotchStripWidth { counter.stripWidths.append($0) }
-            .contentShape(Rectangle())
-            .gesture(TapGesture().onEnded { counter.taps += 1 }, including: .all)
+            CatStripView(stage: stage)
+                .frame(width: 300, height: CatActivity.stripHeight)
+                .environment(\.notchIsOnScreen, onScreen)
+                .onNotchStripWidth { counter.stripWidths.append($0) }
+                .contentShape(Rectangle())
+                .gesture(TapGesture().onEnded { counter.taps += 1 }, including: .all)
         }
     }
 
-    func host(_ rig: StageRig, counter: Counter, onScreen: Bool = true) -> (CountingHostingView<Wings>, NSWindow) {
-        let hosting = CountingHostingView(rootView: Wings(stage: rig.stage, counter: counter, onScreen: onScreen))
-        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 313, height: 32), styleMask: .borderless, backing: .buffered, defer: true)
+    func hosted(_ rig: StageRig, counter: Counter, onScreen: Bool = true) -> (CountingHostingView<Strip>, NSWindow) {
+        let hosting = CountingHostingView(rootView: Strip(stage: rig.stage, counter: counter, onScreen: onScreen))
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 300, height: 26), styleMask: .borderless, backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
         window.contentView = hosting
         hosting.layoutSubtreeIfNeeded()
         return (hosting, window)
     }
 
-    @Test func theViewsAreInTheTreeOnlyWhileTheNotchCanBeSeen() {
+    @Test func theViewIsInTheTreeOnlyWhileTheNotchCanBeSeen() {
         let rig = StageRig()
         let counter = Counter()
-        let (hosting, window) = host(rig, counter: counter)
+        let (hosting, window) = hosted(rig, counter: counter)
         #expect(rig.stage.isAlive)
-        #expect(rig.stage.attachedHosts.count == 2)
+        #expect(rig.stage.attachedHosts.count == 1)
         #expect(rig.scheduler.pendingCount == 1)
 
-        hosting.rootView = Wings(stage: rig.stage, counter: counter, onScreen: false)
+        hosting.rootView = Strip(stage: rig.stage, counter: counter, onScreen: false)
         #expect(runLoop(until: { !rig.stage.isAlive }, seconds: 10))
         #expect(rig.scheduler.pendingCount == 0)
 
-        hosting.rootView = Wings(stage: rig.stage, counter: counter, onScreen: true)
+        hosting.rootView = Strip(stage: rig.stage, counter: counter, onScreen: true)
         #expect(runLoop(until: { rig.stage.isAlive }, seconds: 10))
         window.contentView = nil
         #expect(!rig.stage.isAlive)
         #expect(rig.scheduler.pendingCount == 0)
     }
 
-    /// What was found by looking: in a plain hosting view nothing between the cat's view and the hosting view clips what is drawn outside
-    /// the wing, so a cat inside a pill (whose view does not clip itself) is drawn where it is. The notch's own tree has more in it
-    /// (its shape clips), which this does not cover.
-    @Test func inAPlainHostingViewNothingAboveTheCatsViewClipsItToTheWing() throws {
-        let rig = StageRig()
-        let (hosting, window) = host(rig, counter: Counter())
-        let cat = try #require(rig.stage.attachedHosts.first { $0.role == .trailing })
-        var view = cat.superview
-        var between: [NSView] = []
-        while let current = view, current !== hosting.superview {
-            between.append(current)
-            view = current.superview
-        }
-        #expect(between.count >= 2, "the platform view's host and the hosting view")
-        for ancestor in between {
-            #expect(!ancestor.clipsToBounds, "\(type(of: ancestor)) clips")
-            #expect(ancestor.layer?.masksToBounds != true, "\(type(of: ancestor)) masks")
-        }
-        window.contentView = nil
-    }
-
     @Test func aCatThatIsNotOnScreenIsNeverMadeAtAll() {
         let rig = StageRig()
-        let (_, window) = host(rig, counter: Counter(), onScreen: false)
+        let (_, window) = hosted(rig, counter: Counter(), onScreen: false)
         #expect(!rig.stage.isAlive)
         #expect(rig.stage.attachedHosts.isEmpty)
         #expect(rig.scheduler.pendingCount == 0)
@@ -291,15 +336,15 @@ import Testing
     }
 
     @Test func aMinuteOfTheCatLivingIsNoWorkForSwiftUIAtAll() {
-        let rig = StageRig()
+        let rig = StageRig(seed: 5)
         rig.cpu.value = 0.9
         let counter = Counter()
-        let (hosting, window) = host(rig, counter: counter)
+        let (hosting, window) = hosted(rig, counter: counter)
         rig.advance(1)
         let (bodies, layouts, presentations) = (counter.bodies, hosting.layouts, rig.stage.presentations)
-        // A minute of a cat that runs, jumps when the pointer comes, sleeps and wakes, as busy a minute as it gets.
+        // A minute of a cat that runs, pounces, sleeps and wakes, as busy a minute as it gets.
         for second in 0..<60 {
-            if second == 20 { rig.pointer.point = CGPoint(x: 100, y: 800) }
+            if second == 20 { rig.place(pointerAtShare: 0.5, above: -10) }
             if second == 30 { rig.cpu.value = 0.05 }
             rig.advance(1)
         }
@@ -312,34 +357,53 @@ import Testing
     @Test func theCatAsksTheNotchForNothingAndNeverReportsAStripWidth() {
         let rig = StageRig()
         let counter = Counter()
-        let (hosting, window) = host(rig, counter: counter)
+        let (hosting, window) = hosted(rig, counter: counter)
         rig.advance(30)
         #expect(counter.stripWidths.allSatisfy { $0 == 0 }, "nobody asks for a width: \(counter.stripWidths)")
-        #expect(hosting.fittingSize == CGSize(width: 313, height: 32))
+        #expect(hosting.fittingSize == CGSize(width: 300, height: 26))
         window.contentView = nil
     }
 
-    @Test func theWingIsAsBigAsItIsOfferedAndTheDefaultOtherwise() {
-        #expect(CatSprite.size(for: .init(width: 64, height: 30)) == CGSize(width: 64, height: 30))
+    @Test func theStripIsAsBigAsItIsOfferedAndTheDefaultOtherwise() {
+        #expect(CatSprite.size(for: .init(width: 280, height: 26)) == CGSize(width: 280, height: 26))
         #expect(CatSprite.size(for: .unspecified) == CatSprite.defaultSize)
-        #expect(CatSprite.size(for: .init(width: 90, height: nil)) == CGSize(width: 90, height: 32))
+        #expect(CatSprite.size(for: .init(width: 90, height: nil)) == CGSize(width: 90, height: 26))
+    }
+
+    /// What was found by looking: in a plain hosting view nothing between the cat's view and the hosting view clips what is drawn outside
+    /// the strip's own bounds, so only the view itself cuts a moth that flies out of the strip. The notch's own tree has more in it (its
+    /// shape clips), which this does not cover.
+    @Test func inAPlainHostingViewNothingAboveTheCatsViewClipsItBeyondItsOwnBounds() throws {
+        let rig = StageRig()
+        let (hosting, window) = hosted(rig, counter: Counter())
+        let cat = try #require(rig.stage.attachedHosts.first)
+        #expect(cat.clipsToBounds, "the view clips its own layers, which is what cuts a moth that leaves")
+        var view = cat.superview
+        var between: [NSView] = []
+        while let current = view, current !== hosting.superview {
+            between.append(current)
+            view = current.superview
+        }
+        #expect(between.count >= 2)
+        for ancestor in between { #expect(ancestor.layer?.masksToBounds != true, "\(type(of: ancestor)) masks") }
+        window.contentView = nil
     }
 
     @Test func aClickOnTheCatInTheNotchsOwnViewTreeReachesTheCatAndNotTheNotchsTap() throws {
         let rig = StageRig()
         rig.stage.playsMeow = true
         let counter = Counter()
-        let (hosting, window) = host(rig, counter: counter)
-        let cat = try #require(rig.stage.attachedHosts.first { $0.role == .trailing })
+        let (hosting, window) = hosted(rig, counter: counter)
+        let cat = try #require(rig.stage.attachedHosts.first)
         let sprite = cat.sprite.frame
         let point = cat.convert(CGPoint(x: sprite.midX, y: sprite.midY), to: hosting.superview)
         let hit = hosting.hitTest(point)
         #expect(hit === cat, "the cat is what a click on it lands on: \(String(describing: hit))")
 
-        // The empty left wing is no cat: it falls through to what the notch does with a click, which is to open.
-        let wing = rig.stage.attachedHosts.first { $0.role == .leading }
-        let leftPoint = hosting.convert(CGPoint(x: (wing?.windowFrame.midX ?? 32), y: 16), to: hosting.superview)
-        #expect(!(hosting.hitTest(leftPoint) is CatSpriteView))
+        // The empty strip is no cat: it falls through to what the notch does with a click, which is to open.
+        let farX = sprite.midX < cat.bounds.midX ? cat.bounds.maxX - 6 : cat.bounds.minX + 6
+        let away = hosting.convert(CGPoint(x: farX, y: 13), to: hosting.superview)
+        #expect(!(hosting.hitTest(away) is CatSpriteView))
 
         let event = try #require(NSEvent.mouseEvent(
             with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,

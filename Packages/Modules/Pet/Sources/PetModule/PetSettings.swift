@@ -9,15 +9,15 @@ struct PetSettingsKeys {
 
     /// Whether the cat is on the notch. On, which is the point of the module: it turns itself off in Settings, not by default.
     let show: SettingKey<Bool>
-    /// A hardware notch only: the cat crosses behind the camera from one wing to the other.
-    let bothWings: SettingKey<Bool>
+    /// The colour of the cat.
+    let coat: SettingKey<CatCoat>
     /// A click on the cat mews. Off: a sound nobody asked for at a desk is not a gift.
     let meow: SettingKey<Bool>
     let sleepMinutes: SettingKey<Int>
 
     init(_ settings: ModuleSettings) {
         show = settings.key("show", default: true)
-        bothWings = settings.key("bothWings", default: false)
+        coat = settings.key("coat", default: CatCoat.tabby)
         meow = settings.key("meow", default: false)
         sleepMinutes = settings.key("sleepMinutes", default: 5)
     }
@@ -36,22 +36,16 @@ struct PetSettingsKeys {
 struct PetSettingsView: View {
     let keys: PetSettingsKeys
     let settings: ModuleSettings
-    /// Whether any display has a camera to walk behind; the choice of both wings is of no use without one.
-    let hasNotchedScreen: () -> Bool
 
     var body: some View {
         Group {
             Toggle(isOn: settings.binding(keys.show)) {
                 Text("Hiện mèo trên notch")
-                Text("Mèo chỉ ra khi notch không có hoạt động nào khác, và nhường chỗ ngay khi có.")
+                Text("Mèo chơi trên một dải dưới notch khi không có hoạt động nào khác, và nhường chỗ ngay khi có.")
             }
-            Toggle(isOn: settings.binding(keys.bothWings)) {
-                Text("Mèo đi qua cả hai bên tai thỏ")
-                Text(hasNotchedScreen()
-                    ? "Mèo đi ra sau tai thỏ rồi hiện ra ở bên kia. Màn hình không có tai thỏ luôn cho mèo đi trong cả notch."
-                    : "Chỉ dùng được trên Mac có tai thỏ. Màn hình không có tai thỏ luôn cho mèo đi trong cả notch.")
+            Picker("Màu mèo", selection: settings.binding(keys.coat)) {
+                ForEach(CatCoat.allCases, id: \.self) { Text($0.displayName).tag($0) }
             }
-            .disabled(!hasNotchedScreen())
             Toggle(isOn: settings.binding(keys.meow)) {
                 Text("Tiếng mèo khi bấm")
                 Text("Bấm vào mèo để vuốt ve. Mèo kêu thêm một tiếng nếu bật mục này.")

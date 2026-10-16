@@ -3,7 +3,7 @@ import MyNotchCore
 import Observation
 import SwiftUI
 
-/// A pixel cat that lives on the collapsed notch when nothing else is going on.
+/// A pixel cat that lives on a strip under the collapsed notch when nothing else is going on.
 ///
 /// It is a live activity at the lowest priority, with one rule on top: it is published only while no other module has an activity of
 /// its own, and taken back as soon as one appears, a moment before the notch would have made it a bubble. Priority alone cannot do that:
@@ -60,7 +60,7 @@ public final class PetModule: FeatureModule {
         let id = descriptor.id
         context.run { [weak self] in
             for await _ in Observations({
-                (settings.value(keys.show), settings.value(keys.bothWings), settings.value(keys.meow), settings.value(keys.sleepMinutes))
+                (settings.value(keys.show), settings.value(keys.coat), settings.value(keys.meow), settings.value(keys.sleepMinutes))
             }) {
                 self?.applySettings()
                 self?.reconcile()
@@ -87,8 +87,7 @@ public final class PetModule: FeatureModule {
 
     public func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? {
         AnyView(PetSettingsView(
-            keys: PetSettingsKeys(environment.settings), settings: environment.settings,
-            hasNotchedScreen: { NSScreen.screens.contains { $0.safeAreaInsets.top > 0 } }
+            keys: PetSettingsKeys(environment.settings), settings: environment.settings
         ))
     }
 
@@ -98,7 +97,7 @@ public final class PetModule: FeatureModule {
         guard let context, let stage else { return }
         let keys = PetSettingsKeys(context.settings)
         stage.tuning = keys.tuning(context.settings)
-        stage.bothWings = context.settings.value(keys.bothWings)
+        stage.coat = context.settings.value(keys.coat)
         stage.playsMeow = context.settings.value(keys.meow)
     }
 

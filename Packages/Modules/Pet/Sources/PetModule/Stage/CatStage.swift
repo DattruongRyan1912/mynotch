@@ -2,9 +2,9 @@ import AppKit
 import MyNotchCore
 import NotchUI
 
-/// Where the cat lives: the views of it on the notches that show it, the brain that decides what it does, and the few things it reads
-/// from the Mac to decide. The cat is alive only while some view of it can be seen, which is to say that when the last view leaves its
-/// window the timer, the reads and the animations all stop, and nothing is left running for a cat nobody is looking at.
+/// Where the cat lives: the views of the strip under the notches that show it, the brain that decides what it does, and the few things it
+/// reads from the Mac to decide. The cat is alive only while some view of it can be seen, which is to say that when the last view leaves
+/// its window the timer, the reads and the animations all stop, and nothing is left running for a cat nobody is looking at.
 ///
 /// While it is alive it wakes a few times a second, and only to read: the pointer four times a second, the processors, the idle time and
 /// the sound once a second. What it draws it hands to Core Animation, which plays it on its own.
@@ -22,8 +22,6 @@ final class CatStage {
         var notifications: NotificationCenter = NSWorkspace.shared.notificationCenter
         /// Seconds on a clock that only goes forward.
         var clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
-        /// Whether the screen a window is on has a camera in it. Reads the screen's own numbers, which is all geometry needs to tell.
-        var notchKind: (NSWindow) -> NotchKind = { CatStage.kind(of: $0) }
         var seed: UInt64 = .random(in: .min ... .max)
     }
 
@@ -33,10 +31,10 @@ final class CatStage {
 
     /// What the user chose.
     var tuning = CatTuning()
-    var bothWings = false {
-        didSet { if bothWings != oldValue { hostsDidMove() } }
-    }
     var playsMeow = false
+    var coat = CatCoat.tabby {
+        didSet { if coat != oldValue { hostsDidMove() } }
+    }
 
     private let scheduler: any Scheduler
     private var sources: Sources
@@ -52,8 +50,6 @@ final class CatStage {
     private var hasLoad = false
     private var audioPlaying = false
     private var frames: [ObjectIdentifier: CGRect] = [:]
-    /// What kind of notch each window has, asked of the screen once and not at every waking; asked again when a view moves.
-    private var kinds: [ObjectIdentifier: NotchKind] = [:]
 
     /// Counters for tests, never read by anything else.
     private(set) var ticks = 0
@@ -79,6 +75,8 @@ final class CatStage {
     /// The picture the cat is in now, for tests.
     var plan: CatPlan? { brain?.plan }
 
+    var scene: CatScene? { brain?.scene }
+
     var attachedHosts: [CatSpriteView] { hosts }
 
     // MARK: Views
@@ -89,9 +87,10 @@ final class CatStage {
         frames[ObjectIdentifier(host)] = host.windowFrame
         if hosts.count == 1 {
             wake()
+        } else if isResting {
+            host.showResting(coat: coat)
         } else {
-            // A second view is a wing the first one did not know about: where the cat may go changes for both.
-            hostsDidMove()
+            show(on: host)
         }
     }
 
@@ -109,7 +108,6 @@ final class CatStage {
         hosts.forEach { $0.stopShowing() }
         hosts.removeAll()
         frames.removeAll()
-        kinds.removeAll()
         doze()
     }
 
@@ -127,13 +125,10 @@ final class CatStage {
         isResting = sources.reducesMotion()
         observeMotionPreference()
         refreshFrames()
-        let blind = referenceLane()?.blind
-        if brain == nil {
-            brain = CatBrain(seed: sources.seed, now: now)
-        }
-        brain?.resume(now: now, blind: blind)
+        if brain == nil { brain = CatBrain(seed: sources.seed, now: now) }
+        brain?.resume(now: now)
         if isResting {
-            hosts.forEach(showResting(on:))
+            hosts.forEach { $0.showResting(coat: coat) }
             return
         }
         // A baseline for the load, which is what the processors did since the last read: not the whole time the cat was away.
@@ -164,14 +159,12 @@ final class CatStage {
         guard isAlive, !isResting, var brain else { return }
         ticks += 1
         let now = sources.clock()
-        let pointerNear = PointerProximity.isNear(sources.pointer.location(), to: notchFrames())
         if tickIndex % Self.slowEvery == 0 { readSlowSenses() }
         tickIndex += 1
         let senses = CatSenses(
-            idleSeconds: idle, cpuLoad: load, pointerNear: pointerNear, audioPlaying: audioPlaying, hour: sources.hour()
+            idleSeconds: idle, cpuLoad: load, pointer: pointerReading(), audioPlaying: audioPlaying, hour: sources.hour()
         )
-        let lane = referenceLane()
-        let outcome = brain.update(now: now, senses: senses, tuning: tuning, travel: Double(lane?.travel ?? 0), blind: lane?.blind)
+        let outcome = brain.update(now: now, senses: senses, tuning: tuning, travel: Double(referenceLane()?.travel ?? 0))
         self.brain = brain
         // The notch can move under the cat (a wider pill, another display) without telling it.
         let moved = framesChanged()
@@ -191,91 +184,50 @@ final class CatStage {
         audioPlaying = sources.audio.isPlaying()
     }
 
+    /// The pointer as the cat sees it from the strip it is nearest to, nil when no strip can see it.
+    private func pointerReading() -> PointerReading? {
+        let point = sources.pointer.location()
+        var nearest: (distance: CGFloat, reading: PointerReading)?
+        for host in hosts {
+            guard let strip = host.screenFrame else { continue }
+            let lane = host.lane
+            guard let reading = PointerLook.reading(of: point, strip: strip, lane: lane, spriteWidth: CatSpriteView.spriteSize.width) else { continue }
+            let distance = hypot(max(strip.minX - point.x, point.x - strip.maxX, 0), max(strip.minY - point.y, point.y - strip.maxY, 0))
+            if nearest == nil || distance < nearest!.distance { nearest = (distance, reading) }
+        }
+        return nearest?.reading
+    }
+
     // MARK: Showing
 
     private func show(on host: CatSpriteView) {
-        guard let brain, let lane = lane(for: host) else {
+        guard let brain else {
             host.stopShowing()
             return
         }
         presentations += 1
-        host.show(plan: brain.plan, lane: lane, elapsed: max(sources.clock() - brain.plan.began, 0))
-    }
-
-    private func showResting(on host: CatSpriteView) {
-        guard let lane = lane(for: host) else {
-            host.stopShowing()
-            return
-        }
-        presentations += 1
-        host.showResting(lane: lane)
+        host.show(plan: brain.plan, elapsed: max(sources.clock() - brain.plan.began, 0), coat: coat)
     }
 
     private func hostsDidMove() {
         guard isAlive else { return }
         refreshFrames()
         for host in hosts {
-            if isResting { showResting(on: host) } else { show(on: host) }
+            if isResting { host.showResting(coat: coat) } else { show(on: host) }
         }
     }
 
     private func refreshFrames() {
         frames = Dictionary(uniqueKeysWithValues: hosts.map { (ObjectIdentifier($0), $0.windowFrame) })
-        kinds.removeAll()
-    }
-
-    private func kind(in window: NSWindow) -> NotchKind {
-        let key = ObjectIdentifier(window)
-        if let known = kinds[key] { return known }
-        let kind = sources.notchKind(window)
-        kinds[key] = kind
-        return kind
     }
 
     private func framesChanged() -> Bool {
         hosts.contains { frames[ObjectIdentifier($0)] != $0.windowFrame }
     }
 
-    /// Where the notches are on the screen, one frame each: the views of a window together, so that the camera between two wings is
-    /// part of the notch, and the pointer over it is on the notch.
-    private func notchFrames() -> [CGRect] {
-        var frames: [ObjectIdentifier: CGRect] = [:]
-        for host in hosts {
-            guard let window = host.window, let frame = host.screenFrame else { continue }
-            let key = ObjectIdentifier(window)
-            frames[key] = frames[key].map { $0.union(frame) } ?? frame
-        }
-        return Array(frames.values)
-    }
-
-    // MARK: Lanes
-
     /// The lane of the first view, which is the one the cat's timings are worked out for: on another display with a lane of another length
     /// it covers the same share of it in the same time.
-    private func referenceLane() -> WalkLane? {
-        hosts.first.flatMap { lane(for: $0) }
-    }
-
-    /// The lane of the notch `host` is in, made from the views of the cat it has.
-    func lane(for host: CatSpriteView) -> WalkLane? {
-        guard let window = host.window else { return nil }
-        let mates = hosts.filter { $0.window === window }
-        let wings = Wings(
-            leading: mates.first { $0.role == .leading }?.windowFrame, trailing: mates.first { $0.role == .trailing }?.windowFrame
-        )
-        let metrics = (mates.first { $0.role == .trailing } ?? host).metrics
-        let notch = kind(in: window)
-        let roundEnd = notch == .virtual ? host.bounds.height / 2 : WalkLane.hardwareEndInset
-        return WalkLane.make(
-            mode: LaneMode.resolve(kind: notch, bothWings: bothWings), wings: wings, spriteWidth: metrics.size.width, roundEnd: roundEnd
-        )
-    }
-
-    /// Whether the screen a window is on has a camera in it, by the same numbers the notch itself goes by.
-    static func kind(of window: NSWindow) -> NotchKind {
-        guard let screen = window.screen ?? NSScreen.main else { return .virtual }
-        return NotchGeometry(screen: ScreenDescriptor(screen), config: NotchLayoutConfig()).kind
-    }
+    private func referenceLane() -> WalkLane? { hosts.first?.lane }
 
     // MARK: Petting
 
@@ -283,12 +235,9 @@ final class CatStage {
     func catWasClicked() {
         strokes += 1
         if var brain, !isResting {
-            if brain.pet(now: sources.clock()) == .changed {
-                self.brain = brain
-                hosts.forEach(show(on:))
-            } else {
-                self.brain = brain
-            }
+            let outcome = brain.pet(now: sources.clock())
+            self.brain = brain
+            if outcome == .changed { hosts.forEach(show(on:)) }
         }
         if playsMeow { sources.meow.play() }
     }
@@ -312,9 +261,9 @@ final class CatStage {
         if reduces {
             nextTick?.cancel()
             nextTick = nil
-            hosts.forEach(showResting(on:))
+            hosts.forEach { $0.showResting(coat: coat) }
         } else {
-            brain?.resume(now: sources.clock(), blind: referenceLane()?.blind)
+            brain?.resume(now: sources.clock())
             _ = sources.cpu.load()
             load = 0
             hasLoad = false

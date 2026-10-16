@@ -15,14 +15,24 @@ import Testing
         let settings = try environment()
         let keys = PetSettingsKeys(settings)
         #expect(settings.value(keys.show), "Hiện mèo trên notch")
-        #expect(!settings.value(keys.bothWings), "Mèo đi qua cả hai bên tai thỏ")
+        #expect(settings.value(keys.coat) == .tabby, "Màu mèo")
         #expect(!settings.value(keys.meow), "Tiếng mèo khi bấm")
+    }
+
+    @Test func theCoatIsKeptByNameAndAnUnknownOneReadsAsTheDefault() throws {
+        let settings = try environment()
+        let keys = PetSettingsKeys(settings)
+        for coat in CatCoat.allCases {
+            settings.set(coat, for: keys.coat)
+            #expect(settings.value(keys.coat) == coat)
+        }
+        #expect(CatCoat(rawValue: "tabby") == .tabby && CatCoat(rawValue: "tuxedo") == .tuxedo && CatCoat(rawValue: "grey") == .grey)
     }
 
     @Test func theChoicesAreKeptUnderTheModulesOwnNames() throws {
         let keys = PetSettingsKeys(try environment())
-        #expect([keys.show.name, keys.bothWings.name, keys.meow.name, keys.sleepMinutes.name] == [
-            "module.pet.show", "module.pet.bothWings", "module.pet.meow", "module.pet.sleepMinutes",
+        #expect([keys.show.name, keys.coat.name, keys.meow.name, keys.sleepMinutes.name] == [
+            "module.pet.show", "module.pet.coat", "module.pet.meow", "module.pet.sleepMinutes",
         ])
     }
 
@@ -44,14 +54,11 @@ import Testing
 
     @Test func theRowsBuildAndTakeTheSpaceTheFormGivesThem() throws {
         let settings = try environment()
-        for notched in [true, false] {
-            let view = Form { PetSettingsView(keys: PetSettingsKeys(settings), settings: settings, hasNotchedScreen: { notched }) }
-                .frame(width: 480, height: 400)
-            let hosting = NSHostingView(rootView: view)
-            hosting.frame = CGRect(x: 0, y: 0, width: 480, height: 400)
-            hosting.layoutSubtreeIfNeeded()
-            #expect(hosting.fittingSize.width > 0)
-        }
+        let view = Form { PetSettingsView(keys: PetSettingsKeys(settings), settings: settings) }.frame(width: 480, height: 400)
+        let hosting = NSHostingView(rootView: view)
+        hosting.frame = CGRect(x: 0, y: 0, width: 480, height: 400)
+        hosting.layoutSubtreeIfNeeded()
+        #expect(hosting.fittingSize.width > 0)
     }
 }
 
@@ -73,19 +80,19 @@ import Testing
     }
 
     @Test func aPlanThatOnlyLastsLongerLooksTheSameWhenTheCatStandsStillButNotWhenItWalks() {
-        let sit = CatPlan(pose: .sit, facing: .left, from: 0.5, to: 0.5, began: 0, duration: 3)
+        let sit = CatPlan(move: .sit, facing: .left, from: 0.5, to: 0.5, began: 0, duration: 3)
         var longer = sit
         longer.duration = 9
         longer.began = 40
         #expect(sit.looksLike(longer))
-        let walk = CatPlan(pose: .walk, facing: .right, from: 0.1, to: 0.4, began: 0, duration: 3)
+        let walk = CatPlan(move: .walk, facing: .right, from: 0.1, to: 0.4, began: 0, duration: 3)
         var slower = walk
         slower.duration = 6
         #expect(!walk.looksLike(slower))
         var turned = sit
         turned.facing = .right
         #expect(!sit.looksLike(turned))
-        var harder = CatPlan(pose: .run, facing: .right, from: 0, to: 1, began: 0, duration: 2)
+        var harder = CatPlan(move: .frantic, facing: .right, from: 0, to: 1, began: 0, duration: 2)
         let calm = harder
         harder.fpsScale = 1.4
         #expect(!calm.looksLike(harder))
@@ -121,13 +128,5 @@ import Testing
     @Test func thePointerIsSomewhereOnTheScreens() {
         let point = SystemPointer().location()
         #expect(point.x.isFinite && point.y.isFinite)
-    }
-
-    @Test func aWindowOnNoScreenIsOnAScreenWithoutACameraOrWithAMainOne() {
-        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 10, height: 10), styleMask: .borderless, backing: .buffered, defer: true)
-        window.isReleasedWhenClosed = false
-        // Whatever the machine's main screen is: one of the two kinds, and never a crash.
-        let kind = CatStage.kind(of: window)
-        #expect(kind == .hardware || kind == .virtual)
     }
 }

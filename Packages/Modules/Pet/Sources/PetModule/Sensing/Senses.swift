@@ -86,13 +86,21 @@ struct AudioOutputProbe: AudioPlaybackSource {
     }
 }
 
-/// How near the pointer is to the notch.
-nonisolated enum PointerProximity {
-    /// How far from the notch counts as near, in points.
-    static let margin: CGFloat = 40
+/// How the pointer looks to the cat.
+nonisolated enum PointerLook {
+    /// How far from the strip counts as near, in points: the cat pounces.
+    static let nearMargin: CGFloat = 40
+    /// How far it can see, to the side and up or down.
+    static let sightX: CGFloat = 170
+    static let sightY: CGFloat = 110
 
-    /// Whether `point` is inside any of `rects` (the cat's views, in screen coordinates) or within `margin` of one.
-    static func isNear(_ point: CGPoint, to rects: [CGRect], margin: CGFloat = PointerProximity.margin) -> Bool {
-        rects.contains { $0.insetBy(dx: -margin, dy: -margin).contains(point) }
+    /// What the cat makes of `point` (in screen coordinates) with its strip at `strip`, nil for a pointer out of sight. `lane` is the
+    /// cat's, in the strip's own coordinates, and the share it is given is that of the cat's centre.
+    static func reading(of point: CGPoint, strip: CGRect, lane: WalkLane, spriteWidth: CGFloat) -> PointerReading? {
+        let isNear = strip.insetBy(dx: -nearMargin, dy: -nearMargin).contains(point)
+        let isInRange = strip.insetBy(dx: -sightX, dy: -sightY).contains(point)
+        guard isNear || isInRange else { return nil }
+        let share = lane.travel > 0 ? Double((point.x - strip.minX - spriteWidth / 2 - lane.minX) / lane.travel) : 0.5
+        return PointerReading(share: share, isNear: isNear, isInRange: isInRange, isAbove: point.y >= strip.maxY - 1)
     }
 }

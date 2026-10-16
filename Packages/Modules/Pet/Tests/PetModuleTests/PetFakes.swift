@@ -1,7 +1,6 @@
 import AppKit
 import MyNotchCore
 import MyNotchTestSupport
-import NotchUI
 @testable import PetModule
 
 /// What the cat reads, held by the test: each counts how often it was read, which is how a test shows that nothing is read while the
@@ -64,12 +63,9 @@ extension ManualScheduler {
 final class Knobs {
     var hour = 12
     var reducesMotion = false
-    var kind: NotchKind = .hardware
-    /// How often the stage asked what kind of notch a window has.
-    var kindAsks = 0
 }
 
-/// A stage with everything it reads held by the test, and the two wings of a notch in a window that is never shown.
+/// A stage with everything it reads held by the test, and a strip of a notch in a window that is never shown.
 @MainActor final class StageRig {
     let scheduler = ManualScheduler()
     let idle = FakeIdle()
@@ -82,12 +78,10 @@ final class Knobs {
     let sources: CatStage.Sources
     let stage: CatStage
     let window: NSWindow
-    let leading: CatSpriteView
-    let trailing: CatSpriteView
+    let host: CatSpriteView
 
-    /// A hardware notch: a wing of 64 by 32 points on each side of a camera 185 points wide.
-    static let wingSize = CGSize(width: 64, height: 32)
-    static let cameraWidth: CGFloat = 185
+    /// The strip of a MacBook's collapsed notch: its width, less the padding the notch gives it, by the height the cat asks for.
+    static let stripSize = CGSize(width: 300, height: CatActivity.stripHeight)
 
     var hour: Int {
         get { knobs.hour }
@@ -99,56 +93,48 @@ final class Knobs {
         set { knobs.reducesMotion = newValue }
     }
 
-    var kind: NotchKind {
-        get { knobs.kind }
-        set { knobs.kind = newValue }
-    }
-
-    var kindAsks: Int { knobs.kindAsks }
-
-    init(kind: NotchKind = .hardware, reducesMotion: Bool = false, hour: Int = 12, seed: UInt64 = 7, wingHeight: CGFloat = 32) {
+    init(reducesMotion: Bool = false, hour: Int = 12, seed: UInt64 = 7, width: CGFloat = 300) {
         let knobs = knobs
-        knobs.kind = kind
         knobs.reducesMotion = reducesMotion
         knobs.hour = hour
         let scheduler = scheduler
         let sources = CatStage.Sources(
             idle: idle, cpu: cpu, pointer: pointer, audio: audio, meow: meow,
             hour: { knobs.hour }, reducesMotion: { knobs.reducesMotion }, notifications: notifications,
-            clock: { scheduler.seconds }, notchKind: { _ in
-                knobs.kindAsks += 1
-                return knobs.kind
-            }, seed: seed
+            clock: { scheduler.seconds }, seed: seed
         )
         self.sources = sources
         stage = CatStage(scheduler: scheduler, sources: sources)
-        let width = Self.wingSize.width * 2 + Self.cameraWidth
         window = NSWindow(
-            contentRect: CGRect(x: 100, y: 800, width: width, height: wingHeight), styleMask: .borderless, backing: .buffered, defer: true
+            contentRect: CGRect(x: 100, y: 800, width: width, height: Self.stripSize.height), styleMask: .borderless, backing: .buffered,
+            defer: true
         )
         window.isReleasedWhenClosed = false
-        leading = CatSpriteView(stage: stage, role: .leading)
-        trailing = CatSpriteView(stage: stage, role: .trailing)
-        leading.frame = CGRect(x: 0, y: 0, width: Self.wingSize.width, height: wingHeight)
-        trailing.frame = CGRect(x: width - Self.wingSize.width, y: 0, width: Self.wingSize.width, height: wingHeight)
-        leading.backingScaleOverride = 2
-        trailing.backingScaleOverride = 2
+        host = CatSpriteView(stage: stage)
+        host.frame = CGRect(x: 0, y: 0, width: width, height: Self.stripSize.height)
     }
 
-    /// Both wings come into the window: the cat's views are on a notch that can be seen.
+    /// The strip comes into the window: the cat's view is on a notch that can be seen.
     func show() {
-        window.contentView?.addSubview(leading)
-        window.contentView?.addSubview(trailing)
+        window.contentView?.addSubview(host)
     }
 
-    /// Both wings leave: the notch is open, or hidden, or another activity took its place.
+    /// The strip leaves: the notch is open, or hidden, or another activity took its place.
     func hide() {
-        leading.removeFromSuperview()
-        trailing.removeFromSuperview()
+        host.removeFromSuperview()
     }
 
     func advance(_ seconds: Double) {
         scheduler.advance(by: .milliseconds(Int((seconds * 1000).rounded())))
+    }
+
+    /// The pointer, on the screen, at a share of the lane and `above` points over the strip.
+    func place(pointerAtShare share: Double, above: CGFloat = 0) {
+        guard let strip = host.screenFrame else { return }
+        let lane = host.lane
+        pointer.point = CGPoint(
+            x: strip.minX + lane.minX + CatSpriteView.spriteSize.width / 2 + lane.travel * CGFloat(share), y: strip.midY + above
+        )
     }
 }
 
