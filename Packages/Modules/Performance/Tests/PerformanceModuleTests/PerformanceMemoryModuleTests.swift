@@ -197,7 +197,7 @@ import Testing
     // MARK: Settings
 
     @Test func bothStripSettingsAreOffUntilTheUserTurnsThemOn() throws {
-        let harness = RegistryHarness([PerformanceModule(thermal: FakeThermalReader(), memory: FakeMemoryReader(), now: { .now })])
+        let harness = RegistryHarness([PerformanceModule(thermal: FakeThermalReader(), memory: FakeMemoryReader(), helper: HelperRig().manager, now: { .now })])
         let environment = try #require(harness.settingsEnvironment(for: "performance"))
         let keys = PerformanceSettingsKeys(environment.settings)
         #expect(keys.stripTemperature.name == "module.performance.stripTemperature")

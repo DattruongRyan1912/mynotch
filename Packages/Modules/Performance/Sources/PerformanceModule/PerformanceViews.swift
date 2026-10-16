@@ -15,7 +15,7 @@ extension Tone {
 /// The "Hiệu năng" tab.
 struct PerformanceTabView: View {
     /// What the tab's content needs, with room to spare; a test checks the content fits it at the narrowest notch.
-    static let contentHeight: CGFloat = 184
+    static let contentHeight: CGFloat = 192
     /// The tab bar's height when there are two or more tabs; `NotchTab.preferredHeight` includes it.
     static let tabBarHeight: CGFloat = 30
     static var preferredHeight: CGFloat { contentHeight + NotchTokens.padding + tabBarHeight }
@@ -69,6 +69,7 @@ struct ThermalColumn: View {
             if !presentation.fans.isEmpty {
                 VStack(spacing: 8) {
                     ForEach(presentation.fans) { FanRowView(row: $0) }
+                    if let helper = state.helper { FanHelperRow(helper: helper) }
                 }
             }
         }

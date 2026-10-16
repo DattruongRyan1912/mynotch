@@ -24,6 +24,7 @@ public final class PerformanceModule: FeatureModule {
     let state = PerformanceState()
     private let thermal: any ThermalReading
     private let memory: any MemoryReading
+    private let helper: FanHelperManager
     private let identity = ProcessIdentity()
     private let now: () -> Date
     private var context: ModuleContext?
@@ -46,13 +47,26 @@ public final class PerformanceModule: FeatureModule {
         var processes: Bool
     }
 
-    init(thermal: any ThermalReading, memory: any MemoryReading, now: @escaping () -> Date) {
+    /// The helper manager is passed in: the real one talks to the system's service manager and to a root daemon, which no test
+    /// does, so the tests pass one built on fakes.
+    init(thermal: any ThermalReading, memory: any MemoryReading, helper: FanHelperManager, now: @escaping () -> Date) {
         self.thermal = thermal
         self.memory = memory
+        self.helper = helper
         self.now = now
+        state.helper = helper
     }
 
-    public convenience init() { self.init(thermal: SMCThermalReader(), memory: SystemMemoryReader(), now: { .now }) }
+    public convenience init() {
+        self.init(
+            thermal: SMCThermalReader(), memory: SystemMemoryReader(),
+            helper: FanHelperManager(
+                registration: SMAppServiceRegistration(), client: XPCFanHelperClient(), bundled: { BundledFanHelper.current() },
+                runningApps: { Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)) }
+            ),
+            now: { .now }
+        )
+    }
 
     /// Whether a read is on its way (for tests).
     var isReading: Bool { readTask != nil }
@@ -72,6 +86,9 @@ public final class PerformanceModule: FeatureModule {
                 self?.settingsChanged()
             }
         }
+        // An installed helper that is not the one in this app is registered again; one that was never installed is left alone.
+        let helper = helper
+        context.run { await helper.checkAtLaunch() }
     }
 
     public func stop() async {
@@ -102,9 +119,12 @@ public final class PerformanceModule: FeatureModule {
 
     public func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? {
         let keys = PerformanceSettingsKeys(environment.settings)
+        let thermal = thermal
         return AnyView(PerformanceSettingsView(
             stripTemperature: environment.settings.binding(keys.stripTemperature),
-            stripMemory: environment.settings.binding(keys.stripMemory)
+            stripMemory: environment.settings.binding(keys.stripMemory),
+            helper: helper,
+            readAppFans: { await thermal.read()?.fans ?? [] }
         ))
     }
 
@@ -115,6 +135,8 @@ public final class PerformanceModule: FeatureModule {
         visibleTabs += 1
         state.isTabVisible = true
         updatePolling()
+        let helper = helper
+        Task { await helper.refresh() }
     }
 
     private func tabDisappeared() {

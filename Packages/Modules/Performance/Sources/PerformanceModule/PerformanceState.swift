@@ -13,6 +13,8 @@ final class PerformanceState {
     /// What the strip beside the collapsed notch shows; the temperature only on a Mac that has sensors.
     var stripTemperature = false
     var stripMemory = false
+    /// The fan helper's installation, for the row in the tab; nil where there is none (a test of a view that has no use for one).
+    var helper: FanHelperManager?
 }
 
 /// What the tab tells the module about itself.

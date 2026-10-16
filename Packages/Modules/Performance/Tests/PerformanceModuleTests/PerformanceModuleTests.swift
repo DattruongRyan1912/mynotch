@@ -14,21 +14,22 @@ import Testing
         let module: PerformanceModule
         let reader: FakeThermalReader
         let memory: FakeMemoryReader
+        let rig: HelperRig
         let harness: RegistryHarness
         let clock: TestClock
 
         /// `strip` turns the temperature strip on before the module starts, `memoryStrip` the memory one.
         @MainActor init(
             _ reader: FakeThermalReader = FakeThermalReader(), memory: FakeMemoryReader = FakeMemoryReader(),
-            strip: Bool = false, memoryStrip: Bool = false
+            strip: Bool = false, memoryStrip: Bool = false, rig: HelperRig = HelperRig()
         ) async {
             let clock = TestClock()
-            let module = PerformanceModule(thermal: reader, memory: memory, now: { clock.date })
+            let module = PerformanceModule(thermal: reader, memory: memory, helper: rig.manager, now: { clock.date })
             let harness = RegistryHarness([module])
             if strip { harness.settings.set(true, for: PerformanceModuleTests.stripKey) }
             if memoryStrip { harness.settings.set(true, for: PerformanceModuleTests.memoryStripKey) }
             await harness.registry.bootstrap()
-            (self.module, self.reader, self.memory, self.harness, self.clock) = (module, reader, memory, harness, clock)
+            (self.module, self.reader, self.memory, self.rig, self.harness, self.clock) = (module, reader, memory, rig, harness, clock)
         }
 
         /// A tab on screen; `disappear` is what removing it does.
@@ -339,14 +340,14 @@ import Testing
     }
 
     @Test func settingsRowsExistBeforeTheModuleEverStarts() throws {
-        let harness = RegistryHarness([PerformanceModule(thermal: FakeThermalReader(), memory: FakeMemoryReader(), now: { .now })])
+        let harness = RegistryHarness([PerformanceModule(thermal: FakeThermalReader(), memory: FakeMemoryReader(), helper: HelperRig().manager, now: { .now })])
         #expect(harness.registry.state(of: "performance") == .disabled)
         let view = try #require(harness.registry.settingsView(for: "performance"))
         #expect(String(describing: view).hasPrefix("AnyView(PerformanceSettingsView("))
     }
 
     @Test func theStripSettingIsOffUntilTheUserTurnsItOn() throws {
-        let harness = RegistryHarness([PerformanceModule(thermal: FakeThermalReader(), memory: FakeMemoryReader(), now: { .now })])
+        let harness = RegistryHarness([PerformanceModule(thermal: FakeThermalReader(), memory: FakeMemoryReader(), helper: HelperRig().manager, now: { .now })])
         let environment = try #require(harness.settingsEnvironment(for: "performance"))
         let key = PerformanceSettingsKeys(environment.settings).stripTemperature
         #expect(key.name == "module.performance.stripTemperature")

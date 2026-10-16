@@ -18,6 +18,8 @@ struct PerformanceSettingsKeys {
 struct PerformanceSettingsView: View {
     @Binding var stripTemperature: Bool
     @Binding var stripMemory: Bool
+    let helper: FanHelperManager
+    let readAppFans: () async -> [FanReading]
 
     var body: some View {
         Group {
@@ -26,6 +28,7 @@ struct PerformanceSettingsView: View {
             Text("Số liệu chỉ được đọc (mỗi 2 giây) khi tab đang mở hoặc khi một trong hai dải này bật.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            FanHelperSettingsRows(helper: helper, readAppFans: readAppFans)
         }
     }
 }
