@@ -6,41 +6,110 @@ import SwiftUI
 struct FanHelperRow: View {
     static let height: CGFloat = 22
 
+    /// The parts whose place a test wants to know.
+    enum Part: Hashable {
+        case status, button, warning
+    }
+
     let helper: FanHelperManager
+    /// Hears where each part of the line ended up, in the line's own coordinates; set by a test, nil in the app (nothing is measured).
+    var report: (([Part: CGRect]) -> Void)?
 
     var body: some View {
         let presentation = helper.presentation
+        // The button and the warning keep their natural size and come first in line for the width; the status takes what is left,
+        // loses its "Helper:" before it is cut, and is cut before anything else gives. The warning is after the button, so the
+        // button is never the part that is pushed out.
         HStack(spacing: 6) {
-            Circle()
-                .fill(presentation.tone?.color ?? NotchTokens.fill(0.3))
-                .frame(width: 7, height: 7)
-            Text("Helper: \(presentation.shortStatus)")
-                .font(.system(size: 11))
-                .foregroundStyle(NotchTokens.secondaryText)
-                .lineLimit(1)
+            status(presentation)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .measured(.status, report: report)
+            if let action = presentation.primary {
+                FanHelperButton(title: action.compactTitle) { run(action) }
+                    .layoutPriority(2)
+                    .measured(.button, report: report)
+            } else if presentation.canUninstall, case .running = helper.phase {
+                FanHelperButton(title: "Gỡ") { Task { await helper.uninstall() } }
+                    .layoutPriority(2)
+                    .measured(.button, report: report)
+            }
             if let warning = presentation.warning {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(Tone.caution.color)
+                    .fixedSize()
+                    .layoutPriority(2)
                     .help(warning)
                     .accessibilityLabel(warning)
-            }
-            Spacer(minLength: 4)
-            if let action = presentation.primary {
-                FanHelperButton(title: action.compactTitle) { run(action) }
-            } else if presentation.canUninstall, case .running = helper.phase {
-                FanHelperButton(title: "Gỡ") { Task { await helper.uninstall() } }
+                    .measured(.warning, report: report)
             }
         }
         .frame(height: Self.height)
+        .coordinateSpace(name: Self.space)
+        .onPreferenceChange(PartFrames.self) { report?($0) }
+        .help(presentation.tooltip)
         .accessibilityElement(children: .contain)
     }
+
+    /// The dot and the status in words: with "Helper:" in front when there is room, without it when there is not, and cut off at the
+    /// end as the last resort.
+    private func status(_ presentation: FanHelperPresentation) -> some View {
+        ViewThatFits(in: .horizontal) {
+            statusLabel("Helper: \(presentation.shortStatus)", tone: presentation.tone, cuts: false)
+            statusLabel(presentation.shortStatus, tone: presentation.tone, cuts: false)
+            statusLabel(presentation.shortStatus, tone: presentation.tone, cuts: true)
+        }
+    }
+
+    private func statusLabel(_ text: String, tone: Tone?, cuts: Bool) -> some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(tone?.color ?? NotchTokens.fill(0.3))
+                .frame(width: 7, height: 7)
+            if cuts {
+                label(text)
+            } else {
+                label(text).fixedSize(horizontal: true, vertical: false)
+            }
+        }
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(NotchTokens.secondaryText)
+            .lineLimit(1)
+            .truncationMode(.tail)
+    }
+
+    static let space = "fanHelperRow"
 
     private func run(_ action: FanHelperAction) {
         switch action {
         case .install: Task { await helper.install() }
         case .openSettings: helper.openSystemSettings()
         case .retry: Task { await helper.retry() }
+        }
+    }
+}
+
+/// Where the parts of the line are, collected for a test.
+private struct PartFrames: PreferenceKey {
+    static let defaultValue: [FanHelperRow.Part: CGRect] = [:]
+    static func reduce(value: inout [FanHelperRow.Part: CGRect], nextValue: () -> [FanHelperRow.Part: CGRect]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
+private extension View {
+    /// Reports this view's frame in the line's coordinates, when somebody listens.
+    @ViewBuilder func measured(_ part: FanHelperRow.Part, report: (([FanHelperRow.Part: CGRect]) -> Void)?) -> some View {
+        if report == nil {
+            self
+        } else {
+            background(GeometryReader { proxy in
+                Color.clear.preference(key: PartFrames.self, value: [part: proxy.frame(in: .named(FanHelperRow.space))])
+            })
         }
     }
 }
@@ -55,11 +124,13 @@ struct FanHelperButton: View {
             Text(title)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(NotchTokens.primaryText)
+                .lineLimit(1)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(Capsule().fill(NotchTokens.fill(0.14)))
         }
         .buttonStyle(.plain)
+        .fixedSize()
     }
 }
 
@@ -73,6 +144,8 @@ struct FanHelperSettingsRows: View {
     var body: some View {
         let presentation = helper.presentation
         Group {
+            Text("Điều khiển quạt")
+                .font(.subheadline.weight(.semibold))
             LabeledContent("Helper điều khiển quạt") {
                 Text(presentation.status)
                     .foregroundStyle(presentation.tone == .critical ? Tone.critical.color : .secondary)

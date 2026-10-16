@@ -17,6 +17,11 @@ nonisolated struct FanHelperPresentation: Equatable, Sendable {
     let warning: String?
 
     static let macsFanControlWarning = "Thoát Macs Fan Control trước khi điều khiển quạt"
+    /// Where the full rows are: the menu bar icon's "Open Settings…" (⌘,), then this.
+    static let settingsPath = "Cài đặt MyNotch → Mô-đun → Hiệu năng → Điều khiển quạt"
+
+    /// What the tab's line says when the pointer rests on it: the full status, and where to find the rest.
+    var tooltip: String { "\(status)\n\(Self.settingsPath)" }
 
     init(phase: FanHelperPhase, macsFanControlRunning: Bool) {
         warning = macsFanControlRunning ? Self.macsFanControlWarning : nil

@@ -134,6 +134,12 @@ import Testing
         }
     }
 
+    @Test func theTabsTooltipSaysTheFullStatusAndWhereTheRestIs() {
+        #expect(say(.notInstalled).tooltip == "Chưa cài\nCài đặt MyNotch → Mô-đun → Hiệu năng → Điều khiển quạt")
+        #expect(say(.needsApproval).tooltip.hasPrefix("Cần cho phép trong Cài đặt hệ thống\n"))
+        #expect(FanHelperPresentation.settingsPath == "Cài đặt MyNotch → Mô-đun → Hiệu năng → Điều khiển quạt")
+    }
+
     @Test func theCompactTitlesFitTheTab() {
         #expect(FanHelperAction.install.compactTitle == "Cài helper")
         #expect(FanHelperAction.openSettings.compactTitle == "Cài đặt")
