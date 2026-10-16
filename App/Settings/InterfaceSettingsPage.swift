@@ -38,7 +38,21 @@ struct InterfaceSettingsPage: View {
                     Text("Cổ điển (đen)").tag(NotchLook.classic)
                     Text("Liquid Glass").tag(NotchLook.liquidGlass)
                 }
-                Text("Liquid Glass: notch thu gọn, notch mở rộng, bong bóng và thông báo là một khối kính trong suốt của macOS 26. Trên máy có phần khuyết, kính hiện quanh phần khuyết.")
+                Text("Liquid Glass: notch thu gọn, notch mở rộng, bong bóng và thông báo là kính trong suốt của macOS 26. Trên máy có phần khuyết, kính hiện quanh phần khuyết.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Picker("Độ trong", selection: settings.binding(InterfaceSettings.glassClarity)) {
+                    Text("Cân bằng").tag(NotchGlassClarity.balanced)
+                    Text("Trong vắt").tag(NotchGlassClarity.clear)
+                }
+                .disabled(!isLiquidGlass)
+                Text("Trong vắt giống Control Center nhưng chữ có thể khó đọc khi notch mở trên trang sáng nhiều chữ.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Picker("Hình dạng khi mở", selection: settings.binding(InterfaceSettings.glassShape)) {
+                    Text("Một khối").tag(NotchGlassShape.slab)
+                    Text("Ô rời").tag(NotchGlassShape.tiles)
+                }
+                .disabled(!isLiquidGlass)
+                Text("Ô rời: thanh trang và nội dung là hai mảnh kính riêng, giữa hai mảnh thấy được hình nền.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("Nhuộm theo màu nhấn", isOn: settings.binding(InterfaceSettings.glassTint))
                     .disabled(!isLiquidGlass)

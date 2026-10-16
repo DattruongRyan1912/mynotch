@@ -5,7 +5,7 @@ import SwiftUI
 import Testing
 @testable import NotchUI
 
-/// `debug.glass.active`: the notch panel's glass drawn as an active window's, which is a question of the window's key
+/// The notch panel's glass drawn as an active window's, which is a question of the window's key
 /// *appearance*, never of key status. These tests pin that key status does not move, that the hook does nothing when its method
 /// is missing or is not what is expected, that nothing is hooked by default and on the classic look, and that the appearance comes
 /// back after AppKit takes it away. What the glass then looks like is for the eye; `ActiveGlassLayerCanaryTests` reads the glass's
@@ -55,7 +55,7 @@ import Testing
     // MARK: the hook exists, and does what it is for
 
     @Test func thisMacOSHasTheMethodsTheHookIsMadeOf() {
-        // The day this fails, the switch silently does nothing: look at `ActiveGlassAppearance` and the probe in U3c-report.md.
+        // The day this fails, the hook silently does nothing: look at `ActiveGlassAppearance` and the probe in U3c-report.md.
         #expect(ActiveGlassAppearance.detect() != nil)
     }
 
@@ -233,44 +233,56 @@ import Testing
         return NotchTheme(settings: settings, systemAccent: { NotchAccent.Palette.blue.rgb }, notifications: NotificationCenter())
     }
 
-    func makeController(theme: NotchTheme?, _ switches: NotchGlassSwitches?) -> NotchWindowController {
-        NotchWindowController(
+    func makeController(theme: NotchTheme?, drawsActiveGlass: Bool? = nil) -> NotchWindowController {
+        let make = { (draws: Bool) in
+            NotchWindowController(
+                displayID: 1, screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig(), scheduler: self.harness.scheduler,
+                registry: self.harness.registry, activities: self.harness.activities,
+                delays: { (.milliseconds(150), .milliseconds(300)) },
+                captureHiding: { .never }, swipesBetweenTabs: { true },
+                theme: theme, drawsActiveGlass: draws
+            )
+        }
+        // Left out, the controller's own default is what is tested.
+        return drawsActiveGlass.map(make) ?? NotchWindowController(
             displayID: 1, screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig(), scheduler: harness.scheduler,
             registry: harness.registry, activities: harness.activities,
             delays: { (.milliseconds(150), .milliseconds(300)) },
             captureHiding: { .never }, swipesBetweenTabs: { true },
-            theme: theme, glassSwitches: switches ?? .default
+            theme: theme
         )
     }
 
-    @Test func theSwitchHooksThePanelOnGlassOnly() async throws {
-        let on = NotchGlassSwitches(active: true)
-        let glass = makeController(theme: theme(.liquidGlass), on)
+    @Test func thePanelOfALiquidGlassNotchIsHookedByDefaultAndNeverKey() async throws {
+        let glass = makeController(theme: theme(.liquidGlass))
         defer { glass.close() }
-        #expect(await eventually { glass.activeGlass != nil }, "glass, switch on: hooked")
+        #expect(await eventually { glass.activeGlass != nil }, "Liquid Glass: always hooked")
         #expect(!glass.panelIsKey, "and the panel is not key")
+    }
 
-        let classic = makeController(theme: theme(.classic), on)
+    @Test func theClassicLookTheMissingThemeAndTheSupportSwitchLeaveThePanelUnhooked() async throws {
+        let classic = makeController(theme: theme(.classic))
         defer { classic.close() }
-        let off = makeController(theme: theme(.liquidGlass), NotchGlassSwitches(active: false))
-        defer { off.close() }
-        let byDefault = makeController(theme: theme(.liquidGlass), nil)
-        defer { byDefault.close() }
-        let noTheme = makeController(theme: nil, on)
+        let noTheme = makeController(theme: nil)
         defer { noTheme.close() }
+        // The support switch (`debug.glass.inactive`), which `ScreenManager` reads and hands over as `drawsActiveGlass: false`.
+        let killed = makeController(theme: theme(.liquidGlass), drawsActiveGlass: false)
+        defer { killed.close() }
+        let reference = makeController(theme: theme(.liquidGlass))
+        defer { reference.close() }
+        #expect(await eventually { reference.activeGlass != nil }, "the same notch without the support switch is hooked")
         try await Task.sleep(for: .milliseconds(200))
         #expect(classic.activeGlass == nil, "the classic look: unchanged")
-        #expect(off.activeGlass == nil)
-        #expect(byDefault.activeGlass == nil, "switch off: nothing hooked")
         #expect(noTheme.activeGlass == nil)
-        for controller in [classic, off, byDefault, noTheme] { #expect(!controller.panelIsKey) }
+        #expect(killed.activeGlass == nil, "the support switch turns it off")
+        for controller in [classic, noTheme, killed] { #expect(!controller.panelIsKey) }
     }
 
     @Test func theHookFollowsTheLookWhileTheAppRuns() async throws {
         let settings = SettingsStore(defaults: makeIsolatedDefaults())
         settings.set(.classic, for: InterfaceSettings.look)
         let theme = NotchTheme(settings: settings, systemAccent: { NotchAccent.Palette.blue.rgb }, notifications: NotificationCenter())
-        let controller = makeController(theme: theme, NotchGlassSwitches(active: true))
+        let controller = makeController(theme: theme)
         defer { controller.close() }
         try await Task.sleep(for: .milliseconds(150))
         #expect(controller.activeGlass == nil)
@@ -281,15 +293,21 @@ import Testing
         #expect(!controller.panelIsKey)
     }
 
-    @Test func theKeyboardPolicyIsNotAffectedByTheHook() async throws {
-        let controller = makeController(theme: theme(.liquidGlass), NotchGlassSwitches(active: true))
+    @Test func theClarityAndTheShapeDoNotTouchTheHookOrKeyStatus() async throws {
+        let settings = SettingsStore(defaults: makeIsolatedDefaults())
+        settings.set(.liquidGlass, for: InterfaceSettings.look)
+        let theme = NotchTheme(settings: settings, systemAccent: { NotchAccent.Palette.blue.rgb }, notifications: NotificationCenter())
+        let controller = makeController(theme: theme)
         defer { controller.close() }
         #expect(await eventually { controller.activeGlass != nil })
-        try await Task.sleep(for: .milliseconds(100))
-        #expect(!controller.panelIsKey, "the panel is not key, and takes no keyboard")
-        // The window is never ordered in here (it would show on the user's screen): the hook is the same one that runs after the
-        // panel is ordered front, and `ActiveGlassLayerCanaryTests` orders one far off screen.
-        #expect(controller.activeGlass != nil)
+        let hooked = controller.activeGlass
+        for (clarity, shape) in [(NotchGlassClarity.clear, NotchGlassShape.tiles), (.balanced, .tiles), (.clear, .slab), (.balanced, .slab)] {
+            settings.set(clarity, for: InterfaceSettings.glassClarity)
+            settings.set(shape, for: InterfaceSettings.glassShape)
+            try await Task.sleep(for: .milliseconds(60))
+            #expect(controller.activeGlass == hooked, "\(clarity) \(shape)")
+            #expect(!controller.panelIsKey)
+        }
     }
 }
 

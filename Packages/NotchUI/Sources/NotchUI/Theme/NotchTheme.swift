@@ -75,6 +75,15 @@ public final class NotchTheme {
     /// Whether the Liquid Glass carries a hint of the accent.
     public var glassTint: Bool { settings.value(InterfaceSettings.glassTint) }
 
+    /// How clear the Liquid Glass is.
+    public var glassClarity: NotchGlassClarity { settings.value(InterfaceSettings.glassClarity) }
+
+    /// What the open notch's glass is made of.
+    public var glassShape: NotchGlassShape { settings.value(InterfaceSettings.glassShape) }
+
+    /// Both, for the plan. Reading it in a view's body makes the view redraw when either changes.
+    var glassStyle: NotchGlassStyle { NotchGlassStyle(clarity: glassClarity, shape: glassShape) }
+
     /// What the notch's shape is filled with in `state`. Reading it in a view's body makes the view redraw when the look, the
     /// tint or the classic blur changes.
     public func surface(for state: NotchState) -> NotchSurface {

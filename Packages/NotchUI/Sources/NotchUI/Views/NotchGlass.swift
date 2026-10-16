@@ -19,23 +19,23 @@ extension EnvironmentValues {
 /// appears or disappears is a shape that comes out of its neighbours or melts back into them.
 nonisolated enum NotchGlassID: Hashable, Sendable {
     /// The notch is one shape in every state: closed, collapsed with a strip or the list, open, a toast. So opening it is the
-    /// same glass growing, not one glass replaced by another. (With the debug panel `tiles` it is the one shape of every state
+    /// same glass growing, not one glass replaced by another. (With `tiles` it is the one shape of every state
     /// but the open one, which is made of `tabBar` and `content` instead.)
     case notch
-    /// The tab bar's capsule of the open notch, with the debug panel `tiles`.
+    /// The tab bar's capsule of the open notch, with `tiles`.
     case tabBar
-    /// The tile that holds the open tab's content, with the debug panel `tiles`.
+    /// The tile that holds the open tab's content, with `tiles`.
     case content
     /// A bubble is named after its activity (`ActivitySlot.id`), and the "+N" bubble keeps its name while its number changes.
     case bubble(String)
 }
 
 nonisolated extension NotchSurface {
-    /// The `Glass` this surface draws, nil for the black and the classic blur. The regular variant unless `variant` says clear
-    /// (a debug switch), which adapts to what is behind it, tinted with `accent` at low strength when the user asks for it.
-    func glass(accent: Color, interactive: Bool, variant: NotchGlassVariant = .regular) -> Glass? {
+    /// The `Glass` this surface draws, nil for the black and the classic blur: the balanced (regular) one, which adapts to what is
+    /// behind it, or the clear one when the user chose it, tinted with `accent` at low strength when the user asks for it.
+    func glass(accent: Color, interactive: Bool, clarity: NotchGlassClarity = .balanced) -> Glass? {
         guard case .liquidGlass(let tinted) = self else { return nil }
-        var glass = variant.glass
+        var glass = clarity.glass
         if tinted { glass = glass.tint(accent.opacity(NotchTokens.glassTintOpacity)) }
         return interactive ? glass.interactive() : glass
     }
@@ -43,9 +43,9 @@ nonisolated extension NotchSurface {
 
 /// What glass the notch asks for, as a value: whether the notch and its bubbles share a container, and for each shape its name
 /// in the morph namespace and its `Glass`. The root view and the bubbles draw from it, so a test that reads it reads what is
-/// drawn. With the usual panel (`slab`) it does not depend on the notch's state: the notch is one shape whose glass is the same
-/// closed, collapsed, open or showing a toast, so nothing about it is rebuilt while it morphs. With the debug panel `tiles` the
-/// open notch is made of other shapes instead (`tiles`), and only then.
+/// drawn. With the usual shape (`slab`) it does not depend on the notch's state: the notch is one shape whose glass is the same
+/// closed, collapsed, open or showing a toast, so nothing about it is rebuilt while it morphs. With `tiles` the open notch is made
+/// of other shapes instead (`tiles`), and only then.
 nonisolated struct NotchGlassPlan: Equatable, Sendable {
     /// One glass shape: its name in the namespace and what it is made of.
     struct Shape: Equatable, Sendable {
@@ -53,16 +53,15 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
         let glass: Glass
     }
 
-    /// The open notch with the debug panel `tiles`: the tab bar's capsule and the tile that holds the tab's content. Their glass is
-    /// `Glass.identity`, which draws nothing, while the notch is not open (a toast over a tab keeps the tab's views alive and
-    /// hidden), so the views and what they hold keep their identity as the notch opens and closes.
+    /// The open notch with `tiles`: the tab bar's capsule and the tile that holds the tab's content. Their glass is `Glass.identity`,
+    /// which draws nothing, until the open notch has grown (`NotchGlassPlan.tilesDelay`) and again once it is not open (a toast over
+    /// a tab keeps the tab's views alive and hidden), so the views and what they hold keep their identity as the notch opens and
+    /// closes, and are glass only when the notch's own glass is not.
     struct Tiles: Equatable, Sendable {
         let tabBar: Shape
         let content: Shape
-        /// The open notch draws these: its own shape has no glass, and the strip's shapes sit on the desktop as glass of their own.
-        let isOpen: Bool
-        /// Opacity of the black layer in each of them, above the glass and below what they hold.
-        let dim: Double
+        /// The notch's glass is `Glass.identity` and these are real glass.
+        let isShown: Bool
     }
 
     /// No glass at all: the classic look.
@@ -74,8 +73,8 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
     /// the other.
     static let containerSpacing: CGFloat = 4
 
-    /// The gap between two tiles of the open notch (the tab bar's capsule, the strip's shapes, the content's tile): wider than
-    /// `containerSpacing`, so they do not melt into each other, and it is where the desktop shows.
+    /// The gap between two tiles of the open notch (the tab bar's capsule and the content's tile): wider than `containerSpacing`,
+    /// so they do not melt into each other, and it is where the desktop shows.
     static let tileGap: CGFloat = 8
 
     /// What a tile holds is this far from its edge.
@@ -84,62 +83,75 @@ nonisolated struct NotchGlassPlan: Equatable, Sendable {
     /// The tab bar's capsule is this far from the tab bar's icons, sideways and up and down.
     static let tabBarInset = CGSize(width: 8, height: 3)
 
-    /// With the panel `tiles` the open notch has no fill, but a window that is transparent where it is not drawn lets a click in a
-    /// gap fall through to the app behind. A black layer this faint over the whole notch (under 3 levels of 255, which no one can
-    /// see) keeps the gaps part of the window.
+    /// With `tiles` the open notch has no fill, but a window that is transparent where it is not drawn lets a click in a gap fall
+    /// through to the app behind. A black layer this faint over the whole notch (under 3 levels of 255, which no one can see) keeps
+    /// the gaps part of the window.
     static let hitOpacity = 0.01
 
-    let panel: NotchGlassPanel
+    /// How long the open notch keeps its own glass while it grows, before it gives way to the tiles: about as long as its spring takes
+    /// to come to rest. So the glass never goes while the notch is still growing, which left a stretch with no glass at all.
+    static let tilesDelay = Duration.milliseconds(300)
+
+    /// The animation of the notch's glass giving way to the tiles.
+    static let tilesSwap = Animation.easeInOut(duration: 0.2)
+
+    /// The radius of a shape inside another one that is `inset` away from its edge: the outer radius less that gap, so the two
+    /// curves are concentric. Never below 0.
+    static func concentricRadius(outer: CGFloat, inset: CGFloat) -> CGFloat {
+        max(outer - inset, 0)
+    }
+
+    let shape: NotchGlassShape
     /// Whether the notch and its bubbles are wrapped in one `GlassEffectContainer`.
     let usesContainer: Bool
-    /// The notch's own shape: nil in the classic look, and with the panel `tiles` while the notch is open, which has no glass of its own.
+    /// The notch's own shape: nil in the classic look. With `tiles` its glass is `Glass.identity` while the tiles are shown.
     let notch: Shape?
     /// The bubbles' shapes, in the order of the bubbles.
     let bubbles: [Shape]
-    /// The open notch's tiles; nil unless the panel is `tiles`.
+    /// The open notch's tiles; nil unless the shape is `tiles`.
     let tiles: Tiles?
-    /// The black layer the notch's backdrop draws over its glass, inside its whole shape: the dim, or, with tiles when open, the
-    /// faint veil that keeps the gaps part of the window (the dim is then in each tile).
-    let backdropOpacity: Double
-    /// The colour scheme forced on the content (the notch's and the bubbles'), not on the glass; nil leaves the window's own.
-    let contentScheme: ColorScheme?
+    /// The black layer the notch's backdrop draws inside its whole shape: with `tiles` and the notch open, the faint veil that keeps
+    /// the gaps part of the window; nothing otherwise.
+    let veil: Double
 
     var containerSpacing: CGFloat? { usesContainer ? Self.containerSpacing : nil }
     var shapes: [Shape] { (notch.map { [$0] } ?? []) + bubbles + (tiles.map { [$0.tabBar, $0.content] } ?? []) }
 
-    /// Whether the strip's shapes are glass on the desktop right now: the open notch with tiles.
-    var cardsAreOnTheDesktop: Bool { tiles?.isOpen == true }
+    /// Whether the notch's own glass draws anything right now.
+    var panelHasGlass: Bool { notch.map { $0.glass != .identity } ?? false }
 
     private init() {
-        (panel, usesContainer, notch, bubbles, tiles, backdropOpacity, contentScheme) = (.slab, false, nil, [], nil, 0, nil)
+        (shape, usesContainer, notch, bubbles, tiles, veil) = (.slab, false, nil, [], nil, 0)
     }
 
-    /// The plan for `surface` with a bubble for each of `bubbleIDs` (the `ActivitySlot.id`s), for the notch open or not. The notch's
-    /// glass is not interactive: it is a surface that holds controls, not a control. A bubble is a button, so its glass is.
-    /// `switches` are the debug switches, which only matter on glass: today's behaviour when they are left out.
-    init(surface: NotchSurface, bubbleIDs: [String], accent: Color, switches: NotchGlassSwitches = .default, isOpen: Bool = false) {
-        guard let notchGlass = surface.glass(accent: accent, interactive: false, variant: switches.variant),
-              let bubbleGlass = surface.glass(accent: accent, interactive: true, variant: switches.variant)
+    /// The plan for `surface` with a bubble for each of `bubbleIDs` (the `ActivitySlot.id`s), in `style`, for the notch open or not.
+    /// The notch's glass is not interactive: it is a surface that holds controls, not a control. A bubble is a button, so its glass
+    /// is. With `tiles` the open notch shows them once `tilesSettled` (the root view says so `tilesDelay` after it opens).
+    init(
+        surface: NotchSurface, bubbleIDs: [String], accent: Color, style: NotchGlassStyle = .default, isOpen: Bool = false,
+        tilesSettled: Bool = true
+    ) {
+        guard let notchGlass = surface.glass(accent: accent, interactive: false, clarity: style.clarity),
+              let bubbleGlass = surface.glass(accent: accent, interactive: true, clarity: style.clarity)
         else {
             self = .none
             return
         }
-        panel = switches.panel
+        shape = style.shape
         usesContainer = true
         bubbles = bubbleIDs.map { Shape(id: .bubble($0), glass: bubbleGlass) }
-        contentScheme = switches.scheme == .dark ? .dark : nil
-        if switches.panel == .tiles {
-            let open = isOpen
-            notch = open ? nil : Shape(id: .notch, glass: notchGlass)
+        if style.shape == .tiles {
+            let shown = isOpen && tilesSettled
+            notch = Shape(id: .notch, glass: shown ? .identity : notchGlass)
             tiles = Tiles(
-                tabBar: Shape(id: .tabBar, glass: open ? notchGlass : .identity),
-                content: Shape(id: .content, glass: open ? notchGlass : .identity), isOpen: open, dim: open ? switches.dim : 0
+                tabBar: Shape(id: .tabBar, glass: shown ? notchGlass : .identity),
+                content: Shape(id: .content, glass: shown ? notchGlass : .identity), isShown: shown
             )
-            backdropOpacity = open ? Self.hitOpacity : switches.dim
+            veil = isOpen ? Self.hitOpacity : 0
         } else {
             notch = Shape(id: .notch, glass: notchGlass)
             tiles = nil
-            backdropOpacity = switches.dim
+            veil = 0
         }
     }
 
@@ -165,10 +177,10 @@ extension View {
         }
     }
 
-    /// The notch's own glass drawn behind the view, as a layer of its own, for the debug panel `tiles`: the glass comes and goes
-    /// with the open notch, and the view above it, with the whole notch's content, has to keep its identity when it does. Glass
-    /// that is a modifier of the view would swap the view for another one each time. `enabled` is constant for a notch (the panel is
-    /// `tiles`); the glass inside, when it is `nil`, is nothing. The view itself, with nothing added, when not enabled.
+    /// The notch's own glass drawn behind the view, as a layer of its own, for `tiles`: its glass gives way to the tiles' and comes back,
+    /// and the view above it, with the whole notch's content, must not be swapped for another one when it does, as glass that is a
+    /// modifier of the view would swap it. `enabled` is constant for a notch (the shape is `tiles`); the glass inside is
+    /// `Glass.identity` while the tiles are shown. The view itself, with nothing added, when not enabled.
     @ViewBuilder func notchGlassLayer<S: Shape>(
         _ planned: NotchGlassPlan.Shape?, in shape: S, namespace: Namespace.ID?, enabled: Bool
     ) -> some View {
@@ -177,17 +189,6 @@ extension View {
         } else {
             self
         }
-    }
-
-    /// One tile of the open notch: the view on glass in `shape`, with a black layer at the tile's dim between the two. The modifiers
-    /// are the same whether the tile has glass or `Glass.identity` (nothing), so the view keeps its identity.
-    func notchTile<S: Shape>(_ planned: NotchGlassPlan.Shape, dim: Double, in shape: S, namespace: Namespace.ID?) -> some View {
-        background(Color.black.opacity(dim), in: shape).notchGlass(planned, in: shape, namespace: namespace)
-    }
-
-    /// Forces `scheme` on the view's content when there is one; the view itself otherwise, so the default tree is unchanged.
-    @ViewBuilder func notchContentScheme(_ scheme: ColorScheme?) -> some View {
-        if let scheme { environment(\.colorScheme, scheme) } else { self }
     }
 
     /// Draws the view on the notch's own surface in `shape`: black in the classic look, Liquid Glass in the other, whichever the

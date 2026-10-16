@@ -112,8 +112,8 @@ public final class ScreenManager {
                         settings.value(InterfaceSettings.swipeToOpen) ? settings.value(InterfaceSettings.swipeSensitivity) : nil
                     },
                     theme: theme,
-                    // Once for this notch, from the defaults: the debug switches of the glass look.
-                    glassSwitches: NotchGlassSwitches(reading: .standard),
+                    // Once for this notch: the glass is drawn as an active window's unless support turned that off.
+                    drawsActiveGlass: !NotchGlassSupport.keepsGlassInactive(.standard),
                     feel: { [interface] in interface.feel($0) }
                 )
             }

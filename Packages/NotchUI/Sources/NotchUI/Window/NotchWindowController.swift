@@ -11,7 +11,7 @@ final class NotchWindowController {
     var sharingType: NSWindow.SharingType { panel.sharingType }
     /// The panel's own appearance: nil, the system's, in every look. Forcing it dark made the glass read as dark frosted glass.
     var appearance: NSAppearance? { panel.appearance }
-    /// The glass appearance the panel has been given, nil by default (the debug switch `debug.glass.active`); see `ActiveGlassAppearance`.
+    /// The glass appearance the panel has been given: on Liquid Glass, unless support turned it off; see `ActiveGlassAppearance`.
     var activeGlass: ActiveGlassAppearance? { panel.activeGlass }
     /// Whether the panel is key, which the active glass appearance never changes.
     var panelIsKey: Bool { panel.isKeyWindow }
@@ -21,8 +21,9 @@ final class NotchWindowController {
     private let panel: NotchPanel
     private let hosting: FirstMouseHostingView<NotchRootView>
     private let theme: NotchTheme?
-    /// The debug switches of the glass look, as read once when this notch was made; its root view is rebuilt with the same ones.
-    private let glassSwitches: NotchGlassSwitches
+    /// Whether the Liquid Glass is drawn as an active window's (see `ActiveGlassAppearance`): always, unless support turned it off
+    /// (`NotchGlassSupport`), as read once when this notch was made.
+    private let drawsActiveGlass: Bool
     private let registry: ModuleRegistry
     private let activities: ActivityCenter
     private let captureHiding: () -> CaptureHiding
@@ -65,7 +66,7 @@ final class NotchWindowController {
         systemAllowsSwipe: @escaping () -> Bool = { NSEvent.isSwipeTrackingFromScrollEventsEnabled },
         swipeToOpen: @escaping () -> SwipeSensitivity? = { nil },
         theme: NotchTheme? = nil,
-        glassSwitches: NotchGlassSwitches = .default,
+        drawsActiveGlass: Bool = true,
         feel: @escaping (Haptic) -> Void = { _ in }
     ) {
         self.displayID = displayID
@@ -76,16 +77,14 @@ final class NotchWindowController {
         self.systemAllowsSwipe = systemAllowsSwipe
         self.swipeToOpen = swipeToOpen
         self.theme = theme
-        self.glassSwitches = glassSwitches
+        self.drawsActiveGlass = drawsActiveGlass
         self.feel = feel
         screenFrame = screen.frame
         geometry = NotchGeometry(screen: screen, config: config)
         model = NotchViewModel(scheduler: scheduler, availableTabs: { [weak registry] in registry?.tabs.map(\.id) ?? [] }, delays: delays)
         panel = NotchPanel(frame: geometry.panelFrame(in: screen.frame))
         hosting = FirstMouseHostingView(
-            rootView: NotchRootView(
-                model: model, activities: activities, registry: registry, geometry: geometry, theme: theme, switches: glassSwitches
-            )
+            rootView: NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry, theme: theme)
         )
         hosting.frame = CGRect(origin: .zero, size: geometry.panelSize)
         panel.contentView = hosting
@@ -126,9 +125,7 @@ final class NotchWindowController {
         model.bubbleCount = CompactAccessories.bubbleCount(activities: activities, geometry: newGeometry)
         // The new shape first, then the frame: `setFrame(display: true)` draws at once, and it must not draw the old shape
         // in the new frame.
-        hosting.rootView = NotchRootView(
-            model: model, activities: activities, registry: registry, geometry: geometry, theme: theme, switches: glassSwitches
-        )
+        hosting.rootView = NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry, theme: theme)
         panel.setFrame(geometry.panelFrame(in: screen.frame), display: true)
         hosting.frame = CGRect(origin: .zero, size: geometry.panelSize)
         refreshHitTesting()
@@ -270,10 +267,10 @@ final class NotchWindowController {
         panel.refreshActiveGlass()
     }
 
-    /// Whether the panel is to draw its glass as an active window's: the debug switch, and the Liquid Glass look, so the classic
-    /// notch is never touched. Reading the look here makes the observation loop run when it changes.
+    /// Whether the panel is to draw its glass as an active window's: on the Liquid Glass look, so the classic notch is never touched,
+    /// unless support turned it off. Reading the look here makes the observation loop run when it changes.
     private var wantsActiveGlass: Bool {
-        glassSwitches.active && theme?.look == .liquidGlass
+        drawsActiveGlass && theme?.look == .liquidGlass
     }
 
     /// Gives the panel the active glass appearance, or takes it back; only ever the appearance, never key status. Nothing at all when
@@ -350,7 +347,7 @@ final class NotchWindowController {
         var isDragging: Bool
         /// Read through the setting, so a change of the setting runs the loop too.
         var sharingType: NSWindow.SharingType
-        /// Whether the panel draws its glass as an active window's: the debug switch, on Liquid Glass only. Read through the look.
+        /// Whether the panel draws its glass as an active window's: on Liquid Glass only. Read through the look.
         var drawsActiveGlass: Bool
     }
 

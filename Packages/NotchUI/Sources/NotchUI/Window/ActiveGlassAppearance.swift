@@ -1,8 +1,8 @@
 import AppKit
 import ObjectiveC
 
-/// Draws a window's Liquid Glass as an active window draws it, without making the window key (the debug switch
-/// `debug.glass.active`).
+/// Draws a window's Liquid Glass as an active window draws it, without making the window key. The notch's panel always has it while
+/// the look is Liquid Glass (`NotchGlassSupport` can turn it off).
 ///
 /// macOS draws the glass of a window that is not key in a subdued style: a heavy blur, no edge lensing, no rim, no shadow. SwiftUI
 /// reads the window's *key appearance* for it and changes the parameters of the glass's backdrop filter (probed in a window, with the
@@ -19,7 +19,7 @@ import ObjectiveC
 /// There is no public way: SwiftUI's `appearsActive` environment value changes nothing in the glass (the same probe), and
 /// `NSVisualEffectView.state` and `NSGlassEffectView` have no counterpart for SwiftUI's glass. Both methods are private, so each
 /// call is guarded: the instance method has to exist on the window's class and have the encoding of `void method(void)`; with
-/// anything else the switch does nothing.
+/// anything else the hook does nothing.
 ///
 /// AppKit takes the appearance back whenever the window resigns key, and may on other changes (the app activating or deactivating,
 /// the window changing screen or occlusion), so `NotchPanel` gives it back after each.

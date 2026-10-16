@@ -38,6 +38,11 @@ public enum InterfaceSettings {
     public static let look = SettingKey("interface.look", default: NotchLook.classic)
     /// A hint of the accent colour in the Liquid Glass.
     public static let glassTint = SettingKey("interface.glassTint", default: false)
+    /// How clear the Liquid Glass is: the balanced one, which reads on any background, or the clear one of Control Center.
+    public static let glassClarity = SettingKey("interface.glassClarity", default: NotchGlassClarity.balanced)
+    /// What the open notch's glass is made of: one piece, or a capsule for the tab bar and a tile for the content with the desktop
+    /// showing between them.
+    public static let glassShape = SettingKey("interface.glassShape", default: NotchGlassShape.slab)
     /// A two-finger swipe down over the collapsed notch opens it, and up over the open notch closes it.
     public static let swipeToOpen = SettingKey("interface.swipeToOpen", default: true)
     public static let swipeSensitivity = SettingKey("interface.swipeSensitivity", default: SwipeSensitivity.medium)

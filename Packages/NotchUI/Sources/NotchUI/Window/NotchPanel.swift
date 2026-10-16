@@ -38,9 +38,9 @@ final class NotchPanel: NSPanel {
     /// Called after key status moved to another window, e.g. the user clicked into another app.
     var onResignKey: (() -> Void)?
 
-    /// When set, the panel's glass is drawn as an active window's, whether or not the panel is key (the debug switch
-    /// `debug.glass.active`), and nil, the usual, hooks nothing. It never touches key status. Setting it gives the panel the
-    /// appearance and keeps it there; setting it back to nil takes it away unless the panel is key.
+    /// When set, the panel's glass is drawn as an active window's, whether or not the panel is key, and nil hooks nothing. It never
+    /// touches key status. Setting it gives the panel the appearance and keeps it there; setting it back to nil takes it away unless
+    /// the panel is key.
     var activeGlass: ActiveGlassAppearance? {
         didSet {
             guard activeGlass != oldValue else { return }
