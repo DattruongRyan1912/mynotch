@@ -1,6 +1,7 @@
 import FanHelperKit
 import Foundation
 import Observation
+import ServiceManagement
 import os
 
 /// Installs, checks and removes the fan helper, and says where it is. It acts only when the user presses a button, with one
@@ -52,30 +53,48 @@ final class FanHelperManager {
 
     // MARK: What the user presses
 
-    /// "Cài helper điều khiển quạt".
+    /// "Cài helper điều khiển quạt". The only place an error about the helper's registration is born: until `register()` has thrown,
+    /// a daemon that macOS calls not found is just not installed.
     func install() async {
         guard !isBusy else { return }
         set(.busy(.installing))
         do {
             try registration.register()
         } catch {
-            // Already registered is as good as registered, and so is waiting for approval; the status tells which.
             log.notice("register threw: \(String(describing: error), privacy: .public)")
-            if registration.status == .notRegistered || registration.status == .notFound {
-                set(.failed(Self.describe(error)))
+            switch Self.outcome(of: error) {
+            case .denied:
+                // The daemon waits for an administrator to allow it in System Settings: the header says register() throws that.
+                set(.needsApproval)
                 return
+            case .alreadyRegistered:
+                break
+            case .other:
+                // Waiting for approval or enabled is as good as registered, and the status tells which.
+                if registration.status == .notRegistered || registration.status == .notFound {
+                    set(.failed(Self.describe(error)))
+                    return
+                }
             }
         }
-        await settleAfterChange()
+        await readState()
+        if phase == .notInstalled { set(.failed(Self.notAccepted)) }
     }
 
     /// "Gỡ helper".
     func uninstall() async {
         guard !isBusy else { return }
-        set(.busy(.removing))
         comparison = nil
+        // Nothing registered, nothing to remove: asking macOS to would only make it say so as an error.
+        guard registration.status != .notRegistered, registration.status != .notFound else {
+            set(.notInstalled)
+            return
+        }
+        set(.busy(.removing))
         do {
             try await registration.unregister()
+        } catch where Self.isJobNotFound(error) {
+            // Already gone.
         } catch {
             log.notice("unregister threw: \(String(describing: error), privacy: .public)")
             set(.failed(Self.describe(error)))
@@ -91,7 +110,7 @@ final class FanHelperManager {
 
     /// "Thử lại": registers again when the status says it is not, otherwise looks again.
     func retry() async {
-        if registration.status == .notRegistered { await install() } else { await settleAfterChange() }
+        if registration.status == .notRegistered || registration.status == .notFound { await install() } else { await settleAfterChange() }
     }
 
     // MARK: What the app does by itself
@@ -101,7 +120,10 @@ final class FanHelperManager {
     func refresh() async {
         refreshMacsFanControl()
         guard !isBusy else { return }
-        if case .running = phase, registration.status == .enabled { return }
+        let status = registration.status
+        // The error a register attempt gave stays on screen: macOS still says "not found" after it, which would wipe it.
+        if case .failed = phase, status == .notRegistered || status == .notFound { return }
+        if case .running = phase, status == .enabled { return }
         await readState()
     }
 
@@ -170,9 +192,8 @@ final class FanHelperManager {
     /// The phase that the registration status says, and for an enabled helper what a ping says.
     private func readState() async {
         switch registration.status {
-        case .notRegistered: set(.notInstalled)
+        case .notRegistered, .notFound: set(.notInstalled)
         case .requiresApproval: set(.needsApproval)
-        case .notFound: set(.notFound)
         case .enabled: await ping()
         }
     }
@@ -192,7 +213,33 @@ final class FanHelperManager {
         phase = new
     }
 
-    /// A short Vietnamese reason for an error; the details are in the log.
+    static let notAccepted = "macOS không nhận helper sau khi đăng ký"
+
+    /// What a throwing `register()` means for the next step.
+    enum RegisterOutcome: Equatable {
+        case denied
+        case alreadyRegistered
+        case other
+    }
+
+    static let serviceManagementDomain = "SMAppServiceErrorDomain"
+
+    static func outcome(of error: any Error) -> RegisterOutcome {
+        let nsError = error as NSError
+        guard nsError.domain == serviceManagementDomain else { return .other }
+        switch nsError.code {
+        case kSMErrorLaunchDeniedByUser: return .denied
+        case kSMErrorAlreadyRegistered: return .alreadyRegistered
+        default: return .other
+        }
+    }
+
+    static func isJobNotFound(_ error: any Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == serviceManagementDomain && nsError.code == kSMErrorJobNotFound
+    }
+
+    /// A short Vietnamese reason for an error with its code, and never a path; the details are in the log.
     static func describe(_ error: any Error) -> String {
         switch error as? FanHelperError {
         case .timeout: return "helper không trả lời"
@@ -200,8 +247,35 @@ final class FanHelperManager {
         case let .helperFailed(reason): return "helper báo: \(reason)"
         case nil:
             let nsError = error as NSError
-            return nsError.domain == NSCocoaErrorDomain && (nsError.code == 4097 || nsError.code == 4099)
-                ? "không có helper nào trả lời" : "\(nsError.localizedDescription) (\(nsError.domain) \(nsError.code))"
+            if nsError.domain == NSCocoaErrorDomain && (nsError.code == 4097 || nsError.code == 4099) {
+                return "không có helper nào trả lời"
+            }
+            if nsError.domain == serviceManagementDomain, let reason = serviceManagementReasons[nsError.code] {
+                return "\(reason) (SMAppService \(nsError.code))"
+            }
+            return "\(withoutPaths(nsError.localizedDescription)) (\(nsError.domain) \(nsError.code))"
         }
+    }
+
+    /// The codes of `SMErrors.h`, in words.
+    private static let serviceManagementReasons: [Int: String] = [
+        kSMErrorInternalFailure: "lỗi nội bộ của macOS",
+        kSMErrorInvalidSignature: "chữ ký của ứng dụng không hợp lệ",
+        kSMErrorAuthorizationFailure: "không đủ quyền",
+        kSMErrorToolNotValid: "helper không hợp lệ",
+        kSMErrorJobNotFound: "macOS không có job của helper",
+        kSMErrorServiceUnavailable: "dịch vụ nền của macOS chưa sẵn sàng",
+        kSMErrorJobPlistNotFound: "không tìm thấy file plist của helper trong ứng dụng",
+        kSMErrorJobMustBeEnabled: "job của helper chưa được bật",
+        kSMErrorInvalidPlist: "file plist của helper không hợp lệ",
+        kSMErrorLaunchDeniedByUser: "chưa được cho phép trong Cài đặt hệ thống",
+        kSMErrorAlreadyRegistered: "đã đăng ký rồi",
+    ]
+
+    /// Any word that starts with a slash is a path, and a path does not belong in a line on the screen.
+    static func withoutPaths(_ text: String) -> String {
+        text.split(separator: " ", omittingEmptySubsequences: false)
+            .map { $0.contains("/") ? "…" : String($0) }
+            .joined(separator: " ")
     }
 }

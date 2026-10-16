@@ -109,12 +109,6 @@ import Testing
         #expect(unreachable.primary == .retry)
     }
 
-    @Test func aHelperThatIsNotInTheAppIsAnErrorWithNothingToPress() {
-        let p = say(.notFound)
-        #expect(p.status == "Lỗi: không tìm thấy helper trong ứng dụng")
-        #expect(p.primary == nil && p.canUninstall == false)
-    }
-
     @Test func whileBusyNothingCanBePressed() {
         for (busy, text) in [(FanHelperBusy.installing, "Đang cài…"), (.removing, "Đang gỡ…"), (.updating, "Đang cập nhật helper…")] {
             let p = say(.busy(busy))

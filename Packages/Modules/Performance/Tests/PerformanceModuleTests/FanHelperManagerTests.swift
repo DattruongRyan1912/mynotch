@@ -1,5 +1,6 @@
 import FanHelperKit
 import Foundation
+import ServiceManagement
 import Testing
 @testable import PerformanceModule
 
@@ -12,7 +13,7 @@ import Testing
 
     @Test func eachRegistrationStatusIsAPhase() async {
         for (status, phase) in [
-            (FanHelperRegistrationStatus.notRegistered, FanHelperPhase.notInstalled), (.requiresApproval, .needsApproval), (.notFound, .notFound),
+            (FanHelperRegistrationStatus.notRegistered, FanHelperPhase.notInstalled), (.requiresApproval, .needsApproval), (.notFound, .notInstalled),
         ] {
             let rig = HelperRig(status: status)
             await rig.manager.refresh()
@@ -72,6 +73,143 @@ import Testing
             await rig.manager.checkAtLaunch()
             #expect(rig.registration.calls.isEmpty, "\(status)")
         }
+    }
+
+    // MARK: Not found yet
+
+    func smError(_ code: Int, _ description: String = "x") -> NSError {
+        NSError(domain: FanHelperManager.serviceManagementDomain, code: code, userInfo: [NSLocalizedDescriptionKey: description])
+    }
+
+    /// On macOS 26.5 a daemon that was never registered reads `.notFound`; it must not look like an error with nothing to press.
+    @Test func aDaemonMacOSCallsNotFoundBeforeTheFirstRegisterIsOfferedForInstall() async {
+        let rig = HelperRig(status: .notFound)
+        await rig.manager.refresh()
+        #expect(rig.manager.phase == .notInstalled)
+        let presentation = rig.manager.presentation
+        #expect(presentation.status == "Chưa cài")
+        #expect(presentation.primary == .install && presentation.tone == nil)
+        #expect(rig.registration.calls.isEmpty)
+    }
+
+    @Test func notFoundAtLaunchIsTheSameAndNothingIsRegistered() async {
+        let rig = HelperRig(status: .notFound)
+        await rig.manager.checkAtLaunch()
+        #expect(rig.manager.phase == .notInstalled)
+        #expect(rig.registration.calls.isEmpty && rig.client.pingCount == 0)
+    }
+
+    @Test func installingFromNotFoundThatWorksReachesTheHelper() async {
+        let rig = HelperRig(status: .notFound)
+        await rig.manager.install()
+        #expect(rig.registration.calls == [.register])
+        #expect(rig.manager.phase == .running(.matching))
+    }
+
+    @Test func aRegisterThatThrowsWhileMacOSSaysNotFoundIsTheFirstErrorAndOffersAnotherTry() async {
+        let rig = HelperRig(status: .notFound)
+        rig.registration.statusAfterRegister = .notFound
+        rig.registration.registerError = smError(kSMErrorJobPlistNotFound)
+        await rig.manager.install()
+        #expect(rig.manager.phase == .failed("không tìm thấy file plist của helper trong ứng dụng (SMAppService 8)"))
+        let presentation = rig.manager.presentation
+        #expect(presentation.status == "Lỗi: không tìm thấy file plist của helper trong ứng dụng (SMAppService 8)")
+        #expect(presentation.primary == .retry && presentation.tone == .critical)
+        #expect(presentation.shortStatus == "lỗi")
+    }
+
+    @Test func theErrorStaysOnScreenWhenTheTabOrSettingsLooksAgain() async {
+        let rig = HelperRig(status: .notFound)
+        rig.registration.statusAfterRegister = .notFound
+        rig.registration.registerError = smError(kSMErrorInvalidSignature)
+        await rig.manager.install()
+        let failed = rig.manager.phase
+        for _ in 0..<3 { await rig.manager.refresh() }
+        #expect(rig.manager.phase == failed)
+        #expect(rig.registration.calls == [.register], "looking does not register")
+    }
+
+    @Test func tryingAgainAfterThatErrorRegistersAgain() async {
+        let rig = HelperRig(status: .notFound)
+        rig.registration.statusAfterRegister = .notFound
+        rig.registration.registerError = smError(kSMErrorServiceUnavailable)
+        await rig.manager.install()
+        await rig.manager.retry()
+        #expect(rig.registration.calls == [.register, .register])
+        rig.registration.registerError = nil
+        rig.registration.statusAfterRegister = .enabled
+        await rig.manager.retry()
+        #expect(rig.manager.phase == .running(.matching))
+    }
+
+    @Test func aRegisterThatThrowsLaunchDeniedMeansTheUserMustAllowItWhateverTheStatusSays() async {
+        let rig = HelperRig(status: .notFound)
+        rig.registration.statusAfterRegister = .notFound
+        rig.registration.registerError = smError(kSMErrorLaunchDeniedByUser)
+        await rig.manager.install()
+        #expect(rig.manager.phase == .needsApproval)
+        #expect(rig.manager.presentation.primary == .openSettings)
+    }
+
+    @Test func aRegisterThatThrowsAlreadyRegisteredCarriesOnToTheHelper() async {
+        let rig = HelperRig(status: .notFound)
+        rig.registration.statusAfterRegister = .enabled
+        rig.registration.registerError = smError(kSMErrorAlreadyRegistered)
+        await rig.manager.install()
+        #expect(rig.manager.phase == .running(.matching))
+    }
+
+    @Test func aRegisterThatReturnsButLeavesNothingRegisteredIsAnErrorNotASilentNoOp() async {
+        let rig = HelperRig(status: .notFound)
+        rig.registration.statusAfterRegister = .notFound
+        await rig.manager.install()
+        #expect(rig.manager.phase == .failed(FanHelperManager.notAccepted))
+        #expect(rig.manager.presentation.primary == .retry)
+    }
+
+    @Test func removingWhenNothingIsRegisteredAsksMacOSForNothing() async {
+        for status in [FanHelperRegistrationStatus.notFound, .notRegistered] {
+            let rig = HelperRig(status: status)
+            rig.registration.registerError = nil
+            await rig.manager.uninstall()
+            #expect(rig.registration.calls.isEmpty, "\(status)")
+            #expect(rig.manager.phase == .notInstalled)
+        }
+    }
+
+    @Test func removingAfterAFailedAttemptJustGoesBackToNotInstalled() async {
+        let rig = HelperRig(status: .notFound)
+        rig.registration.statusAfterRegister = .notFound
+        rig.registration.registerError = smError(kSMErrorInvalidSignature)
+        await rig.manager.install()
+        await rig.manager.uninstall()
+        #expect(rig.registration.calls == [.register])
+        #expect(rig.manager.phase == .notInstalled, "nothing to remove: back to not installed, ready for a new try")
+    }
+
+    @Test func theJobNotFoundCodeIsRecognisedOnlyInTheServiceManagementDomain() {
+        #expect(FanHelperManager.isJobNotFound(smError(kSMErrorJobNotFound)))
+        #expect(FanHelperManager.isJobNotFound(NSError(domain: "other", code: kSMErrorJobNotFound)) == false)
+        #expect(FanHelperManager.isJobNotFound(smError(kSMErrorInternalFailure)) == false)
+    }
+
+    @Test func eachServiceManagementCodeHasAReasonWithItsNumber() {
+        #expect(FanHelperManager.describe(smError(kSMErrorInvalidSignature)) == "chữ ký của ứng dụng không hợp lệ (SMAppService 3)")
+        #expect(FanHelperManager.describe(smError(kSMErrorLaunchDeniedByUser)) == "chưa được cho phép trong Cài đặt hệ thống (SMAppService 11)")
+        #expect(FanHelperManager.describe(smError(kSMErrorJobPlistNotFound)).hasSuffix("(SMAppService 8)"))
+    }
+
+    @Test func anErrorWeHaveNoWordsForShowsItsDescriptionWithItsPathsTakenOut() {
+        let error = smError(99, "Could not load /Applications/MyNotch.app/Contents/Library/LaunchDaemons/x.plist now")
+        let text = FanHelperManager.describe(error)
+        #expect(text == "Could not load … now (SMAppServiceErrorDomain 99)")
+        #expect(text.contains("/") == false)
+    }
+
+    @Test func aPathInAnyDescriptionNeverReachesTheScreen() {
+        #expect(FanHelperManager.withoutPaths("a /b/c d") == "a … d")
+        #expect(FanHelperManager.withoutPaths("no path here") == "no path here")
+        #expect(FanHelperManager.withoutPaths("/only") == "…")
     }
 
     // MARK: Install and remove

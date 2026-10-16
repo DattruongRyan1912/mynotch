@@ -34,9 +34,6 @@ nonisolated struct FanHelperPresentation: Equatable, Sendable {
         case .needsApproval:
             (status, shortStatus, tone, primary, canUninstall) =
                 ("Cần cho phép trong Cài đặt hệ thống", "cần cho phép", .caution, .openSettings, true)
-        case .notFound:
-            (status, shortStatus, tone, primary, canUninstall) =
-                ("Lỗi: không tìm thấy helper trong ứng dụng", "lỗi", .critical, nil, false)
         case let .running(info):
             (status, shortStatus, tone, primary, canUninstall) =
                 ("Đang chạy (phiên bản \(info.version), quyền root)", "đang chạy", .normal, nil, true)

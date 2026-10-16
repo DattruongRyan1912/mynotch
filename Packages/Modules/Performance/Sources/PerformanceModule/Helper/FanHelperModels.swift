@@ -9,7 +9,9 @@ nonisolated enum FanHelperRegistrationStatus: Equatable, Sendable {
     case enabled
     /// Registered, but the user has not allowed it yet in System Settings, Login Items.
     case requiresApproval
-    /// The app has no such job: the plist is not in the bundle.
+    /// What macOS reports for a daemon that has never been registered (reports of developers say it often reads this instead of
+    /// `notRegistered`, which it does on macOS 26.5 here), and for a bundle with no plist. The two cannot be told apart before
+    /// registering, so it is treated as not installed: the install button is offered, and `register()` says what is wrong.
     case notFound
 
     init(_ status: SMAppService.Status) {
@@ -66,9 +68,10 @@ nonisolated enum FanHelperBusy: Equatable, Sendable {
 nonisolated enum FanHelperPhase: Equatable, Sendable {
     /// Not looked at yet.
     case unknown
+    /// Nothing registered, which is also what macOS says (`.notFound`) about a daemon before its first `register()`; an error is
+    /// shown only once a `register()` has thrown.
     case notInstalled
     case needsApproval
-    case notFound
     case running(FanHelperInfo)
     /// Registered and enabled, but a ping got no answer.
     case unreachable(String)
