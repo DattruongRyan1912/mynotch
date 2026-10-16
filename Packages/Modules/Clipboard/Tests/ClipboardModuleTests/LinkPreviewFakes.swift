@@ -32,6 +32,15 @@ nonisolated enum TestPictures {
         encoded([(width, height)], as: .png)
     }
 
+    /// A 64 x 48 WebP, which ImageIO reads and MyNotch must not be given by a page (made with Pillow; the bytes are the file's).
+    static let webp = Data(base64Encoded: "UklGRkAAAABXRUJQVlA4IDQAAABQAwCdASpAADAAPm02mUkkIyKhIqgAgA2JaQAAGHCT276rwADxjtk70v9yfh7Ywv4AAAAA")!
+
+    /// An icon file with three pictures in it, 16, 32 and 128 pixels square, the biggest last (made with Pillow).
+    static let icoThreeFrames = Data(base64Encoded: """
+    AAABAAMAEBAAAAAAIABeAAAANgAAACAgAAAAACAAcQAAAJQAAACAgAAAAAAgAIsBAAAFAQAAiVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAJUlEQVR4nGPkOiH3n4ECwES\
+    J5lEDIICJgULANGoAw2gYMFAeBgAaiAIPQUTXNQAAAABJRU5ErkJggolQTkcNChoKAAAADUlIRFIAAAAgAAAAIAgGAAAAc3p69AAAADhJREFUeJzt0EERADAIA0HKExH4l1JXZaqCz8bAZfbU7ReLy824AwQIECBAgAABAgQIECBAgMAXGD3/Ai/+rD8LAAAAAElFTkSuQmCCiVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAABUklEQVR4nO3SMQHAIADAsLETEfiXgiuQwdFEQY+Oudf5yPpfB/CWAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEXVq8C712jbBEAAAAASUVORK5CYII=
+    """)!
+
     /// The size of a stored PNG, read the way the app reads one.
     static func size(of png: Data) -> (width: Int, height: Int)? {
         guard let source = CGImageSourceCreateWithData(png as CFData, nil),

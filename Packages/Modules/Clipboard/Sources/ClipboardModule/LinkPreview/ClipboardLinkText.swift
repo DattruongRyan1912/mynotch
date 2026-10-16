@@ -4,26 +4,40 @@ import Foundation
 /// own cards. Entities are decoded first and characters stripped after, so `&#7;` cannot slip a control character past the strip.
 nonisolated enum ClipboardLinkText {
     static let titleLimit = 200
+    /// A title has at most this many Unicode scalars, cut before the characters are counted: a character (a grapheme cluster) can hold any
+    /// number of combining marks, so 200 characters alone bound nothing.
+    static let titleScalarLimit = 400
+    /// Combining marks after one letter beyond this many are dropped (Vietnamese needs two, a stack of a hundred is not text).
+    static let marksPerLetter = 4
 
     /// The words of a title or an attribute, plain: entities decoded (an unknown or impossible one is dropped, a lone `&` stays), line
-    /// breaks and runs of white space made one space, control characters, line and paragraph separators, zero-width characters and
-    /// the characters that reverse the direction of text removed, trimmed, and cut at `titleLimit` characters. nil when nothing is left.
+    /// breaks and runs of white space made one space, control characters, line and paragraph separators, invisible and zero-width
+    /// characters and the ones that reverse the direction of text removed, a stack of combining marks cut short, trimmed, and cut at
+    /// `titleScalarLimit` Unicode scalars and then at `titleLimit` characters. nil when nothing is left.
     static func title(from raw: String) -> String? {
         let plain = plainText(raw)
         guard !plain.isEmpty else { return nil }
-        return String(plain.prefix(titleLimit))
+        return String(String(plain.unicodeScalars.prefix(titleScalarLimit)).prefix(titleLimit))
     }
 
     static func plainText(_ raw: String) -> String {
         var result = String.UnicodeScalarView()
         var pendingSpace = false
+        var marks = 0
         for scalar in decodingEntities(raw).unicodeScalars {
             // Line breaks, tabs, no-break and ideographic spaces and the line and paragraph separators are all white space.
             if scalar.properties.isWhitespace {
                 pendingSpace = !result.isEmpty
+                marks = 0
                 continue
             }
             guard !isStripped(scalar) else { continue }
+            if isMark(scalar) {
+                marks += 1
+                guard marks <= marksPerLetter else { continue }
+            } else {
+                marks = 0
+            }
             if pendingSpace { result.append(" ") }
             pendingSpace = false
             result.append(scalar)
@@ -31,13 +45,26 @@ nonisolated enum ClipboardLinkText {
         return String(result)
     }
 
-    /// Control characters (C0, DEL and C1), the zero-width and invisible characters that hide text, the bidirectional marks, embeddings,
-    /// overrides and isolates, and U+FFFD (which is only what a failed decoding leaves). Joiners stay: emoji sequences need them.
+    /// What is not shown, or not shown as text, and is therefore a way to hide words: control characters (C0, DEL and C1), every
+    /// default-ignorable scalar (zero-width and joiner-like characters, soft hyphen, Hangul fillers, combining grapheme joiner, variation
+    /// selectors, tag characters), the other format characters (the bidirectional marks, embeddings, overrides and isolates, the invisible
+    /// operators), the object replacement character and U+FFFD (which is only what a failed decoding leaves). Four stay because emoji need
+    /// them: the joiner and non-joiner (U+200D, U+200C) and the text and emoji presentation selectors (U+FE0E, U+FE0F). That costs the
+    /// England, Scotland and Wales flags, which are spelled with tag characters.
     private static func isStripped(_ scalar: Unicode.Scalar) -> Bool {
         switch scalar.value {
-        case 0x200B, 0x200E, 0x200F, 0x2060, 0x061C, 0xFEFF, 0xFFFD, 0x00AD: true
-        case 0x202A...0x202E, 0x2066...0x2069: true
-        default: scalar.properties.generalCategory == .control
+        case 0x200C, 0x200D, 0xFE0E, 0xFE0F: return false
+        case 0xFFFC, 0xFFFD: return true
+        default:
+            let properties = scalar.properties
+            return properties.generalCategory == .control || properties.generalCategory == .format || properties.isDefaultIgnorableCodePoint
+        }
+    }
+
+    private static func isMark(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.properties.generalCategory {
+        case .nonspacingMark, .spacingMark, .enclosingMark: true
+        default: false
         }
     }
 

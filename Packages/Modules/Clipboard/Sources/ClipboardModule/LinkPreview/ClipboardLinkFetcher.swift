@@ -50,7 +50,7 @@ nonisolated struct ClipboardLinkFetcher: Sendable {
 
     /// Off the main actor, where the page is read and parsed and the picture decoded.
     @concurrent func fetch(_ url: URL) async -> Outcome {
-        guard ClipboardLinkGuard.allows(url) else { return .failed }
+        guard ClipboardLinkGuard.allows(url), !ClipboardLinkGuard.looksSingleUse(url) else { return .failed }
         do {
             return try await within(totalTimeout) { try await read(url) }
         } catch {
@@ -96,6 +96,9 @@ nonisolated struct ClipboardLinkFetcher: Sendable {
         var redirects = 0
         while true {
             try await check(current)
+            // A page that sends the request on to a login or a one-time link is not followed there; a picture is part of a page that
+            // was already read and is often signed, so it is not held to this.
+            if kind == .page, ClipboardLinkGuard.looksSingleUse(current) { throw Failure.forbidden }
             let request = ClipboardLinkRequest(url: current, kind: kind, byteLimit: limit)
             let response = try await within(requestTimeout) { try await transport.get(request) }
             guard Self.redirectStatuses.contains(response.status) else { return (current, response) }
@@ -110,6 +113,14 @@ nonisolated struct ClipboardLinkFetcher: Sendable {
 
     /// The address is allowed and so is where its name leads. An IP address needs no lookup; a name that does not resolve, or resolves
     /// to even one address that is not public, is refused.
+    ///
+    /// **This is not a defence against DNS rebinding**: the session resolves the name again when it connects, and a server that answers
+    /// differently the second time gets MyNotch to connect to an address chosen by the page. What keeps that harmless is a property outside
+    /// this package: App Transport Security refuses plain `http://` to a name, so only https is ever sent, and a LAN server cannot complete a
+    /// TLS handshake for the page's name, so no HTTP request reaches it and nothing is read back. **Whoever adds an ATS exception for
+    /// http previews makes rebinding a blind GET with a path the page chooses, and must close it first**: check
+    /// `URLSessionTaskMetrics.remoteAddress` against `ClipboardLinkGuard.isForbidden(address:)` and drop the answer (which stops the data
+    /// being read, not the request), or better connect to the address that was checked, with the certificate evaluated against the name.
     private func check(_ url: URL) async throws {
         guard ClipboardLinkGuard.allows(url), let host = ClipboardLinkGuard.host(of: url) else { throw Failure.forbidden }
         if ClipboardLinkGuard.isLiteralAddress(host) { return }

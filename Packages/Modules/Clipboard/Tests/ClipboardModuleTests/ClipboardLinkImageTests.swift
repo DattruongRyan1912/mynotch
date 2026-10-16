@@ -26,18 +26,45 @@ import UniformTypeIdentifiers
         #expect(size.height == 16)
     }
 
-    @Test func otherFormatsAreReadAndWrittenAsPNG() throws {
-        for type in [UTType.jpeg, .gif, .tiff] {
+    /// What a page may send: PNG, JPEG, GIF and ICO. Whatever else ImageIO reads, a page has no business handing to a process that is not
+    /// sandboxed.
+    @Test func theFourKindsAPageMaySendAreReadAndWrittenAsPNG() throws {
+        for type in [UTType.jpeg, .gif] {
             let png = try #require(ClipboardLinkImage.thumbnail(from: TestPictures.encoded([(600, 400)], as: type)), "\(type)")
             #expect(try #require(TestPictures.size(of: png)).width == 256)
             #expect(Array(png.prefix(4)) == [0x89, 0x50, 0x4E, 0x47])
+        }
+        let icon = try #require(ClipboardLinkImage.thumbnail(from: TestPictures.icoThreeFrames))
+        #expect(Array(icon.prefix(4)) == [0x89, 0x50, 0x4E, 0x47])
+        #expect(ClipboardLinkImage.acceptedTypes == [UTType.png.identifier, UTType.jpeg.identifier, UTType.gif.identifier, UTType.ico.identifier])
+    }
+
+    /// ImageIO reads these, and each is refused by what the bytes are, not by what a server says they are.
+    @Test func everyOtherKindIsRefusedEvenThoughImageIOReadsIt() throws {
+        let tiff = TestPictures.encoded([(64, 64)], as: .tiff)
+        // The control: a decoder that does not look at the kind would make a picture of it.
+        let source = try #require(CGImageSourceCreateWithData(tiff as CFData, nil))
+        #expect(CGImageSourceCreateImageAtIndex(source, 0, nil) != nil)
+        #expect(ClipboardLinkImage.thumbnail(from: tiff) == nil)
+
+        // WebP: decoded by the same library whose heap overflow was exploited with one crafted picture.
+        let webp = TestPictures.webp
+        if let webpSource = CGImageSourceCreateWithData(webp as CFData, nil), CGImageSourceGetType(webpSource) != nil {
+            #expect(CGImageSourceCreateImageAtIndex(webpSource, 0, nil) != nil, "ImageIO reads WebP on this system")
+        }
+        #expect(ClipboardLinkImage.thumbnail(from: webp) == nil)
+
+        // HEIC, where this system can make one.
+        let heic = NSMutableData()
+        if let destination = CGImageDestinationCreateWithData(heic, UTType.heic.identifier as CFString, 1, nil) {
+            CGImageDestinationAddImage(destination, TestPictures.image(width: 64, height: 64), nil)
+            if CGImageDestinationFinalize(destination) { #expect(ClipboardLinkImage.thumbnail(from: heic as Data) == nil) }
         }
     }
 
     /// An icon file holds several sizes, and the first is often the smallest.
     @Test func theBiggestFrameIsTheOneUsed() throws {
-        let tiff = TestPictures.encoded([(16, 16), (128, 128), (32, 32)], as: .tiff)
-        let png = try #require(ClipboardLinkImage.thumbnail(from: tiff))
+        let png = try #require(ClipboardLinkImage.thumbnail(from: TestPictures.icoThreeFrames))
         #expect(try #require(TestPictures.size(of: png)).width == 128)
     }
 

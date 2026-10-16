@@ -47,6 +47,13 @@ import Testing
         let title = try #require(decode("{\"title\":\"a\\u0007\\u202Eb \(long)\"}").title)
         #expect(title.count == 200)
         #expect(title.hasPrefix("ab xxx"))
+        // A title that is a few hundred characters of a hundred thousand combining marks each: cut by scalars before characters.
+        let zalgo = String(repeating: "a" + String(repeating: "\u{0301}", count: 500), count: 300)
+        let stacked = try #require(decode("{\"title\":\"\(zalgo)\"}").title)
+        #expect(stacked.unicodeScalars.count <= ClipboardLinkText.titleScalarLimit)
+        #expect(stacked.utf8.count <= 4 * ClipboardLinkText.titleScalarLimit)
+        let hidden = try #require(decode("{\"title\":\"a\\u200Bb\\u2062c\"}").title)
+        #expect(hidden == "abc")
     }
 
     @Test func thePicturesFileIsNamedAfterTheLinkAndOnlyThat() {
@@ -209,7 +216,9 @@ import Testing
     @Test func aRowIsNamedByTheTitleOfItsPage() {
         let content = ClipboardContent.link(address)
         #expect(ClipboardCardText.rowTitle(of: content) == "www.example.com /bai-viet/mot")
-        #expect(ClipboardCardText.rowTitle(of: content, linkTitle: "Bài viết một") == "Bài viết một")
+        // The host stays, first: a page can call itself anything, and a row that is cut must not cut the address away.
+        #expect(ClipboardCardText.rowTitle(of: content, linkTitle: "Bài viết một") == "www.example.com · Bài viết một")
+        #expect(ClipboardCardText.rowTitle(of: content, linkTitle: "Sign in - Apple").hasPrefix("www.example.com"))
         #expect(ClipboardCardText.rowTitle(of: content, linkTitle: nil) == "www.example.com /bai-viet/mot")
         // Only a link has a title from a page.
         #expect(ClipboardCardText.rowTitle(of: .text("chữ"), linkTitle: "Tiêu đề") == "chữ")

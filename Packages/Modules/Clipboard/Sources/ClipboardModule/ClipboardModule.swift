@@ -53,6 +53,8 @@ public final class ClipboardModule: FeatureModule {
     let soundPlayer: any ClipboardSoundPlaying
     let soundClock: () -> Double
     var soundGate = ClipboardSoundGate()
+    /// Whether the paste that is on its way is one that makes no sound; see `notePasteForSound`.
+    var pasteIsQuiet = true
     /// The optional link previews; see `ClipboardModule+LinkPreview`.
     let linkFetcher: ClipboardLinkFetcher
     let linkPreviews = ClipboardLinkFetches()
@@ -920,6 +922,7 @@ public final class ClipboardModule: FeatureModule {
                 ClipboardPaster.KeyRelease(onSent: sent, onTimeout: { [weak self] in self?.pasteTimedOut() })
             }
         )
+        notePasteForSound(of: item)
         let closeAfterAction = context.settings.value(keys.closeAfterAction)
         switch outcome {
         case .pasted:

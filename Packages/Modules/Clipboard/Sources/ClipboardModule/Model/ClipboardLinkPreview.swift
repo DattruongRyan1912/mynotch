@@ -16,10 +16,10 @@ nonisolated struct ClipboardLinkPreview: Codable, Sendable, Hashable {
     }
 
     /// `history.json` is the user's to edit, and it is drawn in cards: a missing flag is no picture, and a title is made plain and cut again
-    /// (its first 2,000 characters, so a megabyte of it costs nothing), as when it was read.
+    /// (its first 2,000 Unicode scalars, so a megabyte of it costs nothing, however it is made of combining marks), as when it was read.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        title = (try? container.decodeIfPresent(String.self, forKey: .title)).flatMap { ClipboardLinkText.title(from: String($0.prefix(2_000))) }
+        title = (try? container.decodeIfPresent(String.self, forKey: .title)).flatMap { ClipboardLinkText.title(from: String($0.unicodeScalars.prefix(2_000))) }
         hasImage = (try? container.decodeIfPresent(Bool.self, forKey: .hasImage)) ?? false
     }
 

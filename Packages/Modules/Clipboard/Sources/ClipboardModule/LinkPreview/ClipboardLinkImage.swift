@@ -13,14 +13,23 @@ nonisolated enum ClipboardLinkImage {
     /// The most frames of one file looked at, for an icon file that holds several sizes.
     private static let maxFrames = 16
 
-    /// nil for bytes that are not a picture, are not a kind of picture ImageIO reads, or describe too many pixels.
+    /// The only kinds of picture that remote bytes are handed to ImageIO as: what pages use for `og:image` and icons, and the formats whose
+    /// parsers are the simplest. The kind is what ImageIO finds in the bytes, not what the server's `Content-Type` says (a server can say
+    /// anything). **WebP is left out on purpose**: it is common in `og:image`, but its decoder is the one that had a heap overflow exploited
+    /// in the wild with a single crafted picture, and this process is not sandboxed. A page whose `og:image` is a WebP falls back to its
+    /// icon. TIFF, RAW, JPEG 2000, OpenEXR, HEIC, AVIF, PSD and ICNS are out for the same reason: a page has no business sending them.
+    static let acceptedTypes: Set<String> = [
+        UTType.png.identifier, UTType.jpeg.identifier, UTType.gif.identifier, UTType.ico.identifier,
+    ]
+
+    /// nil for bytes that are not a picture, are not one of `acceptedTypes`, or describe too many pixels.
     @concurrent static func thumbnailPNG(from data: Data) async -> Data? {
         thumbnail(from: data)
     }
 
     static func thumbnail(from data: Data) -> Data? {
         guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
-              let type = CGImageSourceGetType(source), UTType(type as String)?.conforms(to: .image) == true else { return nil }
+              let type = CGImageSourceGetType(source), acceptedTypes.contains(type as String) else { return nil }
         let count = min(CGImageSourceGetCount(source), maxFrames)
         // The biggest frame: an icon file's first one is often the smallest.
         var best: (index: Int, pixels: Int)?

@@ -75,6 +75,48 @@ import Testing
         #expect(ClipboardLinkText.titleLimit == 200)
     }
 
+    /// A character (a grapheme cluster) can hold any number of combining marks, so 200 characters alone bound nothing: scalars are cut first.
+    @Test func aStackOfCombiningMarksIsBounded() throws {
+        let zalgo = String(repeating: "a" + String(repeating: "\u{0301}", count: 500), count: 300)
+        let title = try #require(ClipboardLinkText.title(from: zalgo))
+        #expect(title.unicodeScalars.count <= ClipboardLinkText.titleScalarLimit)
+        #expect(title.utf8.count <= 4 * ClipboardLinkText.titleScalarLimit)
+        #expect(title.count <= ClipboardLinkText.titleLimit)
+        // Marks beyond four on a letter are dropped before the cut, so what stays is letters with a few marks, not one letter with 400.
+        #expect(title.count > 50)
+        let cluster = "a" + String(repeating: "\u{0301}", count: ClipboardLinkText.marksPerLetter)
+        #expect(title.unicodeScalars.starts(with: (cluster + cluster).unicodeScalars))
+        // Cut after a hundred thousand marks on one letter: nothing but the first few survive.
+        let one = try #require(ClipboardLinkText.title(from: "e" + String(repeating: "\u{0323}", count: 100_000)))
+        #expect(one.unicodeScalars.count == 1 + ClipboardLinkText.marksPerLetter)
+        // A title of more than 400 scalars that are each a character is cut at 200 characters, as before.
+        let wide = try #require(ClipboardLinkText.title(from: String(repeating: "😀", count: 500)))
+        #expect(wide.count == 200)
+        // Combining marks that are real text are kept: Vietnamese needs two, an emoji keycap one.
+        #expect(try #require(ClipboardLinkText.title(from: "Vie\u{0302}\u{0323}t Nam")) == "Vie\u{0302}\u{0323}t Nam")
+        #expect(try #require(ClipboardLinkText.title(from: "1\u{FE0F}\u{20E3}")) == "1\u{FE0F}\u{20E3}")
+    }
+
+    /// Hidden text is how smuggling works: every scalar that shows nothing is gone, whichever kind it is.
+    @Test(arguments: [
+        0xE0041, 0xE007F, 0xE0100, 0xE01EF, 0x206A, 0x206F, 0x2061, 0x2064, 0x115F, 0x1160, 0x3164, 0xFFA0, 0xFFFC, 0x180E, 0x034F, 0x00AD,
+        0x2062, 0x2063, 0x0600, 0xFE00, 0xFE0D, 0x200B, 0x2060, 0xFEFF, 0x202E, 0x2067, 0x200E, 0x061C, 0x0085,
+    ])
+    func anInvisibleScalarIsStripped(_ value: Int) throws {
+        let scalar = try #require(Unicode.Scalar(UInt32(value)))
+        let title = try #require(ClipboardLinkText.title(from: "a\(Character(scalar))b"), "U+\(String(value, radix: 16))")
+        // U+0085 is white space, which is a space; everything else is nothing.
+        #expect(title == "ab" || title == "a b", "U+\(String(value, radix: 16))")
+        #expect(!title.unicodeScalars.contains(scalar))
+    }
+
+    @Test func thePresentationSelectorsAndJoinersEmojiNeedStay() {
+        #expect(ClipboardLinkText.title(from: "❤\u{FE0F} 👨\u{200D}👩\u{200D}👧 ✔\u{FE0E}") == "❤\u{FE0F} 👨\u{200D}👩\u{200D}👧 ✔\u{FE0E}")
+        // The flags of England, Scotland and Wales are spelled with tag characters, which are stripped: they come out as a black flag.
+        let england = "🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}"
+        #expect(ClipboardLinkText.title(from: england) == "🏴")
+    }
+
     @Test func nothingLeftIsNil() {
         #expect(ClipboardLinkText.title(from: "") == nil)
         #expect(ClipboardLinkText.title(from: "  \n\t ") == nil)

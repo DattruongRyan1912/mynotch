@@ -84,6 +84,23 @@ import Testing
         }
     }
 
+    /// The kind of a picture is what its bytes are, not what the server's header says: a TIFF sent as `image/png` is not used, and the
+    /// next address gets its turn.
+    @Test func aPictureOfAnotherKindIsNotUsedWhateverItsHeaderSays() async throws {
+        transport.set(page, html(head: "<meta property=\"og:image\" content=\"https://cdn.example.com/p\"><link rel=icon href=/i.png>"))
+        transport.set("https://www.example.com/i.png", .picture(TestPictures.png(width: 48, height: 48)))
+        for other in [TestPictures.encoded([(64, 64)], as: .tiff), TestPictures.webp] {
+            transport.set("https://cdn.example.com/p", .picture(other, type: "image/png"))
+            guard case .read(_, let image?) = try await fetch(page) else { Issue.record("expected the icon"); return }
+            // The icon, not the og:image.
+            #expect(try #require(TestPictures.size(of: image)).width == 48)
+        }
+        transport.set(page, html(head: "<meta property=\"og:image\" content=\"https://cdn.example.com/p\">"))
+        transport.set("https://www.example.com/favicon.ico", .status(404))
+        guard case .read(_, let image) = try await fetch(page) else { Issue.record("expected a read"); return }
+        #expect(image == nil)
+    }
+
     @Test func aPictureOverTheLimitIsRefusedNotUsedInPart() async throws {
         transport.set(page, html(head: "<meta property=\"og:image\" content=\"https://cdn.example.com/p.png\">"))
         // Valid bytes, but the transport had more: they are a part of a picture and nothing is made of them.

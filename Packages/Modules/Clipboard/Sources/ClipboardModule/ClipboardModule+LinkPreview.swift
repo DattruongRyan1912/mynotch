@@ -53,11 +53,12 @@ extension ClipboardModule {
     static let defaultLinkPreviewDwell: Duration = .milliseconds(400)
 
     /// The address of a link item that may be read now; nil when it may not: the setting is off or the module stopped, it is not a link
-    /// the guard allows (a private address, credentials), it is a secret (marked by the app that copied it, or looking like one), or it
+    /// the guard allows (a private address, credentials), it looks like a link that is used once (a login, a verification, an invitation, a
+    /// signed address: a request for it could use it up), it is a secret (marked by the app that copied it, or looking like one), or it
     /// is in a board that has a lock.
     func previewableLinkURL(of item: ClipboardItem) -> URL? {
         guard let context, let keys, store != nil, context.settings.value(keys.linkPreviews), case .link(let url) = item.content,
-              ClipboardLinkGuard.allows(url), !item.isSensitive, !linkPreviews.secrets.hides(item),
+              ClipboardLinkGuard.allows(url), !ClipboardLinkGuard.looksSingleUse(url), !item.isSensitive, !linkPreviews.secrets.hides(item),
               !state.history.boards.contains(where: { $0.isProtected && $0.itemIDs.contains(item.id) }) else { return nil }
         return url
     }

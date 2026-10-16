@@ -179,6 +179,44 @@ import Testing
         #expect(sounds == [.captured])
     }
 
+    /// The caption promises silence for these, and a paste goes through one place that knows only that ⌘V went out, so the item is
+    /// remembered when the paste is asked for.
+    @Test func aPasteOfASecretOrALockedItemIsSilent() async throws {
+        try fixture.setSounds(true)
+        await fixture.start()
+        let (settings, keys) = try fixture.settings()
+        settings.set(false, for: keys.ignoreSensitive)
+        fixture.copy("mã của trình quản lý", extraTypes: ["org.nspasteboard.ConcealedType"])
+        fixture.copy("password: hunter2hunter2")
+        fixture.copy("trong két")
+        _ = try await fixture.pinToOpenLockedBoard(try fixture.item("trong két"))
+        fixture.copy("một câu bình thường")
+        #expect(sounds == [.captured])
+
+        var pastes = 0
+        for text in ["mã của trình quản lý", "password: hunter2hunter2", "trong két"] {
+            later()
+            module.paste(try fixture.item(text))
+            fixture.harness.scheduler.advance(by: .milliseconds(80))
+            pastes += 1
+            #expect(fixture.keystrokes.pasteCount == pastes, "\(text) is pasted")
+            #expect(sounds == [.captured], "\(text) makes no sound")
+        }
+        // An ordinary one, right after, is heard: the silence was about the item.
+        later()
+        module.paste(try fixture.item("một câu bình thường"))
+        fixture.harness.scheduler.advance(by: .milliseconds(80))
+        #expect(sounds == [.captured, .pasted])
+        // And the item is the latest one asked for: a secret pasted after an ordinary one is silent, an ordinary one after a secret is not.
+        later()
+        module.paste(try fixture.item("password: hunter2hunter2"))
+        fixture.harness.scheduler.advance(by: .milliseconds(80))
+        later()
+        module.paste(try fixture.item("một câu bình thường"))
+        fixture.harness.scheduler.advance(by: .milliseconds(80))
+        #expect(sounds == [.captured, .pasted, .pasted])
+    }
+
     @Test func anIgnoredAppIsSilent() async throws {
         try fixture.setSounds(true)
         await fixture.start()
