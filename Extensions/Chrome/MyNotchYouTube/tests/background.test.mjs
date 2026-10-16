@@ -12,7 +12,7 @@ const PLAYBACK = { v: 1, type: "playback", videoId: "aaaaaaaaaaa", title: "Place
 function startWorker({ connectThrows = null, tabs = [], rejectFor = [], queryThrows = null, access = true, noTabs = [] } = {}) {
   const worker = {
     connects: [], ports: [], listeners: [], installedListeners: [], addedListeners: [], removedListeners: [], infos: [],
-    warnings: [], now: 1000000, queries: [], injections: [], accessQueries: [], access, tabMessages: [], noTabs, removedTabListeners: []
+    warnings: [], now: 1000000, queries: [], injections: [], accessQueries: [], access, tabMessages: [], noTabs, removedTabListeners: [], updatedTabListeners: [], audible: {}, gets: []
   };
   const chrome = {
     runtime: {
@@ -53,6 +53,11 @@ function startWorker({ connectThrows = null, tabs = [], rejectFor = [], queryThr
     },
     tabs: {
       onRemoved: { addListener: (fn) => worker.removedTabListeners.push(fn) },
+      onUpdated: { addListener: (fn) => worker.updatedTabListeners.push(fn) },
+      get(tabId) {
+        worker.gets.push(tabId);
+        return Promise.resolve({ id: tabId, audible: worker.audible[tabId] === true });
+      },
       sendMessage(tabId, message, options) {
         worker.tabMessages.push(plain({ tabId, message, options }));
         if (worker.noTabs.includes(tabId)) return Promise.reject(new Error("Could not establish connection. Receiving end does not exist."));
@@ -164,7 +169,7 @@ const YOUTUBE_TAB = (id) => ({ id, url: "https://www.youtube.com/watch?v=aaaaaaa
 const MAIN_INJECTION = { files: ["captions-page.js", "page.js"], world: "MAIN" };
 const ISOLATED_INJECTION = { files: ["captions.js", "tabmessages.js", "content.js", "tabs.js"], world: "ISOLATED" };
 const SESSION_INJECTION = { files: ["mediasession-page.js"], world: "MAIN" };
-const ALL_URLS = ["https://www.youtube.com/*", "http://*/*", "https://*/*"];
+const ALL_URLS = ["https://www.youtube.com/*", "https://*/*", "http://localhost/*"];
 
 test("the worker listens for onInstalled from the moment it starts, and injects nothing before it fires", () => {
   const worker = startWorker({ tabs: [{ id: 1 }] });
@@ -354,7 +359,7 @@ test("an invalid command from the host is reported as such and never reaches the
 const WEB_SENDER = (tabId, url = "https://music.example.com/album") => ({ id: OWN, url, tab: { id: tabId }, frameId: 0 });
 const REPORT = {
   v: 1, type: "tab-report", site: "music.example.com", title: "Song", artist: "Artist", album: "", state: "playing",
-  time: 12.5, duration: 200, rate: 1, live: false
+  time: 12.5, duration: 200, rate: 1, live: false, element: true
 };
 
 test("the worker listens for closed tabs from the moment it starts (no permission is needed for it)", () => {
@@ -373,6 +378,7 @@ test("a report from a page on any site reaches the host as `tab` with the tab's 
   assert.deepEqual(worker.protocol().map((message) => [message.type, message.tab]), [["tab", 41], ["tabgone", 41]]);
   assert.equal(worker.protocol()[0].title, "Song");
   assert.deepEqual(worker.diags().map((message) => message.event), [`sw-start v=${VERSION}`, "sw-access youtube=granted", "sw-msg tab"]);
+  assert.equal(worker.gets.length, 1, "Chrome was asked once whether the tab makes sound");
   for (const message of worker.diags()) assertSafeDiag(message, "sw");
   // The host gets the site's host name and nothing of the page's address.
   for (const secret of ["private-path", "token", "xyz", "https", "://"]) {
@@ -392,14 +398,29 @@ test("a tabcommand the host writes goes to the top frame of the tab it names, an
   assertSafeDiag(worker.diags().at(-1), "content");
 });
 
-test("a tab that is gone: the command is dropped, the app is told the tab is gone, and the worker reports sw-tabcommand-no-tab", async () => {
+test("a tab that is gone: the command is dropped and the worker reports sw-tabcommand-no-tab, and nothing else is said of the tab", async () => {
   const worker = startWorker({ noTabs: [41] });
   await flush();
   worker.ports[0].receive({ v: 1, type: "tabcommand", tab: 41, action: "play" });
   await flush();
-  assert.deepEqual(worker.protocol().map((message) => [message.type, message.tab]), [["tabgone", 41]]);
+  assert.deepEqual(worker.protocol(), [], "no tabgone: the page says by itself when it is gone");
   assert.equal(worker.diags().at(-1).event, "sw-tabcommand-no-tab");
   assertSafeDiag(worker.diags().at(-1), "sw");
+});
+
+test("a tab making sound or going quiet reaches the app for a page that only says it plays", async () => {
+  const worker = startWorker();
+  await flush();
+  worker.listeners[0]({ ...REPORT, element: false }, WEB_SENDER(41));
+  await flush();
+  assert.equal(worker.updatedTabListeners.length, 1, "onUpdated is registered synchronously, as MV3 requires");
+  assert.deepEqual(worker.protocol().map((message) => [message.state, message.audible]), [["paused", false]]);
+  worker.updatedTabListeners[0](41, { audible: true });
+  worker.updatedTabListeners[0](41, { status: "loading" }); // anything else about the tab is not for us
+  worker.updatedTabListeners[0](41, undefined);
+  worker.updatedTabListeners[0](41, { audible: "yes" });
+  assert.deepEqual(worker.protocol().map((message) => [message.state, message.audible]), [["paused", false], ["playing", true]]);
+  assert.equal(JSON.parse(readSource("manifest.json")).permissions.includes("tabs"), false, "audible needs no permission, and none is asked");
 });
 
 test("a page's script cannot send a command, nor can a page pose as the worker", async () => {

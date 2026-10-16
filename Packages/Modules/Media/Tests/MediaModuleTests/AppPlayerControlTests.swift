@@ -32,6 +32,10 @@ import Testing
             #expect(script.components(separatedBy: "tell application").count == 2, "\(script)")
             let tell = script.range(of: "tell application id")!
             #expect(tell.lowerBound > script.range(of: check)!.upperBound)
+            // A hung app costs two seconds, not the system's two minutes behind which every later read and command would wait.
+            let timeout = script.range(of: "with timeout of 2 seconds")!
+            #expect(timeout.lowerBound > script.range(of: check)!.upperBound && timeout.upperBound < tell.lowerBound, "\(script)")
+            #expect(script.range(of: "end timeout")!.lowerBound > script.range(of: "end tell")!.upperBound, "\(script)")
             #expect(script.hasSuffix("end if\nreturn {\"notrunning\"}"), "\(script)")
             for forbidden in ["launch", "activate", "run script", "open ", "reopen", "do shell", "quit", "System Events", "make new"] {
                 #expect(!script.contains(forbidden), "\(forbidden) in \(script)")
@@ -42,12 +46,12 @@ import Testing
     }
 
     @Test func theCommandsAreTheAppsOwnWords() {
-        #expect(PlayerScripts.command(.play, for: .music).contains("\n        play\n"))
-        #expect(PlayerScripts.command(.pause, for: .spotify).contains("\n        pause\n"))
-        #expect(PlayerScripts.command(.togglePlayPause, for: .music).contains("\n        playpause\n"))
-        #expect(PlayerScripts.command(.next, for: .spotify).contains("\n        next track\n"))
-        #expect(PlayerScripts.command(.previous, for: .music).contains("\n        previous track\n"))
-        #expect(PlayerScripts.command(.seek(seconds: 61.2349), for: .music).contains("\n        set player position to 61.235\n"))
+        #expect(PlayerScripts.command(.play, for: .music).contains("\n            play\n"))
+        #expect(PlayerScripts.command(.pause, for: .spotify).contains("\n            pause\n"))
+        #expect(PlayerScripts.command(.togglePlayPause, for: .music).contains("\n            playpause\n"))
+        #expect(PlayerScripts.command(.next, for: .spotify).contains("\n            next track\n"))
+        #expect(PlayerScripts.command(.previous, for: .music).contains("\n            previous track\n"))
+        #expect(PlayerScripts.command(.seek(seconds: 61.2349), for: .music).contains("\n            set player position to 61.235\n"))
     }
 
     @Test func aSeekIsAPlainNumberWithAPointHeldInRange() {
@@ -151,23 +155,45 @@ import Testing
         #expect(runner.scripts.filter { $0.contains("artwork 1") }.count == 2)
     }
 
-    @Test func spotifysCoverIsFetchedOncePerTrackFromTheAddressItGave() async {
+    @Test func spotifysCoverIsFetchedOncePerTrackFromTheAddressItGaveAndNotWaitedFor() async {
         let fetched = FetchLog()
         let (control, _) = control(.spotify, [.value(Self.spotifyList)], fetch: { url in
             await fetched.record(url)
             return Data([1, 2])
         })
+        guard case .snapshot(let first) = await control.read() else { Issue.record("not a snapshot"); return }
+        #expect(first.artwork == nil, "the read does not wait for the cover")
+        for _ in 0..<200 where await fetched.urls.isEmpty { await Task.yield() }
         for _ in 0..<3 {
+            for _ in 0..<50 { await Task.yield() }
             guard case .snapshot(let snapshot) = await control.read() else { Issue.record("not a snapshot"); return }
-            #expect(snapshot.artwork == Data([1, 2]))
+            #expect(snapshot.artwork == Data([1, 2]), "the next read has it")
         }
         #expect(await fetched.urls == [URL(string: "https://i.scdn.co/image/abc")!])
+    }
+
+    @Test func aSlowServiceNeverHoldsTheReadOfSpotifysStateAndPosition() async {
+        let gate = Release()
+        let (control, runner) = control(.spotify, [.value(Self.spotifyList)], fetch: { _ in
+            await gate.wait()
+            return Data([9])
+        })
+        for _ in 0..<5 {
+            guard case .snapshot(let snapshot) = await control.read() else { Issue.record("not a snapshot"); return }
+            #expect(snapshot.title == "Track")
+            #expect(snapshot.artwork == nil)
+        }
+        #expect(runner.scripts.count == 5, "five reads, though the cover has not come")
+        await gate.open()
     }
 
     @Test func aCoverTheServiceDoesNotGiveLeavesTheTrackWithoutOne() async {
         let (control, _) = control(.spotify, [.value(Self.spotifyList)])
         guard case .snapshot(let snapshot) = await control.read() else { Issue.record("not a snapshot"); return }
         #expect(snapshot.artwork == nil)
+        for _ in 0..<50 { await Task.yield() }
+        guard case .snapshot(let again) = await control.read() else { Issue.record("not a snapshot"); return }
+        #expect(again.artwork == nil)
     }
 
     @Test func onlySpotifysOwnImageServiceOverHTTPSIsFetched() {

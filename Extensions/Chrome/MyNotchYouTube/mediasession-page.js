@@ -15,14 +15,18 @@
  *
  * The page always gets the original behaviour: the wrappers call the original first and return its result untouched, and
  * everything this script does after it is wrapped in try/catch. It exposes no globals and wraps only once (a hidden symbol flag).
- * It reads nothing else of the page and makes no request.
+ * It reads nothing else of the page and makes no request. It is not invisible (a page can see that `setActionHandler` is not native, and
+ * which messages it is posted), which no hook in the page's own world can be; it keeps its names meaningless and says nothing until the
+ * page uses its Media Session.
  */
 (function (root) {
   "use strict";
 
-  var SOURCE = "mynotch-tab";
+  var SOURCE = "k9x2q7";
   var MAX_TEXT = 300;
-  var FLAG = Symbol.for("io.lucasvu.mynotch.tab.page");
+  // Both this key and the tag above say nothing of what they are for: a page can list the symbols of its window and read the messages it
+  // is posted, and a name that spells the extension would tell every site that this visitor runs it.
+  var FLAG = Symbol.for("k9x2q7.p");
   if (root[FLAG]) return;
   try {
     Object.defineProperty(root, FLAG, { value: true });
@@ -185,5 +189,5 @@
     false
   );
 
-  schedule();
+  // Nothing is posted until the page sets something: a page that never touches its Media Session never hears from this script.
 })(typeof globalThis !== "undefined" ? globalThis : self);

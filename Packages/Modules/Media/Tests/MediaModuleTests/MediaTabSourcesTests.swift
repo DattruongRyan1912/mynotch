@@ -153,7 +153,11 @@ import Testing
         await bootstrap()
         let client = try await connect()
         await send(YouTubeTestMessages.tab(3, title: "Page", playing: true), from: client) { !tabEntries.isEmpty }
-        await send(YouTubeTestMessages.tab(3, title: "Page", playing: false), from: client) { tabEntries.first?.isPlaying == false }
+        // The hub waits a moment between two reports of one page (it uses the newest), and the timer is the test's to run.
+        await send(YouTubeTestMessages.tab(3, title: "Page", playing: false), from: client) {
+            harness.scheduler.advance(by: .milliseconds(250))
+            return tabEntries.first?.isPlaying == false
+        }
         #expect(tabEntries.count == 1 && tabEntries[0].isPlaying == false)
         #expect(store.state.title == "Page", "the only source: the notch keeps it, paused")
         await send(.tabGone(tab: 3), from: client) { tabEntries.isEmpty }

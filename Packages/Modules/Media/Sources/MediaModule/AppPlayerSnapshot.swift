@@ -1,4 +1,5 @@
 import Foundation
+import YouTubeBridgeKit
 
 /// What a player app says of itself: from the notification it posts when something changes, or from a read by Apple Events.
 nonisolated struct AppPlayerSnapshot: Equatable, Sendable {
@@ -75,7 +76,7 @@ nonisolated enum KnownPlayer: CaseIterable, Sendable {
     func event(fromNotification userInfo: [AnyHashable: Any]) -> PlayerNotification? {
         guard let state = (userInfo["Player State"] as? String)?.lowercased() else { return nil }
         guard state == "playing" || state == "paused" else { return .stopped }
-        let title = Self.text(userInfo["Name"]) ?? ""
+        let title = Self.text(userInfo["Name"], limit: DisplayLimits.title) ?? ""
         guard !title.isEmpty else { return .stopped }
         let duration: Double?
         switch self {
@@ -83,26 +84,28 @@ nonisolated enum KnownPlayer: CaseIterable, Sendable {
         case .spotify: duration = Self.number(userInfo["Duration"]).map { $0 / 1000 }
         }
         let identifier = switch self {
-        case .music: Self.text(userInfo["Persistent ID"])
-        case .spotify: Self.text(userInfo["Track ID"])
+        case .music: Self.text(userInfo["Persistent ID"], limit: 100)
+        case .spotify: Self.text(userInfo["Track ID"], limit: 100)
         }
         return .track(AppPlayerSnapshot(
-            isPlaying: state == "playing", title: title, artist: Self.text(userInfo["Artist"]), album: Self.text(userInfo["Album"]),
+            isPlaying: state == "playing", title: title, artist: Self.text(userInfo["Artist"], limit: DisplayLimits.name),
+            album: Self.text(userInfo["Album"], limit: DisplayLimits.name),
             durationSeconds: duration.flatMap { $0 > 0 ? $0 : nil },
             positionSeconds: self == .spotify ? Self.number(userInfo["Playback Position"]).flatMap { $0 >= 0 ? $0 : nil } : nil,
             trackID: identifier
         ))
     }
 
-    /// Non-empty text, whatever type the app put it in (an id may be a number).
-    private static func text(_ value: Any?) -> String? {
+    /// Non-empty text of at most `limit` characters and without control characters (any process can post these notifications), whatever
+    /// type the app put it in (an id may be a number).
+    static func text(_ value: Any?, limit: Int) -> String? {
         let text: String? = switch value {
         case let string as String: string
         case let number as NSNumber: number.stringValue
         default: nil
         }
-        let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed?.isEmpty == false ? trimmed : nil
+        let cleaned = text.map { DisplayText.clean($0, limit: limit) }
+        return cleaned?.isEmpty == false ? cleaned : nil
     }
 
     private static func number(_ value: Any?) -> Double? {
@@ -112,6 +115,12 @@ nonisolated enum KnownPlayer: CaseIterable, Sendable {
         default: nil
         }
     }
+}
+
+/// How much text of a title, an artist or an album is kept: the extension's limits.
+nonisolated enum DisplayLimits {
+    static let title = 300
+    static let name = 200
 }
 
 nonisolated enum PlayerNotification: Equatable, Sendable {

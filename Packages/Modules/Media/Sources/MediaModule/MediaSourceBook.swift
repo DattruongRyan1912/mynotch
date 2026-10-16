@@ -9,17 +9,30 @@ import Foundation
 ///   the system's state, which is richer than what an app or a tab reports of itself.
 /// - **Primary** (what the closed notch, the lock screen and the hotkeys follow): the user's pin while that source is there;
 ///   otherwise the source that started playing most recently. Pausing a source never takes the place from it unless another
-///   source plays, and a source that goes away hands it on to the one playing, or else the one that was playing last.
+///   source plays, and a source that goes away hands it on to the one playing, or else the one that was playing last. The place is
+///   not taken from a source that plays by another that has only just started: it must stay the choice for `switchDelay` first, so
+///   that a source cannot flap the notch. A page that has no element of ours and no sound Chrome hears never takes it by itself.
 /// - **Shown** in the player: the source the user chose with a chip while it is there, else the primary.
 /// - **A source that blinks.** The system's session is empty for a moment between two tracks, and a player's element is emptied at
-///   the next video: that is not a source going away. What the user chose (the pin, the shown source) is kept for `releaseGrace`
-///   after its source is missing, with the last state it had, and released only when it has stayed away that long.
+///   the next video: that is not a source going away. What the user chose (the pin, the shown source), and the system's session that
+///   has the notch while another source plays, are kept for `releaseGrace` after the source is missing, with the last state they had,
+///   and released only when it has stayed away that long. Any source that goes keeps what was known of when it began to play for as
+///   long, so that it comes back as it was and does not take the notch from the source that played meanwhile.
 nonisolated struct MediaSourceBook: Sendable {
     /// A tab that has not been heard from for this long is not there any more. A page that plays reports every 5 s and a paused one
     /// every 30 s, but Chrome may let a tab it put to sleep stay quiet for a minute or two.
     static let tabLiveWindow: TimeInterval = 150
     /// How long a source the user pinned or chose may be missing before the choice is let go.
     static let releaseGrace: TimeInterval = 1.5
+    /// How long another source must have been the choice for the primary to move to it from a source that plays.
+    static let defaultSwitchDelay: TimeInterval = 1
+
+    /// 0 moves the primary at once, for a test of the rules that is not about the delay.
+    let switchDelay: TimeInterval
+
+    init(switchDelay: TimeInterval = MediaSourceBook.defaultSwitchDelay) {
+        self.switchDelay = switchDelay
+    }
 
     private(set) var entries: [MediaSourceEntry] = []
     private(set) var primaryID: MediaSourceID?
@@ -30,6 +43,7 @@ nonisolated struct MediaSourceBook: Sendable {
         var state: NowPlayingState
         var site: String
         var heardAt: Date
+        var isBelieved: Bool
     }
 
     /// A source the user chose that is missing now, as it was when it went, and since when.
@@ -48,6 +62,12 @@ nonisolated struct MediaSourceBook: Sendable {
     private var lastPlayed: [MediaSourceID: Date] = [:]
     private var firstSeen: [MediaSourceID: Date] = [:]
     private var missing: [MediaSourceID: Missing] = [:]
+    /// Since when a source that had a place in the memories above has not been there: it keeps them for `releaseGrace`, so that a source
+    /// that blinks comes back as it was and is not taken for one that has just started.
+    private var goneAt: [MediaSourceID: Date] = [:]
+    /// The source that wants the primary place from one that plays, and since when.
+    private var candidateID: MediaSourceID?
+    private var candidateSince: Date?
 
     var primary: MediaSourceEntry? { primaryID.flatMap(entry(_:)) }
 
@@ -62,7 +82,8 @@ nonisolated struct MediaSourceBook: Sendable {
 
     /// When the next tab will go stale or the next missing choice will be let go, so that one timer is enough; nil while there is none.
     var nextExpiry: Date? {
-        (tabs.values.map { $0.heardAt + Self.tabLiveWindow } + missing.values.map { $0.since + Self.releaseGrace }).min()
+        let waiting = candidateSince.map { [$0 + switchDelay] } ?? []
+        return (tabs.values.map { $0.heardAt + Self.tabLiveWindow } + missing.values.map { $0.since + Self.releaseGrace } + waiting).min()
     }
 
     // MARK: what the sources report
@@ -80,8 +101,9 @@ nonisolated struct MediaSourceBook: Sendable {
     }
 
     /// What a page says of its media; nil when it has none any more.
-    mutating func setTab(_ ref: TabRef, state: NowPlayingState?, site: String = "", at now: Date) {
-        tabs[ref] = state.map { TabSession(state: $0, site: site, heardAt: now) }
+    /// `isBelieved`: an element of the page is the media, or Chrome hears the tab; a page that is neither does not take the notch by itself.
+    mutating func setTab(_ ref: TabRef, state: NowPlayingState?, site: String = "", isBelieved: Bool = true, at now: Date) {
+        tabs[ref] = state.map { TabSession(state: $0, site: site, heardAt: now, isBelieved: isBelieved) }
         refresh(at: now)
     }
 
@@ -122,13 +144,13 @@ nonisolated struct MediaSourceBook: Sendable {
     mutating func pin(_ id: MediaSourceID, at now: Date) {
         guard entry(id) != nil else { return }
         pinnedID = id
-        refresh(at: now)
+        refresh(at: now, immediate: true)
     }
 
     mutating func unpin(at now: Date) {
         guard pinnedID != nil else { return }
         pinnedID = nil
-        refresh(at: now)
+        refresh(at: now, immediate: true)
     }
 
     mutating func togglePin(_ id: MediaSourceID, at now: Date) {
@@ -139,39 +161,82 @@ nonisolated struct MediaSourceBook: Sendable {
     mutating func select(_ id: MediaSourceID, at now: Date) {
         guard entry(id) != nil else { return }
         selectedID = id == primaryID ? nil : id
-        refresh(at: now)
+        refresh(at: now, immediate: true)
     }
 
     // MARK: working it out
 
-    private mutating func refresh(at now: Date) {
+    /// - Parameter immediate: the user's own act (a pin, a chosen chip), which moves the primary place at once.
+    private mutating func refresh(at now: Date, immediate: Bool = false) {
         var merged = mergedEntries()
         keepChoices(in: &merged, at: now)
         remember(merged, at: now)
-        primaryID = choosePrimary(from: merged)
+        primaryID = resolvePrimary(choosePrimary(from: merged), in: merged, at: now, immediate: immediate)
         if let selectedID, selectedID == primaryID { self.selectedID = nil }
         entries = merged.sorted(by: { isOrdered($0, before: $1) })
     }
 
-    /// A pinned or chosen source that is missing stays, as it last was, until it has been missing for `releaseGrace`; one that comes
-    /// back in time was never gone. What is not pinned or chosen is gone at once.
+    /// The primary place moves to a source that plays only once that source has been the choice for `switchDelay`, when the one that has
+    /// it plays too; the pin, the user's acts, and a place with nothing playing in it are not held.
+    private mutating func resolvePrimary(_ desired: MediaSourceID?, in merged: [MediaSourceEntry], at now: Date, immediate: Bool) -> MediaSourceID? {
+        guard !immediate, switchDelay > 0, let current = primaryID, let desired, desired != current, pinnedID != desired,
+              merged.contains(where: { $0.id == current && $0.isPlaying })
+        else {
+            candidateID = nil
+            candidateSince = nil
+            return desired
+        }
+        if candidateID != desired {
+            candidateID = desired
+            candidateSince = now
+        }
+        guard let since = candidateSince, now.timeIntervalSince(since) >= switchDelay else { return current }
+        candidateID = nil
+        candidateSince = nil
+        return desired
+    }
+
+    /// A source the user pinned or chose, or the one that has the notch while another source plays, that is missing stays, as it last was,
+    /// until it has been missing for `releaseGrace`; one that comes back in time was never gone. What is none of those is gone at once.
+    /// A pin or choice on a browser's own source that the extension then explains as a tab (or the reverse) follows the merge.
     private mutating func keepChoices(in merged: inout [MediaSourceEntry], at now: Date) {
         let live = Set(merged.map(\.id))
-        let chosen = Set([pinnedID, selectedID].compactMap { $0 })
+        var chosen = Set([pinnedID, selectedID].compactMap { $0 })
+        // The notch's source, when it was the system's session that has gone while another source plays and the system has no other
+        // session in its place (a session that moved to another app is a change of source, not a blink).
+        if let primaryID, !live.contains(primaryID), merged.contains(where: { $0.isPlaying && $0.canLead }),
+           let last = missing[primaryID]?.entry ?? entries.first(where: { $0.id == primaryID }), last.isPlaying, last.isSystemBacked,
+           !merged.contains(where: { $0.isSystemBacked }) {
+            chosen.insert(primaryID)
+        }
         for id in missing.keys where live.contains(id) || !chosen.contains(id) { missing[id] = nil }
         for id in chosen where !live.contains(id) {
-            if let gone = missing[id] {
+            let last = missing[id]?.entry ?? entries.first(where: { $0.id == id })
+            if let last, let target = browserMerge(of: last, in: merged) {
+                if pinnedID == id { pinnedID = target.id }
+                if selectedID == id { selectedID = target.id }
+                missing[id] = nil
+            } else if let gone = missing[id] {
                 if now.timeIntervalSince(gone.since) < Self.releaseGrace {
                     merged.append(gone.entry)
                 } else {
                     release(id)
                 }
-            } else if let last = entries.first(where: { $0.id == id }) {
+            } else if let last {
                 missing[id] = Missing(entry: last, since: now)
                 merged.append(last)
             } else {
                 release(id)
             }
+        }
+    }
+
+    /// The source the system's session of a browser moved into: a tab where it was the browser's own, or the browser's own where it was a
+    /// tab. Only the system's session can move so (another browser, or an app, is not a merge).
+    private func browserMerge(of last: MediaSourceEntry, in merged: [MediaSourceEntry]) -> MediaSourceEntry? {
+        guard last.isSystemBacked, last.state.isFromBrowser else { return nil }
+        return merged.first {
+            $0.isSystemBacked && $0.id != last.id && $0.state.isFromBrowser && $0.state.playerBundleIdentifier == last.state.playerBundleIdentifier
         }
     }
 
@@ -189,12 +254,13 @@ nonisolated struct MediaSourceBook: Sendable {
         }
         for (ref, session) in tabs {
             let id = MediaSourceID.tab(ref)
-            byID[id] = MediaSourceEntry(id: id, state: session.state, isSystemBacked: false, tab: ref, site: session.site)
+            byID[id] = MediaSourceEntry(id: id, state: session.state, isSystemBacked: false, tab: ref, site: session.site, canLead: session.isBelieved)
         }
         if let system {
             if system.isFromBrowser, let ref = tab(playing: system), var entry = byID[.tab(ref)] {
                 entry.state = system.withArtwork(from: entry.state)
                 entry.isSystemBacked = true
+                entry.canLead = true // the system says it plays
                 byID[entry.id] = entry
             } else {
                 // An app, or a browser that no tab accounts for (the extension is not there).
@@ -229,10 +295,19 @@ nonisolated struct MediaSourceBook: Sendable {
 
     private mutating func remember(_ merged: [MediaSourceEntry], at now: Date) {
         let live = Set(merged.map(\.id))
-        playingSince = playingSince.filter { live.contains($0.key) }
-        lastPlayed = lastPlayed.filter { live.contains($0.key) }
-        firstSeen = firstSeen.filter { live.contains($0.key) }
+        // A source that is missing keeps what was known of it for `releaseGrace`, and is then forgotten.
+        let remembered = Set(playingSince.keys).union(lastPlayed.keys).union(firstSeen.keys)
+        for id in remembered where !live.contains(id) {
+            let since = goneAt[id] ?? now
+            goneAt[id] = since
+            if now.timeIntervalSince(since) >= Self.releaseGrace { forget(id) }
+        }
         for entry in merged {
+            // A source back after longer than the grace is a new one.
+            if let since = goneAt[entry.id] {
+                goneAt[entry.id] = nil
+                if now.timeIntervalSince(since) >= Self.releaseGrace { forget(entry.id) }
+            }
             if firstSeen[entry.id] == nil { firstSeen[entry.id] = now }
             if entry.isPlaying {
                 if playingSince[entry.id] == nil { playingSince[entry.id] = now }
@@ -243,13 +318,21 @@ nonisolated struct MediaSourceBook: Sendable {
         }
     }
 
+    private mutating func forget(_ id: MediaSourceID) {
+        playingSince[id] = nil
+        lastPlayed[id] = nil
+        firstSeen[id] = nil
+        goneAt[id] = nil
+    }
+
     private func choosePrimary(from merged: [MediaSourceEntry]) -> MediaSourceID? {
         if let pinnedID, merged.contains(where: { $0.id == pinnedID }) { return pinnedID }
-        let playing = merged.filter(\.isPlaying)
+        let leaders = merged.filter(\.canLead)
+        let playing = leaders.filter(\.isPlaying)
         if !playing.isEmpty { return playing.max { isLater($1, than: $0) }?.id }
         // Nothing plays: a pause never takes the place from the source that had it.
         if let primaryID, merged.contains(where: { $0.id == primaryID }) { return primaryID }
-        return merged.max { isLater($1, than: $0) }?.id
+        return leaders.max { isLater($1, than: $0) }?.id
     }
 
     /// `lhs` is the later of the two: of two that play, the one that began playing last; of two that do not, the one that played

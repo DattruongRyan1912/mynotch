@@ -7,7 +7,7 @@ import Testing
     static let spotify = "com.spotify.client"
     static let chrome = "com.google.Chrome"
     let start = Date(timeIntervalSince1970: 1_000_000)
-    var book = MediaSourceBook()
+    var book = MediaSourceBook(switchDelay: 0)
 
     static func state(_ bundle: String, _ title: String = "Song", playing: Bool = true, artwork: Bool = false) -> NowPlayingState {
         NowPlayingState(
@@ -128,7 +128,7 @@ import Testing
         book.setSystem(Self.chromeSession("Neither"), at: at(1))
         #expect(book.entries.count == 3)
         #expect(book.entry(.app(Self.chrome))?.isSystemBacked == true)
-        var none = MediaSourceBook()
+        var none = MediaSourceBook(switchDelay: 0)
         none.setTab(TabRef(connection: 1, tab: 1), state: Self.tabState("One", playing: false), at: at(0))
         none.setSystem(Self.chromeSession("Neither"), at: at(1))
         #expect(none.entries.count == 2)
@@ -246,11 +246,11 @@ import Testing
         book.setApp(Self.music, state: Self.state(Self.music), at: at(0))
         book.setSystem(Self.state(Self.spotify), at: at(0))
         #expect(book.primaryID == .app(Self.spotify))
-        var other = MediaSourceBook()
+        var other = MediaSourceBook(switchDelay: 0)
         other.setSystem(Self.state(Self.spotify), at: at(0))
         other.setApp(Self.music, state: Self.state(Self.music), at: at(0))
         #expect(other.primaryID == .app(Self.spotify))
-        var apps = MediaSourceBook()
+        var apps = MediaSourceBook(switchDelay: 0)
         apps.setApp("com.b", state: Self.state("com.b"), at: at(0))
         apps.setApp("com.a", state: Self.state("com.a"), at: at(0))
         #expect(apps.primaryID == .app("com.a"))
@@ -347,6 +347,180 @@ import Testing
         #expect(book.pinnedID == .app(Self.music))
         #expect(book.primaryID == .app(Self.music))
         #expect(ids == [.app(Self.music)])
+    }
+
+    @Test mutating func aPinOnTheBrowsersOwnSourceFollowsItIntoATabTheExtensionThenExplainsAndBack() {
+        let ref = TabRef(connection: 1, tab: 4)
+        book.setSystem(Self.chromeSession("My Song"), at: at(0))
+        #expect(ids == [.app(Self.chrome)])
+        book.pin(.app(Self.chrome), at: at(1))
+        // The tab reports (the extension came up late, or the page was slow to say): the same source, now with a page behind it.
+        book.setTab(ref, state: Self.tabState("My Song"), site: "music.example.com", at: at(2))
+        #expect(ids == [.tab(ref)])
+        #expect(book.pinnedID == .tab(ref), "the pin is not lost to a change of name")
+        #expect(book.primaryID == .tab(ref))
+        // The page's report ends (its element was emptied): the system's session is the browser's own source again.
+        book.setTab(ref, state: nil, at: at(3))
+        #expect(ids == [.app(Self.chrome)])
+        #expect(book.pinnedID == .app(Self.chrome))
+        #expect(book.primaryID == .app(Self.chrome))
+        #expect(book.nextExpiry == nil, "nothing is missing: it is a rename and not a blink")
+    }
+
+    @Test mutating func aChoiceOfWhatToLookAtFollowsABrowserSourceThroughTheSameMerge() {
+        let ref = TabRef(connection: 1, tab: 4)
+        book.setSystem(Self.chromeSession("My Song", playing: false), at: at(0))
+        book.setApp(Self.music, state: Self.state(Self.music), at: at(1))
+        #expect(book.primaryID == .app(Self.music))
+        book.select(.app(Self.chrome), at: at(2))
+        #expect(book.selectedID == .app(Self.chrome))
+        book.setTab(ref, state: Self.tabState("My Song", playing: false), site: "music.example.com", at: at(3))
+        #expect(book.entry(.app(Self.chrome)) == nil)
+        #expect(book.selectedID == .tab(ref), "the chip the user chose is the same source with another name")
+        #expect(book.displayedID == .tab(ref))
+        #expect(book.primaryID == .app(Self.music))
+    }
+
+    @Test mutating func aPinOnAnAppIsNotMovedToABrowserBecauseThatTookItsPlaceInTheSystemsSession() {
+        book.setApp(Self.music, state: Self.state(Self.music), at: at(0))
+        book.setSystem(Self.state(Self.music), at: at(1))
+        book.pin(.app(Self.music), at: at(2))
+        book.setSystem(Self.chromeSession("Page"), at: at(3))
+        // Music was pinned and is still there as what it says of itself; the pin does not go to the browser.
+        #expect(book.pinnedID == .app(Self.music))
+        #expect(book.primaryID == .app(Self.music))
+    }
+
+    // MARK: a page's word
+
+    @Test mutating func aPageWithNoElementAndNoSoundIsAChipButCannotTakeTheNotchByItself() {
+        let ref = TabRef(connection: 1, tab: 1)
+        book.setApp(Self.music, state: Self.state(Self.music, playing: false), at: at(0))
+        book.setTab(ref, state: Self.tabState("Claims to play"), isBelieved: false, at: at(1))
+        #expect(Set(ids) == [.app(Self.music), .tab(ref)])
+        #expect(book.primaryID == .app(Self.music), "a paused source that the page's word would otherwise have replaced")
+        #expect(book.entry(.tab(ref))?.isPlaying == true)
+        #expect(book.entry(.tab(ref))?.canLead == false)
+        // Alone, it has no place either: nothing the notch could believe.
+        var alone = MediaSourceBook(switchDelay: 0)
+        alone.setTab(ref, state: Self.tabState("Claims to play"), isBelieved: false, at: at(0))
+        #expect(alone.entries.count == 1)
+        #expect(alone.primaryID == nil)
+        #expect(alone.displayedID == nil)
+    }
+
+    @Test mutating func aPageThatChromeHearsOrThatHasAnElementLeadsLikeAnyOther() {
+        let ref = TabRef(connection: 1, tab: 1)
+        book.setApp(Self.music, state: Self.state(Self.music), at: at(0))
+        book.setTab(ref, state: Self.tabState("Page"), isBelieved: false, at: at(1))
+        #expect(book.primaryID == .app(Self.music))
+        book.setTab(ref, state: Self.tabState("Page"), isBelieved: true, at: at(2))
+        #expect(book.primaryID == .tab(ref), "now it is heard, and it started later than Music")
+    }
+
+    @Test mutating func aPageThatTheSystemSaysPlaysIsBelievedWhateverItReportsOfItself() {
+        let ref = TabRef(connection: 1, tab: 1)
+        book.setTab(ref, state: Self.tabState("Page"), isBelieved: false, at: at(0))
+        #expect(book.primaryID == nil)
+        book.setSystem(Self.chromeSession("Page"), at: at(1))
+        #expect(book.primaryID == .tab(ref))
+        #expect(book.entries[0].isSystemBacked)
+    }
+
+    @Test mutating func aPageThatIsNotBelievedAndNothingElseIsThereLeavesTheNotchWithoutASourceUntilSomethingIs() {
+        let ref = TabRef(connection: 1, tab: 1)
+        book.setTab(ref, state: Self.tabState("Page"), isBelieved: false, at: at(0))
+        #expect(book.primary == nil)
+        book.setApp(Self.music, state: Self.state(Self.music, playing: false), at: at(1))
+        #expect(book.primaryID == .app(Self.music))
+    }
+
+    // MARK: the wait before the notch moves
+
+    @Test mutating func theNotchMovesToASourceThatStartsWhileAnotherPlaysOnlyAfterItHasBeenTheChoiceForAMoment() {
+        var delayed = MediaSourceBook()
+        delayed.setApp(Self.music, state: Self.state(Self.music), at: at(0))
+        delayed.setApp(Self.spotify, state: Self.state(Self.spotify), at: at(5))
+        #expect(delayed.primaryID == .app(Self.music), "Spotify has only just started")
+        #expect(delayed.nextExpiry == at(5 + MediaSourceBook.defaultSwitchDelay), "a timer is wanted for the moment it is due")
+        delayed.expireTabs(at: at(5 + MediaSourceBook.defaultSwitchDelay - 0.1))
+        #expect(delayed.primaryID == .app(Self.music))
+        delayed.expireTabs(at: at(5 + MediaSourceBook.defaultSwitchDelay))
+        #expect(delayed.primaryID == .app(Self.spotify))
+        #expect(delayed.nextExpiry == nil)
+    }
+
+    @Test mutating func aSourceThatFlapsBetweenPlayingAndPausedNeverGetsTheNotchAndOneThatSettlesDoes() {
+        var delayed = MediaSourceBook()
+        delayed.setApp(Self.music, state: Self.state(Self.music), at: at(0))
+        // Every 0.4 s the other source plays and pauses: it is never the choice for a whole second.
+        var time = 10.0
+        for _ in 0..<20 {
+            delayed.setApp(Self.spotify, state: Self.state(Self.spotify), at: at(time))
+            delayed.expireTabs(at: at(time + 0.4))
+            delayed.setApp(Self.spotify, state: Self.state(Self.spotify, playing: false), at: at(time + 0.4))
+            #expect(delayed.primaryID == .app(Self.music))
+            time += 0.8
+        }
+        delayed.setApp(Self.spotify, state: Self.state(Self.spotify), at: at(time))
+        delayed.expireTabs(at: at(time + 1))
+        #expect(delayed.primaryID == .app(Self.spotify))
+    }
+
+    @Test mutating func aSourceThatWantsTheNotchLosesItsWaitWhenAnotherStartsLaterAndWhenTheOneThatHasItPauses() {
+        var delayed = MediaSourceBook()
+        delayed.setApp(Self.music, state: Self.state(Self.music), at: at(0))
+        delayed.setApp(Self.spotify, state: Self.state(Self.spotify), at: at(5))
+        delayed.setApp("com.third", state: Self.state("com.third"), at: at(5.8))
+        delayed.expireTabs(at: at(6.2))
+        #expect(delayed.primaryID == .app(Self.music), "Spotify's wait ended, but the choice is the third now, which has waited 0.4 s")
+        delayed.expireTabs(at: at(6.8))
+        #expect(delayed.primaryID == .app("com.third"))
+        // The source that has the notch pausing is not a wait: there is nothing playing in its place to hold.
+        var paused = MediaSourceBook()
+        paused.setApp(Self.music, state: Self.state(Self.music), at: at(0))
+        paused.setApp(Self.spotify, state: Self.state(Self.spotify), at: at(5))
+        paused.setApp(Self.music, state: Self.state(Self.music, playing: false), at: at(5.2))
+        #expect(paused.primaryID == .app(Self.spotify))
+    }
+
+    @Test mutating func aSourceTheUserChoseWithAChipOrAPinTakesThePlaceAtOnce() {
+        var delayed = MediaSourceBook()
+        delayed.setApp(Self.music, state: Self.state(Self.music), at: at(0))
+        delayed.setApp(Self.spotify, state: Self.state(Self.spotify, playing: false), at: at(1))
+        delayed.pin(.app(Self.spotify), at: at(2))
+        #expect(delayed.primaryID == .app(Self.spotify))
+        delayed.unpin(at: at(3))
+        #expect(delayed.primaryID == .app(Self.music), "the paused Spotify gives the place up to what plays")
+    }
+
+    // MARK: a source that blinks
+
+    @Test mutating func aSourceThatBlinksDoesNotTakeTheNotchFromTheOneThatPlayedInTheMeantimeNorFromTheOneThatPlayedBefore() {
+        // Spotify (the system's session) began first; Music began later and has the notch.
+        book.setSystem(Self.state(Self.spotify, "Spotify song"), at: at(0))
+        book.setApp(Self.music, state: Self.state(Self.music, "Music song"), at: at(5))
+        #expect(book.primaryID == .app(Self.music))
+        // Spotify's session is empty between two tracks, and back within the grace: it was never gone, so it did not just start.
+        book.setSystem(nil, at: at(10))
+        book.setSystem(Self.state(Self.spotify, "Next Spotify song"), at: at(10.4))
+        #expect(book.primaryID == .app(Self.music), "a blink is not the latest to start")
+        // Gone for good (longer than the grace), it comes back as a new source and takes the notch as any new one does.
+        book.setSystem(nil, at: at(20))
+        book.expireTabs(at: at(20 + MediaSourceBook.releaseGrace + 0.1))
+        book.setSystem(Self.state(Self.spotify, "Much later"), at: at(30))
+        #expect(book.primaryID == .app(Self.spotify))
+    }
+
+    @Test mutating func aSourceThatPlaysWhileAnotherBlinksKeepsTheNotchWhenTheBlinkingOneComesBack() {
+        // Music has the notch and blinks (a quit and a restart of the player within a second); a page plays on meanwhile.
+        let ref = TabRef(connection: 1, tab: 1)
+        book.setApp(Self.music, state: Self.state(Self.music), at: at(0))
+        book.setTab(ref, state: Self.tabState("Page"), at: at(2))
+        #expect(book.primaryID == .tab(ref))
+        book.setApp(Self.music, state: nil, at: at(3))
+        book.setApp(Self.music, state: Self.state(Self.music), at: at(3.5))
+        #expect(book.primaryID == .tab(ref), "Music began before the page: it does not begin again because it blinked")
     }
 
     // MARK: the chips

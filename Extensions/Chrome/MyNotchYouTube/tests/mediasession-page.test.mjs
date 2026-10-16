@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import vm from "node:vm";
-import { createContext, flush, plain, runScripts } from "./helpers.mjs";
+import { createContext, extensionDir, flush, plain, runScripts } from "./helpers.mjs";
 
 const ORIGIN = "https://site.example";
 
@@ -54,7 +56,7 @@ function makePage({ withSession = true } = {}) {
 }
 
 const EMPTY = {
-  source: "mynotch-tab", type: "session", title: "", artist: "", album: "", playback: "none", position: null,
+  source: "k9x2q7", type: "session", title: "", artist: "", album: "", playback: "none", position: null,
   next: false, previous: false, play: false, pause: false, seek: false
 };
 
@@ -62,7 +64,7 @@ test("it posts what the Media Session holds, once for the changes of one task", 
   const page = makePage();
   page.start();
   await flush();
-  assert.deepEqual(page.posted.splice(0), [{ data: EMPTY, origin: ORIGIN }]);
+  assert.deepEqual(page.posted, [], "nothing until the page uses its Media Session: a page that never does never hears from this script");
 
   page.session.metadata = { title: "Song", artist: "Artist", album: "Album", artwork: [{ src: "https://cdn.example/a.png" }] };
   page.session.playbackState = "playing";
@@ -85,7 +87,6 @@ test("the position the page says is passed on with the time it said it, and clea
   const page = makePage();
   page.start();
   await flush();
-  page.posted.length = 0;
   page.now = 7000;
   page.session.setPositionState({ duration: 200, position: 30, playbackRate: 1.5 });
   await flush();
@@ -106,7 +107,7 @@ test("a position the page gets wrong is the page's own exception, and is not rec
   page.throwOnPosition = true;
   assert.throws(() => page.session.setPositionState({ duration: 1, position: 5 }), TypeError);
   await flush();
-  assert.equal(page.posted.at(-1).data.position, null);
+  assert.deepEqual(page.posted, [], "nothing was set, so nothing is told");
 });
 
 test("each change of the playback state is passed on, and the page's setter and getter are the originals", async () => {
@@ -175,7 +176,7 @@ test("an invoke message calls the page's own handler with the action; anything e
   for (const action of ["nexttrack", "previoustrack", "play", "pause", "seekto", "stop"]) {
     page.session.setActionHandler(action, (details) => calls.push(plain(details)));
   }
-  const invoke = (data, overrides) => page.fire({ source: "mynotch-tab", type: "invoke", ...data }, overrides);
+  const invoke = (data, overrides) => page.fire({ source: "k9x2q7", type: "invoke", ...data }, overrides);
   invoke({ action: "next" });
   invoke({ action: "previous" });
   invoke({ action: "play" });
@@ -192,7 +193,7 @@ test("an invoke message calls the page's own handler with the action; anything e
   invoke({ action: "toString" });
   invoke({ action: "__proto__" });
   page.fire({ source: "mynotch-yt", type: "invoke", action: "next" });
-  page.fire({ source: "mynotch-tab", type: "session", action: "next" });
+  page.fire({ source: "k9x2q7", type: "session", action: "next" });
   invoke({ action: "next" }, { source: {} });
   invoke({ action: "next" }, { origin: "https://evil.example" });
   page.fire("next");
@@ -203,11 +204,11 @@ test("an invoke message calls the page's own handler with the action; anything e
 test("a handler that throws, or none at all, never reaches the message listener's caller", () => {
   const page = makePage();
   page.start();
-  page.fire({ source: "mynotch-tab", type: "invoke", action: "next" }); // no handler
+  page.fire({ source: "k9x2q7", type: "invoke", action: "next" }); // no handler
   page.session.setActionHandler("nexttrack", () => {
     throw new Error("the page's own error");
   });
-  assert.doesNotThrow(() => page.fire({ source: "mynotch-tab", type: "invoke", action: "next" }));
+  assert.doesNotThrow(() => page.fire({ source: "k9x2q7", type: "invoke", action: "next" }));
 });
 
 test("it wraps once: a second run neither wraps again nor posts twice", async () => {
@@ -217,8 +218,9 @@ test("it wraps once: a second run neither wraps again nor posts twice", async ()
   page.start();
   assert.equal(page.session.setActionHandler, wrapped);
   assert.equal(page.listeners.size, 1);
+  page.session.metadata = { title: "x" };
   await flush();
-  assert.equal(page.posted.length, 1);
+  assert.equal(page.posted.length, 1, "one message for one change, not one per copy");
 });
 
 test("a page without a Media Session is left alone, and it leaves no global behind", () => {
@@ -239,4 +241,10 @@ test("a page that cannot be posted to (an opaque origin) does not break the hook
   assert.doesNotThrow(() => page.start());
   await flush();
   assert.doesNotThrow(() => page.session.setActionHandler("nexttrack", () => {}));
+});
+
+test("nothing it defines or posts spells what it is for: the flag and the tag are meaningless words", () => {
+  const source = fs.readFileSync(path.join(extensionDir, "mediasession-page.js"), "utf8");
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  for (const word of ["mynotch", "MyNotch", "lucasvu"]) assert.equal(code.includes(word), false, word);
 });

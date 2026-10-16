@@ -41,6 +41,12 @@
   }
 
   var TICK_MS = 1000;
+  // While nothing plays and nothing is waiting, a tick only has a heartbeat to look for.
+  var PAUSED_TICK_MS = 5000;
+  // At most one report in this long from one page, forced ones too. A page chooses its own title, state and position, and without a
+  // floor it could make this script, the worker, the host and the app do work as fast as it can post; what a report finds changed
+  // in the meantime is not lost, the next tick sends the newest state.
+  var MIN_REPORT_MS = 250;
   var PLAYING_HEARTBEAT_MS = 5000;
   var PAUSED_HEARTBEAT_MS = 30000;
   // A clip shorter than this is an interface sound or a loop, unless the page says it is a player.
@@ -59,7 +65,10 @@
     last: null, // { key, time, at } of the last report
     session: null, // what the page script last said of the Media Session, and when (see onPageMessage)
     emptiedAt: 0, // when the element shown was emptied, until it plays again or the grace is over
+    sentAt: 0, // when the last report went out (never reset: a page cannot get round the floor by starting over)
+    dirty: false, // a report was held back by the floor, and is to go out at the next tick
     timer: 0,
+    tickMs: 0,
     messages: null, // chrome.runtime.onMessage, where the command listener is registered
     stopped: false
   };
@@ -122,9 +131,23 @@
     return !state.el && readSession() !== null && sessionPlayback() !== "none";
   }
 
+  /** Web calls: their remote voices play in elements of the page, and are no music. Only a page that names itself is believed. */
+  var CALL_HOSTS = /^(?:.+\.)?(?:meet\.google\.com|zoom\.us|zoom\.com|teams\.microsoft\.com|teams\.live\.com|whereby\.com|webex\.com|meet\.jit\.si|gotomeeting\.com|skype\.com|chime\.aws)$/;
+
+  /** A live feed of a camera or a microphone, which is how a call's voices reach their elements (`srcObject`, not a file or a stream). */
+  function isLiveFeed(el) {
+    try {
+      return typeof root.MediaStream === "function" && el.srcObject instanceof root.MediaStream;
+    } catch (error) {
+      return false;
+    }
+  }
+
   /** Whether a media element is one to show: see the header. */
   function isEligible(el) {
     if (readSession()) return true;
+    // No title of its own in a Media Session: not a call (by its site, or by what feeds the element), not silent, not a short clip.
+    if (CALL_HOSTS.test(root.location.hostname || "") || isLiveFeed(el)) return false;
     if (el.muted === true || el.volume === 0) return false;
     var duration = el.duration;
     return !(typeof duration === "number" && isFinite(duration) && duration < MIN_SECONDS);
@@ -152,7 +175,8 @@
       time: Math.max(finite(el.currentTime, 0), 0),
       duration: typeof duration === "number" && isFinite(duration) && duration >= 0 ? duration : null,
       rate: rate > 0 && rate <= 16 ? rate : 1,
-      live: duration === Infinity
+      live: duration === Infinity,
+      element: true
     };
   }
 
@@ -186,7 +210,8 @@
       time: time,
       duration: duration,
       rate: rate,
-      live: false
+      live: false,
+      element: false
     };
   }
 
@@ -221,6 +246,13 @@
 
   /** Sends the element's report when something changed, the position is not where the last report put it, or a heartbeat is due. */
   function report(force) {
+    var now = Date.now();
+    if (state.sentAt && now >= state.sentAt && now - state.sentAt < MIN_REPORT_MS) {
+      // Too soon after the last one, whatever the page says: the tick sends what is newest by then.
+      state.dirty = true;
+      syncTimer();
+      return;
+    }
     var el = state.el;
     var message;
     if (el) {
@@ -239,19 +271,21 @@
       return;
     }
     if (!message) return;
-    var now = Date.now();
     var key = [message.title, message.artist, message.album, message.site, message.state, message.duration, message.rate, message.live].join("\u0001");
     var last = state.last;
     // A session that never said where it is has no position to be off: only its heartbeat is news.
     var positionKnown = Boolean(el) || Boolean(state.session && state.session.position);
-    if (!force && last && last.key === key && now - last.at < heartbeat(message)) {
+    if (!force && !state.dirty && last && last.key === key && now - last.at < heartbeat(message)) {
       if (!positionKnown || Math.abs(message.time - expectedTime(last, now)) < SAME_POSITION_SECONDS) return;
     }
     var clean = T.validateReport(message);
     if (!clean) return;
     state.last = { key: key, time: message.time, at: now, playing: message.state === "playing", rate: message.rate };
     state.reported = true;
+    state.sentAt = now;
+    state.dirty = false;
     transmit(clean);
+    syncTimer();
   }
 
   /** The page has no media to show any more: say so once, and stop ticking. */
@@ -261,6 +295,7 @@
     state.emptiedAt = 0;
     state.last = null;
     state.reported = false;
+    state.dirty = false;
     stopTimer();
     if (reported) transmit(T.validateEnd({ v: 1, type: "tab-end" }));
   }
@@ -272,13 +307,31 @@
     report(true);
   }
 
+  /** A second while something plays or waits (a held-back report, an emptied player); every few seconds while it is paused. */
+  function wantedTickMs() {
+    return state.dirty || state.emptiedAt || !state.last || state.last.playing ? TICK_MS : PAUSED_TICK_MS;
+  }
+
+  /** Starts the tick, or sets it to the pace it should have now; only while something is being reported. */
+  function syncTimer() {
+    if (state.stopped || !state.timer) return;
+    var ms = wantedTickMs();
+    if (state.tickMs === ms) return;
+    root.clearInterval(state.timer);
+    state.timer = root.setInterval(tick, ms);
+    state.tickMs = ms;
+  }
+
   function startTimer() {
-    if (!state.timer && !state.stopped) state.timer = root.setInterval(tick, TICK_MS);
+    if (state.timer || state.stopped) return;
+    state.tickMs = wantedTickMs();
+    state.timer = root.setInterval(tick, state.tickMs);
   }
 
   function stopTimer() {
     if (state.timer) root.clearInterval(state.timer);
     state.timer = 0;
+    state.tickMs = 0;
   }
 
   function claim(el) {
@@ -297,6 +350,7 @@
         return;
       }
       report(false);
+      syncTimer();
     } catch (error) {
       /* the next tick tries again */
     }
@@ -311,6 +365,7 @@
         if (el === state.el) {
           state.emptiedAt = 0;
           report(false);
+          syncTimer();
         } else if (isEligible(el)) {
           claim(el);
         }
@@ -321,6 +376,7 @@
         // Not yet the end: it is most likely the next video loading into the same element. The tick ends it if nothing plays.
         state.emptiedAt = Date.now();
         report(false);
+        syncTimer();
       } else if ((event.type === "durationchange" || event.type === "loadedmetadata") && !isEligible(el)) {
         end();
         afterElementGone();

@@ -33,6 +33,9 @@ nonisolated struct MediaSourceEntry: Equatable, Sendable, Identifiable {
     var tab: TabRef?
     /// The host name of the page, for a tab.
     var site: String?
+    /// The source may become the one the notch follows by itself (see `MediaSourceBook`). A page that only says it plays, with no element
+    /// of ours and no sound Chrome hears, may not: it can be chosen, and pinned, but its word alone does not take the notch.
+    var canLead = true
 
     var isPlaying: Bool { state.isPlaying }
 }

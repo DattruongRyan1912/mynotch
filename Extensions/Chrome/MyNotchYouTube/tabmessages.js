@@ -17,7 +17,7 @@
 (function (root) {
   "use strict";
 
-  var SOURCE = "mynotch-tab";
+  var SOURCE = "k9x2q7";
   var MAX_TITLE = 300;
   var MAX_NAME = 200;
   var MAX_RATE = 16;
@@ -83,6 +83,8 @@
     if (duration !== null && (!isNumber(duration) || duration < 0 || duration > MAX_SECONDS)) return null;
     if (!isNumber(message.rate) || message.rate <= 0 || message.rate > MAX_RATE) return null;
     if (typeof message.live !== "boolean") return null;
+    // Whether an element of the document is the media (and not only what the page's Media Session says).
+    if (typeof message.element !== "boolean") return null;
     return {
       site: message.site,
       title: title,
@@ -92,7 +94,8 @@
       time: round3(message.time),
       duration: duration === null ? null : round3(duration),
       rate: round3(message.rate),
-      live: message.live
+      live: message.live,
+      element: message.element
     };
   }
 
@@ -112,7 +115,8 @@
       time: fields.time,
       duration: fields.duration,
       rate: fields.rate,
-      live: fields.live
+      live: fields.live,
+      element: fields.element
     };
   }
 
@@ -122,8 +126,11 @@
     return { v: 1, type: "tab-end" };
   }
 
-  /** service worker -> app: the report with the tab it came from; null when either is not valid. */
-  function buildTab(tabId, report) {
+  /**
+   * service worker -> app: the report with the tab it came from and whether Chrome says the tab is making sound; null when either is
+   * not valid. A page with no element of ours that only says it plays is not to be believed without the sound.
+   */
+  function buildTab(tabId, report, audible) {
     if (!validTabId(tabId)) return null;
     var checked = validateReport(report);
     if (!checked) return null;
@@ -139,7 +146,9 @@
       time: checked.time,
       duration: checked.duration,
       rate: checked.rate,
-      live: checked.live
+      live: checked.live,
+      element: checked.element,
+      audible: audible === true
     };
   }
 

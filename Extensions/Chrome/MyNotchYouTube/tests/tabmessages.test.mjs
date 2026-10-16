@@ -16,13 +16,14 @@ const report = (overrides = {}) => ({
   duration: 200,
   rate: 1,
   live: false,
+  element: true,
   ...overrides
 });
 
 test("a report is a fresh object with exactly the protocol fields, and the numbers are rounded to milliseconds", () => {
   const dirty = report({ url: "https://example.invalid/?token=secret", cookie: "x", artwork: "https://example.invalid/a.png" });
   const clean = T.validateReport(dirty);
-  assert.deepEqual(Object.keys(clean).sort(), ["album", "artist", "duration", "live", "rate", "site", "state", "time", "title", "type", "v"]);
+  assert.deepEqual(Object.keys(clean).sort(), ["album", "artist", "duration", "element", "live", "rate", "site", "state", "time", "title", "type", "v"]);
   assert.notEqual(clean, dirty);
   assert.equal(clean.time, 12.346);
 });
@@ -47,7 +48,8 @@ test("a report is refused when its envelope, text, numbers or flags are wrong", 
     report({ time: -1 }), report({ time: NaN }), report({ time: Infinity }), report({ time: "1" }), report({ time: 1e8 }),
     report({ duration: -1 }), report({ duration: Infinity }), report({ duration: "3" }), report({ duration: undefined }),
     report({ rate: 0 }), report({ rate: -1 }), report({ rate: 17 }), report({ rate: NaN }), report({ rate: "1" }),
-    report({ live: "false" }), report({ live: undefined }), report({ live: 0 })
+    report({ live: "false" }), report({ live: undefined }), report({ live: 0 }),
+    report({ element: undefined }), report({ element: "true" }), report({ element: 1 }), report({ element: null })
   ];
   for (const value of bad) assert.equal(T.validateReport(value), null, JSON.stringify(value));
 });
@@ -81,13 +83,21 @@ test("buildTab puts the tab id on a valid report and nothing else; a bad id or r
     time: 12.346,
     duration: 200,
     rate: 1,
-    live: false
+    live: false,
+    element: true,
+    audible: false
   });
   assert.ok(T.buildTab(0, report()));
   assert.ok(T.buildTab(2147483647, report()));
   for (const id of [-1, 1.5, NaN, Infinity, "7", null, undefined, 2147483648]) assert.equal(T.buildTab(id, report()), null, String(id));
   assert.equal(T.buildTab(7, report({ title: "" })), null);
   assert.equal(T.buildTab(7, { v: 1, type: "tab", tab: 7 }), null, "a tab message is not a report");
+});
+
+test("buildTab says whether Chrome hears the tab, and only true counts as audible", () => {
+  assert.equal(T.buildTab(7, report(), true).audible, true);
+  for (const value of [false, undefined, null, "true", 1, {}]) assert.equal(T.buildTab(7, report(), value).audible, false, String(value));
+  assert.equal(T.buildTab(7, report({ element: false }), true).element, false);
 });
 
 test("buildGone", () => {
@@ -139,7 +149,7 @@ test("validateTabCommand is closed: another action, field, type, tab id or secon
 
 test("a session message from the page script is read as text, numbers and flags, and only from this window with the tag", () => {
   const win = {};
-  const event = (data, overrides = {}) => ({ source: win, origin: "https://site.example", data: { source: "mynotch-tab", ...data }, ...overrides });
+  const event = (data, overrides = {}) => ({ source: win, origin: "https://site.example", data: { source: "k9x2q7", ...data }, ...overrides });
   const accepted = T.acceptSessionMessage(
     event({
       type: "session", title: " Song\n", artist: "A", album: "B", playback: "playing", position: { position: 30, duration: 200, rate: 1.5, at: 123 },
@@ -168,7 +178,7 @@ test("a session message from the page script is read as text, numbers and flags,
 test("the position of a session is kept only when it is a position, and each part of it is in range", () => {
   const win = {};
   const read = (position) =>
-    T.acceptSessionMessage({ source: win, origin: "o", data: { source: "mynotch-tab", type: "session", position } }, win, "o").position;
+    T.acceptSessionMessage({ source: win, origin: "o", data: { source: "k9x2q7", type: "session", position } }, win, "o").position;
   assert.deepEqual(read({ position: 0, duration: null, rate: 1, at: null }), { position: 0, duration: null, rate: 1, at: null });
   assert.deepEqual(read({ position: 12.5 }), { position: 12.5, duration: null, rate: 1, at: null }, "no length, no speed: the defaults");
   assert.deepEqual(read({ position: 5, duration: Infinity, rate: 99 }), { position: 5, duration: null, rate: 1, at: null });
@@ -180,10 +190,10 @@ test("the position of a session is kept only when it is a position, and each par
 
 test("buildInvoke names the actions the page's handlers can do, and a seek says to where", () => {
   for (const action of ["next", "previous", "play", "pause"]) {
-    assert.deepEqual(T.buildInvoke(action), { source: "mynotch-tab", type: "invoke", action });
+    assert.deepEqual(T.buildInvoke(action), { source: "k9x2q7", type: "invoke", action });
   }
-  assert.deepEqual(T.buildInvoke("seek", 61.23456), { source: "mynotch-tab", type: "invoke", action: "seek", seconds: 61.235 });
-  assert.deepEqual(T.buildInvoke("seek", 0), { source: "mynotch-tab", type: "invoke", action: "seek", seconds: 0 });
+  assert.deepEqual(T.buildInvoke("seek", 61.23456), { source: "k9x2q7", type: "invoke", action: "seek", seconds: 61.235 });
+  assert.deepEqual(T.buildInvoke("seek", 0), { source: "k9x2q7", type: "invoke", action: "seek", seconds: 0 });
   assert.equal(T.buildInvoke("seek"), null);
   for (const bad of [-1, NaN, Infinity, "5", null, 1e9]) assert.equal(T.buildInvoke("seek", bad), null, String(bad));
   for (const action of ["toggle", "stop", "", null, undefined, "Next", "toString"]) assert.equal(T.buildInvoke(action), null, String(action));

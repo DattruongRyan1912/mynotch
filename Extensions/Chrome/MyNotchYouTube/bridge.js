@@ -43,6 +43,9 @@
   var WATCHED_ORIGINS = ["https://www.youtube.com/*"];
   // The tabs with media the worker tells the app about at one time; a page beyond this is not shown.
   var MAX_TABS = 64;
+  // A report from the same tab sooner than this after the last is dropped: the page's script already keeps a floor of 250 ms, and a
+  // page can post to it as fast as it likes, so this is the second hop's own bound, whatever arrives.
+  var MIN_TAB_GAP_MS = 200;
   var DIAG_WINDOW_MS = 5000;
 
   /**
@@ -214,8 +217,9 @@
 
   /**
    * Message handler of the service worker.
-   * deps: bridge, captions (captions.js API), tabs (tabmessages.js API), ownId, now() -> ms, version, log(text), and for
-   * commands sendToTab(tabId, message) -> Promise (chrome.tabs.sendMessage to the tab's top frame).
+   * deps: bridge, captions (captions.js API), tabs (tabmessages.js API), ownId, now() -> ms, version, log(text), for commands
+   * sendToTab(tabId, message) -> Promise (chrome.tabs.sendMessage to the tab's top frame) and for the sound getTab(tabId) -> Promise
+   * (chrome.tabs.get; `audible` is not a field the `tabs` permission gates).
    */
   function createRelay(deps) {
     var C = deps.captions;
@@ -224,6 +228,9 @@
     var states = {}; // kind -> the last state event sent by reportState
     var playbackTab = null; // the tab that last sent a playback message; in memory only, never stored
     var mediaTabs = new Set(); // the tabs the app has been told about with `tab` and not yet `tabgone`; in memory only
+    var lastTabAt = new Map(); // tabId -> when its latest report was passed on (the limiter's memory)
+    var lastReports = new Map(); // tabId -> its latest valid report, to say again when Chrome says the tab is audible or not
+    var audibleTabs = new Map(); // tabId -> whether Chrome says the tab makes sound; unknown until it says
 
     /**
      * The answer to a command, as a diagnostic that is never rate limited: the app waits for one per command and
@@ -274,19 +281,68 @@
         else forgetTab(tabId);
         return;
       }
-      var tab = T.buildTab(tabId, message);
-      if (!tab) {
+      var clean = T.validateReport(message);
+      if (!clean || !T.buildTab(tabId, clean, false)) {
         report("sw-reject invalid tab");
         return;
       }
       if (!mediaTabs.has(tabId) && mediaTabs.size >= MAX_TABS) return;
+      // One report in a few hundred milliseconds from one tab; the page's script sends the newest state again at its next tick.
+      var now = deps.now();
+      var last = lastTabAt.get(tabId);
+      if (last !== undefined && now >= last && now - last < MIN_TAB_GAP_MS) return;
+      lastTabAt.set(tabId, now);
       mediaTabs.add(tabId);
+      lastReports.set(tabId, clean);
+      if (!audibleTabs.has(tabId)) learnAudible(tabId);
       report("sw-msg tab");
-      deps.bridge.handle(tab);
+      sendTab(tabId);
+    }
+
+    /**
+     * Passes the tab's latest report on. A page that has no element of ours and only says through its Media Session that it plays is
+     * not believed unless Chrome says the tab makes sound: any page can say that, and the one that says it last would take the
+     * notch from the music the user is listening to. Without the sound it is told as paused.
+     */
+    function sendTab(tabId) {
+      var clean = lastReports.get(tabId);
+      if (!clean) return;
+      var audible = audibleTabs.get(tabId) === true;
+      var told = clean.element === false && !audible && clean.state === "playing" ? Object.assign({}, clean, { state: "paused" }) : clean;
+      var tab = T.buildTab(tabId, told, audible);
+      if (tab) deps.bridge.handle(tab);
+    }
+
+    /** What Chrome says of the tab's sound, asked once for a tab it has not said anything of yet (the answer after a restart of the worker too). */
+    function learnAudible(tabId) {
+      audibleTabs.set(tabId, false);
+      if (typeof deps.getTab !== "function") return;
+      new Promise(function (resolve) {
+        resolve(deps.getTab(tabId));
+      }).then(function (tab) {
+        if (tab && typeof tab.audible === "boolean") onTabAudible(tabId, tab.audible);
+      }, function () {
+        /* a tab that is gone: the removal says so */
+      });
+    }
+
+    /** chrome.tabs.onUpdated's `audible`, or the answer to `learnAudible`: the tab starts or stops making sound. */
+    function onTabAudible(tabId, audible) {
+      if (typeof tabId !== "number" || typeof audible !== "boolean") return;
+      if (!mediaTabs.has(tabId)) {
+        // Not a tab with media: what Chrome says of it is not kept (the map is bounded by the tabs the app has been told of).
+        return;
+      }
+      if (audibleTabs.get(tabId) === audible) return;
+      audibleTabs.set(tabId, audible);
+      sendTab(tabId);
     }
 
     /** The tab has no media any more, or is closed: the app is told once, and only about a tab it was told of. */
     function forgetTab(tabId) {
+      lastTabAt.delete(tabId);
+      lastReports.delete(tabId);
+      audibleTabs.delete(tabId);
       if (mediaTabs.delete(tabId)) tellGone(tabId);
     }
 
@@ -385,8 +441,8 @@
       new Promise(function (resolve) {
         resolve(deps.sendToTab(command.tab, command));
       }).then(undefined, function () {
-        mediaTabs.delete(command.tab);
-        tellGone(command.tab); // the app still shows it, and nothing else will tell it
+        // Only the answer: a tab that is frozen, discarded or loading may be fine, and the page says by itself when it is not (its next
+        // report, or the tab's removal); dropping the chip for it would drop what the user pinned too.
         answer("sw-tabcommand-no-tab");
       });
     }
@@ -396,6 +452,7 @@
       onMessage: onMessage,
       onHostMessage: onHostMessage,
       onTabRemoved: onTabRemoved,
+      onTabAudible: onTabAudible,
       report: report,
       reportState: reportState
     };

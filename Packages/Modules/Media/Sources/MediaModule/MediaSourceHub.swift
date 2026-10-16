@@ -26,26 +26,38 @@ final class MediaSourceHub {
     static let browserBundleID = "com.google.Chrome"
     /// A position that is within this many seconds of where the last report put it is not news.
     static let positionTolerance = 0.5
+    /// A page is heard at most this often (the extension keeps its own floor and the worker another; a peer of the socket may not): what
+    /// comes sooner waits, and only the newest of it is used.
+    static let tabInterval: TimeInterval = 0.2
+    /// Pages one Chrome may have at once (the worker's own bound).
+    static let maxTabsPerConnection = 64
 
     let model = MediaSourceModel()
-    private(set) var book = MediaSourceBook()
+    private(set) var book: MediaSourceBook
     /// The module hears of every change after the chips are up to date.
     var onChange: (Change) -> Void = { _ in }
 
     private let environment: MediaAppEnvironment
     private let controls: [String: any AppPlayerControl]
+    private let switchDelay: TimeInterval
     private var scheduler: (any Scheduler)?
     private var permissions: (any PermissionCenter)?
     private var now: () -> Date
 
     private var sessions: [String: AppPlayerSession] = [:]
     private var tabStates: [TabRef: NowPlayingState] = [:]
+    /// When a page was last heard (what the limiter measures from), and what it said since, of which only the newest is kept.
+    private var lastTabAt: [TabRef: Date] = [:]
+    private var pendingTabs: [TabRef: BrowserTab] = [:]
+    private var flushTimer: ScheduledAction?
     private var artworkRevision = 0
     /// Apps the user let control (read, then, by Apple Events) and apps they refused, by bundle id.
     private var granted: Set<String> = []
     private var denied: Set<String> = []
     /// Apps already asked, so that the question is put once, and reads that are not finished.
     private var asked: Set<String> = []
+    /// Apps something tried to use where the user could not be asked (the lock screen): asked at the next interaction with the open notch.
+    private var pendingAsk: Set<String> = []
     private var inFlight: Set<String> = []
     private var cancellations: [() -> Void] = []
     private var pollTimer: ScheduledAction?
@@ -54,8 +66,13 @@ final class MediaSourceHub {
     /// Counts starts, so that an answer that was on its way when the module stopped finds out it is stale.
     private var generation = 0
 
-    init(environment: MediaAppEnvironment = .inert, controls: [any AppPlayerControl] = [], now: @escaping () -> Date = Date.init) {
+    init(
+        environment: MediaAppEnvironment = .inert, controls: [any AppPlayerControl] = [], now: @escaping () -> Date = Date.init,
+        switchDelay: TimeInterval = MediaSourceBook.defaultSwitchDelay
+    ) {
         self.environment = environment
+        self.switchDelay = switchDelay
+        book = MediaSourceBook(switchDelay: switchDelay)
         self.controls = Dictionary(uniqueKeysWithValues: controls.map { ($0.player.bundleID, $0) })
         self.now = now
         model.onSelect = { [weak self] in self?.select($0) }
@@ -86,15 +103,20 @@ final class MediaSourceHub {
         expiryTimer?.cancel()
         expiryTimer = nil
         scheduledExpiry = nil
+        flushTimer?.cancel()
+        flushTimer = nil
         scheduler = nil
         permissions = nil
         sessions = [:]
         tabStates = [:]
+        lastTabAt = [:]
+        pendingTabs = [:]
+        pendingAsk = []
         granted = []
         denied = []
         asked = []
         inFlight = []
-        book = MediaSourceBook()
+        book = MediaSourceBook(switchDelay: switchDelay)
         model.reset()
     }
 
@@ -105,25 +127,61 @@ final class MediaSourceHub {
         publish(.system)
     }
 
-    /// A page with media reported, on connection `connection` (the Chrome profile).
+    /// A page with media reported, on connection `connection` (the Chrome profile). A page is heard at most every `tabInterval`: what comes
+    /// sooner is kept, the newest of it, and used when the interval is over; a Chrome has at most `maxTabsPerConnection` pages.
     func receive(_ tab: BrowserTab, connection: Int) {
         let date = now()
         let ref = TabRef(connection: connection, tab: tab.tab)
+        if tabStates[ref] == nil, tabStates.keys.filter({ $0.connection == connection }).count >= Self.maxTabsPerConnection { return }
+        if let last = lastTabAt[ref], date >= last, date.timeIntervalSince(last) < Self.tabInterval {
+            pendingTabs[ref] = tab
+            scheduleFlush(after: last.addingTimeInterval(Self.tabInterval).timeIntervalSince(date))
+            return
+        }
+        apply(tab, ref: ref, at: date)
+    }
+
+    private func apply(_ tab: BrowserTab, ref: TabRef, at date: Date) {
+        lastTabAt[ref] = date
+        pendingTabs[ref] = nil
         let state = Self.state(of: tab, replacing: tabStates[ref], at: date)
         tabStates[ref] = state
-        book.setTab(ref, state: state, site: tab.site, at: date)
+        book.setTab(ref, state: state, site: tab.site, isBelieved: tab.isBelieved, at: date)
         publish(.other)
+    }
+
+    /// One timer, for the pages that spoke too soon: when it fires each is used as it last said.
+    private func scheduleFlush(after delay: TimeInterval) {
+        guard flushTimer == nil, let scheduler else { return }
+        let milliseconds = Int64((max(delay, 0) * 1000).rounded(.up))
+        flushTimer = scheduler.schedule(after: .milliseconds(milliseconds)) { [weak self] in self?.flush() }
+    }
+
+    private func flush() {
+        flushTimer = nil
+        let date = now()
+        let waiting = pendingTabs
+        for (ref, tab) in waiting where tabStates[ref] != nil { apply(tab, ref: ref, at: date) }
+        pendingTabs = pendingTabs.filter { tabStates[$0.key] != nil }
     }
 
     func tabGone(_ tab: Int, connection: Int) {
         let ref = TabRef(connection: connection, tab: tab)
+        forgetLimiter(of: ref)
         guard tabStates.removeValue(forKey: ref) != nil else { return }
         book.setTab(ref, state: nil, at: now())
         publish(.other)
     }
 
+    private func forgetLimiter(of ref: TabRef) {
+        lastTabAt[ref] = nil
+        pendingTabs[ref] = nil
+    }
+
     /// The bridge is off: no page is heard from.
     func forgetTabs() {
+        lastTabAt = [:]
+        pendingTabs = [:]
         guard !tabStates.isEmpty else { return }
         tabStates = [:]
         book.removeAllTabs(at: now())
@@ -132,6 +190,8 @@ final class MediaSourceHub {
 
     /// The Chrome behind `connection` has gone.
     func connectionEnded(_ connection: Int) {
+        lastTabAt = lastTabAt.filter { $0.key.connection != connection }
+        pendingTabs = pendingTabs.filter { $0.key.connection != connection }
         guard tabStates.keys.contains(where: { $0.connection == connection }) else { return }
         tabStates = tabStates.filter { $0.key.connection != connection }
         book.removeTabs(ofConnection: connection, at: now())
@@ -233,7 +293,7 @@ final class MediaSourceHub {
 
     /// Whether the app may be read and controlled, asking the user the first time (it is only ever asked once per run, and macOS
     /// remembers the answer). False while the app is not running, since there is no one to ask about.
-    private func ensureAllowed(_ bundleID: String) async -> Bool {
+    private func ensureAllowed(_ bundleID: String, mayAsk: Bool = true) async -> Bool {
         guard let permissions, controls[bundleID] != nil, environment.isRunning(bundleID) else { return false }
         switch permissions.status(of: .automation(bundleID: bundleID)) {
         case .granted:
@@ -245,6 +305,12 @@ final class MediaSourceHub {
         case .unknown:
             return false
         case .notDetermined:
+            // Where the user cannot answer (the lock screen) nothing is asked, and the app is remembered for the next interaction with
+            // the open notch: a prompt that nobody sees is answered by nobody, and is not asked twice.
+            guard mayAsk else {
+                pendingAsk.insert(bundleID)
+                return false
+            }
             guard asked.insert(bundleID).inserted else { return false }
             let generation = generation
             let answer = await permissions.request(.automation(bundleID: bundleID))
@@ -325,11 +391,12 @@ final class MediaSourceHub {
     }
 
     /// Asks an app to do something, after asking the user the first time. Next, a read, so that the player shows what it did.
-    func perform(_ command: AppPlayerCommand, onApp bundleID: String) {
+    /// - Parameter mayAsk: the user can be asked now. The lock screen's buttons pass false: an app that was not allowed yet does nothing there.
+    func perform(_ command: AppPlayerCommand, onApp bundleID: String, mayAsk: Bool = true) {
         guard let control = controls[bundleID] else { return }
         let generation = generation
         Task { [weak self] in
-            guard let self, await ensureAllowed(bundleID), generation == self.generation, environment.isRunning(bundleID) else { return }
+            guard let self, await ensureAllowed(bundleID, mayAsk: mayAsk), generation == self.generation, environment.isRunning(bundleID) else { return }
             let outcome = await control.perform(command)
             guard generation == self.generation else { return }
             switch outcome {
@@ -363,6 +430,10 @@ final class MediaSourceHub {
             refreshPermissions()
             publish(.other)
             for control in pollTargets() { read(control) }
+            // The notch is open, so the user is here: what could not be asked on the lock screen is asked now.
+            let waiting = pendingAsk
+            pendingAsk = []
+            for bundleID in waiting { Task { [weak self] in _ = await self?.ensureAllowed(bundleID) } }
         }
         refreshPolling()
     }
@@ -404,6 +475,8 @@ final class MediaSourceHub {
         // The timer may fire a little early after rounding; the deadline itself is when the book expects the tick.
         book.expireTabs(at: max(now(), book.nextExpiry ?? now()))
         tabStates = tabStates.filter { book.entry(forTab: $0.key) != nil }
+        lastTabAt = lastTabAt.filter { tabStates[$0.key] != nil }
+        pendingTabs = pendingTabs.filter { tabStates[$0.key] != nil }
         publish(.other)
     }
 }

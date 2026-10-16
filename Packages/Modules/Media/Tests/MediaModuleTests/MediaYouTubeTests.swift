@@ -48,6 +48,11 @@ import Testing
         source.emit(AdapterLines.track(title, artist: "Channel", playing: playing, bundle: bundle))
     }
 
+    /// Lets the title a browser plays hold still for as long as lyrics wait for it, which is when the lookup is made.
+    func letTheTitleHold() {
+        harness.scheduler.advance(by: MediaModule.browserLyricsDelay)
+    }
+
     func receive(_ messages: YouTubeMessage..., at date: Date? = nil) {
         for message in messages { module.receiveYouTube(message, at: date ?? Date()) }
     }
@@ -334,6 +339,7 @@ import Testing
         client.reply(LrclibReplies.found())
         await bootstrapWithCaptions()
         playInChrome()
+        letTheTitleHold()
         await settle { store.syncedLyrics != nil }
         #expect(store.syncedLyrics == LrclibReplies.syncedLines)
 
@@ -350,6 +356,7 @@ import Testing
         await bootstrapWithCaptions()
         receive(YouTubeTestMessages.captions(), YouTubeTestMessages.playback())
         playInChrome()
+        letTheTitleHold()
         await settle { !client.requests.isEmpty }
         #expect(client.requests.isEmpty)
         #expect(store.syncedLyrics == YouTubeTestMessages.lines)
@@ -364,6 +371,7 @@ import Testing
         }
         await bootstrapWithCaptions()
         playInChrome()
+        letTheTitleHold()
         await settle { gate.isWaiting }
         receive(YouTubeTestMessages.captions(), YouTubeTestMessages.playback())
         gate.open()
@@ -371,15 +379,69 @@ import Testing
         #expect(store.syncedLyrics == YouTubeTestMessages.lines)
     }
 
+    @Test func aTitleThatKeepsChangingIsLookedUpOnlyOnceItHoldsStill() async {
+        enableLyrics()
+        client.reply(LrclibReplies.found())
+        await bootstrapWithCaptions()
+        // A page that tries a new title every half second, thirty times: nothing is asked of the lyrics service meanwhile.
+        for index in 0..<30 {
+            playInChrome(title: "T\(index)x")
+            harness.scheduler.advance(by: .milliseconds(500))
+        }
+        await settle { !client.requests.isEmpty }
+        #expect(client.requests.isEmpty, "no title held for two seconds")
+        letTheTitleHold()
+        await settle { !client.requests.isEmpty }
+        let asked = client.requests.compactMap { $0.url?.absoluteString }.joined(separator: " ")
+        #expect(asked.contains("T29x"))
+        for index in 0..<29 { #expect(!asked.contains("T\(index)x"), Comment(rawValue: "T\(index)x was asked for")) }
+    }
+
+    @Test func aTitleThatHoldsStillIsLookedUpOnceNoMatterHowOftenThePositionOrThePlayStateChanges() async {
+        enableLyrics()
+        client.reply(LrclibReplies.found())
+        await bootstrapWithCaptions()
+        playInChrome()
+        letTheTitleHold()
+        await settle { store.syncedLyrics != nil }
+        let asked = client.requests.count
+        for second in 0..<20 {
+            source.emit(AdapterLines.position(Double(second)))
+            playInChrome(playing: second.isMultiple(of: 2))
+            letTheTitleHold()
+        }
+        await settle { false }
+        #expect(client.requests.count == asked)
+    }
+
+    @Test func aTitleThatChangesBackToTheOldOneBeforeItHeldNeedsNoSecondLookup() async {
+        enableLyrics()
+        client.reply(LrclibReplies.found())
+        await bootstrapWithCaptions()
+        playInChrome(title: "First")
+        letTheTitleHold()
+        await settle { store.syncedLyrics != nil }
+        let asked = client.requests.count
+        playInChrome(title: "Second")
+        harness.scheduler.advance(by: .milliseconds(500))
+        playInChrome(title: "First")
+        letTheTitleHold()
+        await settle { false }
+        #expect(client.requests.count == asked, "answered from what the service already has")
+    }
+
     @Test func whenTheCaptionsGoTheWebLyricsComeBack() async {
         enableLyrics()
         client.reply(LrclibReplies.found())
         await bootstrapWithCaptions()
         playInChrome()
+        letTheTitleHold()
         await settle { store.syncedLyrics != nil }
         receive(YouTubeTestMessages.captions(), YouTubeTestMessages.playback())
         receive(YouTubeTestMessages.clear())
-        // Answered from the disk cache, so no new request, and the service's spacing is no obstacle.
+        // The title of a page is waited for again; then it is answered from the disk cache, so no new request, and the service's spacing
+        // is no obstacle.
+        letTheTitleHold()
         await settle { store.syncedLyrics == LrclibReplies.syncedLines }
         #expect(store.syncedLyrics == LrclibReplies.syncedLines)
         #expect(client.requests.count == 1)
@@ -390,6 +452,7 @@ import Testing
         client.reply(LrclibReplies.found())
         await bootstrapWithCaptions()
         playInChrome()
+        letTheTitleHold()
         await settle { store.syncedLyrics != nil }
         #expect(store.syncedLyrics == LrclibReplies.syncedLines)
         #expect(client.requests.count == 1)

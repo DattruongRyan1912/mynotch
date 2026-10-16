@@ -1,4 +1,5 @@
 import Foundation
+import YouTubeBridgeKit
 
 /// One read of a player app by Apple Events.
 nonisolated enum AppPlayerReading: Equatable, Sendable {
@@ -115,13 +116,19 @@ nonisolated enum PlayerScripts {
         return guarded(player, "\(action)\nreturn true")
     }
 
+    /// How long an app may take to answer an event: the system's own wait is two minutes, and everything after a hung app waits behind it
+    /// on the script queue.
+    static let timeoutSeconds = 2
+
     private static func guarded(_ player: KnownPlayer, _ body: String) -> String {
-        let indented = body.split(separator: "\n", omittingEmptySubsequences: false).map { "        " + $0 }.joined(separator: "\n")
+        let indented = body.split(separator: "\n", omittingEmptySubsequences: false).map { "            " + $0 }.joined(separator: "\n")
         return """
             if application id "\(player.bundleID)" is running then
-                tell application id "\(player.bundleID)"
+                with timeout of \(timeoutSeconds) seconds
+                    tell application id "\(player.bundleID)"
             \(indented)
-                end tell
+                    end tell
+                end timeout
             end if
             return {"notrunning"}
             """
@@ -136,6 +143,8 @@ final class AppleScriptPlayerControl: AppPlayerControl {
     /// Fetches a cover from an address; nil for anything that is not a cover from the app's own service.
     private let fetchArtwork: (URL) async -> Data?
     private var cover: (key: String, data: Data?)?
+    /// The track whose cover is being fetched: a slow service must not hold a read (and with it the position and the state).
+    private var fetching: String?
 
     init(player: KnownPlayer, runner: any PlayerScriptRunner, fetchArtwork: @escaping (URL) async -> Data? = { _ in nil }) {
         self.player = player
@@ -178,33 +187,53 @@ final class AppleScriptPlayerControl: AppPlayerControl {
         guard case .list(let items) = value, items.count >= 7, case .text(let state) = items[0] else { return nil }
         let lowered = state.lowercased()
         guard lowered == "playing" || lowered == "paused" || lowered == "fast forwarding" || lowered == "rewinding" else { return nil }
-        guard let title = Self.text(items[1]), !title.isEmpty else { return nil }
+        guard let title = Self.text(items[1], limit: DisplayLimits.title), !title.isEmpty else { return nil }
         // Music's duration is in seconds, Spotify's in milliseconds.
         let duration = Self.number(items[5]).map { player == .spotify ? $0 / 1000 : $0 }
         return AppPlayerSnapshot(
-            isPlaying: lowered != "paused", title: title, artist: Self.text(items[2]).flatMap { $0.isEmpty ? nil : $0 },
-            album: Self.text(items[3]).flatMap { $0.isEmpty ? nil : $0 }, durationSeconds: duration.flatMap { $0 > 0 ? $0 : nil },
-            positionSeconds: Self.number(items[4]).flatMap { $0 >= 0 ? $0 : nil }, trackID: Self.text(items[6]).flatMap { $0.isEmpty ? nil : $0 },
-            artworkURL: items.count > 7 ? Self.text(items[7]).flatMap(URL.init(string:)) : nil
+            isPlaying: lowered != "paused", title: title,
+            artist: Self.text(items[2], limit: DisplayLimits.name).flatMap { $0.isEmpty ? nil : $0 },
+            album: Self.text(items[3], limit: DisplayLimits.name).flatMap { $0.isEmpty ? nil : $0 },
+            durationSeconds: duration.flatMap { $0 > 0 ? $0 : nil },
+            positionSeconds: Self.number(items[4]).flatMap { $0 >= 0 ? $0 : nil },
+            trackID: Self.text(items[6], limit: 100).flatMap { $0.isEmpty ? nil : $0 },
+            artworkURL: items.count > 7 ? Self.text(items[7], limit: 2048).flatMap(URL.init(string:)) : nil
         )
     }
 
     private func artwork(for snapshot: AppPlayerSnapshot) async -> Data? {
         let key = snapshot.trackID ?? "\(snapshot.title)\u{1}\(snapshot.artist ?? "")\u{1}\(snapshot.album ?? "")"
         if let cover, cover.key == key { return cover.data }
-        var data: Data?
         if let source = PlayerScripts.artwork(player) {
+            // Music's cover is data, read once: a read of a file in the app's own library.
+            var data: Data?
             if case .value(.data(let bytes)) = await runner.run(source), !bytes.isEmpty { data = bytes }
-        } else if let url = snapshot.artworkURL {
-            data = await fetchArtwork(url)
+            cover = (key, data)
+            return data
         }
-        cover = (key, data)
-        return data
+        // Spotify gives an address. It is fetched on the side, and the read does not wait for it: the next read has the cover.
+        guard let url = snapshot.artworkURL else {
+            cover = (key, nil)
+            return nil
+        }
+        if fetching != key {
+            fetching = key
+            Task { [weak self, fetchArtwork] in
+                let data = await fetchArtwork(url)
+                self?.finishFetching(key, data)
+            }
+        }
+        return nil
     }
 
-    private static func text(_ value: PlayerScriptValue) -> String? {
+    private func finishFetching(_ key: String, _ data: Data?) {
+        if fetching == key { fetching = nil }
+        cover = (key, data)
+    }
+
+    private static func text(_ value: PlayerScriptValue, limit: Int) -> String? {
         switch value {
-        case .text(let text): text.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .text(let text): DisplayText.clean(text, limit: limit)
         case .number(let number): number.rounded() == number ? String(Int64(number)) : String(number)
         default: nil
         }

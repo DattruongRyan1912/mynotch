@@ -145,6 +145,11 @@ public final class MediaModule: FeatureModule {
     /// Track the lyrics were asked for (or are shown for); nil while lyrics are off or the track has no key.
     private var lyricsTrack: TrackKey?
     private var lyricsTask: Task<Void, Never>?
+    /// Waits for the title of what a browser plays to hold still before lyrics are asked for it.
+    private var lyricsDebounce: ScheduledAction?
+    /// A page chooses its own title, and could make a lookup at lrclib.net of each one it tries: the lookup waits this long for a title
+    /// that has held still.
+    static let browserLyricsDelay: Duration = .seconds(2)
     /// Counts track changes, so a retry planned for an earlier track finds out it is stale.
     private var lyricsEpoch = 0
     /// What the Settings rows show of the Chrome bridge, and where its buttons put the files.
@@ -207,7 +212,7 @@ public final class MediaModule: FeatureModule {
         let spectrum = SystemAudioTap(bandCount: NowPlayingBars.barCount)
         let client = URLSessionHTTPClient()
         // Reading Music and Spotify sends them Apple Events only once the user lets MyNotch (see `MediaSourceHub`).
-        let controls = Self.systemControls(client: client)
+        let controls = Self.systemControls()
         if let adapterScript, let adapterFramework {
             self.init(
                 makeSource: { scheduler in AdapterProcess(script: adapterScript, framework: adapterFramework, scheduler: scheduler) },
@@ -255,16 +260,11 @@ public final class MediaModule: FeatureModule {
     }
 
     /// Music and Spotify through Apple Events, on the system's script queue; Spotify's cover is fetched from its own image service.
-    private static func systemControls(client: any HTTPClient) -> [any AppPlayerControl] {
+    private static func systemControls() -> [any AppPlayerControl] {
         let runner = SystemPlayerScriptRunner()
+        let fetcher = SpotifyArtworkFetcher()
         return KnownPlayer.allCases.map { player in
-            AppleScriptPlayerControl(player: player, runner: runner, fetchArtwork: { url in
-                guard SpotifyArtwork.isAllowed(url) else { return nil }
-                var request = URLRequest(url: url)
-                request.timeoutInterval = 5
-                guard let reply = try? await client.send(request), reply.status == 200, reply.body.count <= SpotifyArtwork.maxBytes else { return nil }
-                return reply.body
-            })
+            AppleScriptPlayerControl(player: player, runner: runner, fetchArtwork: { await fetcher.fetch($0) })
         }
     }
 
@@ -404,6 +404,8 @@ public final class MediaModule: FeatureModule {
         spectrumFeed = nil
         lyricsTask?.cancel()
         lyricsTask = nil
+        lyricsDebounce?.cancel()
+        lyricsDebounce = nil
         lyricsTrack = nil
         shownCaptions = nil
         #if DEBUG
@@ -492,8 +494,18 @@ public final class MediaModule: FeatureModule {
         await signIn.removeWebsiteData()
     }
 
-    /// The lock screen's buttons: the Media tab's, through the same actions, but for the primary source whatever the tab shows.
-    var lockScreenTransport: LockScreenTransport { LockScreenTransport(store: store, actions: actions) }
+    /// The lock screen's buttons: the Media tab's, through the same actions, but for the primary source whatever the tab shows, and
+    /// never asking the user for anything: nobody can answer a prompt on the lock screen.
+    var lockScreenTransport: LockScreenTransport { LockScreenTransport(store: store, actions: lockScreenActions) }
+
+    var lockScreenActions: MediaActions {
+        MediaActions(
+            send: { [weak self] command in self?.send(command, mayAsk: false) },
+            seek: { [weak self] seconds in self?.seek(toSeconds: seconds) },
+            press: { [weak self] button in self?.press(button, mayAsk: false) },
+            toggleLyricsPanel: { [weak self] in self?.lyricsPanel?.toggle() }
+        )
+    }
 
     /// What the notch follows acts on: the lock screen, the hotkeys. The primary source, whichever the Media tab is showing.
     var actions: MediaActions {
@@ -537,7 +549,9 @@ public final class MediaModule: FeatureModule {
     /// has a live session for that video: Chrome ignores MediaRemote's next and previous there. Whatever else is sent
     /// goes to MediaRemote, as does a press the extension does not take (see `sendToExtension`). A source the system does not play
     /// is controlled through its own: Music and Spotify by Apple Events (the first press asks the user), a tab by the extension.
-    func send(_ command: MediaCommand, to id: MediaSourceID? = nil) {
+    /// - Parameter mayAsk: the user can be asked for the Automation permission now; the lock screen's buttons pass false, and a press of
+    ///   theirs on an app that was not allowed yet does nothing and is asked of the user at the next interaction with the open notch.
+    func send(_ command: MediaCommand, to id: MediaSourceID? = nil, mayAsk: Bool = true) {
         switch route(for: id) {
         case .system(let state):
             if let action = command.youTubeCommand, skipRoute(for: state) == .bridge {
@@ -546,7 +560,7 @@ public final class MediaModule: FeatureModule {
             }
             source?.send(command)
         case .app(let bundleID):
-            if let command = command.appCommand { sources.perform(command, onApp: bundleID) }
+            if let command = command.appCommand { sources.perform(command, onApp: bundleID, mayAsk: mayAsk) }
         case .tab(let ref):
             if let action = command.tabAction { sendToTab(ref, action) }
         }
@@ -640,7 +654,7 @@ public final class MediaModule: FeatureModule {
     /// A button beside play and pause: what it does depends on what the player reports (see `MediaControlButton`), and a
     /// button that cannot be used does nothing. Next and previous go through `send`, so they take the same route as the hotkeys.
     /// `id` is the source it is pressed for: the primary one unless the Media tab shows another.
-    func press(_ button: MediaControlButton, to id: MediaSourceID? = nil, at now: Date = Date()) {
+    func press(_ button: MediaControlButton, to id: MediaSourceID? = nil, mayAsk: Bool = true, at now: Date = Date()) {
         let target = id ?? sources.book.primaryID
         let entry = id.flatMap { sources.book.entry($0) } ?? sources.book.primary
         let state = entry?.state ?? store.state
@@ -651,7 +665,7 @@ public final class MediaModule: FeatureModule {
             hasVolume: volume.isAvailable, volumeIsOpen: false, pendingSeek: waiting
         )
         switch button.effect(in: controlContext, at: now) {
-        case .command(let command): send(command, to: id)
+        case .command(let command): send(command, to: id, mayAsk: mayAsk)
         case .seek(let seconds): seek(toSeconds: seconds, to: id, at: now)
         case .shuffle(let mode): if isSystemBacked(id) { source?.setShuffle(mode) }
         case .repeatMode(let mode): if isSystemBacked(id) { source?.setRepeat(mode) }
@@ -818,11 +832,26 @@ public final class MediaModule: FeatureModule {
         guard track != lyricsTrack else { return }
         lyricsTask?.cancel()
         lyricsTask = nil
+        lyricsDebounce?.cancel()
+        lyricsDebounce = nil
         lyricsTrack = track
         lyricsEpoch += 1
         // The lookup is under way before the activity looks at the lyrics, so a strip held for them knows they are coming.
-        if let track { fetchLyrics(for: track, mayRetry: true) }
+        if let track {
+            if store.state.isFromBrowser, let context {
+                // The title is the page's to choose: once per title that has held still, not once per title it tries.
+                lyricsDebounce = context.scheduler.schedule(after: Self.browserLyricsDelay) { [weak self] in self?.lyricsTitleHeld(track) }
+            } else {
+                fetchLyrics(for: track, mayRetry: true)
+            }
+        }
         show(lyrics: nil)
+    }
+
+    private func lyricsTitleHeld(_ track: TrackKey) {
+        lyricsDebounce = nil
+        guard track == lyricsTrack else { return }
+        fetchLyrics(for: track, mayRetry: true)
     }
 
     /// Hands the lyrics to the store and the activity gets its say: its strip exists only while there are synced lyrics
@@ -978,6 +1007,8 @@ public final class MediaModule: FeatureModule {
         if lyricsTrack != nil {
             lyricsTask?.cancel()
             lyricsTask = nil
+            lyricsDebounce?.cancel()
+            lyricsDebounce = nil
             lyricsTrack = nil
             lyricsEpoch += 1
         }
@@ -1033,7 +1064,7 @@ public final class MediaModule: FeatureModule {
     /// Lyrics for the current track may still arrive: a lookup is out, the next track has not shown up yet, or captions
     /// from the Chrome extension may still come.
     private var lyricsArePending: Bool {
-        lyricsTask != nil || !store.state.isActive || (youtubeCaptionsEnabled && shownCaptions == nil)
+        lyricsTask != nil || lyricsDebounce != nil || !store.state.isActive || (youtubeCaptionsEnabled && shownCaptions == nil)
     }
 
     /// Whether the activity carries the strip: the setting is on and the track plays with synced lyrics, from whichever

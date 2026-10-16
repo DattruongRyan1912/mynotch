@@ -213,6 +213,7 @@ import Testing
         await harness.registry.bootstrap()
         environment.music("Playing", name: "Music song")
         source.emit(AdapterLines.track("Spotify song", artist: "S", bundle: Self.spotifyID))
+        harness.scheduler.advance(by: .seconds(MediaSourceBook.defaultSwitchDelay + 0.5))
         #expect(store.state.title == "Spotify song")
         source.emit(AdapterLines.playing(false))
         #expect(store.state.title == "Music song", "Music plays, and the paused primary gives the place up")
@@ -296,6 +297,45 @@ import Testing
         source.emit(AdapterLines.track("Playing", artist: "A", bundle: Self.musicID))
         #expect(store.state.title == "Playing")
         #expect(module.sources.book.entries.map(\.isSystemBacked) == [true])
+    }
+
+    // MARK: the lock screen cannot ask
+
+    @Test func theLockScreensButtonsNeverBringUpTheAutomationQuestionButTheNotchesDoAndAskedOnceTheLockScreenWorks() async {
+        allow(.music, .notDetermined)
+        environment.running = [Self.musicID]
+        harness.permissions.requestResult = .granted
+        await harness.registry.bootstrap()
+        environment.music("Paused", name: "Music song")
+        let transport = module.lockScreenTransport
+        transport.togglePlayPause()
+        transport.skipForward()
+        transport.skipBack()
+        await settle()
+        #expect(harness.permissions.requested.isEmpty, "nobody is at the lock screen to answer")
+        #expect(music.performed.isEmpty, "and what was pressed there did nothing")
+        // Opening the Media tab is an interaction at the open notch: the question is put then.
+        module.sources.model.setTabVisible(true)
+        await settle { !harness.permissions.requested.isEmpty }
+        #expect(harness.permissions.requested == [.automation(bundleID: Self.musicID)])
+        await settle { harness.permissions.status(of: .automation(bundleID: Self.musicID)) == .granted }
+        // Allowed now, the lock screen controls it.
+        transport.togglePlayPause()
+        await settle { !music.performed.isEmpty }
+        #expect(music.performed == [.togglePlayPause])
+        #expect(harness.permissions.requested.count == 1)
+    }
+
+    @Test func aPressOnTheOpenNotchIsWhatAsksTheFirstTime() async {
+        allow(.music, .notDetermined)
+        environment.running = [Self.musicID]
+        harness.permissions.requestResult = .granted
+        await harness.registry.bootstrap()
+        environment.music("Paused", name: "Music song")
+        module.send(.togglePlayPause)
+        await settle { music.performed.count == 1 }
+        #expect(harness.permissions.requested == [.automation(bundleID: Self.musicID)])
+        #expect(music.performed == [.togglePlayPause])
     }
 
     // MARK: failing and stopping

@@ -99,6 +99,7 @@ function makePage({ title = "Placeholder page", hostname = "music.example.com", 
         }
       }
     },
+    MediaStream: class MediaStream {},
     postMessage: (data, origin) => page.posted.push({ data: plain(data), origin }),
     addEventListener(type, fn) {
       (page.windowListeners[type] ??= new Set()).add(fn);
@@ -107,7 +108,7 @@ function makePage({ title = "Placeholder page", hostname = "music.example.com", 
       page.windowListeners[type]?.delete(fn);
     },
     setInterval(fn, ms) {
-      page.intervals.push({ fn, ms, cleared: false });
+      page.intervals.push({ fn, ms, cleared: false, since: 0 });
       return page.intervals.length;
     },
     clearInterval(id) {
@@ -116,21 +117,38 @@ function makePage({ title = "Placeholder page", hostname = "music.example.com", 
   });
   vm.runInContext("Date.now = () => __now", page.context);
   page.win = vm.runInContext("globalThis", page.context);
+  page.newStream = () => vm.runInContext("new MediaStream()", page.context);
   page.start = () => runScripts(page.context, SCRIPTS);
   page.live = () => page.intervals.filter((interval) => !interval.cleared);
-  /** Seconds go by, and a player that plays moves on with them, as a real one does. */
+  /** Seconds go by, and a player that plays moves on with them, as a real one does; a timer fires every `ms` it was set to. */
   page.advance = (ms) => {
     for (let elapsed = 0; elapsed < ms; elapsed += 1000) {
       page.context.__now += 1000;
       for (const el of page.media) if (!el.paused && !el.ended) el.currentTime += 1;
-      for (const interval of page.live()) interval.fn();
+      for (const interval of page.live()) {
+        interval.since += 1000;
+        if (interval.since >= interval.ms) {
+          interval.since = 0;
+          interval.fn();
+        }
+      }
     }
   };
-  page.emit = (el, type) => [...(page.docListeners[type] ?? [])].forEach(({ fn }) => fn({ type, target: el }));
+  /** What happens in a real page: its events come some time apart, never within the same millisecond. */
+  page.pause = (ms = 300) => {
+    page.context.__now += ms;
+    for (const el of page.media) if (!el.paused && !el.ended) el.currentTime += ms / 1000;
+  };
+  page.emit = (el, type) => {
+    page.pause();
+    [...(page.docListeners[type] ?? [])].forEach(({ fn }) => fn({ type, target: el }));
+  };
   page.take = () => page.sent.splice(0);
   page.fire = (type, event = { type }) => [...(page.windowListeners[type] ?? [])].forEach((fn) => fn(event));
-  page.session = (data) =>
-    page.fire("message", { source: page.win, origin: ORIGIN, data: { source: "mynotch-tab", type: "session", ...data } });
+  page.session = (data) => {
+    page.pause();
+    page.fire("message", { source: page.win, origin: ORIGIN, data: { source: "k9x2q7", type: "session", ...data } });
+  };
   /** What the page script says of a Media Session that is playing something. */
   page.playSession = (data = {}) =>
     page.session({ title: "Session song", artist: "Session artist", album: "", playback: "playing", play: true, pause: true, seek: true, ...data });
@@ -155,7 +173,8 @@ const REPORT = {
   time: 30,
   duration: 200,
   rate: 1,
-  live: false
+  live: false,
+  element: true
 };
 
 test("a page with no media costs listeners and nothing else: no message, no timer", () => {
@@ -191,7 +210,7 @@ test("only the fields of the protocol leave the page, and the site is the host n
   page.start();
   page.emit(el, "play");
   const [message] = page.take();
-  assert.deepEqual(Object.keys(message).sort(), ["album", "artist", "duration", "live", "rate", "site", "state", "time", "title", "type", "v"]);
+  assert.deepEqual(Object.keys(message).sort(), ["album", "artist", "duration", "element", "live", "rate", "site", "state", "time", "title", "type", "v"]);
   assert.equal(message.site, "music.example.com");
   const text = JSON.stringify(message);
   for (const secret of ["secret", "frag", "album?", "cdn.example", "cover.png", "https"]) assert.equal(text.includes(secret), false, secret);
@@ -316,14 +335,13 @@ test("a seek, a new speed and a new length are reported; the position drifting a
   page.emit(el, "play");
   page.take();
 
-  page.context.__now += 2000;
-  el.currentTime = 32; // exactly where playing from the report puts it
-  page.emit(el, "seeked");
+  page.pause(2000);
+  page.emit(el, "seeked"); // where playing from the report puts it: no news
   assert.deepEqual(page.take(), []);
 
   el.currentTime = 120;
   page.emit(el, "seeked");
-  assert.deepEqual(page.take().map((message) => message.time), [120]);
+  assert.deepEqual(page.take().map((message) => Math.round(message.time)), [120]);
 
   el.playbackRate = 1.5;
   page.emit(el, "ratechange");
@@ -378,7 +396,7 @@ test("the latest player to play is the one shown; a player that is not shown doe
   page.emit(first, "play");
   page.take();
   page.emit(second, "play");
-  assert.deepEqual(page.take().map((message) => message.time), [77]);
+  assert.deepEqual(page.take().map((message) => Math.round(message.time)), [78]);
   first.paused = true;
   page.emit(first, "pause");
   assert.deepEqual(page.take(), [], "the first is no longer the one shown");
@@ -569,15 +587,15 @@ test("a command with no player shown, or one that was removed, is unavailable", 
 
 test("a seek on a stream that cannot be seeked is unavailable, never an exception", () => {
   const el = video({ duration: Infinity });
+  const page = makePage({ media: [el] });
+  page.start();
+  page.emit(el, "play");
   Object.defineProperty(el, "currentTime", {
     get: () => 5,
     set() {
       throw new Error("InvalidStateError");
     }
   });
-  const page = makePage({ media: [el] });
-  page.start();
-  page.emit(el, "play");
   assert.deepEqual(page.command(command("seek", { seconds: 1 })).responses, [{ ok: false }]);
 });
 
@@ -606,7 +624,7 @@ test("next and previous go to the page's own handler, asked through the page scr
   page.session({ title: "", artist: "", album: "", next: true, previous: false });
   assert.deepEqual(page.command(command("next")).responses, [{ ok: true }]);
   assert.deepEqual(page.command(command("previous")).responses, [{ ok: false }]);
-  assert.deepEqual(page.posted, [{ data: { source: "mynotch-tab", type: "invoke", action: "next" }, origin: ORIGIN }]);
+  assert.deepEqual(page.posted, [{ data: { source: "k9x2q7", type: "invoke", action: "next" }, origin: ORIGIN }]);
 });
 
 test("only the extension's own worker may give a command, and only the closed set", () => {
@@ -698,10 +716,10 @@ test("a session message from a page, a stranger or another source is not taken f
   page.start();
   page.emit(el, "play");
   page.take();
-  page.fire("message", { source: {}, origin: ORIGIN, data: { source: "mynotch-tab", type: "session", title: "Forged" } });
-  page.fire("message", { source: page.win, origin: "https://evil.example", data: { source: "mynotch-tab", type: "session", title: "Forged" } });
+  page.fire("message", { source: {}, origin: ORIGIN, data: { source: "k9x2q7", type: "session", title: "Forged" } });
+  page.fire("message", { source: page.win, origin: "https://evil.example", data: { source: "k9x2q7", type: "session", title: "Forged" } });
   page.fire("message", { source: page.win, origin: ORIGIN, data: { source: "mynotch-yt", type: "session", title: "Forged" } });
-  page.fire("message", { source: page.win, origin: ORIGIN, data: { source: "mynotch-tab", type: "invoke", action: "next" } });
+  page.fire("message", { source: page.win, origin: ORIGIN, data: { source: "k9x2q7", type: "invoke", action: "next" } });
   page.advance(1000);
   assert.deepEqual(page.take(), []);
 });
@@ -726,7 +744,8 @@ const SESSION_REPORT = {
   time: 0,
   duration: null,
   rate: 1,
-  live: false
+  live: false,
+  element: false
 };
 
 test("a page whose Media Session says it plays, with no element of ours, is reported from the session, with a tick", () => {
@@ -742,11 +761,11 @@ test("the position the session gave carries on at its speed while it plays, and 
   const page = makePage();
   page.start();
   page.context.__now = 10000;
-  page.playSession({ position: { position: 30, duration: 200, rate: 1.5, at: 10000 } });
+  page.playSession({ position: { position: 30, duration: 200, rate: 1.5, at: 10300 } }); // said as it arrives
   assert.deepEqual(page.take().map(({ time, duration, rate }) => [time, duration, rate]), [[30, 200, 1.5]]);
   page.advance(5000);
   assert.deepEqual(page.take().map(({ time }) => time), [37.5], "five seconds at one and a half");
-  page.playSession({ position: { position: 199, duration: 200, rate: 1, at: 15000 } });
+  page.playSession({ position: { position: 199, duration: 200, rate: 1, at: 15300 } });
   page.take();
   page.advance(30000);
   assert.ok(page.take().every(({ time }) => time <= 200), "never past the end");
@@ -841,7 +860,7 @@ test("an element wins over the session, which then adds no second report", () =>
   page.playSession({ title: "Session song" });
   const sent = page.take();
   assert.equal(sent.length, 1, "the title changed, and the element's own report says so");
-  assert.equal(sent[0].time, 30, "from the element: its position, not the session's zero");
+  assert.ok(sent[0].time >= 30, "from the element: its position, not the session's zero");
   page.advance(5000);
   assert.ok(page.take().every((message) => message.time >= 30));
 });
@@ -881,22 +900,22 @@ test("commands go through the page's Media Session handlers when there is no ele
   page.playSession({ next: true, previous: true });
   const invoked = () => page.posted.splice(0).map((post) => post.data);
   assert.deepEqual(page.command(command("pause")).responses, [{ ok: true }]);
-  assert.deepEqual(invoked(), [{ source: "mynotch-tab", type: "invoke", action: "pause" }]);
+  assert.deepEqual(invoked(), [{ source: "k9x2q7", type: "invoke", action: "pause" }]);
   page.command(command("play"));
   page.command(command("toggle")); // it plays: toggle pauses
   page.command(command("seek", { seconds: 61.5 }));
   page.command(command("next"));
   page.command(command("previous"));
   assert.deepEqual(invoked(), [
-    { source: "mynotch-tab", type: "invoke", action: "play" },
-    { source: "mynotch-tab", type: "invoke", action: "pause" },
-    { source: "mynotch-tab", type: "invoke", action: "seek", seconds: 61.5 },
-    { source: "mynotch-tab", type: "invoke", action: "next" },
-    { source: "mynotch-tab", type: "invoke", action: "previous" }
+    { source: "k9x2q7", type: "invoke", action: "play" },
+    { source: "k9x2q7", type: "invoke", action: "pause" },
+    { source: "k9x2q7", type: "invoke", action: "seek", seconds: 61.5 },
+    { source: "k9x2q7", type: "invoke", action: "next" },
+    { source: "k9x2q7", type: "invoke", action: "previous" }
   ]);
   page.playSession({ playback: "paused", next: false, previous: false });
   page.command(command("toggle")); // it is paused: toggle plays
-  assert.deepEqual(invoked(), [{ source: "mynotch-tab", type: "invoke", action: "play" }]);
+  assert.deepEqual(invoked(), [{ source: "k9x2q7", type: "invoke", action: "play" }]);
   assert.deepEqual(page.diags.map((message) => message.event).slice(0, 2), ["content-tabcommand pause ok", "content-tabcommand play ok"]);
 });
 
@@ -928,4 +947,169 @@ test("next and previous in a session go to YouTube's button clicks when that scr
   assert.deepEqual(page.command(command("next")).responses, [{ ok: true }]);
   assert.deepEqual(page.command(command("previous")).responses, [{ ok: false }]);
   assert.deepEqual(page.posted, []);
+});
+
+// ---- what a page can make this script do: nothing at the rate it likes -------------------------------------------
+
+test("10 000 forged session messages in one tick make no report beyond the floor, and the next tick sends the newest state once", () => {
+  const page = makePage();
+  page.start();
+  page.playSession({ title: "first" });
+  page.take();
+  for (let index = 0; index < 10000; index++) {
+    page.fire("message", {
+      source: page.win,
+      origin: ORIGIN,
+      data: { source: "k9x2q7", type: "session", title: `t${index}`, artist: "a", album: "", playback: "playing", play: true, pause: true, seek: true, position: null }
+    });
+  }
+  assert.deepEqual(page.take(), [], "all within the floor of the report before");
+  page.advance(1000);
+  const sent = page.take();
+  assert.equal(sent.length, 1, "the newest, once");
+  assert.equal(sent[0].title, "t9999");
+  page.advance(10000);
+  assert.ok(page.take().length <= 2, "and nothing more than a heartbeat");
+});
+
+test("a page that changes its title as fast as it can is reported at most four times a second", () => {
+  const page = makePage({ media: [video()], metadata: { title: "t", artist: "", album: "" } });
+  page.start();
+  page.take();
+  let reports = 0;
+  for (let step = 0; step < 4000; step++) {
+    page.metadata = { title: `title ${step}`, artist: "", album: "" };
+    page.pause(5); // 5 ms of a page that never rests: 20 seconds in all
+    page.fire("message", { source: page.win, origin: ORIGIN, data: { source: "k9x2q7", type: "session", title: `title ${step}`, playback: "playing" } });
+    if (step % 200 === 199) page.advance(0);
+    reports += page.take().length;
+  }
+  assert.ok(reports <= 4 * 20 + 2, `${reports} reports in 20 s`);
+  assert.ok(reports >= 10, "but it is not silenced");
+});
+
+test("a report held back by the floor is sent by the tick with what is newest, a state flip included", () => {
+  const el = video();
+  const page = makePage({ media: [el] });
+  page.start();
+  page.take();
+  el.paused = true;
+  page.context.__now += 100; // a pause within the floor of the report made at the start
+  page.fire("pause");
+  for (const { fn } of page.docListeners.pause ?? []) fn({ type: "pause", target: el });
+  assert.deepEqual(page.take(), [], "held back");
+  assert.equal(page.live().at(-1).ms, 1000, "and the tick is at its quick pace for it");
+  page.advance(1000);
+  assert.deepEqual(page.take().map((message) => message.state), ["paused"]);
+});
+
+test("two reports further apart than the floor both go out; the end of the page is never held back", () => {
+  const el = video();
+  const page = makePage({ media: [el] });
+  page.start();
+  page.take();
+  el.paused = true;
+  page.emit(el, "pause");
+  assert.deepEqual(page.take().map((message) => message.state), ["paused"]);
+  page.context.__now += 10;
+  page.fire("pagehide");
+  assert.deepEqual(page.take(), [{ v: 1, type: "tab-end" }], "within the floor, and at once");
+});
+
+test("while paused with nothing waiting the tick slows to five seconds, and is quick again while something plays or waits", () => {
+  const el = video();
+  const page = makePage({ media: [el] });
+  page.start();
+  assert.equal(page.live().at(-1).ms, 1000, "playing");
+  el.paused = true;
+  page.emit(el, "pause");
+  page.advance(1000);
+  assert.deepEqual(page.live().map((interval) => interval.ms), [5000]);
+  el.paused = false;
+  page.emit(el, "play");
+  assert.deepEqual(page.live().map((interval) => interval.ms), [1000]);
+  el.paused = true;
+  page.emit(el, "pause");
+  page.advance(1000);
+  page.emit(el, "emptied"); // something waits
+  assert.deepEqual(page.live().map((interval) => interval.ms), [1000]);
+});
+
+test("a paused page is still reported every 30 s with the slower tick, and a held-back state is not left for five seconds", () => {
+  const el = video({ paused: true });
+  const page = makePage({ media: [el], metadata: { title: "T", artist: "", album: "" } });
+  page.start();
+  page.emit(el, "play");
+  el.paused = true;
+  page.emit(el, "pause");
+  page.take();
+  page.advance(5000);
+  assert.deepEqual(page.live().map((interval) => interval.ms), [5000]);
+  let sent = 0;
+  for (let second = 0; second < 30; second++) {
+    page.advance(1000);
+    sent += page.take().length;
+  }
+  assert.equal(sent, 1, "one heartbeat in 30 s");
+});
+
+// ---- calls and live feeds are no media sources -----------------------------------------------------------------
+
+test("a call page's voices are not reported: by the site, and by what feeds the element", () => {
+  for (const hostname of ["meet.google.com", "zoom.us", "us02web.zoom.us", "teams.microsoft.com", "whereby.com", "meet.jit.si", "acme.webex.com"]) {
+    const el = video({ duration: Infinity });
+    const page = makePage({ media: [el], hostname, title: "Weekly sync" });
+    page.start();
+    page.emit(el, "play");
+    assert.deepEqual(page.take(), [], hostname);
+    assert.deepEqual(page.intervals, [], `${hostname}: no tick either`);
+  }
+  // Another site whose name merely ends alike is a site like any other.
+  const other = video();
+  const page = makePage({ media: [other], hostname: "notzoom.us" });
+  page.start();
+  page.emit(other, "play");
+  assert.equal(page.take().length, 1);
+});
+
+test("an element fed by a live camera or microphone is not reported unless the page names itself in its Media Session", () => {
+  const page = makePage();
+  page.start();
+  const el = video({ duration: Infinity });
+  el.srcObject = page.newStream();
+  page.media.push(el);
+  page.emit(el, "play");
+  assert.deepEqual(page.take(), [], "a MediaStream and no title of its own");
+
+  const file = video({ srcObject: null });
+  page.media.push(file);
+  page.emit(file, "play");
+  assert.equal(page.take().length, 1, "an element with a file or a stream of data is another thing");
+});
+
+test("a call page, or a live feed, that names itself in its Media Session is believed", () => {
+  const meet = video({ duration: Infinity });
+  const call = makePage({ media: [meet], hostname: "meet.google.com", metadata: { title: "A broadcast", artist: "", album: "" } });
+  call.start();
+  call.emit(meet, "play");
+  assert.deepEqual(call.take().map((message) => message.title), ["A broadcast"]);
+
+  const page = makePage({ metadata: { title: "Radio", artist: "", album: "" } });
+  page.start();
+  const feed = video({ duration: Infinity });
+  feed.srcObject = page.newStream();
+  page.media.push(feed);
+  page.emit(feed, "play");
+  assert.deepEqual(page.take().map(({ title, live, element }) => [title, live, element]), [["Radio", true, true]]);
+});
+
+test("a session-only report says so: element is false, and an element's report says true", () => {
+  const page = makePage();
+  page.start();
+  page.playSession();
+  assert.equal(page.take()[0].element, false);
+  const el = video();
+  const other = makePage({ media: [el] });
+  other.start();
+  assert.equal(other.take()[0].element, true);
 });

@@ -113,6 +113,23 @@ import Testing
         #expect(await host.finish() == 0)
     }
 
+    @Test func aReportOlderThanAMinuteIsNotReplayedAndOneYoungerIs() async throws {
+        defer { server.remove() }
+        let host = start()
+        host.sendJSON(Self.tab(7, title: "Stale"))
+        await host.waitUntilHandled()
+        clock.advance(by: 30)
+        let young = host.sendJSON(Self.tab(8, title: "Young"))
+        await host.waitUntilHandled()
+        clock.advance(by: 31) // the first is 61 s old, the second 31 s: the app stamps a replay with the time it gets it, so an old one lies
+        try server.start()
+        await host.waitForLog(containing: "replayed-tabs=1")
+        await waitUntil { !server.frames.isEmpty }
+        #expect(server.frames == [young])
+        #expect(HostRelay.maxTabAge == 60)
+        #expect(await host.finish() == 0)
+    }
+
     @Test(arguments: YouTubeHostCLITests.readDelays) func aRestartedAppGetsTheReportsAgain(readDelay: TimeInterval) async throws {
         defer { server.remove() }
         try server.start()

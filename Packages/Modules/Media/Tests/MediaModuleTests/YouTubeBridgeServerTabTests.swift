@@ -170,4 +170,27 @@ import Testing
         await waitUntil { !ended.isEmpty }
         #expect(!server.send(TabCommand(tab: 1, action: .play), toConnection: connection))
     }
+
+    @Test func aNumberIsNeverGivenToTwoConnectionsSoAPressOnAGoneChromeCannotReachTheNext() async throws {
+        let server = makeServer()
+        try server.start()
+        defer { server.stop() }
+        var old = 0
+        do {
+            let client = try #require(YouTubeTestClient(path: path))
+            client.sendFrame(YouTubeTestMessages.json(YouTubeTestMessages.tab(1)))
+            await waitUntil { received.count == 1 }
+            old = received[0].connection
+        }
+        await waitUntil { !ended.isEmpty }
+        // The descriptor the first connection had is free now and is the one the next connection most likely gets.
+        let next = try #require(YouTubeTestClient(path: path))
+        next.sendFrame(YouTubeTestMessages.json(YouTubeTestMessages.tab(1)))
+        await waitUntil { received.count == 2 }
+        #expect(received[1].connection != old)
+        #expect(!server.send(TabCommand(tab: 1, action: .pause), toConnection: old), "the Chrome that was there is gone")
+        #expect(!next.hasUnreadData, "and what was meant for it is not written to the one that took its descriptor")
+        #expect(server.send(TabCommand(tab: 1, action: .pause), toConnection: received[1].connection))
+        #expect(next.receiveFrames(count: 1) == [TabCommand(tab: 1, action: .pause).json])
+    }
 }

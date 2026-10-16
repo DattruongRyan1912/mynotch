@@ -474,7 +474,7 @@ test("injector: every tab gets the manifest's entries that name its address, in 
 
   assert.deepEqual(
     h.queries,
-    [{ url: ["https://www.youtube.com/*", "http://*/*", "https://*/*"] }],
+    [{ url: ["https://www.youtube.com/*", "https://*/*", "http://localhost/*"] }],
     "matched by URL; no tabs permission needed"
   );
   assert.deepEqual(h.calls, [
@@ -1076,11 +1076,12 @@ const tabReport = (overrides = {}) => ({
   duration: 200,
   rate: 1,
   live: false,
+  element: true,
   ...overrides
 });
-const tabOf = (tabId, overrides = {}) => {
+const tabOf = (tabId, overrides = {}, audible = false) => {
   const { type, ...fields } = tabReport(overrides);
-  return { v: 1, type: "tab", tab: tabId, ...fields };
+  return { v: 1, type: "tab", tab: tabId, ...fields, audible };
 };
 const PLAY = (tab, extra = {}) => ({ v: 1, type: "tabcommand", tab, action: "play", ...extra });
 
@@ -1096,7 +1097,7 @@ test("tab: only the fields of the protocol leave the worker; the page cannot add
   const h = commandHarness();
   h.relay.onMessage({ ...tabReport(), url: "https://example.invalid/?token=secret", artwork: "https://example.invalid/a.png", tab: 99 }, WEB_SENDER(7));
   const [message] = h.ports[0].posted;
-  assert.deepEqual(Object.keys(message).sort(), ["album", "artist", "duration", "live", "rate", "site", "state", "tab", "time", "title", "type", "v"]);
+  assert.deepEqual(Object.keys(message).sort(), ["album", "artist", "audible", "duration", "element", "live", "rate", "site", "state", "tab", "time", "title", "type", "v"]);
   assert.equal(message.tab, 7, "the tab is the sender's, never the message's");
 });
 
@@ -1156,18 +1157,25 @@ test("tab: `tab-end` and a closed tab tell the app once, and only about a tab it
   assert.deepEqual(h.ports[0].posted.at(-1), { v: 1, type: "tabgone", tab: 8 });
 });
 
-test("tab: a worker that restarted still tells the app about a tab it sends a command to and finds gone", async () => {
+test("tab: a command that cannot be delivered is answered, and costs the tab nothing: no `tabgone`, the page says by itself when it is gone", async () => {
   const h = commandHarness({ sendToTab: () => Promise.reject(new Error("Could not establish connection. Receiving end does not exist.")) });
+  h.relay.onMessage(tabReport(), WEB_SENDER(21));
   h.ports[0].receive(PLAY(21));
+  h.ports[0].receive(PLAY(22)); // a tab the worker has never heard of
   await flush();
-  assert.deepEqual(h.ports[0].posted, [{ v: 1, type: "tabgone", tab: 21 }]);
-  assert.equal(swDiags(h.ports[0]).at(-1), "sw-tabcommand-no-tab");
+  assert.deepEqual(h.ports[0].posted.map((message) => message.type), ["tab"], "no tabgone");
+  assert.equal(swDiags(h.ports[0]).filter((event) => event === "sw-tabcommand-no-tab").length, 2, "each command is answered");
+  h.relay.onMessage(tabReport({ time: 40 }), { ...WEB_SENDER(21) });
+  h.advance(300);
+  h.relay.onMessage(tabReport({ time: 45 }), WEB_SENDER(21));
+  assert.equal(h.ports[0].posted.at(-1).time, 45, "and it goes on reporting");
 });
 
 test("tab: no more than 64 tabs are shown at once", () => {
   const h = commandHarness();
   for (let tab = 1; tab <= 70; tab++) h.relay.onMessage(tabReport(), WEB_SENDER(tab));
   assert.equal(h.ports[0].posted.filter((message) => message.type === "tab").length, 64);
+  h.advance(300);
   h.relay.onMessage(tabReport({ time: 99 }), WEB_SENDER(3)); // a tab already shown keeps reporting
   assert.equal(h.ports[0].posted.at(-1).time, 99);
   h.relay.onTabRemoved(1);
@@ -1253,4 +1261,126 @@ test("the access watcher is about YouTube only, however many sites the extension
   assert.deepEqual(h.queries, [{ origins: ["https://www.youtube.com/*"] }]);
   assert.deepEqual(B.WATCHED_ORIGINS, ["https://www.youtube.com/*"]);
   assert.ok(MANIFEST.content_scripts[0].matches.includes(B.WATCHED_ORIGINS[0]), "and it is the YouTube entry's pattern");
+});
+
+// ---- how fast a page may be heard: one tab, a few times a second --------------------------------------------
+
+test("limiter: a burst from one tab is passed on once; a tab that waits its turn and another tab are not held back", () => {
+  const h = commandHarness();
+  for (let index = 0; index < 10000; index++) h.relay.onMessage(tabReport({ title: `Title ${index}` }), WEB_SENDER(7));
+  assert.equal(h.ports[0].posted.length, 1, "10 000 reports in one instant: one");
+  assert.equal(h.ports[0].posted[0].title, "Title 0");
+  h.relay.onMessage(tabReport({ title: "Another tab" }), WEB_SENDER(8));
+  assert.equal(h.ports[0].posted.length, 2, "another tab has its own turn");
+  h.advance(199);
+  h.relay.onMessage(tabReport({ title: "Too soon" }), WEB_SENDER(7));
+  assert.equal(h.ports[0].posted.length, 2);
+  h.advance(1);
+  h.relay.onMessage(tabReport({ title: "In turn" }), WEB_SENDER(7));
+  assert.equal(h.ports[0].posted.length, 3);
+  assert.equal(h.ports[0].posted.at(-1).title, "In turn");
+  assert.deepEqual(swDiags(h.ports[0]), ["sw-start v=0.1.1", "sw-msg tab"], "and the log says it once");
+});
+
+test("limiter: what a dropped report does not change is not remembered, and a drop is not a rejection", () => {
+  const h = commandHarness();
+  h.relay.onMessage(tabReport(), WEB_SENDER(7));
+  h.advance(50);
+  h.relay.onMessage(tabReport({ title: "Held back" }), WEB_SENDER(7));
+  h.advance(160); // 210 ms after the report that went, though only 160 after the one that was dropped
+  h.relay.onMessage(tabReport({ title: "Goes" }), WEB_SENDER(7));
+  assert.deepEqual(h.ports[0].posted.map((message) => message.title), ["Song", "Goes"]);
+  assert.equal(swDiags(h.ports[0]).includes("sw-reject untrusted"), false);
+});
+
+test("limiter: the end of a page and a closed tab clear it, so the next media of the tab is heard at once; time going back is no limit either", () => {
+  const h = commandHarness();
+  h.relay.onMessage(tabReport(), WEB_SENDER(7));
+  h.relay.onMessage({ v: 1, type: "tab-end" }, WEB_SENDER(7));
+  h.relay.onMessage(tabReport({ title: "Next media" }), WEB_SENDER(7));
+  assert.deepEqual(h.ports[0].posted.map((message) => message.type), ["tab", "tabgone", "tab"]);
+  h.relay.onTabRemoved(7);
+  h.relay.onMessage(tabReport({ title: "Again" }), WEB_SENDER(7));
+  assert.equal(h.ports[0].posted.at(-1).title, "Again");
+  h.advance(-1000); // a clock that went back
+  h.relay.onMessage(tabReport({ title: "After the jump" }), WEB_SENDER(7));
+  assert.equal(h.ports[0].posted.at(-1).title, "After the jump");
+});
+
+test("limiter: its memory is the tabs that are shown, never more than the cap", () => {
+  const h = commandHarness();
+  for (let tab = 1; tab <= 200; tab++) h.relay.onMessage(tabReport(), WEB_SENDER(tab));
+  assert.equal(h.ports[0].posted.length, 64);
+});
+
+// ---- a page that only says it plays is believed while Chrome hears the tab -------------------------------------------
+
+const SESSION_ONLY = { element: false };
+
+test("sound: a session-only page that says it plays is told as paused while Chrome does not hear the tab, and as playing once it does", () => {
+  const h = commandHarness();
+  h.relay.onMessage(tabReport(SESSION_ONLY), WEB_SENDER(7));
+  assert.deepEqual(h.ports[0].posted.map(({ state, audible, element }) => [state, audible, element]), [["paused", false, false]]);
+  h.relay.onTabAudible(7, true);
+  assert.deepEqual(h.ports[0].posted.at(-1), tabOf(7, SESSION_ONLY, true), "the same report, said again, as it plays");
+  h.relay.onTabAudible(7, true); // no change: not said again
+  assert.equal(h.ports[0].posted.length, 2);
+  h.relay.onTabAudible(7, false);
+  assert.deepEqual(h.ports[0].posted.at(-1).state, "paused");
+  assert.equal(h.ports[0].posted.length, 3);
+});
+
+test("sound: a page with an element of ours is told as it says, with or without the sound; a paused page stays paused", () => {
+  const h = commandHarness();
+  h.relay.onMessage(tabReport({ element: true }), WEB_SENDER(7));
+  assert.equal(h.ports[0].posted.at(-1).state, "playing");
+  assert.equal(h.ports[0].posted.at(-1).audible, false);
+  h.relay.onMessage(tabReport({ element: false, state: "paused" }), WEB_SENDER(8));
+  h.relay.onTabAudible(8, true);
+  assert.equal(h.ports[0].posted.at(-1).state, "paused", "a page that says it is paused is not made to play by a sound");
+});
+
+test("sound: what the worker is not told of is ignored; a tab that is gone takes its sound with it", () => {
+  const h = commandHarness();
+  h.relay.onTabAudible(9, true); // no media in tab 9
+  h.relay.onTabAudible("9", true);
+  h.relay.onTabAudible(7, "yes");
+  assert.deepEqual(h.ports[0].posted, []);
+  h.relay.onMessage(tabReport(SESSION_ONLY), WEB_SENDER(7));
+  h.relay.onTabAudible(7, true);
+  h.relay.onTabRemoved(7);
+  h.relay.onTabAudible(7, true);
+  assert.deepEqual(h.ports[0].posted.map((message) => message.type), ["tab", "tab", "tabgone"]);
+  h.advance(300);
+  h.relay.onMessage(tabReport(SESSION_ONLY), WEB_SENDER(7));
+  assert.equal(h.ports[0].posted.at(-1).state, "paused", "the tab came back: its sound is unknown again until Chrome says");
+});
+
+test("sound: the worker asks Chrome once about a tab it has not heard of, and uses the answer", async () => {
+  const asked = [];
+  const h = relayHarness({
+    getTab: (tabId) => {
+      asked.push(tabId);
+      return Promise.resolve({ id: tabId, audible: true });
+    }
+  });
+  h.relay.start();
+  h.relay.onMessage(tabReport(SESSION_ONLY), WEB_SENDER(7));
+  assert.deepEqual(h.ports[0].posted.map((message) => message.state), ["paused"], "before the answer");
+  await flush();
+  assert.deepEqual(h.ports[0].posted.map((message) => message.state), ["paused", "playing"], "and after it");
+  h.advance(300);
+  h.relay.onMessage(tabReport(SESSION_ONLY), WEB_SENDER(7));
+  assert.deepEqual(asked, [7], "once");
+  assert.equal(h.ports[0].posted.at(-1).state, "playing");
+});
+
+test("sound: a tab Chrome cannot answer for (gone), or an answer without `audible`, leaves it unheard, never an exception", async () => {
+  for (const getTab of [() => Promise.reject(new Error("No tab with id: 7.")), () => Promise.resolve({ id: 7 }), () => Promise.resolve(undefined), () => { throw new TypeError("chrome.tabs is undefined"); }]) {
+    const h = relayHarness({ getTab });
+    h.relay.start();
+    assert.doesNotThrow(() => h.relay.onMessage(tabReport(SESSION_ONLY), WEB_SENDER(7)));
+    await flush();
+    assert.deepEqual(h.ports[0].posted.map((message) => message.state), ["paused"]);
+  }
 });

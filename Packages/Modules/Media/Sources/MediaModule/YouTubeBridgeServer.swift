@@ -9,9 +9,9 @@ import YouTubeBridgeKit
 ///
 /// What goes the other way is a command: a `YouTubeCommand` (`send`) is written, as a frame, to the host whose page last
 /// reported playback, which is the one that can act on it; a `TabCommand` is written to the connection the caller names, the
-/// one the tab's reports came in on. Each message is handed on with the connection it came in on (several Chromes, one per
-/// profile, may be connected, and their tab ids are not one set of numbers), and the end of a connection is told too, so
-/// that what came from it can be forgotten.
+/// one the tab's reports came in on. Each message is handed on with the number of the connection it came in on (several Chromes,
+/// one per profile, may be connected, and their tab ids are not one set of numbers; a number is never given to two connections),
+/// and the end of a connection is told too, so that what came from it can be forgotten.
 ///
 /// What it does goes to the log (`YouTubeBridgeLog`): connections, a count of the frames by type every 10 s, why a
 /// frame was refused. Never what was in a frame.
@@ -43,6 +43,10 @@ final class YouTubeBridgeServer {
         private struct State {
             var isOpen = true
             var connections: [Int32: DispatchSourceRead] = [:]
+            /// A connection's number for the module, which no later connection ever has: a descriptor's number is reused as soon as it is
+            /// closed, and a press on a tab of a Chrome that is gone must not reach the next one that gets its descriptor.
+            var serials: [Int32: Int] = [:]
+            var nextSerial = 1
             var listener: DispatchSourceRead?
             /// The connection that sent the latest `playback`: the host whose extension has the page that plays.
             var playbackConnection: Int32?
@@ -75,7 +79,7 @@ final class YouTubeBridgeServer {
         func setListener(_ source: DispatchSourceRead) { state.withLock { $0.listener = source } }
 
         enum Admission {
-            case accepted(open: Int)
+            case accepted(open: Int, serial: Int)
             case refusedLimit
             case sessionOver
         }
@@ -87,7 +91,10 @@ final class YouTubeBridgeServer {
                 guard state.isOpen else { return .sessionOver }
                 guard state.connections.count < YouTubeBridgeServer.maxConnections else { return .refusedLimit }
                 state.connections[fd] = source
-                return .accepted(open: state.connections.count)
+                let serial = state.nextSerial
+                state.nextSerial += 1
+                state.serials[fd] = serial
+                return .accepted(open: state.connections.count, serial: serial)
             }
             // A source must be resumed before it can go away, cancelled or not.
             if case .accepted = admission {} else { source.cancel() }
@@ -100,8 +107,12 @@ final class YouTubeBridgeServer {
             if let line = tally.line(force: force) { log("app frames \(line)") }
         }
 
+        /// The number of the connection on `fd`, for the module.
+        func serial(of fd: Int32) -> Int? { state.withLock { $0.serials[fd] } }
+
         func remove(_ fd: Int32) {
             state.withLock { state in
+                state.serials[fd] = nil
                 _ = state.connections.removeValue(forKey: fd)?.cancel()
                 if state.playbackConnection == fd { state.playbackConnection = nil }
             }
@@ -124,10 +135,11 @@ final class YouTubeBridgeServer {
             }
         }
 
-        /// Writes `frame` to connection `fd`, like `sendToPlaybackConnection`; false when it is not a connection of this session.
-        func send(_ frame: Data, toConnection fd: Int32) -> Bool {
+        /// Writes `frame` to the connection that has this number, like `sendToPlaybackConnection`; false when it is not a connection
+        /// of this session (any more).
+        func send(_ frame: Data, toConnection serial: Int) -> Bool {
             state.withLock { state in
-                guard state.isOpen else { return false }
+                guard state.isOpen, let fd = state.serials.first(where: { $0.value == serial })?.key else { return false }
                 return Self.write(frame, to: fd, in: state)
             }
         }
@@ -147,6 +159,7 @@ final class YouTubeBridgeServer {
                 state.isOpen = false
                 defer {
                     state.connections = [:]
+                    state.serials = [:]
                     state.listener = nil
                     state.playbackConnection = nil
                 }
@@ -264,8 +277,7 @@ final class YouTubeBridgeServer {
     /// Asks the host on `connection` (the one the tab's reports came in on) to do `command` to its tab. False when that
     /// connection is gone or cannot be written to; nothing is retried or sent to another host.
     func send(_ command: TabCommand, toConnection connection: Int) -> Bool {
-        guard let fd = Int32(exactly: connection) else { return false }
-        return session?.send(command.frame, toConnection: fd) ?? false
+        session?.send(command.frame, toConnection: connection) ?? false
     }
 
     /// The clients connected right now (for tests).
@@ -319,18 +331,21 @@ final class YouTubeBridgeServer {
             let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
             let handler: @Sendable () -> Void = {
                 if let reason = drain(fd, reader: reader, onMessage: onMessage, session: session) {
+                    let serial = session.serial(of: fd)
                     session.remove(fd)
                     session.writeSummary(force: true)
                     session.log("app connection closed: \(reason)")
-                    // After what the connection sent, and before anything a later connection with the same number sends.
-                    DispatchQueue.main.async { MainActor.assumeIsolated { if session.isOpen { onDisconnect(Int(fd)) } } }
+                    // After what the connection sent.
+                    if let serial {
+                        DispatchQueue.main.async { MainActor.assumeIsolated { if session.isOpen { onDisconnect(serial) } } }
+                    }
                 }
             }
             source.setEventHandler(handler: handler)
             let cancelHandler: @Sendable () -> Void = { close(fd) }
             source.setCancelHandler(handler: cancelHandler)
             switch session.add(source, for: fd) {
-            case .accepted(let open): session.log("app connection accepted open=\(open)")
+            case .accepted(let open, _): session.log("app connection accepted open=\(open)")
             case .refusedLimit: session.log("app connection refused: limit")
             case .sessionOver: break
             }
@@ -370,7 +385,8 @@ final class YouTubeBridgeServer {
             session.tally.count(message.typeName)
             // Before the message is handed on, so that whoever acts on it can already answer on this connection.
             if case .playback = message { session.playbackArrived(on: fd) }
-            DispatchQueue.main.async { MainActor.assumeIsolated { if session.isOpen { onMessage(message, Int(fd)) } } }
+            let serial = session.serial(of: fd) ?? 0
+            DispatchQueue.main.async { MainActor.assumeIsolated { if session.isOpen { onMessage(message, serial) } } }
         case .failure(let rejection):
             session.tally.lose(rejection.rawValue)
             if session.tally.announces(rejection.rawValue) { session.log("app rejected frame: \(rejection.rawValue)") }

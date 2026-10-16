@@ -16,7 +16,8 @@ import YouTubeBridgeKit
 
     init() {
         let clock = clock
-        hub = MediaSourceHub(environment: environment.environment, controls: [music, spotify], now: { clock.date })
+        // No delay before the notch moves to a source that has just started (its own tests make one): these are about the rest.
+        hub = MediaSourceHub(environment: environment.environment, controls: [music, spotify], now: { clock.date }, switchDelay: 0)
         // The fake says "denied" for what it was not told; the players have not been asked yet.
         allow(.music, .notDetermined)
         allow(.spotify, .notDetermined)
@@ -35,8 +36,17 @@ import YouTubeBridgeKit
         for _ in 0..<200 where !condition() { await Task.yield() }
     }
 
-    func tab(_ id: Int = 1, title: String = "Page song", playing: Bool = true, time: Double = 10, artist: String? = nil, site: String = "music.example.com") -> BrowserTab {
-        BrowserTab(tab: id, site: site, title: title, artist: artist, isPlaying: playing, time: time, duration: 200)
+    func tab(
+        _ id: Int = 1, title: String = "Page song", playing: Bool = true, time: Double = 10, artist: String? = nil, site: String = "music.example.com",
+        element: Bool = true, audible: Bool = false
+    ) -> BrowserTab {
+        BrowserTab(tab: id, site: site, title: title, artist: artist, isPlaying: playing, time: time, duration: 200, hasElement: element, isAudible: audible)
+    }
+
+    /// Time passes for the clock the hub reads and for the timers it sets.
+    func pass(_ seconds: TimeInterval) {
+        clock.advance(by: seconds)
+        scheduler.advance(by: .milliseconds(Int64((seconds * 1000).rounded())))
     }
 
     var ids: [MediaSourceID] { hub.book.entries.map(\.id) }
@@ -127,6 +137,7 @@ import YouTubeBridgeKit
         #expect(entry.state.isFromBrowser)
         #expect(entry.state.durationSeconds == 200)
         #expect(entry.state.isPlaying)
+        clock.advance(by: 0.3)
         hub.receive(tab(7, artist: "A real artist"), connection: 3)
         #expect(hub.book.entries[0].state.artist == "A real artist")
     }
@@ -138,6 +149,7 @@ import YouTubeBridgeKit
         #expect(!state.isPlaying)
         #expect(state.durationSeconds == nil)
         #expect(state.elapsedAnchor?.rate == 0)
+        clock.advance(by: 0.3)
         hub.receive(BrowserTab(tab: 1, site: "radio.example", title: "Live", isPlaying: true, time: 50, rate: 1.5), connection: 1)
         #expect(hub.book.entries[0].state.elapsedAnchor?.rate == 1.5)
     }
@@ -153,6 +165,7 @@ import YouTubeBridgeKit
         hub.receive(tab(1, time: 70), connection: 1)
         #expect(hub.book.entries[0].state != before)
         let beforePause = hub.book.entries[0].state
+        clock.advance(by: 0.3)
         hub.receive(tab(1, playing: false, time: 70), connection: 1)
         #expect(hub.book.entries[0].state != beforePause)
     }
@@ -204,6 +217,239 @@ import YouTubeBridgeKit
         #expect(ids.isEmpty)
         #expect(scheduler.pendingCount == 0)
         hub.forgetTabs()
+    }
+
+    // MARK: a page cannot flood the hub or fake a source
+
+    @Test func aFloodOfReportsFromOnePageChangesTheNotchAtMostOnceAMomentAndTheNewestWordIsDelivered() {
+        var changes = 0
+        hub.onChange = { _ in changes += 1 }
+        start()
+        changes = 0
+        // Ten thousand reports in one second (a page that tries a new title at each): about one is used per interval.
+        for index in 0..<10_000 {
+            clock.advance(by: 0.0001)
+            hub.receive(tab(1, title: "Title \(index)"), connection: 1)
+        }
+        let used = Int((1.0 / MediaSourceHub.tabInterval).rounded(.up)) + 2
+        #expect(changes <= used, "\(changes) changes for 10,000 messages")
+        #expect(ids.count == 1)
+        #expect(scheduler.pendingCount <= 2, "one timer to deliver the newest and one for the page going stale: never one per message")
+        // The page stops: its newest word is the one that is used, once the interval is over.
+        pass(0.3)
+        #expect(hub.book.entries[0].state.title == "Title 9999")
+        #expect(changes <= used + 1)
+    }
+
+    @Test func aFloodOfReportsAtOneInstantIsOneChangeAndTheLastOfThemIsUsedLater() {
+        var changes = 0
+        hub.onChange = { _ in changes += 1 }
+        start()
+        changes = 0
+        for index in 0..<10_000 { hub.receive(tab(1, title: "Title \(index)"), connection: 1) }
+        #expect(changes == 1)
+        #expect(hub.book.entries[0].state.title == "Title 0", "the first is heard at once")
+        pass(MediaSourceHub.tabInterval + 0.05)
+        #expect(changes == 2)
+        #expect(hub.book.entries[0].state.title == "Title 9999", "the last wins")
+        pass(5)
+        #expect(changes == 2, "nothing is left over")
+    }
+
+    @Test func eachPageIsLimitedOnItsOwnSoOnePageCannotMakeAnotherWait() {
+        start()
+        hub.receive(tab(1, title: "One"), connection: 1)
+        hub.receive(tab(1, title: "One again"), connection: 1)
+        hub.receive(tab(2, title: "Two"), connection: 1)
+        hub.receive(tab(1, title: "Two again"), connection: 2)
+        #expect(ids.count == 3)
+        #expect(hub.book.entry(.tab(TabRef(connection: 1, tab: 1)))?.state.title == "One")
+        #expect(hub.book.entry(.tab(TabRef(connection: 1, tab: 2)))?.state.title == "Two", "heard at once: its own first report")
+        #expect(hub.book.entry(.tab(TabRef(connection: 2, tab: 1)))?.state.title == "Two again", "another Chrome, another page")
+        pass(MediaSourceHub.tabInterval + 0.05)
+        #expect(hub.book.entry(.tab(TabRef(connection: 1, tab: 1)))?.state.title == "One again")
+    }
+
+    @Test func aReportAfterTheIntervalIsUsedAtOnceAndThenWaitsAgain() {
+        start()
+        hub.receive(tab(1, title: "A"), connection: 1)
+        clock.advance(by: MediaSourceHub.tabInterval + 0.05)
+        hub.receive(tab(1, title: "B"), connection: 1)
+        #expect(hub.book.entries[0].state.title == "B")
+        hub.receive(tab(1, title: "C"), connection: 1)
+        #expect(hub.book.entries[0].state.title == "B")
+        #expect(scheduler.pendingCount == 2)
+    }
+
+    @Test func aChromeHasAtMostSixtyFourPagesAndAnotherChromeHasItsOwn() {
+        var changes = 0
+        hub.onChange = { _ in changes += 1 }
+        start()
+        changes = 0
+        for page in 0..<10_000 { hub.receive(tab(page, title: "Page \(page)"), connection: 1) }
+        #expect(ids.count == MediaSourceHub.maxTabsPerConnection)
+        #expect(changes == MediaSourceHub.maxTabsPerConnection, "nothing beyond the limit is even published")
+        hub.receive(tab(70_000, title: "Late"), connection: 1)
+        #expect(ids.count == MediaSourceHub.maxTabsPerConnection)
+        hub.receive(tab(70_000, title: "Other Chrome"), connection: 2)
+        #expect(ids.count == MediaSourceHub.maxTabsPerConnection + 1)
+        // A page that went leaves its place to the next.
+        hub.tabGone(3, connection: 1)
+        hub.receive(tab(70_000, title: "Late"), connection: 1)
+        #expect(ids.count == MediaSourceHub.maxTabsPerConnection + 1)
+        #expect(hub.book.entry(.tab(TabRef(connection: 1, tab: 70_000)))?.state.title == "Late")
+        // A page already known may always speak (it is not a new one).
+        pass(1)
+        hub.receive(tab(5, title: "Page 5 again"), connection: 1)
+        #expect(hub.book.entry(.tab(TabRef(connection: 1, tab: 5)))?.state.title == "Page 5 again")
+    }
+
+    @Test func aPageThatGoesWhileItsReportWaitsIsNotBroughtBackAndNeitherIsOneOfAChromeThatEnded() {
+        start()
+        hub.receive(tab(1, title: "A"), connection: 1)
+        hub.receive(tab(1, title: "B"), connection: 1)
+        hub.receive(tab(2, title: "C"), connection: 2)
+        hub.receive(tab(2, title: "D"), connection: 2)
+        hub.tabGone(1, connection: 1)
+        hub.connectionEnded(2)
+        pass(1)
+        #expect(ids.isEmpty)
+        #expect(scheduler.pendingCount == 0)
+        hub.receive(tab(3, title: "E"), connection: 1)
+        hub.receive(tab(3, title: "F"), connection: 1)
+        hub.forgetTabs()
+        pass(1)
+        #expect(ids.isEmpty)
+        #expect(scheduler.pendingCount == 0)
+    }
+
+    @Test func aPageThatIsBackAfterBeingGoneIsHeardAtOnce() {
+        start()
+        hub.receive(tab(1, title: "A"), connection: 1)
+        hub.tabGone(1, connection: 1)
+        hub.receive(tab(1, title: "A again"), connection: 1)
+        #expect(hub.book.entries[0].state.title == "A again")
+    }
+
+    @Test func aPageWithNoElementAndNoSoundHasAChipButNeverTakesTheNotch() {
+        environment.running = [KnownPlayer.music.bundleID]
+        start()
+        environment.music("Playing", name: "Music song")
+        hub.receive(tab(1, title: "I am playing, honest", element: false, audible: false), connection: 1)
+        #expect(ids.count == 2, "it is shown, so that the user can see what a page claims")
+        #expect(hub.book.primaryID == .app("com.apple.Music"))
+        #expect(hub.book.entry(.tab(TabRef(connection: 1, tab: 1)))?.canLead == false)
+        // Alone, it is not the notch's either.
+        environment.quit("com.apple.Music")
+        #expect(hub.book.primaryID == nil)
+        #expect(hub.model.primaryID == nil)
+        #expect(hub.book.primary == nil)
+    }
+
+    @Test func aPageWithNoElementThatChromeHearsPlayingCanTakeTheNotchAndLosesItWhenTheSoundStops() {
+        environment.running = [KnownPlayer.music.bundleID]
+        start()
+        environment.music("Paused", name: "Music song")
+        hub.receive(tab(1, title: "Session only", element: false, audible: true), connection: 1)
+        #expect(hub.book.primaryID == .tab(TabRef(connection: 1, tab: 1)))
+        pass(1)
+        hub.receive(tab(1, title: "Session only", playing: false, element: false, audible: false), connection: 1)
+        #expect(hub.book.entry(.tab(TabRef(connection: 1, tab: 1)))?.canLead == false)
+        // Nothing plays: the one that had the place keeps it, as for any pause.
+        #expect(hub.book.primaryID == .tab(TabRef(connection: 1, tab: 1)))
+    }
+
+    @Test func aPageWithAnElementTakesTheNotchEvenWhenNothingHearsIt() {
+        start()
+        hub.receive(tab(1, title: "Muted video", element: true, audible: false), connection: 1)
+        #expect(hub.book.primaryID == .tab(TabRef(connection: 1, tab: 1)))
+    }
+
+    @Test func aSourceThatStartsWhileAnotherPlaysTakesTheNotchOnlyAfterAMomentAndAFlapNeverDoes() {
+        let delayed = MediaSourceHub(environment: environment.environment, controls: [music, spotify], now: { [clock] in clock.date })
+        environment.running = [KnownPlayer.music.bundleID]
+        delayed.start(scheduler: scheduler, permissions: permissions)
+        environment.music("Playing", name: "Music song")
+        let page = MediaSourceID.tab(TabRef(connection: 1, tab: 1))
+        delayed.receive(tab(1, title: "Page song", time: 0), connection: 1)
+        #expect(delayed.book.primaryID == .app("com.apple.Music"), "the page just started: the notch stays")
+        pass(0.5)
+        #expect(delayed.book.primaryID == .app("com.apple.Music"))
+        // The page pauses and plays again: the wait starts over.
+        delayed.receive(tab(1, title: "Page song", playing: false, time: 0.5), connection: 1)
+        pass(0.3)
+        delayed.receive(tab(1, title: "Page song", time: 0.8), connection: 1)
+        pass(0.9)
+        #expect(delayed.book.primaryID == .app("com.apple.Music"), "0.9 s since it played again")
+        pass(0.2)
+        #expect(delayed.book.primaryID == page, "it has been the choice for a second now")
+        #expect(delayed.model.primaryID == page)
+        delayed.stop()
+    }
+
+    @Test func thePinAndTheUsersOwnChoiceAreNotHeldBackByTheWait() {
+        let delayed = MediaSourceHub(environment: environment.environment, controls: [music, spotify], now: { [clock] in clock.date })
+        environment.running = [KnownPlayer.music.bundleID]
+        delayed.start(scheduler: scheduler, permissions: permissions)
+        environment.music("Playing", name: "Music song")
+        pass(0.5)
+        delayed.receive(tab(1, title: "Page song"), connection: 1)
+        let page = MediaSourceID.tab(TabRef(connection: 1, tab: 1))
+        #expect(delayed.book.primaryID == .app("com.apple.Music"))
+        delayed.togglePin(page)
+        #expect(delayed.book.primaryID == page)
+        delayed.togglePin(page)
+        #expect(delayed.book.primaryID == page, "unpinned, it is the later of the two playing: the notch is where it is")
+        delayed.stop()
+    }
+
+    // MARK: the lock screen cannot bring up the Automation question
+
+    @Test func aPressWhereTheUserCannotBeAskedDoesNothingForAnAppNotAllowedYetAndTheQuestionComesWithTheNextInteractionAtTheOpenNotch() async {
+        environment.running = [KnownPlayer.music.bundleID]
+        allow(.music, .notDetermined)
+        permissions.requestResult = .granted
+        start()
+        environment.music("Paused")
+        hub.perform(.togglePlayPause, onApp: "com.apple.Music", mayAsk: false)
+        await settle()
+        #expect(permissions.requested.isEmpty, "a question on the lock screen would be answered by nobody")
+        #expect(music.performed.isEmpty, "and the press did nothing")
+        hub.perform(.next, onApp: "com.apple.Music", mayAsk: false)
+        await settle()
+        #expect(permissions.requested.isEmpty && music.performed.isEmpty)
+        // The notch is opened to the Media tab: now there is someone to ask, and it is asked once.
+        hub.model.setTabVisible(true)
+        await settle { !permissions.requested.isEmpty }
+        #expect(permissions.requested == [.automation(bundleID: "com.apple.Music")])
+        hub.model.setTabVisible(false)
+        hub.model.setTabVisible(true)
+        await settle()
+        #expect(permissions.requested.count == 1, "the note is spent")
+        #expect(music.performed.isEmpty, "what was pressed on the lock screen is not done later")
+    }
+
+    @Test func aPressWhereTheUserCannotBeAskedStillWorksForAnAppAlreadyAllowed() async {
+        environment.running = [KnownPlayer.music.bundleID]
+        allow(.music)
+        start()
+        environment.music("Paused")
+        hub.perform(.togglePlayPause, onApp: "com.apple.Music", mayAsk: false)
+        await settle { !music.performed.isEmpty }
+        #expect(music.performed == [.togglePlayPause])
+        #expect(permissions.requested.isEmpty)
+    }
+
+    @Test func aPressWhereTheUserCannotBeAskedForAnAppThatIsNotRunningLeavesNoNote() async {
+        allow(.music, .notDetermined)
+        start()
+        environment.music("Paused")
+        environment.running = []
+        hub.perform(.play, onApp: "com.apple.Music", mayAsk: false)
+        await settle()
+        hub.model.setTabVisible(true)
+        await settle()
+        #expect(permissions.requested.isEmpty)
     }
 
     // MARK: the system's session

@@ -145,6 +145,9 @@ public enum YouTubeMessage: Equatable, Sendable {
         var duration: Double?
         var rate: Double
         var live: Bool
+        /// Absent from an extension that predates them: an element, not heard.
+        var element: Bool?
+        var audible: Bool?
     }
 
     private struct TabGoneFields: Decodable {
@@ -197,7 +200,8 @@ public enum YouTubeMessage: Equatable, Sendable {
         let album = normalised(fields.album ?? "", limit: BrowserTab.maxNameLength)
         return .tab(BrowserTab(
             tab: fields.tab, site: fields.site, title: title, artist: artist.isEmpty ? nil : artist, album: album.isEmpty ? nil : album,
-            isPlaying: fields.state == "playing", time: fields.time, duration: fields.duration, rate: fields.rate, isLive: fields.live
+            isPlaying: fields.state == "playing", time: fields.time, duration: fields.duration, rate: fields.rate, isLive: fields.live,
+            hasElement: fields.element ?? true, isAudible: fields.audible ?? false
         ))
     }
 
@@ -225,10 +229,9 @@ public enum YouTubeMessage: Equatable, Sendable {
         }
     }
 
-    /// Runs of whitespace (newlines included) become one space, the ends are trimmed, and the rest is cut at `limit`.
+    /// Runs of whitespace (newlines included) become one space, control and direction marks are dropped, the ends are trimmed, and the rest is cut at `limit` (see `DisplayText`).
     private static func normalised(_ text: String, limit: Int) -> String {
-        let collapsed = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        return String(collapsed.prefix(limit)).trimmingCharacters(in: .whitespaces)
+        DisplayText.clean(text, limit: limit)
     }
 }
 

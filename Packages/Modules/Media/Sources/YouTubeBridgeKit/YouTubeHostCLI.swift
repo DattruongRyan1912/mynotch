@@ -92,9 +92,10 @@ final class HostRelay: Sendable {
     static let awayReminderInterval: TimeInterval = 30
     /// Pages with media that are kept for the replay; a page is one only while it reports, so this is a bound, not a count.
     static let maxTabs = 64
-    /// A page's report older than this is not replayed: a page that plays says so every 5 s and a paused one every 30 s, but a
-    /// tab Chrome has put to sleep may stay quiet for a minute or two, and the app drops a tab it has not heard of in this long.
-    static let maxTabAge: TimeInterval = 150
+    /// A page's report older than this is not replayed: a page that plays says so every 5 s and a paused one every 30 s (Chrome may put a
+    /// background tab's timers to one a minute), the app stamps what it is given with the time it arrives, and an old report would show
+    /// a position that far behind and keep a page that is gone that much longer.
+    static let maxTabAge: TimeInterval = 60
 
     private struct State {
         var socket: Int32?

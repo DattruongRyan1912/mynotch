@@ -41,6 +41,30 @@ import Testing
         #expect(tab.artist == nil && tab.album == nil)
     }
 
+    @Test func whatChromeHearsAndWhatIsAnElementAreCarriedAndDefaultToAnElementThatIsNotHeard() {
+        var report = Self.tab()
+        report["element"] = false
+        report["audible"] = true
+        guard case .tab(let heard) = Self.decode(report) else { Issue.record("not decoded"); return }
+        #expect(!heard.hasElement && heard.isAudible && heard.isBelieved, "no element, but Chrome hears it")
+        report["audible"] = false
+        guard case .tab(let silent) = Self.decode(report) else { Issue.record("not decoded"); return }
+        #expect(!silent.hasElement && !silent.isAudible && !silent.isBelieved, "a page's word alone is not believed")
+        // An extension that predates both fields reports elements.
+        guard case .tab(let older) = Self.decode(Self.tab()) else { Issue.record("not decoded"); return }
+        #expect(older.hasElement && !older.isAudible && older.isBelieved)
+    }
+
+    @Test func anElementOrAudibleThatIsNotABooleanIsRefused() {
+        for key in ["element", "audible"] {
+            for value: Any in ["true", 1, [true]] {
+                var object = Self.tab()
+                object[key] = value
+                #expect(YouTubeMessage.check(YouTubeMessageTests.data(object)) == .failure(.invalidTab), Comment(rawValue: "\(key) \(value)"))
+            }
+        }
+    }
+
     @Test func aPageWithoutAPlainHostNameHasNoSite() {
         if case .tab(let tab) = Self.decode(Self.tab(site: "")) { #expect(tab.site.isEmpty) } else { Issue.record("not decoded") }
     }
@@ -95,6 +119,15 @@ import Testing
             object[key] = nil
             #expect(YouTubeMessage.check(YouTubeMessageTests.data(object)) == .failure(.invalidTab), Comment(rawValue: key))
         }
+    }
+
+    @Test func textFromAPageCannotHoldAControlCharacterOrTurnTheLineAround() {
+        let message = Self.decode(Self.tab(title: "Song\u{202E}gnos\u{0007}\u{200F} two", artist: "A\u{2066}B\u{009B}C"))
+        guard case .tab(let tab) = message else { Issue.record("not decoded"); return }
+        #expect(tab.title == "Songgnos two")
+        #expect(tab.artist == "ABC")
+        // A title of nothing but such marks is no title.
+        #expect(YouTubeMessage.check(YouTubeMessageTests.data(Self.tab(title: "\u{202E}\u{200F} \u{0007}"))) == .failure(.invalidTab))
     }
 
     @Test func aTabGoneMessageNeedsATabInRange() {

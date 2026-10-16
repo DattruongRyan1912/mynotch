@@ -18,10 +18,17 @@ public struct BrowserTab: Equatable, Sendable {
     public var duration: Double?
     public var rate: Double
     public var isLive: Bool
+    /// An element of the page is the media. A page with none only says through its Media Session what it plays, which any page can say.
+    public var hasElement: Bool
+    /// Chrome says the tab is making sound (the extension asks it; the page cannot say so).
+    public var isAudible: Bool
+
+    /// A page whose media is not heard and not an element has nothing but its own word for it, and does not lead (see `MediaSourceBook`).
+    public var isBelieved: Bool { hasElement || isAudible }
 
     public init(
         tab: Int, site: String, title: String, artist: String? = nil, album: String? = nil, isPlaying: Bool,
-        time: Double, duration: Double? = nil, rate: Double = 1, isLive: Bool = false
+        time: Double, duration: Double? = nil, rate: Double = 1, isLive: Bool = false, hasElement: Bool = true, isAudible: Bool = false
     ) {
         self.tab = tab
         self.site = site
@@ -33,6 +40,8 @@ public struct BrowserTab: Equatable, Sendable {
         self.duration = duration
         self.rate = rate
         self.isLive = isLive
+        self.hasElement = hasElement
+        self.isAudible = isAudible
     }
 
     /// Chrome's tab ids are small integers; this is the range the extension and the app both accept.

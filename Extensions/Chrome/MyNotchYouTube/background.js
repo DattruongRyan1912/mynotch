@@ -61,6 +61,9 @@ importScripts("captions.js", "tabmessages.js", "bridge.js");
     sendToTab: function (tabId, message) {
       return chrome.tabs.sendMessage(tabId, message, { frameId: 0 });
     },
+    getTab: function (tabId) {
+      return chrome.tabs.get(tabId);
+    },
     log: log
   });
 
@@ -100,6 +103,10 @@ importScripts("captions.js", "tabmessages.js", "bridge.js");
   // A tab that is closed has no media any more: the app is told, if it was told about the tab (no permission is needed).
   chrome.tabs.onRemoved.addListener(function (tabId) {
     relay.onTabRemoved(tabId);
+  });
+  // Whether a tab makes sound: a page that only says it plays is believed only while it does. `audible` needs no permission.
+  chrome.tabs.onUpdated.addListener(function (tabId, changeInfo) {
+    if (changeInfo && typeof changeInfo.audible === "boolean") relay.onTabAudible(tabId, changeInfo.audible);
   });
 
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
