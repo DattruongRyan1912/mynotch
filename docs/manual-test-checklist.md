@@ -6,7 +6,7 @@
 
 Điền **Đạt / Không đạt / Không kiểm được (lý do)** vào cột Kết quả.
 
-Checklist này chỉ có phần nền tảng. Bản gộp theo module (gồm các mục mới của 2026-10-15: Notch và giao diện, Việc cần làm, Chia cửa sổ, và mục mới của Clipboard, Media, Dịch…) là `manual-test-checklist-all.html`. Hai mục 9 và 28 dưới đây đã được đồng bộ với mã hiện tại (tên chế độ màn hình và dáng của tab Battery). Tên các trang Settings là tên ở thanh bên của app: Quyền, Chung, Giao diện, Trang trên notch, nhóm Modules và Giới thiệu (tiêu đề đầu trang vẫn còn tiếng Anh: General, Interface, About).
+Checklist này chỉ có phần nền tảng. Bản gộp theo module (gồm các mục mới của 2026-10-15: Notch và giao diện, Việc cần làm, Chia cửa sổ, và mục mới của Clipboard, Media, Dịch…) là `manual-test-checklist-all.html`. Hai mục 9 và 28 dưới đây đã được đồng bộ với mã hiện tại (tên chế độ màn hình và dáng của tab Battery). Tên các trang Settings là tên ở thanh bên của app: Quyền, Chung, Giao diện, Trang trên notch, nhóm "Mô-đun" và Giới thiệu (tiêu đề đầu trang cũng là tiếng Việt từ `fd8c48e`; chỉ tên cửa sổ "MyNotch Settings" và các mục menu bar như Open Settings… còn tiếng Anh).
 
 Trước khi kiểm:
 - Thoát OneNotch và các app notch khác (hai app cùng chiếm vùng notch).
@@ -62,6 +62,6 @@ Trước khi kiểm:
 | 29 | Cắm sạc: activity tia sét + % hiện khoảng 4 giây; rút sạc trong 4 giây thì activity tắt ngay | | |
 | 30 | Settings → Battery → tắt "Thông báo khi cắm sạc": cắm sạc thì không còn activity tia sét | | |
 | 31 | Pin yếu (rút sạc, pin ≤ 50%): Settings → Battery tăng ngưỡng lên trên % hiện tại → activity pin yếu (đỏ) hiện; hạ ngưỡng xuống dưới % hiện tại → tắt ngay. Các dòng cài đặt không bị lồng hộp trong hộp | | |
-| 32 | Settings → Modules → Battery: tắt thì tab và activity biến mất; bật lại thì tab quay lại (activity sạc chỉ hiện ở lần cắm sạc tiếp theo; activity pin yếu chỉ hiện nếu pin vẫn dưới ngưỡng) | | |
+| 32 | Settings → Mô-đun → Battery: tắt thì tab và activity biến mất; bật lại thì tab quay lại (activity sạc chỉ hiện ở lần cắm sạc tiếp theo; activity pin yếu chỉ hiện nếu pin vẫn dưới ngưỡng) | | |
 | 33 | Trang Giới thiệu: Phiên bản `0.1.0 (1)`, Bundle ID `io.lucasvu.mynotch`, mục Thư viện bên thứ ba có KeyboardShortcuts (MIT, link mở được) | | |
 | 34 | Activity Monitor: CPU của MyNotch khi rê chuột liên tục 30 giây — đạt nếu trung bình dưới ~5% (ghi con số) | | |

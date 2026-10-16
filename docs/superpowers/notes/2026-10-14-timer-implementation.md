@@ -6,6 +6,7 @@
 - **Commit chính:** `bec55d9` module, `f994113` sửa sau review, `5a1362a` (màn hình khoá, kèm các sửa Timer của review H4), `e2b0586` gắn vào app.
 - **Test tự động:** 36 test theo báo cáo L1 (`verify.sh` qua ở `8a2b842`). Test chỉ dùng đồng hồ giả, `ManualScheduler` và bộ phát âm thanh giả. Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Hẹn giờ trong checklist gộp](../../manual-test-checklist-all.html#timer)
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: mặt số và núm không còn trắng cứng (S2 `37d02c8`, `a944673`; mục 9). Timer 128 test. Cổ điển giữ nguyên từng điểm ảnh; cổng `verify.sh` chưa chạy cho commit này (xanh gần nhất ở `6077497`, trước nhiều commit S2). Chưa ai thấy trên kính thật.
 - **Cập nhật sau `156f02d` (2026-10-15):** ba loại hẹn giờ và mặt số phút (`30830cf`, `23f4ff1`) (mục 7 và 8). Timer 125 test. Mục 1 và 4 ở trên nói về tab bản đầu (các mẫu 1, 5, 10, 25 phút), đã được thay.
 
 ## 1. Đã xây gì so với spec
@@ -79,3 +80,11 @@ Commit `30830cf`, vòng sửa `23f4ff1`. Test: Timer **125 test trong 7 suite** 
 ## 8. Cần kiểm thử tay (phần mới)
 
 Xem [mục Hẹn giờ trong checklist gộp](../../manual-test-checklist-all.html#timer): kéo vòng quanh mặt số (bám con trỏ, dính phút nguyên, qua 12 giờ từ phía cao thì ra 60); con lăn và vuốt trên mặt số đổi phút mà **không** đổi tab, vuốt ngang bắt đầu trên mặt số thì đổi tab; ←/→ và ⇧←/⇧→; ô nhắc việc; VoiceOver; notch thu gọn với từng loại (glyph và thời gian, dải nhãn, trạng thái xong màu đỏ); bộ chọn bốn đoạn ở notch mở thật; "Dài hơn" mở menu mà notch không đóng; chip nhanh ở bề rộng mặc định; đóng và mở lại app với hẹn giờ đang chạy hay đã hết lúc app đóng.
+
+## 9. Đọc được trên kính sáng và tối (S2 `37d02c8`, test `a944673`, 2026-10-16)
+
+Quy tắc chung và hai thứ S2 thêm vào NotchUI (`NotchTokens.fill(_:)` và `View.notchColorScheme()`): ghi chú Nền tảng, mục 16.5.
+
+- **Thay:** 2 chỗ `.white` (rãnh của mặt số và núm) thành `NotchTokens.fill(_:)`. Không còn gì trắng cứng trong package.
+- **Test:** `TimerGlassTests` (kính sáng, kính tối, Cổ điển trên fixture mặt số và bấm giờ). Commit `a944673` đo nền kính từ một ảnh trống cùng cỡ thay vì trung vị của ảnh (một view phủ gần hết khung làm trung vị sai). Timer **128 test** (S2). Cổ điển **giống từng điểm ảnh** (băm toàn bộ bitmap trước và sau, hai appearance, bốn lần chạy). Kính do WindowServer vẽ nên không test nào thấy nó: test dựng view trên nền sáng hay tối và đọc màu của chính view. Bộ vẽ ngoài màn hình có hai "tâm trạng" ổn định (mặt số và đồng hồ bấm giờ cũng vậy ở mã chưa sửa), nên băm được so theo tập.
+- **Cần người kiểm:** hàng "Chữ trên kính" cuối nhóm [Hẹn giờ](../../manual-test-checklist-all.html#timer) của checklist (hình nền sáng, giao diện sáng của macOS, Liquid Glass).

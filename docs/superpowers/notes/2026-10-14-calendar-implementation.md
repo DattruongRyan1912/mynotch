@@ -6,6 +6,7 @@
 - **Commit chính:** `77a535c` agenda và nhận link họp, `fc35c95` module, `d35eb2a` sửa sau review, `f14dad6` gắn vào app.
 - **Test tự động:** 151 test theo báo cáo L1 (`verify.sh` qua ở `8a2b842`). Không dùng EventKit thật trong test. Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Lịch trong checklist gộp](../../manual-test-checklist-all.html#calendar)
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: sáu chỗ `.white`, scheme tối ép của ô thêm nhanh và nhãn "Tham gia" (S2 `d99d64e`, `b7f62d6`; mục 9). Calendar 330 test. Cổ điển giữ nguyên từng điểm ảnh; cổng `verify.sh` chưa chạy cho commit này (xanh gần nhất ở `6077497`, trước nhiều commit S2). Chưa ai thấy trên kính thật.
 - **Cập nhật sau `156f02d` (2026-10-15):** báo lại và bỏ qua cuộc họp, Whereby và Jitsi (`e042f41`, `66f20f6`), thêm sự kiện một dòng và tóm tắt trong ngày (`ce5c98c`, `f9dd973`) (mục 7 và 8). Calendar 326 test (`f511376`). Đường ghi EventKit chưa chạy với kho thật.
 
 ## 1. Đã xây gì so với spec
@@ -88,3 +89,11 @@ Nút "Tham gia", dòng giờ của sự kiện kế (`UpcomingCard`), màu con t
 ## 8. Cần kiểm thử tay (phần mới)
 
 Xem [mục Lịch trong checklist gộp](../../manual-test-checklist-all.html#calendar): thẻ họp với link Whereby, `meet.jit.si` và một lời mời có chữ "Jitsi:"; **Báo lại** (đúng giây, lặp, sau giờ bắt đầu thì mất nút, cạnh nhạc), **Bỏ qua** (qua lần mở lại; lần xuất hiện kế của họp lặp vẫn hiện); bàn phím (Tab, Space); "+" mở bằng hover và bằng click (caret), gõ "Họp nhóm 3h chiều mai", Telex, Return rồi **xoá sự kiện thử (nó ghi vào lịch thật)**, Esc, bấm sang app khác; dòng tóm tắt ở bề rộng 480 pt; ba cài đặt mới.
+
+## 9. Đọc được trên kính sáng và tối (S2 `d99d64e`, test `b7f62d6`, 2026-10-16)
+
+Quy tắc chung và hai thứ S2 thêm vào NotchUI (`NotchTokens.fill(_:)` và `View.notchColorScheme()`): ghi chú Nền tảng, mục 16.5.
+
+- **Thay:** 6 chỗ `.white` thành `NotchTokens.fill(_:)`; scheme tối mà ô thêm sự kiện tự đặt thành `.notchColorScheme()`. **Nhãn "Tham gia"** (`MeetingCardActions.labelColour`) từng trả token chữ chính, mà trên một màu nhấn đậm ở kính sáng token đó là chữ đen; nay trả `Color.white` (Cổ điển không đổi) và vẫn chuyển sang đen khi màu nhấn quá sáng (hai test cũ nay gọi `Color.white`).
+- **Test:** `CalendarGlassTests` (kính sáng, kính tối, Cổ điển; nhãn "Tham gia" có test riêng); `b7f62d6` cố định appearance của cửa sổ chứa. Calendar **330 test**. Cổ điển **giống từng điểm ảnh** (băm toàn bộ bitmap trước và sau, hai appearance, bốn lần chạy). Kính do WindowServer vẽ nên không test nào thấy nó: test dựng view trên nền sáng hay tối và đọc màu của chính view.
+- **Cần người kiểm:** hàng "Chữ trên kính" cuối nhóm [Lịch](../../manual-test-checklist-all.html#calendar) của checklist (hình nền sáng, giao diện sáng của macOS, Liquid Glass).

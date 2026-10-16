@@ -6,6 +6,7 @@
 - **Commit chính:** `09a2548` điểm nối thả file (H1), `378c5d5` sửa H1, `48430fc` Khay (H2), `e2d8575` sửa Khay vòng 1, `a21e9a6` sửa Khay vòng 2 (nguồn kéo AppKit, cache URL), `4097fe8` sửa NotchUI (kết thúc kéo khi ẩn), `e2b0586` gắn vào app.
 - **Test tự động:** Shelf 62 test (báo cáo `H2-fix2-report`), NotchUI 77 (báo cáo L1); `verify.sh` qua sau mỗi đợt sửa. Phiên kéo thật của AppKit và hit testing dưới chuột thật không chạy được trong test, nên phần đó chỉ kiểm bằng tay. Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Khay trong checklist gộp](../../manual-test-checklist-all.html#shelf)
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối, và đọc được trên notch Cổ điển khi macOS ở giao diện sáng (S2 `a60412f`, `58ce563`, `e2516cf`; mục 9). Shelf 254 test. Cổ điển giữ nguyên từng điểm ảnh; cổng `verify.sh` chưa chạy cho commit này (xanh gần nhất ở `6077497`, trước nhiều commit S2). Chưa ai thấy trên kính thật.
 - **Cập nhật sau `156f02d` (2026-10-15):** hành động với file trên khay: đổi định dạng, đổi kích thước, nén, tách nền, nhận chữ, PDF (`8793a3a`, `00b8859`, `6e5c545`) (mục 7 và 8). Shelf 251 test. Chưa chạy trong notch.
 
 ## 1. Đã xây gì so với spec
@@ -108,3 +109,12 @@ Dưới các thẻ của khay có một hàng **"Hành động"** với sáu nú
 ## 8. Cần kiểm thử tay (phần mới)
 
 Xem [mục Khay trong checklist gộp](../../manual-test-checklist-all.html#shelf): bấm chọn hai ba ảnh rồi từng nút và menu (menu giữ notch mở); thả một file lên một nút khi chưa chọn gì (vòng sáng và chạy lựa chọn); tách nền thật trên ảnh có người hay vật; OCR thật trên ảnh chụp chữ tiếng Việt và "Chép lại" sau khi chép cái khác; tiến độ và "Huỷ" với lô lớn; HEIC trên máy này và ảnh có GPS; ảnh chụp ngang từ điện thoại ra phải thẳng; nén một `.app` hay thư mục có `node_modules` hay môi trường ảo rồi giải nén trong Finder (liên kết còn là liên kết); Huỷ khi nén lớn; khay đầy rồi chạy hành động; **kéo ảnh từ Photos vào khi khay đầy rồi đổi cỡ: file ở `~/Downloads/MyNotch` và còn đó sau khi mở lại app**; tách PDF 20 trang trở lên.
+
+## 9. Đọc được trên kính sáng và tối, và trên notch Cổ điển ở giao diện sáng (S2 `a60412f`, `58ce563`, sửa `e2516cf`, 2026-10-16)
+
+Quy tắc chung và hai thứ S2 thêm vào NotchUI (`NotchTokens.fill(_:)` và `View.notchColorScheme()`): ghi chú Nền tảng, mục 16.5.
+
+- **Thay:** 2 chỗ `.white` thành `NotchTokens.fill(_:)`. **Còn trắng có chủ ý:** dấu tích trên vòng màu nhấn (`.foregroundStyle(Color.accentColor, .white)`).
+- **Sửa riêng cho Cổ điển (`e2516cf`, `fix(shelf): keep the shelf readable on the black notch in light mode`).** Có từ trước S2: Khay vẽ bằng màu hệ thống (chữ mặc định, `.secondary`, nút `.bordered`) và không ép scheme, nên trên notch Cổ điển (đen bất kể appearance) mà macOS ở **giao diện sáng**, chữ đen trên nền đen. Giữ pixel-identical cấm sửa nó trong S2; người điều phối duyệt `.notchColorScheme()` ở gốc `ShelfTabView`: scheme tối ở Cổ điển, scheme của hệ thống ở kính. Đây là chỗ **duy nhất** trong chuỗi S2 đổi Cổ điển, và chỉ khi macOS ở giao diện sáng. Trước `e2516cf` test Cổ điển của Khay chỉ kiểm trong appearance tối; `e2516cf` thêm hai fixture của cả tab (tab rỗng, tab có thẻ) kiểm Cổ điển trong **cả hai** appearance (thẻ và báo cáo vẽ riêng, ngoài scheme của tab, vẫn chỉ kiểm trong appearance tối).
+- **Test:** `ShelfGlassTests`; `58ce563` cố định appearance của cửa sổ chứa (điều khiển AppKit theo cửa sổ chứ không theo scheme của SwiftUI, nên không có nó các test phụ thuộc giao diện sáng hay tối của chính máy). Shelf **254 test**. Cổ điển **giống từng điểm ảnh** (băm toàn bộ bitmap trước và sau, hai appearance, bốn lần chạy). Kính do WindowServer vẽ nên không test nào thấy nó: test dựng view trên nền sáng hay tối và đọc màu của chính view.
+- **Cần người kiểm:** hàng "Chữ trên kính" cuối nhóm [Khay](../../manual-test-checklist-all.html#shelf) của checklist (hình nền sáng, giao diện sáng của macOS, Liquid Glass).

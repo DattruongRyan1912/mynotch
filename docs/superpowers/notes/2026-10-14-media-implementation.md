@@ -8,6 +8,7 @@
 - **Commit sau lần thử thật (2026-10-14 tối đến 2026-10-15):** chẩn đoán và sửa lời Apple `866eded`, `aac650d`, `f50cb30` (sau review); tiêu đề có dấu `|` `1b2f231` và cache `v6` `6be97f4`; extension 0.1.1 với tin `diag` `2f4a065`; log cầu nối và nhận `diag` phía Swift `7333b3d`; test nối lại của host `857a84f`; dải lời dưới notch `aa59237` (Core và Media), `127c0ab` (NotchUI), `4690e63` (giữ dải qua đổi bài); dòng lời giữa tab `3fe5f58`; hiệu năng `c52c9ea` (bộ đếm) và `ff7079c` (phổ âm không bố cục lại notch). Phần nền tảng đi cùng (khe `bottom` của `LiveActivity`, vẽ dải, bubble) nằm ở [ghi chú nền tảng](2026-10-14-platform-foundation-implementation.html).
 - **Test tự động:** package Media 865 test (`swift test`, hai target `MediaModuleTests` và `YouTubeBridgeKitTests`; số của báo cáo PERF1 ở `84662bb`, `verify.sh` qua) và 146 test node cho extension (`node --test Extensions/Chrome/MyNotchYouTube/tests/`; số của báo cáo M9b cho extension 0.1.1). Chuỗi lrclib (M7) đã review hai vòng; M8, M8-diag, M9a, M9b, M10a, M10b và M11 mỗi phần đã review (Apple và M9 kèm re-review), đều kết thúc "Approved" hoặc "ADDRESSED", không còn Critical hay Important. Chưa chạy lại khi viết tài liệu này. **Không test tự động nào chạm Keychain, Apple, Chrome hay YouTube thật**; phần đã chạy thật nằm ở mục 4 (Apple, qua trigger Debug) và mục 5 (host và content script), phần còn lại ở checklist.
 - **Kiểm thử tay:** [mục Media trong checklist gộp](../../manual-test-checklist-all.html#media)
+- **Cập nhật sau `034e40d` (2026-10-16):** lời bài hát trên màn hình khoá (M13 `a790f43`, sửa `fe5d190`) và chữ đọc được trên kính sáng và tối (S2 `dc31793`): mục 18. Media **1463 test trong 108 suite** (`fe5d190`); cổng `verify.sh` chưa chạy cho các commit này (xanh gần nhất ở `6077497`). Chưa ai thấy trên màn hình khoá hay trên kính sáng thật.
 - **Cập nhật sau `156f02d` (2026-10-15):** cầu nối YouTube chạy được ở Chrome không đầu (`8a464f4`), Bài sau và Bài trước cho YouTube (`2df155c`, `d2eec4c`, `eda15d0`), nút điều khiển tuỳ chọn (`2923f8b`, `3a64967`, `c211b6a`), karaoke và bảng lời nổi (`73bbd09`, `f0d715c`), màu theo ảnh bìa và nút trên màn hình khoá (`daf9715`, `25da7c6`), cột sóng (`8a6750e`, `9a29cd3`), test hết phụ thuộc đồng hồ (`b9c6dbe`) (mục 16 và 17). Media 1436 test (`389a228`), 229 test node cho extension 0.1.3. Chưa ai nhìn bằng mắt hay thử với Chrome thật của người dùng.
 
 ## 1. Đã xây gì so với spec
@@ -344,3 +345,27 @@ Các đợt: M9c `8a464f4`, M9d `2df155c`, `d2eec4c`, `eda15d0`, R2b `2923f8b`, 
 ## 17. Cần kiểm thử tay (phần mới)
 
 Xem các nhóm trong [mục Media của checklist gộp](../../manual-test-checklist-all.html#media): cầu nối YouTube sau khi nạp lại extension 0.1.3 và đặt Site access; Bài sau, Bài trước trong mix (kể cả quảng cáo, hai lần bấm nhanh, host cũ rơi sang MediaRemote sau khoảng 1 giây); nút điều khiển (bốn bộ chọn, tua, ngẫu nhiên, lặp, âm lượng, lời, **Thích mờ**); karaoke ở dải, hàng trong tab và bảng; bảng lời nổi (kéo, ×, màn bị rút, khoá màn hình, ẩn quay màn hình); màu theo ảnh bìa và cột sóng; **điều khiển trên màn hình khoá bật và tắt (cần khoá màn hình thật)**.
+
+## 18. Lời trên màn hình khoá và chữ đọc được trên kính (M13, S2 giai đoạn 2 `dc31793`)
+
+### 18.1 Phần của Media trong lời trên màn hình khoá (M13 `a790f43`, sửa `fe5d190`)
+
+Phần LockScreen (công tắc "Hiện lời bài hát trên màn hình khoá", panel cao bằng thẻ, cờ "đang được nhìn" khi màn hình ngủ) nằm ở ghi chú Màn hình khoá, mục 9; ở đây chỉ phần Media.
+
+- `LockScreenLyrics` (`LockScreenLyrics.swift`) là mô hình hai dòng ở một thời điểm, từ `LyricPanelLines`; `NowPlayingStore.lockScreenLyrics(at:)` trả nil khi bài không có lời đồng bộ. `LockScreenLyricsView` là khối 14 pt (dòng đang hát) và 12 pt (dòng kế) trong một `LyricTimeline` dùng `LyricTickSchedule` của R3c; dòng đang hát có thời gian chữ là một `KaraokeLine` (cú quét CA-keyframe một hoạt ảnh) hay chữ sáng thường. `NowPlayingLockScreenView` vẽ khối giữa hàng tên bài và thanh tiến trình khi `\.lockScreenLyricsEnabled` bật.
+- **Theo "Tô theo từng chữ"** (qua `karaokeIsActive`), **không** theo nút "ẩn lời" của hàng ở tab. Phải-sang-trái và dòng không có thời gian: cả dòng sáng.
+- **Chi phí:** timeline đứng yên khi `notchIsOnScreen` false; `LyricTimeline.schedule(for:)` là nơi duy nhất dựng lịch (đổi cho test, `body` không đổi hành vi). Các test thời gian của vòng sửa không còn đua đồng hồ.
+- **Test:** `MediaLockScreenLyricsTests` (25 test: mô hình, kho, hosting, chi phí).
+
+### 18.2 Chữ trên kính sáng và tối (S2 `dc31793`)
+
+Quy tắc chung ở ghi chú Nền tảng, mục 16.5. Phần của Media:
+
+- **5 chỗ `.white` thay bằng token** (hai ô bìa, rãnh tiến trình, vệt khi rê hàng, rãnh âm lượng). **Còn trắng có chủ ý:** rãnh tiến trình trên màn hình khoá (thẻ đen), nút đóng của bảng lời nổi (glyph trắng trên đĩa đen của nó), màu "Trắng" của phổ (màu do người dùng chọn), và các `KaraokeStyle` của Cổ điển.
+- **Màu chụp một lần:** `KaraokeStyle.row`, `strip` và `lockScreen` từng chụp `NSColor(NotchTokens…)` ở lần dùng đầu (lần chạy test ở HEAD cho thấy: chữ đen trên notch Cổ điển khi một test kính tình cờ chạm vào biến `static` trước). Nay là trắng tường minh, với `rowOnGlass` (`CurrentLyricView`) và `stripOnGlass` (`NowPlayingActivityViews`) cho kính, do view chọn từ `\.notchSurface` đọc trong `body`; một màu hệ thống ở một độ mờ cũng bị đóng băng (`withAlphaComponent` trên màu trong catalog là màu cố định), nên `NSColor.dynamic(_:alpha:)` giữ nó động. `KaraokeLineView` tính màu theo appearance của chính nó và dựng lại ở `viewDidChangeEffectiveAppearance`.
+- **Nền đen cố định:** gốc `LyricsPanelView` (bảng lời nổi) có `.notchOnDarkBackground()`; thẻ màn hình khoá và view media của nó cũng có (chủ của nền đen là `LockScreenRootView`).
+- **Test:** `MediaGlassTests` (kính sáng, kính tối, Cổ điển; riêng cho bảng lời, thẻ màn hình khoá, dòng karaoke); Cổ điển giống từng điểm ảnh theo băm bitmap.
+
+## 19. Cần kiểm thử tay (phần mới sau `034e40d`)
+
+Xem nhóm [Karaoke và bảng lời nổi](../../manual-test-checklist-all.html#media-karaoke) và hàng "Chữ trên kính" cuối mục [Media](../../manual-test-checklist-all.html#media): dòng karaoke ở hàng tab và dưới notch trên kính sáng, lật appearance khi một dòng đang hiện (màu được dựng lại), bảng lời nổi và thẻ màn hình khoá với kiểu kính trên hình nền sáng (chữ sáng trên nền đen); và các hàng lời trên [màn hình khoá](../../manual-test-checklist-all.html#lock-screen).

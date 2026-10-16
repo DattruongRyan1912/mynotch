@@ -6,6 +6,7 @@
 - **Commit chính:** `e0ce3a0` hình học, `31cc797` lưu trữ và OCR, `d6e8710` model và trình sửa, `c25a867` chụp, overlay, module, `611348c` sửa ảnh, `0bd2692` sửa lỗi lưu, `33bbe96` gắn vào app, `75ccd69` sửa thumbnail. Phụ: `b4f009a`, `d57cc9d`, `118d3d5` (chỉ mục ảnh an toàn hơn).
 - **Test tự động:** 217 test theo báo cáo `S-fix-report` và báo cáo L1 (`verify.sh` qua ở `8a2b842`). Có OCR thật trên ảnh tổng hợp (Vision, chạy cục bộ). Mọi thứ chạm hệ thống (ScreenCaptureKit, overlay, pasteboard, phím tắt, hộp thoại quyền) đều dùng bản giả. Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Ảnh chụp trong checklist gộp](../../manual-test-checklist-all.html#screenshot)
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: chỗ giữ ảnh của thẻ (S2 `489bef2`, `44d0dd2`; mục 9). Screenshot 329 test. Cổ điển giữ nguyên từng điểm ảnh; cổng `verify.sh` chưa chạy cho commit này (xanh gần nhất ở `6077497`, trước nhiều commit S2). Chưa ai thấy trên kính thật.
 - **Cập nhật sau `156f02d` (2026-10-15):** đánh số bước, kính lúp, thước đo, xoá thông minh và canvas tự mở rộng (`00cb437`, `d6e83ef`) (mục 7 và 8). Screenshot 326 test (`d6e83ef`). Chưa ai nhìn bằng mắt.
 
 ## 1. Đã xây gì so với spec
@@ -95,3 +96,11 @@ Commit `00cb437`, vòng sửa quyền riêng tư `d6e83ef`. Test: Screenshot **3
 ## 8. Cần kiểm thử tay (phần mới)
 
 Xem [mục Ảnh chụp trong checklist gộp](../../manual-test-checklist-all.html#screenshot): bố cục thanh công cụ chín nút ở bề rộng 900 pt và hàng thanh trượt kính lúp; kéo ra ngoài mép ảnh (canvas lớn ra khi nhả, view khớp lại); huy hiệu bước (viền, căn số ở cả ba độ dày, ⌥-bấm xoá); viền kính lúp và vòng đứt nét khi kéo; thước trên ảnh Retina ("… px (… pt)", ⇧); xoá thông minh trên ảnh giao diện thật (nền phẳng so với ảnh chụp ảnh); cài đặt màu đệm; **che vùng rồi kiểm kính lúp không lộ chữ bị che (Chép, Lưu, kéo thẻ ra)**.
+
+## 9. Đọc được trên kính sáng và tối (S2 `489bef2`, test `44d0dd2`, 2026-10-16)
+
+Quy tắc chung và hai thứ S2 thêm vào NotchUI (`NotchTokens.fill(_:)` và `View.notchColorScheme()`): ghi chú Nền tảng, mục 16.5.
+
+- **Thay:** 1 trong 9 chỗ (`.white` của chỗ giữ ảnh của thẻ trong tab) thành `NotchTokens.fill(_:)`. **Còn trắng có chủ ý:** viền và chữ của lớp chọn vùng (`SelectionView`, nó có lớp tối riêng), viền cắt của trình sửa ảnh, nhãn nút công cụ đang chọn trên màu nhấn và vòng mẫu màu (trình sửa là cửa sổ thường trên nền hệ thống), `CanvasFill.white` và nền của hiệu ứng điểm ảnh (màu bạn chọn khi vẽ).
+- **Test:** `ScreenshotGlassTests`; `44d0dd2` cố định appearance của cửa sổ chứa. Screenshot **329 test**. Cổ điển **giống từng điểm ảnh** (băm toàn bộ bitmap trước và sau, hai appearance, bốn lần chạy). Kính do WindowServer vẽ nên không test nào thấy nó: test dựng view trên nền sáng hay tối và đọc màu của chính view.
+- **Cần người kiểm:** hàng "Chữ trên kính" cuối nhóm [Ảnh chụp](../../manual-test-checklist-all.html#screenshot) của checklist (hình nền sáng, giao diện sáng của macOS, Liquid Glass).

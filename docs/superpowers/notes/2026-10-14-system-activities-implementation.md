@@ -6,6 +6,7 @@
 - **Commit chính:** `7bc718c` các monitor và nhận biết tải xong, `4aad00f` module, `956f5fb` sửa sau review (tải nhỏ, đọc lại pin), `e2b0586` gắn vào app (cùng Shortcuts, Timer, Shelf), `5552a84` đầu dò quyền Downloads và Bluetooth chạy ngoài main thread.
 - **Test tự động:** 83 test theo báo cáo vòng sửa cuối (`fix-report`, `verify.sh` qua). Không chạm Bluetooth, CoreAudio hay thư mục Downloads thật trong test (có một thử nghiệm FSEvents thật trong thư mục tạm, đã xoá). Phần gọi IOBluetooth thật không có test tự động. Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Hệ thống trong checklist gộp](../../manual-test-checklist-all.html#system-activities)
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: activity không còn truyền `.white` lúc publish (S2 `a62ec60`; mục 9). SystemActivities 218 test. Cổ điển giữ nguyên từng điểm ảnh; cổng `verify.sh` chưa chạy cho commit này (xanh gần nhất ở `6077497`, trước nhiều commit S2). Chưa ai thấy trên kính thật.
 - **Cập nhật sau `156f02d` (2026-10-15):** thay HUD âm lượng, độ sáng và đèn bàn phím của macOS (`679ff00`, `1d2de52`) (mục 8). SystemActivities 215 test. Chưa tạo event tap thật và chưa nhìn bằng mắt.
 
 ## 1. Đã xây gì so với spec
@@ -87,3 +88,11 @@ Commit `679ff00`, vòng sửa 1 `1d2de52`. Test: SystemActivities **215 test tro
 ### 8.3 Cần kiểm thử tay
 
 Xem [mục Hệ thống trong checklist gộp](../../manual-test-checklist-all.html#system-activities) (nhóm **Thay HUD của macOS**): bật công tắc, cấp Accessibility (hàng "Cần quyền" tự mất sau vài giây, tap tự bật không cần chạy lại); phím âm lượng, tắt tiếng, độ sáng, đèn bàn phím có HUD của macOS **không** hiện và thanh của MyNotch hiện 1,5 giây, giữ phím thì cập nhật mượt, ngay sau khi máy thức dậy hay đổi thiết bị đầu ra; từng công tắc con trả phím lại cho macOS ngay; tắt công tắc hay bỏ MyNotch khỏi Accessibility khi đang chạy không có phím kẹt hay mất; đầu ra không có âm lượng (một số màn HDMI); ⌘ hay ⌃ với phím độ sáng; gập nắp và cắm màn ngoài; chế độ màn hình "Màn hình chính". Quyền: Accessibility (đặt lại bằng `tccutil reset Accessibility io.lucasvu.mynotch`).
+
+## 9. Đọc được trên kính sáng và tối (S2 `a62ec60`, 2026-10-16)
+
+Quy tắc chung và hai thứ S2 thêm vào NotchUI (`NotchTokens.fill(_:)` và `View.notchColorScheme()`): ghi chú Nền tảng, mục 16.5.
+
+- **Thay:** 1 chỗ `.white`, và là một **màu chụp một lần**: module truyền `.white` vào một activity ngay lúc publish, nên màu đóng băng ở giá trị Cổ điển. Nay `tint` là tuỳ chọn, module truyền nil và các view đọc token khi chúng vẽ. Việc này buộc package **phụ thuộc NotchUI** (`Package.swift` thêm một dòng, như các module khác); cổng `verify.sh` build app và là nơi kiểm nó.
+- **Test:** `SystemActivitiesGlassTests` (kính sáng, kính tối, Cổ điển). SystemActivities **218 test** (S2). Cổ điển **giống từng điểm ảnh** (băm toàn bộ bitmap trước và sau, hai appearance, bốn lần chạy). Kính do WindowServer vẽ nên không test nào thấy nó: test dựng view trên nền sáng hay tối và đọc màu của chính view. Một lần ở package này một "tâm trạng" của bộ vẽ chưa gặp ở bốn lần chạy trước xuất hiện ở một lần sau; sáu lần chạy sau nữa chỉ cho băm cũ.
+- **Cần người kiểm:** hàng "Chữ trên kính" cuối nhóm [Hệ thống](../../manual-test-checklist-all.html#system-activities) của checklist (hình nền sáng, giao diện sáng của macOS, Liquid Glass).

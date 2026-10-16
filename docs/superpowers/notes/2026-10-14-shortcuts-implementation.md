@@ -6,6 +6,7 @@
 - **Commit chính:** `3376513` module, `45e4419` giới hạn output, `e2b0586` gắn vào app, `9f2d14b` Core: huỷ phím tắt theo tên, `a8025b2` bộ chạy `posix_spawn` và huỷ phím tắt của mục bỏ ưa thích.
 - **Test tự động:** Shortcuts 52 test và MyNotchCore 119 (báo cáo `H3-fix2-report`, `verify.sh` qua); review lại vòng H3-fix2 (`re-review-H3-fix2.md`) **Approved**, không có Critical hay Important, đã chạy lại hai package (52 và 119, ba lần, 0 cảnh báo) cùng thí nghiệm riêng cho bộ chạy (fd, process group, 300 vòng huỷ đua, trạng thái thoát). Test không bao giờ chạy `/usr/bin/shortcuts` thật (bộ chạy thật chỉ được thử với `/bin/echo`, `/usr/bin/false`, `/bin/sleep`, `/usr/bin/head`, `/bin/sh` và một đường dẫn không tồn tại). Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Shortcuts trong checklist gộp](../../manual-test-checklist-all.html#shortcuts)
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: một chỗ `.white` (S2 `ceef34f`; mục 7). Shortcuts 55 test. Cổ điển giữ nguyên từng điểm ảnh; cổng `verify.sh` chưa chạy cho commit này (xanh gần nhất ở `6077497`, trước nhiều commit S2). Chưa ai thấy trên kính thật.
 
 ## 1. Đã xây gì so với spec
 
@@ -49,3 +50,11 @@ Ledger không có dòng `Ruling:` riêng cho Shortcuts. Vòng sửa H1/H3/H4 (`4
 ## 6. Cần kiểm thử tay
 
 Xem [mục Shortcuts trong checklist gộp](../../manual-test-checklist-all.html#shortcuts). Mục chạy shortcut thật có thể gây hộp thoại quyền Automation tuỳ shortcut.
+
+## 7. Đọc được trên kính sáng và tối (S2 `ceef34f`, 2026-10-16)
+
+Quy tắc chung và hai thứ S2 thêm vào NotchUI (`NotchTokens.fill(_:)` và `View.notchColorScheme()`): ghi chú Nền tảng, mục 16.5.
+
+- **Thay:** 1 chỗ `.white` của nút shortcut thành `NotchTokens.fill(_:)`. Để test được, `ShortcutButton` đổi từ `private` sang internal (không thay đổi gì khác).
+- **Test:** `ShortcutsGlassTests` (kính sáng, kính tối, Cổ điển). Shortcuts **55 test** (S2). Cổ điển **giống từng điểm ảnh** (băm toàn bộ bitmap trước và sau, hai appearance, bốn lần chạy). Kính do WindowServer vẽ nên không test nào thấy nó: test dựng view trên nền sáng hay tối và đọc màu của chính view.
+- **Cần người kiểm:** hàng "Chữ trên kính" cuối nhóm [Shortcuts](../../manual-test-checklist-all.html#shortcuts) của checklist (hình nền sáng, giao diện sáng của macOS, Liquid Glass).

@@ -7,6 +7,7 @@
 - **Commit chính:** `41a6f5d` và `a75ea22` engine, detector, selection reader; `af75ff2` Services trong Core và app; `57d1a85` và `2bd557a` module; `3fc9482` hàng đợi Services 10 giây; `2655167` gắn vào app (cùng Media); `2b613fe` từ chối yêu cầu Services khi module tắt và báo cho người dùng; `009871c` `context.presenter` thành facade theo module (`open()` thay `open(tab:)`).
 - **Test tự động:** 82 test (báo cáo L1 và báo cáo vòng sửa cuối; Translation chạy lại sau `009871c` và qua). Test không gọi framework Translation thật. Chưa chạy lại khi viết tài liệu này.
 - **Kiểm thử tay:** [mục Dịch trong checklist gộp](../../manual-test-checklist-all.html#translation)
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: ô nhập, ô kết quả, các chip đen và chip bôi đen (S2 `42dd1b1`; mục 9). Translation 907 test. Cổ điển giữ nguyên từng điểm ảnh; cổng `verify.sh` chưa chạy cho commit này (xanh gần nhất ở `6077497`, trước nhiều commit S2). Chưa ai thấy trên kính thật.
 - **Cập nhật sau `156f02d` (2026-10-15):** đọc to và thay vào chỗ đang chọn (`6f57656`, `fcbddbc`), quy đổi (`bcba139`, `1df3073`), từ điển và bộ máy dịch riêng (`7a813f7`, `5c7fffd`), "Bôi đen là hiểu" (`1f31453`, `cdd93f4`, `6e87a81`, `b684ca2`) (mục 7 và 8). Translation 899 test (`b684ca2`). Chưa ai nhìn bằng mắt hay thử với Accessibility, Keychain và mạng thật.
 
 ## 1. Đã xây gì so với spec
@@ -113,3 +114,13 @@ Các đợt: R1b `6f57656`, `fcbddbc`; R2f `dc5e5a8`, `bcba139`, `1df3073`; R3d 
 ## 8. Cần kiểm thử tay (phần mới)
 
 Xem [mục Dịch trong checklist gộp](../../manual-test-checklist-all.html#translation): đọc to và giọng thiếu; thay vào chỗ đang chọn (Notes, TextEdit: đường AX; Safari, Chrome: đường dán, clipboard trả về sau 0,5 giây, lịch sử Clipboard không có mục thừa); quy đổi (5 ft 11 in, 72°F, 3pm PST, 9h sáng giờ Tokyo, (2+3)*4, $12 khi bật tiền tệ); thẻ từ điển (sau khi tải từ điển tiếng Anh); từng bộ máy dịch với khoá thật và khi hỏng ("Dịch bằng Apple"), Keychain; "Bôi đen là hiểu" ở Safari, Notes, TextEdit, Chrome (sau ⌃⌥T một lần), Terminal; trường mật khẩu không ra gì; mã, đường dẫn, URL, log không ra gì; câu tiếng Việt không dấu không ra bản dịch Ý; nút "Dịch" khi thiếu gói; thông báo thiếu quyền; "⋯" và "Hoàn tác"; nhật ký `smart-selection`.
+
+## 9. Đọc được trên kính sáng và tối (S2 `42dd1b1`, 2026-10-16)
+
+Quy tắc chung và hai thứ S2 thêm vào NotchUI (`NotchTokens.fill(_:)` và `View.notchColorScheme()`): ghi chú Nền tảng, mục 16.5.
+
+- **Thay:** 6 trong 7 chỗ `.white` (ô nhập, ô kết quả, đường kẻ, viên menu) thành `NotchTokens.fill(_:)`; scheme tối mà tab tự đặt thành `.notchColorScheme()`. `AccentLabel` (nhãn trên màu nhấn đặc) trả `Color.white` thay vì token, vì trên kính sáng token đó là đen trên một màu nhấn đậm.
+- **Nền đen cố định thì ép sáng:** các chip đọc to và chép (đen 0,6), chip chép của danh sách quy đổi, và gốc `SelectionChipView` (chip nổi của "Bôi đen là hiểu", đen 0,9; một test ghim) có `.notchOnDarkBackground()`; **viền 0,14 của chip còn trắng** (chip đen).
+- **Ô nhập AppKit** (`TranslationInputField`) từng ép chữ trắng, con trỏ trắng và thanh cuộn `darkAqua`. `TranslationInputField.Look(onGlass:)` giữ đúng như vậy ở Cổ điển và dùng `labelColor` cùng appearance của cửa sổ ở kính; tab đưa `surface.isLiquidGlass` từ `body` và ô áp lại trong `updateNSView` **chỉ khi kiểu đổi** (không khi bộ gõ đang soạn, nên không rơi chữ tiếng Việt).
+- **Test:** `TranslationGlassTests` (kính sáng, kính tối, Cổ điển; riêng cho chip, ô nhập, nhãn). Translation **907 test**. Cổ điển **giống từng điểm ảnh** (băm toàn bộ bitmap trước và sau, hai appearance, bốn lần chạy). Kính do WindowServer vẽ nên không test nào thấy nó: test dựng view trên nền sáng hay tối và đọc màu của chính view.
+- **Cần người kiểm:** hàng "Chữ trên kính" cuối nhóm [Dịch](../../manual-test-checklist-all.html#translation) của checklist (hình nền sáng, giao diện sáng của macOS, Liquid Glass).

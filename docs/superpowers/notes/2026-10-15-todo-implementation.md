@@ -6,6 +6,7 @@
 - **Commit:** `463ba0a` (module), `943d82c` (quyền Lời nhắc thành tuỳ chọn, tab hiện trước khi có quyền), `b33834b` (sửa review: việc lặp, focus, hai lỗi đọc tiếng Việt), `af22a1d` (nhận ra quyền vừa cấp: mục 8).
 - **Test tự động:** 188 test trong 12 suite ở `af22a1d` (172 trong 11 suite ở `b33834b`, 142 sau `943d82c`, 138 ở `463ba0a`), ba lần chạy sạch, 0 cảnh báo. Mọi test dùng nguồn dữ liệu giả; **đường đọc và ghi EventKit thật chưa được test tự động nào chạm tới**, và cơ sở dữ liệu Lời nhắc thật không bị đụng.
 - **Kiểm thử tay:** [nhóm Việc cần làm trong checklist gộp](../../manual-test-checklist-all.html#todo). Quyền: Lời nhắc (đặt lại bằng `tccutil reset Reminders io.lucasvu.mynotch`).
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: sáu chỗ `.white` và scheme tối ép của tab (S2 `cf04f16`, `59ad5bd`; mục 9). Todo 191 test. Cổ điển giữ nguyên từng điểm ảnh; cổng `verify.sh` chưa chạy cho commit này (xanh gần nhất ở `6077497`, trước nhiều commit S2). Chưa ai thấy trên kính thật.
 
 ## 1. Đã xây gì
 
@@ -63,3 +64,11 @@ Người dùng báo: sau khi cấp quyền Lời nhắc, tab vẫn nói chưa c�
 - **Cò:** gợi ý **tự nhìn khi còn hiện** (`.task` trên tab, `watchAccess()`: đọc lại trạng thái mỗi giây cho tới khi quyền xuất hiện hay gợi ý biến), nên một lần cấp ở nơi khác khi notch đã mở và tab Việc cần làm đã chọn được nhận **trong khoảng một giây** mà không cần sự kiện nào. `EKEventStoreChanged` vốn đã làm mới (và lần làm mới đọc lại trạng thái): một test nay phủ tín hiệu đổi sau khi cấp. Mở tab, app thành active và notch gắn lại tab vẫn làm mới. Lưu ý nội dung tab bị tháo khi notch đóng (`NotchRootView` chỉ gắn khi mở hay có toast), nên mỗi lần mở gọi `appeared`; vòng theo dõi là thứ phủ một tab vẫn gắn.
 - **Hàng Settings và trang Quyền.** Hàng quyền của Todo trong Settings đọc `permissions.status` ngay trong `body`, thứ không gì đánh giá lại: nay nó giữ trạng thái và **đọc lại mỗi giây khi đang hiện** (và theo lần xin ngay). Trang Quyền hiện `PermissionOverview.statuses`, một cache làm mới khi app active, sau `grant()` và mỗi 2 giây khi trang và cửa sổ đang hiện; `PermissionRow` của trang module đọc lại mỗi 2 giây qua `TimelineView` và không có cache. Vòng thăm dò nền của app (`AppDelegate.setPermissionPolling`) chỉ chạy khi có module đợi ở `needsPermission`, mà Todo không còn thế từ khi quyền tuỳ chọn; **phần hở đó được U4 (`e3a2d48`) đóng** bằng vòng 3 giây khi Settings hay notch đang mở (Nền tảng, mục 15.3), còn chấm đỏ và huy hiệu vẫn chỉ đếm quyền bắt buộc.
 - **Chưa kiểm:** đường EventKit thật vẫn chưa test tự động nào chạm tới và cơ sở dữ liệu Lời nhắc thật không bị đụng; việc cấp rồi thấy danh sách hiện trong vòng một giây là điều chỉ người dùng xác nhận được (nhóm Việc cần làm của checklist, mục về quyền và nhóm "Quyền"); không ai gỡ được là cò nào trong các cách trên đã gây sự cố thật.
+
+## 9. Đọc được trên kính sáng và tối (S2 `cf04f16`, test `59ad5bd`, 2026-10-16)
+
+Quy tắc chung và hai thứ S2 thêm vào NotchUI (`NotchTokens.fill(_:)` và `View.notchColorScheme()`): ghi chú Nền tảng, mục 16.5.
+
+- **Thay:** 6 chỗ `.white` (ở tab và ở hàng việc) thành `NotchTokens.fill(_:)`; scheme tối mà tab tự đặt (`.environment(\.colorScheme, .dark)`, thứ làm token thành trắng trên kính sáng) thành `.notchColorScheme()`.
+- **Test:** `TodoGlassTests` (kính sáng, kính tối, Cổ điển). Commit `59ad5bd` đo nền kính từ một ảnh trống. Todo **191 test** (S2). Cổ điển **giống từng điểm ảnh** (băm toàn bộ bitmap trước và sau, hai appearance, bốn lần chạy). Kính do WindowServer vẽ nên không test nào thấy nó: test dựng view trên nền sáng hay tối và đọc màu của chính view.
+- **Cần người kiểm:** hàng "Chữ trên kính" cuối nhóm [Việc cần làm](../../manual-test-checklist-all.html#todo) của checklist (hình nền sáng, giao diện sáng của macOS, Liquid Glass).
