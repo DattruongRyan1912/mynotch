@@ -5,6 +5,8 @@ import ClipboardModule
 import LockScreenModule
 import MediaModule
 import MyNotchCore
+import PerformanceModule
+import PortsModule
 import ScreenshotModule
 import ShelfModule
 import ShortcutsModule
@@ -28,6 +30,8 @@ enum ModuleList {
             BatteryModule(),
             ShortcutsModule(),
             TimerModule(),
+            PerformanceModule(),
+            PortsModule(),
             ShelfModule(),
             SystemActivitiesModule(),
             LockScreenModule(),

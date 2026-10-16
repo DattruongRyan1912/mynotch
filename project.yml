@@ -38,6 +38,10 @@ packages:
     path: Packages/Modules/LockScreen
   MediaModule:
     path: Packages/Modules/Media
+  PerformanceModule:
+    path: Packages/Modules/Performance
+  PortsModule:
+    path: Packages/Modules/Ports
   ScreenshotModule:
     path: Packages/Modules/Screenshot
   ShelfModule:
@@ -84,6 +88,8 @@ targets:
       - package: ClipboardModule
       - package: LockScreenModule
       - package: MediaModule
+      - package: PerformanceModule
+      - package: PortsModule
       - package: ScreenshotModule
       - package: ShelfModule
       - package: ShortcutsModule
