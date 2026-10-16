@@ -55,12 +55,11 @@ public struct YouTubeDiag: Equatable, Sendable {
         let words = event.split(separator: " ", omittingEmptySubsequences: false)
         switch origin {
         case .content:
-            guard words.count == 3, words[0] == "content-command", let command = YouTubeCommand(rawValue: String(words[1])) else { return nil }
-            switch words[2] {
-            case "ok": return .content(command, performed: true)
-            case "unavailable": return .content(command, performed: false)
-            default: return nil
-            }
+            // `content-command <action> ok [via=<how>]` or `unavailable [reason=<why>]`: the extension before 0.2.2 says neither.
+            guard words.count >= 3, words.count <= 4, words[0] == "content-command", let command = YouTubeCommand(rawValue: String(words[1])),
+                  Self.isOutcome(words[2...])
+            else { return nil }
+            return .content(command, performed: words[2] == "ok")
         case .sw:
             return event == "sw-command-no-tab" || event == "sw-reject invalid command" ? .worker : nil
         case .page:
@@ -85,6 +84,20 @@ public struct YouTubeDiag: Equatable, Sendable {
     private static let closedWordCodes: Set<String> = ["content-command", "content-tabcommand"]
 
     // MARK: shapes
+
+    /// How a command went: `ok` and how it was done, or `unavailable` and why (the word after it may be left out). Closed lists of words.
+    private static let doneVia: Set<Substring> = ["button", "href", "upnext", "endscreen", "restart", "history"]
+    private static let unavailableReasons: Set<Substring> = ["ad", "none", "refused", "error"]
+
+    private static func isOutcome(_ words: ArraySlice<Substring>) -> Bool {
+        guard let first = words.first, words.count <= 2 else { return false }
+        let detail = words.count == 2 ? value(of: first == "ok" ? "via" : "reason", in: words[words.startIndex + 1]) : nil
+        switch first {
+        case "ok": return words.count == 1 || detail.map(doneVia.contains) == true
+        case "unavailable": return words.count == 1 || detail.map(unavailableReasons.contains) == true
+        default: return false
+        }
+    }
 
     /// `arguments` is what follows the code: nothing, or a space and then the words separated by single spaces.
     private static func areValid(_ arguments: Substring, for code: String) -> Bool {
@@ -119,7 +132,7 @@ public struct YouTubeDiag: Equatable, Sendable {
             return words.count == 2 && ["play", "pause", "toggle", "next", "previous", "seek"].contains(words[0])
                 && (words[1] == "ok" || words[1] == "unavailable")
         case "content-command":
-            return words.count == 2 && (words[0] == "next" || words[0] == "previous") && (words[1] == "ok" || words[1] == "unavailable")
+            return (2...3).contains(words.count) && (words[0] == "next" || words[0] == "previous") && isOutcome(words[1...])
         case "content-cc":
             return words.count == 1 && (words[0] == "on" || words[0] == "off")
         case "content-send-error":

@@ -57,6 +57,10 @@ function makePage({ url = watch(ID), title = "Placeholder title - YouTube", pres
     removedRuntimeListeners: [],
     nextButton: null,
     prevButton: null,
+    upNextLinks: [], // the links of "Up next" in the sidebar, in document order
+    endScreenLinks: [], // the links of the end screen
+    nav: { canGoBack: false, currentEntry: { index: 1 }, entries: [] }, // the Navigation API's view of the history
+    historyBacks: 0,
     dispatched: []
   };
   page.setVideo = (next) => {
@@ -73,6 +77,12 @@ function makePage({ url = watch(ID), title = "Placeholder title - YouTube", pres
       if (selector === ".ytp-prev-button") return page.prevButton;
       return selector.includes("video") ? page.video : null;
     },
+    querySelectorAll(selector) {
+      if (page.queryThrows) throw page.queryThrows;
+      if (selector.includes("ytd-watch-next-secondary-results-renderer")) return page.upNextLinks;
+      if (selector.includes("endscreen")) return page.endScreenLinks;
+      return [];
+    },
     dispatchEvent: (event) => page.dispatched.push(event),
     getElementById: (id) => (id === "movie_player" ? { classList: { contains: (name) => page.ad && name === "ad-showing" } } : null)
   };
@@ -80,6 +90,20 @@ function makePage({ url = watch(ID), title = "Placeholder title - YouTube", pres
     __now: 1000000,
     document,
     location: page.location,
+    navigation: {
+      get canGoBack() {
+        return page.nav.canGoBack;
+      },
+      get currentEntry() {
+        return page.nav.currentEntry;
+      },
+      entries: () => page.nav.entries
+    },
+    history: {
+      back() {
+        page.historyBacks += 1;
+      }
+    },
     chrome: {
       runtime: {
         get id() {
@@ -1070,10 +1094,12 @@ function fakeButton(overrides = {}) {
     disabled: false,
     ariaDisabled: "false",
     rects: 1,
+    href: null,
+    target: null,
     click() {
       button.clicks += 1;
     },
-    getAttribute: (name) => (name === "aria-disabled" ? button.ariaDisabled : null),
+    getAttribute: (name) => (name === "aria-disabled" ? button.ariaDisabled : name === "href" ? button.href : name === "target" ? button.target : null),
     getClientRects: () => ({ length: button.rects }),
     ...overrides
   };
@@ -1097,7 +1123,7 @@ test("next: the player's own next button is clicked once, and the content script
   page.nextButton = fakeButton();
   const { responses } = page.command(NEXT);
   assert.equal(page.nextButton.clicks, 1);
-  assert.deepEqual(commandDiags(page), ["content-command next ok"]);
+  assert.deepEqual(commandDiags(page), ["content-command next ok via=button"]);
   assert.deepEqual(responses, [{ ok: true }], "answered at once, so the worker's send resolves");
   for (const message of page.diags) assertSafeDiag(message, "content");
 });
@@ -1115,7 +1141,7 @@ test("next: a missing, hidden, disabled or invisible button is unavailable and n
     page.nextButton = button;
     const { responses } = page.command(NEXT);
     assert.equal(button ? button.clicks : 0, 0);
-    assert.deepEqual(commandDiags(page), ["content-command next unavailable"]);
+    assert.deepEqual(commandDiags(page), ["content-command next unavailable reason=none"]);
     assert.deepEqual(responses, [{ ok: false }]);
   }
 });
@@ -1126,7 +1152,7 @@ test("next: nothing is skipped while an advert plays", () => {
   page.ad = true;
   page.command(NEXT);
   assert.equal(page.nextButton.clicks, 0);
-  assert.deepEqual(commandDiags(page), ["content-command next unavailable"]);
+  assert.deepEqual(commandDiags(page), ["content-command next unavailable reason=ad"]);
 });
 
 test("previous: the player's previous button is clicked when there is a usable one, and the video is left alone", () => {
@@ -1136,7 +1162,7 @@ test("previous: the player's previous button is clicked when there is a usable o
   page.command(PREVIOUS);
   assert.equal(page.prevButton.clicks, 1);
   assert.equal(page.video.currentTime, 40);
-  assert.deepEqual(commandDiags(page), ["content-command previous ok"]);
+  assert.deepEqual(commandDiags(page), ["content-command previous ok via=button"]);
 });
 
 test("previous: without a usable previous button it restarts the video, but only when it is more than 3 s in", () => {
@@ -1147,7 +1173,7 @@ test("previous: without a usable previous button it restarts the video, but only
     const { responses } = page.command(PREVIOUS);
     assert.equal(page.video.currentTime, 0);
     assert.equal(button ? button.clicks : 0, 0);
-    assert.deepEqual(commandDiags(page), ["content-command previous ok"]);
+    assert.deepEqual(commandDiags(page), ["content-command previous ok via=restart"]);
     assert.deepEqual(responses, [{ ok: true }]);
   }
   for (const time of [3, 2.9, 0]) {
@@ -1155,7 +1181,7 @@ test("previous: without a usable previous button it restarts the video, but only
     page.video.currentTime = time;
     const { responses } = page.command(PREVIOUS);
     assert.equal(page.video.currentTime, time, `${time} s: left where it is`);
-    assert.deepEqual(commandDiags(page), ["content-command previous unavailable"]);
+    assert.deepEqual(commandDiags(page), ["content-command previous unavailable reason=none"]);
     assert.deepEqual(responses, [{ ok: false }]);
   }
   const justOver = startedPage();
@@ -1252,12 +1278,12 @@ test("every command is carried out and every one is answered: the app waits for 
   page.command(NEXT);
   page.command(NEXT);
   assert.equal(page.nextButton.clicks, 3);
-  assert.deepEqual(commandDiags(page), Array(3).fill("content-command next ok"));
+  assert.deepEqual(commandDiags(page), Array(3).fill("content-command next ok via=button"));
   page.nextButton = null;
   page.video.currentTime = 1; // too early to restart
   page.command(NEXT);
   page.command(PREVIOUS);
-  assert.deepEqual(commandDiags(page).slice(3), ["content-command next unavailable", "content-command previous unavailable"]);
+  assert.deepEqual(commandDiags(page).slice(3), ["content-command next unavailable reason=none", "content-command previous unavailable reason=none"]);
 });
 
 test("the other diagnostics of the content script stay rate limited when commands are answered", () => {
@@ -1271,7 +1297,7 @@ test("the other diagnostics of the content script stay rate limited when command
   }
   const events = page.diags.map((message) => message.event);
   assert.deepEqual(events.filter((event) => event.startsWith("content-cc")), ["content-cc off"], "off once; the repeats and the on sent at start are within 5 s");
-  assert.equal(events.filter((event) => event === "content-command next ok").length, 2);
+  assert.equal(events.filter((event) => event === "content-command next ok via=button").length, 2);
 });
 
 test("the listener is registered once, removed when the copy stops and not doubled by a second copy", () => {
@@ -1292,7 +1318,7 @@ test("a command that arrives while the copy is not on a watch page is simply una
   const page = startedPage({ url: `${ORIGIN}/` });
   const { responses } = page.command(NEXT);
   assert.deepEqual(responses, [{ ok: false }]);
-  assert.deepEqual(commandDiags(page), ["content-command next unavailable"]);
+  assert.deepEqual(commandDiags(page), ["content-command next unavailable reason=none"]);
 });
 
 test("a throwing page query is unavailable, never an exception into the worker's message", () => {
@@ -1301,7 +1327,7 @@ test("a throwing page query is unavailable, never an exception into the worker's
   let outcome;
   assert.doesNotThrow(() => (outcome = page.command(NEXT)));
   assert.deepEqual(outcome.responses, [{ ok: false }]);
-  assert.deepEqual(commandDiags(page), ["content-command next unavailable"]);
+  assert.deepEqual(commandDiags(page), ["content-command next unavailable reason=error"]);
 });
 
 test("a click that throws is unavailable too", () => {
@@ -1312,7 +1338,344 @@ test("a click that throws is unavailable too", () => {
     }
   });
   assert.doesNotThrow(() => page.command(NEXT));
-  assert.deepEqual(commandDiags(page), ["content-command next unavailable"]);
+  assert.deepEqual(commandDiags(page), ["content-command next unavailable reason=error"]);
+});
+
+// ---- next without a playlist: the fallbacks, every one a click on a link to another video of YouTube -----------
+
+/** A link of the page: where it points, and how many times it was clicked. */
+const link = (href, overrides = {}) => fakeButton({ href, ...overrides });
+
+const up = (id = ID2) => `/watch?v=${id}`;
+const sentTo = (links) => links.map((one) => one.clicks);
+
+test("next: a hidden next button that is a link to another video is clicked: that is how a video outside any playlist goes on", () => {
+  for (const hidden of [{ rects: 0 }, { hidden: true }]) {
+    const page = startedPage();
+    page.nextButton = link(up(), hidden);
+    const { responses } = page.command(NEXT);
+    assert.equal(page.nextButton.clicks, 1);
+    assert.deepEqual(commandDiags(page), ["content-command next ok via=href"]);
+    assert.deepEqual(responses, [{ ok: true }]);
+  }
+});
+
+test("next: a usable next button is still the first choice, and a link only the second", () => {
+  const page = startedPage();
+  page.nextButton = link(up());
+  const side = link(up(ID2));
+  page.upNextLinks = [side];
+  page.command(NEXT);
+  assert.deepEqual([page.nextButton.clicks, side.clicks], [1, 0]);
+  assert.deepEqual(commandDiags(page), ["content-command next ok via=button"]);
+});
+
+test("next: a hidden button that goes nowhere new (this video, a disabled player) leaves the next step to the sidebar", () => {
+  for (const button of [link(up(ID), { rects: 0 }), link(up(), { rects: 0, ariaDisabled: "true" }), link(up(), { rects: 0, disabled: true }), link(null, { rects: 0 }), link("", { rects: 0 })]) {
+    const page = startedPage();
+    page.nextButton = button;
+    const side = link(up(ID2));
+    page.upNextLinks = [side];
+    page.command(NEXT);
+    assert.equal(button.clicks, 0);
+    assert.equal(side.clicks, 1);
+    assert.deepEqual(commandDiags(page), ["content-command next ok via=upnext"]);
+  }
+});
+
+test("next: with no next button at all the first of Up next in the sidebar is clicked", () => {
+  const page = startedPage();
+  const first = link(up(ID2));
+  const second = link(up("zzzzzzzzzzz"));
+  page.upNextLinks = [first, second];
+  const { responses } = page.command(NEXT);
+  assert.deepEqual(sentTo([first, second]), [1, 0]);
+  assert.deepEqual(commandDiags(page), ["content-command next ok via=upnext"]);
+  assert.deepEqual(responses, [{ ok: true }]);
+});
+
+test("next: a sidebar link that is the video that plays, or that goes elsewhere, is passed over for the first one that is another video", () => {
+  const page = startedPage();
+  const same = link(up(ID));
+  const elsewhere = link("https://evil.example/watch?v=lmnopqrstuv");
+  const real = link(up(ID2));
+  page.upNextLinks = [same, elsewhere, real];
+  page.command(NEXT);
+  assert.deepEqual(sentTo([same, elsewhere, real]), [0, 0, 1]);
+  assert.deepEqual(commandDiags(page), ["content-command next ok via=upnext"]);
+});
+
+test("next: with nothing in the sidebar the end screen's link is clicked", () => {
+  const page = startedPage();
+  const end = link(up(ID2));
+  page.endScreenLinks = [end];
+  page.command(NEXT);
+  assert.equal(end.clicks, 1);
+  assert.deepEqual(commandDiags(page), ["content-command next ok via=endscreen"]);
+});
+
+test("next: the order is the button, the button's own link, the sidebar, the end screen", () => {
+  const page = startedPage();
+  const button = link(up(ID2), { rects: 0 });
+  const side = link(up("sidebar_vid"));
+  const end = link(up("endscreenvd"));
+  page.nextButton = button;
+  page.upNextLinks = [side];
+  page.endScreenLinks = [end];
+  page.command(NEXT);
+  assert.deepEqual(sentTo([button, side, end]), [1, 0, 0]);
+  page.nextButton = null;
+  page.command(NEXT);
+  assert.deepEqual(sentTo([button, side, end]), [1, 1, 0]);
+  page.upNextLinks = [];
+  page.command(NEXT);
+  assert.deepEqual(sentTo([button, side, end]), [1, 1, 1]);
+  assert.deepEqual(commandDiags(page), ["content-command next ok via=href", "content-command next ok via=upnext", "content-command next ok via=endscreen"]);
+});
+
+test("next: while an advert shows no link is clicked either", () => {
+  const page = startedPage();
+  const button = link(up(), { rects: 0 });
+  const side = link(up(ID2));
+  const end = link(up("endscreenvd"));
+  page.nextButton = button;
+  page.upNextLinks = [side];
+  page.endScreenLinks = [end];
+  page.ad = true;
+  const { responses } = page.command(NEXT);
+  assert.deepEqual(sentTo([button, side, end]), [0, 0, 0]);
+  assert.deepEqual(commandDiags(page), ["content-command next unavailable reason=ad"]);
+  assert.deepEqual(responses, [{ ok: false }]);
+});
+
+test("next: an address that is not another video of this site is never followed, wherever it is offered", () => {
+  const refused = [
+    "https://evil.example/watch?v=lmnopqrstuv", // another site
+    "https://www.youtube.com.evil.example/watch?v=lmnopqrstuv", // a look-alike
+    "//evil.example/watch?v=lmnopqrstuv", // the same scheme, another site
+    "http://www.youtube.com/watch?v=lmnopqrstuv", // not the page's origin
+    "https://music.youtube.com/watch?v=lmnopqrstuv", // another origin of the same family
+    "javascript:alert(1)",
+    "data:text/html,x",
+    "/results?search_query=x", // another page of this site
+    "/shorts/lmnopqrstuv",
+    "/watch", // no video
+    "/watch?v=short", // not a video id
+    "/watch?v=lmnopqrstuv%0Aabc",
+    `/watch?v=${"a".repeat(3000)}` // far too long
+  ];
+  for (const href of refused) {
+    const button = link(href, { rects: 0 });
+    const side = link(href);
+    const end = link(href);
+    const page = startedPage();
+    page.nextButton = button;
+    page.upNextLinks = [side];
+    page.endScreenLinks = [end];
+    page.command(NEXT);
+    assert.deepEqual(sentTo([button, side, end]), [0, 0, 0], href.slice(0, 60));
+    assert.deepEqual(commandDiags(page), ["content-command next unavailable reason=refused"], href.slice(0, 60));
+  }
+  // A link that opens a window of its own is not followed here either.
+  for (const target of ["_blank", "popup", "_top"]) {
+    const page = startedPage();
+    const side = link(up(ID2), { target });
+    page.upNextLinks = [side];
+    page.command(NEXT);
+    assert.equal(side.clicks, 0, target);
+    assert.deepEqual(commandDiags(page), ["content-command next unavailable reason=refused"], target);
+  }
+});
+
+test("next: a refused link does not stop a good one that comes after it", () => {
+  const page = startedPage();
+  const bad = link("https://evil.example/watch?v=lmnopqrstuv");
+  const good = link(up(ID2));
+  page.upNextLinks = [bad, good];
+  page.command(NEXT);
+  assert.deepEqual(sentTo([bad, good]), [0, 1]);
+  assert.deepEqual(commandDiags(page), ["content-command next ok via=upnext"]);
+});
+
+test("next: addresses of this site are taken as relative or whole, with other parameters, and the video id decides", () => {
+  for (const href of [`/watch?v=${ID2}`, `${ORIGIN}/watch?v=${ID2}`, `/watch?v=${ID2}&list=RD${ID2}&index=2`, `/watch?list=PLx&v=${ID2}&t=30s`]) {
+    const page = startedPage();
+    const side = link(href);
+    page.upNextLinks = [side];
+    page.command(NEXT);
+    assert.equal(side.clicks, 1, href);
+  }
+  const page = startedPage();
+  const same = link(`${ORIGIN}/watch?v=${ID}&t=5s`);
+  page.upNextLinks = [same];
+  page.command(NEXT);
+  assert.equal(same.clicks, 0, "this video, whatever else the address says");
+  assert.deepEqual(commandDiags(page), ["content-command next unavailable reason=none"]);
+});
+
+test("next: nothing to go to is unavailable and says so without a word of the page", () => {
+  const page = startedPage();
+  page.upNextLinks = [link(null), link("")];
+  const { responses } = page.command(NEXT);
+  assert.deepEqual(commandDiags(page), ["content-command next unavailable reason=none"]);
+  assert.deepEqual(responses, [{ ok: false }]);
+  for (const message of page.diags) assertSafeDiag(message, "content");
+});
+
+test("next: every way it is done, and every way it is not, is a diagnostic of the closed grammar with no address and no title", () => {
+  const cases = [
+    () => {
+      const page = startedPage();
+      page.nextButton = link(up());
+      return page;
+    },
+    () => {
+      const page = startedPage();
+      page.nextButton = link(up(), { rects: 0 });
+      return page;
+    },
+    () => {
+      const page = startedPage();
+      page.upNextLinks = [link(up())];
+      return page;
+    },
+    () => {
+      const page = startedPage();
+      page.endScreenLinks = [link(up())];
+      return page;
+    },
+    () => {
+      const page = startedPage();
+      page.upNextLinks = [link("https://evil.example/watch?v=lmnopqrstuv")];
+      return page;
+    },
+    () => {
+      const page = startedPage();
+      page.ad = true;
+      return page;
+    },
+    () => startedPage()
+  ];
+  const seen = [];
+  for (const make of cases) {
+    const page = make();
+    page.command(NEXT);
+    for (const message of page.diags) assertSafeDiag(message, "content");
+    seen.push(...commandDiags(page));
+  }
+  assert.deepEqual(seen, [
+    "content-command next ok via=button",
+    "content-command next ok via=href",
+    "content-command next ok via=upnext",
+    "content-command next ok via=endscreen",
+    "content-command next unavailable reason=refused",
+    "content-command next unavailable reason=ad",
+    "content-command next unavailable reason=none"
+  ]);
+});
+
+test("next: the media tab script's hook takes the same steps", () => {
+  const page = startedPage();
+  const side = link(up(ID2));
+  page.upNextLinks = [side];
+  assert.equal(vm.runInContext(`${HOOK}("next")`, page.context), true);
+  assert.equal(side.clicks, 1);
+  page.upNextLinks = [];
+  assert.equal(vm.runInContext(`${HOOK}("next")`, page.context), false);
+});
+
+/** The history as the Navigation API lists it: the entries before this one, this one last. */
+function withHistory(page, urls) {
+  page.nav = { canGoBack: urls.length > 1, currentEntry: { index: urls.length - 1 }, entries: urls.map((url) => ({ url })) };
+}
+
+test("previous: a video that has just begun goes back when the page before it is a watch page of another video", () => {
+  const page = startedPage();
+  page.video.currentTime = 1.5;
+  withHistory(page, [watch(ID2), watch(ID)]);
+  const { responses } = page.command(PREVIOUS);
+  assert.equal(page.historyBacks, 1);
+  assert.equal(page.video.currentTime, 1.5, "the video itself was left alone");
+  assert.deepEqual(commandDiags(page), ["content-command previous ok via=history"]);
+  assert.deepEqual(responses, [{ ok: true }]);
+});
+
+test("previous: it does not go back when the page before is not a watch page of another video", () => {
+  const before = [
+    `${ORIGIN}/`, `${ORIGIN}/results?search_query=x`, `${ORIGIN}/feed/subscriptions`, `${ORIGIN}/shorts/${ID2}`, watch(ID), // this very video
+    "https://www.youtube.com.evil.example/watch?v=lmnopqrstuv", "https://evil.example/watch?v=lmnopqrstuv", "http://www.youtube.com/watch?v=lmnopqrstuv",
+    null, undefined, "", "not a url"
+  ];
+  for (const url of before) {
+    const page = startedPage();
+    page.video.currentTime = 1;
+    withHistory(page, [url, watch(ID)]);
+    page.command(PREVIOUS);
+    assert.equal(page.historyBacks, 0, String(url));
+    assert.deepEqual(commandDiags(page), ["content-command previous unavailable reason=none"], String(url));
+  }
+});
+
+test("previous: nothing to go back to, or no way to know what is, is unavailable as before", () => {
+  const empty = startedPage();
+  empty.video.currentTime = 1;
+  withHistory(empty, [watch(ID)]); // canGoBack false
+  assert.deepEqual(empty.command(PREVIOUS).responses, [{ ok: false }]);
+  assert.equal(empty.historyBacks, 0);
+
+  const blind = startedPage();
+  blind.video.currentTime = 1;
+  withHistory(blind, [watch(ID2), watch(ID)]);
+  vm.runInContext("delete globalThis.navigation", blind.context); // a Chrome without the Navigation API
+  assert.deepEqual(blind.command(PREVIOUS).responses, [{ ok: false }]);
+  assert.equal(blind.historyBacks, 0);
+
+  const lost = startedPage();
+  lost.video.currentTime = 1;
+  lost.nav = { canGoBack: true, currentEntry: null, entries: [{ url: watch(ID2) }] };
+  assert.deepEqual(lost.command(PREVIOUS).responses, [{ ok: false }]);
+  const first = startedPage();
+  first.video.currentTime = 1;
+  first.nav = { canGoBack: true, currentEntry: { index: 0 }, entries: [{ url: watch(ID) }] }; // nothing before this entry
+  assert.deepEqual(first.command(PREVIOUS).responses, [{ ok: false }]);
+  assert.equal(lost.historyBacks + first.historyBacks, 0);
+});
+
+test("previous: past 3 s it restarts the video as before and does not go back, and an advert stops both", () => {
+  const page = startedPage();
+  page.video.currentTime = 30;
+  withHistory(page, [watch(ID2), watch(ID)]);
+  page.command(PREVIOUS);
+  assert.equal(page.video.currentTime, 0);
+  assert.equal(page.historyBacks, 0);
+  assert.deepEqual(commandDiags(page), ["content-command previous ok via=restart"]);
+
+  const ad = startedPage();
+  ad.video.currentTime = 1;
+  ad.ad = true;
+  withHistory(ad, [watch(ID2), watch(ID)]);
+  ad.command(PREVIOUS);
+  assert.equal(ad.historyBacks, 0);
+  assert.deepEqual(commandDiags(ad), ["content-command previous unavailable reason=ad"]);
+
+  const button = startedPage();
+  button.video.currentTime = 1;
+  button.prevButton = fakeButton();
+  withHistory(button, [watch(ID2), watch(ID)]);
+  button.command(PREVIOUS);
+  assert.equal(button.prevButton.clicks, 1, "the player's own button comes first");
+  assert.equal(button.historyBacks, 0);
+});
+
+test("the fallbacks make up no event and open no address: they click, and go back one page, and nothing else", () => {
+  const source = readSource("content.js");
+  assert.equal(/KeyboardEvent|keydown|keyup|keypress|dispatchEvent|\.focus\(|location\.(?:assign|replace|href\s*=)|window\.open|\.open\(|fetch\(|XMLHttpRequest|sendBeacon/.test(source.replace(/\/\*[\s\S]*?\*\//g, "")), false);
+  const page = startedPage();
+  page.nextButton = link(up(), { rects: 0 });
+  page.upNextLinks = [link(up(ID2))];
+  page.command(NEXT);
+  page.command(NEXT);
+  assert.deepEqual(page.dispatched, []);
 });
 
 // ---- the manifest also runs content.js on other pages, for the media tab script's sake ---------------------

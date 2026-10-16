@@ -19,6 +19,11 @@ import Testing
         ("content", "content-cc on"), ("content", "content-cc off"),
         ("content", "content-command next ok"), ("content", "content-command next unavailable"),
         ("content", "content-command previous ok"), ("content", "content-command previous unavailable"),
+        ("content", "content-command next ok via=button"), ("content", "content-command next ok via=href"),
+        ("content", "content-command next ok via=upnext"), ("content", "content-command next ok via=endscreen"),
+        ("content", "content-command previous ok via=restart"), ("content", "content-command previous ok via=history"),
+        ("content", "content-command next unavailable reason=ad"), ("content", "content-command next unavailable reason=none"),
+        ("content", "content-command previous unavailable reason=refused"), ("content", "content-command previous unavailable reason=error"),
         ("content", "content-tabcommand play ok"), ("content", "content-tabcommand pause unavailable"),
         ("content", "content-tabcommand toggle ok"), ("content", "content-tabcommand next unavailable"),
         ("content", "content-tabcommand previous ok"), ("content", "content-tabcommand seek ok"),
@@ -108,6 +113,14 @@ import Testing
             ("content", "content-command next ok abcdefghijk"), ("content", "content-command next=ok"),
             ("content", "content-command unavailable ok"), ("content", "content-command next unavailable unavailable"),
             ("content", "content-command next ok https://www.youtube.com/watch"),
+            ("content", "content-command next ok via="), ("content", "content-command next ok via=teleport"),
+            ("content", "content-command next ok via=BUTTON"), ("content", "content-command next ok reason=ad"),
+            ("content", "content-command next unavailable via=button"), ("content", "content-command next unavailable reason=teleport"),
+            ("content", "content-command next unavailable reason=abcdefghijk"),
+            ("content", "content-command next unavailable reason=https://www.youtube.com/watch?v=abcdefghijk"),
+            ("content", "content-command next ok via=button via=href"), ("content", "content-command next ok  via=button"),
+            ("content", "content-command next ok via=button "), ("content", "content-command next ok via=button extra"),
+            ("content", "content-tabcommand next ok via=button"),
             ("sw", "sw-command-no-tab extra"), ("sw", "sw-command-no-tab "), ("sw", "sw-command-no-tab tab=1"),
             ("sw", "sw-reject invalid commands"), ("sw", "sw-reject invalid Command"), ("sw", "sw-reject invalid unavailable"),
             ("content", "content-start extra"), ("content", "content-start "), ("content", "content-cc"), ("content", "content-cc maybe"),
@@ -194,6 +207,11 @@ import Testing
             ("content-command next unavailable", .content(.next, performed: false)),
             ("content-command previous ok", .content(.previous, performed: true)),
             ("content-command previous unavailable", .content(.previous, performed: false)),
+            ("content-command next ok via=href", .content(.next, performed: true)),
+            ("content-command next ok via=upnext", .content(.next, performed: true)),
+            ("content-command previous ok via=history", .content(.previous, performed: true)),
+            ("content-command next unavailable reason=ad", .content(.next, performed: false)),
+            ("content-command previous unavailable reason=none", .content(.previous, performed: false)),
         ]
         for (event, answer) in content {
             #expect(YouTubeDiag(origin: .content, event: event).commandAnswer == answer, "\(event)")
@@ -204,7 +222,7 @@ import Testing
         #expect(YouTubeDiag(origin: .sw, event: "sw-command-no-tab").commandAnswer == .worker)
         #expect(YouTubeDiag(origin: .sw, event: "sw-reject invalid command").commandAnswer == .worker)
         #expect(YouTubeDiag(origin: .content, event: "sw-command-no-tab").commandAnswer == nil, "only the worker knows about tabs")
-        for event in ["sw-start v=0.1.3", "sw-reject invalid playback", "sw-msg playback", "sw-access youtube=granted", "content-start", "content-alive videoid-present=true playing=true", "content-command next", "content-command skip ok", ""] {
+        for event in ["sw-start v=0.1.3", "sw-reject invalid playback", "sw-msg playback", "sw-access youtube=granted", "content-start", "content-alive videoid-present=true playing=true", "content-command next", "content-command skip ok", "content-command next ok via=teleport", "content-command next unavailable via=button", "content-command next ok via=button extra", ""] {
             #expect(YouTubeDiag(origin: .sw, event: event).commandAnswer == nil, "\(event)")
             #expect(YouTubeDiag(origin: .content, event: event).commandAnswer == nil, "\(event)")
         }

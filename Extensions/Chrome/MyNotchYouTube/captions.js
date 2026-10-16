@@ -327,7 +327,7 @@
     "sw-tabcommand-no-tab": NO_ARGS,
     "content-start": NO_ARGS,
     "content-no-lib": NO_ARGS,
-    "content-command": /^ (?:next|previous) (?:ok|unavailable)$/,
+    "content-command": /^ (?:next|previous) (?:ok(?: via=(?:button|href|upnext|endscreen|restart|history))?|unavailable(?: reason=(?:ad|none|refused|error))?)$/,
     "content-tabcommand": /^ (?:play|pause|toggle|next|previous|seek) (?:ok|unavailable)$/,
     "content-video-found": NO_ARGS,
     "content-video-missing": NO_ARGS,

@@ -11,9 +11,12 @@
  *    Diag events are fixed codes plus numbers and booleans: no titles, URLs or video ids.
  *  - Does nothing outside www.youtube.com (the manifest also runs it on other pages, for the media tab script's sake).
  *  - Carries out the two commands the app can give through the service worker, `next` and `previous`,
- *    the way a user would: it clicks the player's own button (previous restarts the video when the
- *    player has no usable previous button and the video is more than 3 s in). It never makes up
- *    keyboard events, and it says what happened as a `content-command` diag.
+ *    the way a user would, and only ever by clicking: next clicks the player's next button, else a link to
+ *    another video of YouTube itself (the next button's own, even hidden, the first of "Up next" in the
+ *    sidebar, the end screen's); previous clicks the player's previous button, else restarts a video that
+ *    is more than 3 s in, else goes back when the page before is a watch page. It never makes up keyboard
+ *    events, follows no address that is not another video of this site, and says what happened as a
+ *    `content-command` diag (how, or why not: fixed words, never an address or a title).
  *
  * Only the fields of the shared protocol are ever sent; no URLs, no cookies, nothing else.
  */
@@ -63,6 +66,14 @@
   var TICK_MS = 1000;
   var NEXT_BUTTON = ".ytp-next-button";
   var PREVIOUS_BUTTON = ".ytp-prev-button";
+  // Links to other videos where YouTube lists what follows: "Up next" in the watch page's sidebar (an old and a newer layout), and the end screen.
+  var UPNEXT_LINKS =
+    'ytd-watch-next-secondary-results-renderer a#thumbnail[href^="/watch"], ' +
+    'ytd-watch-next-secondary-results-renderer ytd-compact-video-renderer a[href^="/watch"], ' +
+    'ytd-watch-next-secondary-results-renderer yt-lockup-view-model a[href^="/watch"]';
+  var ENDSCREEN_LINKS = '.ytp-autonav-endscreen-upnext-container a[href^="/watch"], .ytp-endscreen-content a[href^="/watch"]';
+  var WATCH_VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
+  var MAX_HREF = 2048;
   // What YouTube's own "previous" does: past this many seconds it restarts the video instead of going back.
   var RESTART_AFTER_SECONDS = 3;
   var HEARTBEAT_MS = 5000;
@@ -332,24 +343,128 @@
     return true;
   }
 
-  /** Previous: the player's previous button; without a usable one, restart a video that is past 3 s. */
-  function goToPrevious() {
-    if (clickPlayerButton(PREVIOUS_BUTTON)) return true;
-    var video = state.video || findVideo();
-    var time = video ? video.currentTime : NaN;
-    if (typeof time !== "number" || !isFinite(time) || time <= RESTART_AFTER_SECONDS) return false;
-    video.currentTime = 0;
-    return true;
+  /** How a command went: carried out, and how (a fixed word), or not, and why (a fixed word). */
+  function done(via) {
+    return { ok: true, via: via };
   }
 
-  /** Whether the command could be carried out. Never throws: a page that changed under us is "unavailable". */
-  function perform(action) {
+  function failed(reason) {
+    return { ok: false, reason: reason };
+  }
+
+  /** The id of the video a watch address is for, when it is one of this site's own (relative addresses are this page's); else null. */
+  function watchIdOf(address) {
+    if (typeof address !== "string" || address.length === 0 || address.length > MAX_HREF) return null;
+    var url;
     try {
-      if (isAdShowing()) return false;
-      return action === "next" ? clickPlayerButton(NEXT_BUTTON) : goToPrevious();
+      url = new URL(address, root.location.href);
     } catch (error) {
-      return false;
+      return null;
     }
+    if (url.origin !== root.location.origin || url.pathname !== "/watch") return null;
+    var id = url.searchParams.get("v");
+    return id !== null && WATCH_VIDEO_ID.test(id) ? id : null;
+  }
+
+  /**
+   * What clicking `link` would do: "ok" it goes to another video of this site, "same" it goes to the video that plays, "refused" it goes
+   * anywhere else (another site, another page, no video id, a new window), "none" it is no link at all.
+   */
+  function linkKind(link) {
+    if (!link || typeof link.getAttribute !== "function") return "none";
+    var address = link.getAttribute("href");
+    if (typeof address !== "string" || address.length === 0) return "none";
+    var target = link.getAttribute("target");
+    if (typeof target === "string" && target !== "" && target !== "_self") return "refused";
+    var id = watchIdOf(address);
+    if (id === null) return "refused";
+    return id === watchIdOf(root.location.href) ? "same" : "ok";
+  }
+
+  /** The first of the links the selector finds that goes to another video; `scan.refused` says if any went somewhere it must not. */
+  function firstVideoLink(selector, scan) {
+    var links = doc.querySelectorAll(selector);
+    for (var i = 0; i < links.length; i++) {
+      var kind = linkKind(links[i]);
+      if (kind === "ok") return links[i];
+      if (kind === "refused") scan.refused = true;
+    }
+    return null;
+  }
+
+  /**
+   * Next: the player's next button; else, when that button (hidden, as it is for a video that is in no playlist) is a link to another
+   * video, that link; else the first of "Up next" in the sidebar; else the end screen's. Every step is a click on a link that goes to
+   * another video of YouTube itself, which the page follows without loading itself again.
+   */
+  function goToNext() {
+    var button = doc.querySelector(NEXT_BUTTON);
+    if (isUsable(button)) {
+      button.click();
+      return done("button");
+    }
+    var scan = { refused: false };
+    var own = linkKind(button);
+    var disabled = button && (button.disabled === true || (typeof button.getAttribute === "function" && button.getAttribute("aria-disabled") === "true"));
+    if (own === "ok" && !disabled) {
+      button.click();
+      return done("href");
+    }
+    if (own === "refused") scan.refused = true;
+    var upNext = firstVideoLink(UPNEXT_LINKS, scan);
+    if (upNext) {
+      upNext.click();
+      return done("upnext");
+    }
+    var endScreen = firstVideoLink(ENDSCREEN_LINKS, scan);
+    if (endScreen) {
+      endScreen.click();
+      return done("endscreen");
+    }
+    return failed(scan.refused ? "refused" : "none");
+  }
+
+  /** Whether the page before this one in the history is the watch page of another video of this site (the Navigation API tells, for its own origin). */
+  function previousEntryIsAnotherVideo() {
+    var navigation = root.navigation;
+    if (!navigation || navigation.canGoBack !== true || !navigation.currentEntry || typeof navigation.entries !== "function") return false;
+    var before = navigation.entries()[navigation.currentEntry.index - 1];
+    var id = before ? watchIdOf(before.url) : null;
+    return id !== null && id !== watchIdOf(root.location.href);
+  }
+
+  /**
+   * Previous: the player's previous button; without a usable one, restart a video that is past 3 s (what YouTube's own button does),
+   * and go back one page in the history when the video has only just begun and the page before is a watch page.
+   */
+  function goToPrevious() {
+    if (clickPlayerButton(PREVIOUS_BUTTON)) return done("button");
+    var video = state.video || findVideo();
+    var time = video ? video.currentTime : NaN;
+    if (typeof time !== "number" || !isFinite(time)) return failed("none");
+    if (time > RESTART_AFTER_SECONDS) {
+      video.currentTime = 0;
+      return done("restart");
+    }
+    if (previousEntryIsAnotherVideo() && root.history && typeof root.history.back === "function") {
+      root.history.back();
+      return done("history");
+    }
+    return failed("none");
+  }
+
+  /** What became of a command. Never throws: a page that changed under us is "unavailable". */
+  function carryOut(action) {
+    try {
+      if (isAdShowing()) return failed("ad");
+      return action === "next" ? goToNext() : goToPrevious();
+    } catch (error) {
+      return failed("error");
+    }
+  }
+
+  function perform(action) {
+    return carryOut(action).ok;
   }
 
   /**
@@ -362,10 +477,10 @@
     if (!own || !sender || sender.tab || sender.id !== own) return undefined;
     var command = C.validateCommand(message);
     if (!command) return undefined;
-    var ok = perform(command.action);
-    diag("content-command " + command.action + " " + (ok ? "ok" : "unavailable"), true);
+    var outcome = carryOut(command.action);
+    diag("content-command " + command.action + (outcome.ok ? " ok via=" + outcome.via : " unavailable reason=" + outcome.reason), true);
     try {
-      if (typeof sendResponse === "function") sendResponse({ ok: ok });
+      if (typeof sendResponse === "function") sendResponse({ ok: outcome.ok });
     } catch (error) {
       /* the worker stopped waiting */
     }
