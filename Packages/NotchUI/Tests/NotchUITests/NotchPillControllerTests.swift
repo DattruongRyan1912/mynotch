@@ -45,7 +45,7 @@ private final class ControllerModule: FeatureModule {
         controller.update(displayID: 1, screen: screen, config: NotchLayoutConfig(virtualNotchStyle: .pill))
         #expect(controller.geometry.isPill)
         #expect(controller.display.geometry == NotchGeometry(screen: screen, config: NotchLayoutConfig(virtualNotchStyle: .pill)))
-        #expect(controller.display.geometry.panelSize.height == 25 + NotchGeometry.pillTopGap + CGFloat(240), "the panel holds the gap too")
+        #expect(controller.display.geometry.panelSize.height == 32 + NotchGeometry.pillTopGap + CGFloat(240), "the panel holds the gap too")
         #expect(controller.model.displayState == .open("a"), "nothing closed it")
 
         controller.update(displayID: 1, screen: screen, config: NotchLayoutConfig(virtualNotchStyle: .notch))

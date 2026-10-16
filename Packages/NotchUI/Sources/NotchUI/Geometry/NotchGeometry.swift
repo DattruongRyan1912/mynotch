@@ -28,6 +28,13 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     /// The radius of all four corners of the open pill: the open notch's own bottom radius, so the content's tile, which is
     /// `NotchTokens.padding` inside it, comes out concentric.
     public static let pillOpenRadius: CGFloat = 24
+    /// Shortest and tallest the floating pill can be, held to by the geometry and by the setting.
+    public static let pillHeightLimits: ClosedRange<CGFloat> = 24...56
+    /// From this height up a pill draws the collapsed notch's leading and trailing views, and its bubbles' icons, bigger (see
+    /// `collapsedContentScale`): they were made for a body of about this height.
+    static let pillContentScaleStart: CGFloat = 32
+    /// The most they are drawn bigger, at the tallest pill: 25 %, so a 56 pt pill does not look bloated.
+    static let pillMaxContentScale: CGFloat = 1.25
     /// The widest a strip makes the collapsed notch, however much it asks for (and not wider than the open notch): so it stays on the
     /// screen with room beside it for its bubbles. A strip that wants more scales its text down a little and is cut off after that.
     public static let stripWidthLimit: CGFloat = 560
@@ -45,6 +52,15 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
 
     /// Whether the notch is a floating pill.
     public var isPill: Bool { style == .pill }
+
+    /// How much bigger a pill draws the leading and trailing views of the collapsed notch and the icons of its bubbles: 1 up to 32 pt,
+    /// then growing to 1.25 at the tallest pill. Always 1 for a notch, hardware or not, which is as it was. They stay centred in the body.
+    public var collapsedContentScale: CGFloat {
+        guard isPill else { return 1 }
+        let span = Self.pillHeightLimits.upperBound - Self.pillContentScaleStart
+        let grown = min(max(notchSize.height - Self.pillContentScaleStart, 0) / span, 1)
+        return 1 + (Self.pillMaxContentScale - 1) * grown
+    }
 
     /// How far below the top of the open notch's shape the tab page starts. A hardware notch keeps the cutout's own height free there, since
     /// the camera is in it. A display without a notch has no cutout, so nothing is kept free: the page starts the padding below the top, the
@@ -79,7 +95,18 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     /// for the tab bar with the gap under it, over what the tab bar takes in one piece. The tab gets the room it gets in one piece, and
     /// not less. Nothing when the notch is not made of tiles.
     public func tilesChrome(tabCount: Int) -> CGFloat {
-        opensAsTiles ? NotchTilesLayout.extraHeight(tabCount: tabCount) : 0
+        opensAsTiles ? NotchTilesLayout.extraHeight(tabCount: tabCount, bar: tabBarCapsule(tabCount: tabCount), topInset: openTopInset) : 0
+    }
+
+    /// Where the tab bar's capsule is while the notch is open as tiles, with `tabCount` tabs, and how tall: none with a single tab. On a
+    /// pill it is where the collapsed pill is (the same top under the gap, the same height), so that the pill opens by changing its width
+    /// into the tab bar's and the content's tile comes out under it; anywhere else it is under the top inset, as tall as the tab bar and
+    /// its inset.
+    func tabBarCapsule(tabCount: Int) -> NotchTilesLayout.Bar? {
+        guard tabCount >= 2 else { return nil }
+        return isPill
+            ? NotchTilesLayout.Bar(top: 0, height: notchSize.height)
+            : NotchTilesLayout.Bar(top: openTopInset, height: NotchTilesLayout.defaultCapsuleHeight)
     }
 
     public init(screen: ScreenDescriptor, config: NotchLayoutConfig) {
@@ -97,7 +124,10 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
             kind = .virtual
             style = config.virtualNotchStyle
             let width = min(max(config.virtualNotchWidth, 120), 300)
-            let height = min(max(config.virtualNotchHeight ?? screen.menuBarHeight, 24), 40)
+            // A pill has a height of its own; a notch is as tall as the menu bar or as the user said.
+            let height = config.virtualNotchStyle == .pill
+                ? min(max(config.pillHeight, Self.pillHeightLimits.lowerBound), Self.pillHeightLimits.upperBound)
+                : min(max(config.virtualNotchHeight ?? screen.menuBarHeight, 24), 40)
             notchSize = CGSize(width: width, height: height)
             centerOffset = 0
         }
@@ -161,7 +191,7 @@ nonisolated public struct NotchGeometry: Equatable, Sendable {
     /// list under the collapsed notch needs all of it, so a display without a notch has no smaller panel for the band its open notch no
     /// longer has; with tiles the open notch is taller by their chrome, and the panel with it.
     public var panelSize: CGSize {
-        let open = openTopInset + Self.maxContentHeight + tilesChrome(tabCount: 2)
+        let open = openTopInset + Self.maxContentHeight + max(tilesChrome(tabCount: 1), tilesChrome(tabCount: 2))
         return CGSize(width: Self.maxOpenWidth, height: topGap + max(notchSize.height + Self.maxContentHeight, open))
     }
 

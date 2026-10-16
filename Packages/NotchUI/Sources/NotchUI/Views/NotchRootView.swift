@@ -227,7 +227,7 @@ struct NotchRootView: View {
         let final = NotchTilesLayout.open(
             shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: contentHeight, tabCount: registry.tabs.count),
             topInset: geometry.openTopInset,
-            topRadius: openRadii.top, tabCount: registry.tabs.count
+            topRadius: openRadii.top, tabCount: registry.tabs.count, bar: geometry.tabBarCapsule(tabCount: registry.tabs.count)
         )
         let rest = NotchTilesLayout.rest(collapsedSize: collapsedSize, topRadius: collapsedRadii.top, hasTabBar: final.tabBar != nil)
         let inner = CGSize(
@@ -248,7 +248,8 @@ struct NotchRootView: View {
                     ) {
                         TabBar(tabs: registry.tabs, selected: shownTab?.id) { model.open(tab: $0) }
                             .frame(width: TabBarMetrics.width(count: registry.tabs.count), height: TabBarMetrics.iconSize.height)
-                            .padding(.top, NotchGlassPlan.tabBarInset.height)
+                            // Centred in the capsule, which on a pill is as tall as the pill.
+                            .padding(.top, (bar.size.height - TabBarMetrics.iconSize.height) / 2)
                     }
                 }
                 tile(
@@ -320,7 +321,7 @@ struct NotchRootView: View {
         if state == .compact {
             ActivityBubbles(
                 slots: ActivitySlot.bubbles(of: activities, capacity: geometry.bubbleCapacity),
-                geometry: geometry, stripWidth: stripWidth, label: label(for:), activate: activate
+                geometry: geometry, stripWidth: stripWidth, iconScale: geometry.collapsedContentScale, label: label(for:), activate: activate
             )
             .transition(.asymmetric(insertion: .opacity.animation(NotchTokens.enter), removal: .opacity.animation(NotchTokens.leave)))
             .notchLogLifecycle("bubbles")
@@ -335,9 +336,9 @@ struct NotchRootView: View {
             if let entry = activities.current {
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
-                        entry.activity.leading.frame(width: geometry.config.compactSideWidth)
+                        entry.activity.leading.frame(width: geometry.config.compactSideWidth).scaled(geometry.collapsedContentScale)
                         Spacer(minLength: geometry.notchSize.width)
-                        entry.activity.trailing.frame(width: geometry.config.compactSideWidth)
+                        entry.activity.trailing.frame(width: geometry.config.compactSideWidth).scaled(geometry.collapsedContentScale)
                     }
                     .frame(height: geometry.notchSize.height)
                     // Both are laid out at their final height at once and revealed by the growing shape's clip, so the text

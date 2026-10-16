@@ -11,7 +11,9 @@ import Testing
     let gap = NotchGeometry.pillTopGap
 
     init() {
-        pill = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: .pill))
+        // A 25 pt pill, the menu bar's height on this display, so the numbers below are the ones of the brief; the height is the setting's
+        // (`NotchPillHeightTests`).
+        pill = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: .pill, pillHeight: 25))
     }
 
     var frame: CGRect { screen.frame }
@@ -56,7 +58,7 @@ import Testing
 
     @Test func theWidthAndHeightSettingsSizeThePillToo() {
         let sized = NotchGeometry(
-            screen: screen, config: NotchLayoutConfig(virtualNotchWidth: 240, virtualNotchHeight: 36, virtualNotchStyle: .pill)
+            screen: screen, config: NotchLayoutConfig(virtualNotchWidth: 240, virtualNotchStyle: .pill, pillHeight: 36)
         )
         #expect(sized.shapeSize(for: .closed) == CGSize(width: 240, height: 36))
         #expect(sized.shape(for: .closed).cornerRadius == 18)
@@ -124,8 +126,8 @@ import Testing
     @Test func theFixedPanelCoversEveryShapeThePillCanTake() {
         for config in [
             NotchLayoutConfig(virtualNotchStyle: .pill),
-            NotchLayoutConfig(virtualNotchWidth: 300, virtualNotchHeight: 40, openWidth: 900, virtualNotchStyle: .pill),
-            NotchLayoutConfig(virtualNotchWidth: 120, virtualNotchHeight: 24, openWidth: 480, virtualNotchStyle: .pill),
+            NotchLayoutConfig(virtualNotchWidth: 300, openWidth: 900, virtualNotchStyle: .pill, pillHeight: 56),
+            NotchLayoutConfig(virtualNotchWidth: 120, openWidth: 480, virtualNotchStyle: .pill, pillHeight: 24),
         ] {
             let geometry = NotchGeometry(screen: screen, config: config)
             let panel = geometry.panelFrame(in: frame)

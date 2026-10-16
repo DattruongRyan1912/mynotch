@@ -126,7 +126,7 @@ private final class TopModule: FeatureModule {
             NotchTilesLayout.rest(collapsedSize: geometry.shapeSize(for: .closed), topRadius: collapsed.top, hasTabBar: tabs >= 2),
             NotchTilesLayout.open(
                 shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: content, tabCount: tabs), topInset: geometry.openTopInset,
-                topRadius: geometry.cornerRadii(for: .open(nil)).top, tabCount: tabs
+                topRadius: geometry.cornerRadii(for: .open(nil)).top, tabCount: tabs, bar: geometry.tabBarCapsule(tabCount: tabs)
             )
         )
     }
@@ -138,11 +138,16 @@ private final class TopModule: FeatureModule {
             // They start where they always did: the collapsed notch's body, at the top of the shape.
             #expect(rest.content.top == 0 && rest.tabBar?.top == 0, Comment(rawValue: name))
             #expect(rest.content.size.height == geometry.notchSize.height, Comment(rawValue: name))
-            // And they end the padding below the top: the capsule first, then the tile, the same gaps as on a MacBook.
-            #expect(open.tabBar?.top == padding, "\(name): the capsule is the padding under the top")
-            #expect(open.content.top == padding + 30 + NotchGlassPlan.tileGap, Comment(rawValue: name))
-            #expect(open.content.top == (book.open.content.top) - (32 - 14), "\(name): 18 pt higher than on a MacBook")
-            #expect(open.tabBar?.size == book.open.tabBar?.size, "\(name): the capsule is the same")
+            // And they end under the top: the capsule first, then the tile, the same gaps as on a MacBook. A notch's capsule is the padding
+            // under the top; a pill's is where the pill is (`NotchPillBarTests`).
+            let barTop = geometry.isPill ? 0 : padding
+            let barHeight = geometry.isPill ? geometry.notchSize.height : 30
+            #expect(open.tabBar?.top == barTop, "\(name): the capsule")
+            #expect(open.content.top == barTop + barHeight + NotchGlassPlan.tileGap, Comment(rawValue: name))
+            if !geometry.isPill {
+                #expect(open.content.top == (book.open.content.top) - (32 - 14), "\(name): 18 pt higher than on a MacBook")
+                #expect(open.tabBar?.size == book.open.tabBar?.size, "\(name): the capsule is the same")
+            }
             #expect(open.content.size.height == geometry.shapeSize(for: .open(nil), contentHeight: 190, tabCount: 2).height - padding - open.content.top, Comment(rawValue: name))
             #expect(open.content.size.height == book.open.content.size.height, "\(name): the tile is as tall as on a MacBook: the content asked for it")
         }

@@ -28,6 +28,11 @@ public enum InterfaceSettings {
     public static let virtualNotchHeight = SettingKey("interface.virtualNotchHeight", default: 32.0, clampedTo: 24...40)
     /// Whether the virtual notch is stuck to the top edge or a floating pill. A display with a hardware notch never changes.
     public static let virtualNotchStyle = SettingKey("interface.virtualNotchStyle", default: VirtualNotchStyle.notch)
+    /// How tall the floating pill is, which is its own: the notch style keeps its height (`virtualNotchHeight`, or the menu bar's).
+    public static let pillHeight = SettingKey(
+        "interface.pillHeight", default: 32.0,
+        clampedTo: Double(NotchGeometry.pillHeightLimits.lowerBound)...Double(NotchGeometry.pillHeightLimits.upperBound)
+    )
     public static let openWidth = SettingKey(
         "interface.openWidth", default: 600.0,
         clampedTo: Double(NotchGeometry.openWidthLimits.lowerBound)...Double(NotchGeometry.openWidthLimits.upperBound)
@@ -69,13 +74,15 @@ nonisolated public struct NotchLayoutConfig: Equatable, Sendable {
     public var openWidth: CGFloat = 600
     /// How a display without a hardware notch draws it; `NotchGeometry` ignores it on one that has.
     public var virtualNotchStyle: VirtualNotchStyle = .notch
+    /// How tall the floating pill is; the geometry holds it to `NotchGeometry.pillHeightLimits`, and ignores it for a notch.
+    public var pillHeight: CGFloat = 32
     /// Whether the open notch is made of Liquid Glass tiles (a capsule for the tab bar and a tile for the content). The tiles take room
     /// of their own around what a tab shows, so the open notch is taller by that much and a tab gets the room it gets in one piece.
     public var opensAsTiles = false
 
     public init(
         virtualNotchWidth: CGFloat = 185, virtualNotchHeight: CGFloat? = nil, compactSideWidth: CGFloat = 64, openWidth: CGFloat = 600,
-        virtualNotchStyle: VirtualNotchStyle = .notch, opensAsTiles: Bool = false
+        virtualNotchStyle: VirtualNotchStyle = .notch, opensAsTiles: Bool = false, pillHeight: CGFloat = 32
     ) {
         self.virtualNotchWidth = virtualNotchWidth
         self.virtualNotchHeight = virtualNotchHeight
@@ -83,6 +90,7 @@ nonisolated public struct NotchLayoutConfig: Equatable, Sendable {
         self.openWidth = openWidth
         self.virtualNotchStyle = virtualNotchStyle
         self.opensAsTiles = opensAsTiles
+        self.pillHeight = pillHeight
     }
 }
 
@@ -94,7 +102,8 @@ extension NotchLayoutConfig {
                 ? nil : settings.value(InterfaceSettings.virtualNotchHeight),
             openWidth: settings.value(InterfaceSettings.openWidth),
             virtualNotchStyle: settings.value(InterfaceSettings.virtualNotchStyle),
-            opensAsTiles: settings.value(InterfaceSettings.look) == .liquidGlass && settings.value(InterfaceSettings.glassShape) == .tiles
+            opensAsTiles: settings.value(InterfaceSettings.look) == .liquidGlass && settings.value(InterfaceSettings.glassShape) == .tiles,
+            pillHeight: settings.value(InterfaceSettings.pillHeight)
         )
     }
 }

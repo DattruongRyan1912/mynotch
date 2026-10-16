@@ -20,7 +20,7 @@ import Testing
     func open(_ geometry: NotchGeometry, tabs: Int = 3, contentHeight: CGFloat = 190) -> NotchTilesLayout {
         NotchTilesLayout.open(
             shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: contentHeight, tabCount: tabs), topInset: geometry.openTopInset,
-            topRadius: geometry.cornerRadii(for: .open(nil)).top, tabCount: tabs
+            topRadius: geometry.cornerRadii(for: .open(nil)).top, tabCount: tabs, bar: geometry.tabBarCapsule(tabCount: tabs)
         )
     }
 
@@ -45,7 +45,7 @@ import Testing
         #expect(tile.size.width == size.width - 2 * inset)
         #expect(tile.top + tile.size.height + NotchTokens.padding == size.height, "the padding below it")
         let bar = layout.tabBar
-        #expect(bar?.top == NotchTokens.padding, "the capsule is the padding under the top: there is no cutout to keep free")
+        #expect(bar?.top == 0 && bar?.size.height == pill.notchSize.height, "the capsule is where the collapsed pill is (`NotchPillBarTests`)")
         #expect((bar?.top ?? 0) + (bar?.size.height ?? 0) + NotchGlassPlan.tileGap == tile.top)
         // The notch's tile is 16 pt narrower: its ears.
         #expect(open(notch).content.size.width == tile.size.width - 16)

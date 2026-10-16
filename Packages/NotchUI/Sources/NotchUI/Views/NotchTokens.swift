@@ -45,6 +45,12 @@ public enum NotchTokens {
 }
 
 extension View {
+    /// The view drawn `scale` times as big about its centre (the layout is as it was), and the view itself, in the tree it always had, for
+    /// the scale of 1 that every notch but a tall pill has: see `NotchGeometry.collapsedContentScale`.
+    @ViewBuilder func scaled(_ scale: CGFloat) -> some View {
+        if scale == 1 { self } else { scaleEffect(scale) }
+    }
+
     /// For a view that draws on a background of its own that is always dark (a floating chip, the lyrics panel): gives it the dark
     /// colour scheme, in which the text tokens are light whatever the look is. Without it, on Liquid Glass in the light appearance
     /// the tokens are the system's primary and secondary colours, which are black there, and text on a black background is lost.

@@ -71,12 +71,23 @@ import Testing
         let frame = LockScreenPanel.frame(
             on: screen, height: 80, interface: interface(showing: NotchLayoutConfig(virtualNotchStyle: .pill), on: screen)
         )
-        // The pill hangs 5 pt below the top and is 24 tall, so it ends 29 from the top; the panel starts the gap (8) under that. Measured
-        // from the notch only, it would start 3 pt under the pill.
-        #expect(frame.maxY == 1080 - 5 - 24 - gap)
-        #expect(frame.maxY == 1043)
+        // The pill hangs 5 pt below the top and is 32 tall (its own height, `pillHeight`'s default), so it ends 37 from the top; the panel
+        // starts the gap (8) under that. Measured from the notch only, it would start 3 pt under the pill.
+        #expect(frame.maxY == 1080 - 5 - 32 - gap)
+        #expect(frame.maxY == 1035)
         #expect(frame.midX == 960)
         #expect(frame.size == size)
+    }
+
+    @Test func staysTheGapClearOfATallPillWhateverHeightTheUserGaveIt() {
+        let screen = virtualScreen()
+        for height in [CGFloat(24), 40, 56] {
+            // The notch's own height setting is another one and does not move it.
+            let config = NotchLayoutConfig(virtualNotchHeight: 24, virtualNotchStyle: .pill, pillHeight: height)
+            let frame = LockScreenPanel.frame(on: screen, height: 80, interface: interface(showing: config, on: screen))
+            #expect(frame.maxY == 1080 - NotchGeometry.pillTopGap - height - gap, "\(height)")
+            #expect(NotchGeometry.pillTopGap + height + gap == 1080 - frame.maxY, "the gap under the pill is the usual 8 pt")
+        }
     }
 
     @Test func staysTheGapClearOfANotchStuckToTheTopOfADisplayWithoutOne() {
@@ -90,7 +101,8 @@ import Testing
     @Test func followsTheVirtualNotchHeightTheUserChose() {
         let screen = virtualScreen()
         for (style, top) in [(VirtualNotchStyle.notch, CGFloat(0)), (.pill, NotchGeometry.pillTopGap)] {
-            let config = NotchLayoutConfig(virtualNotchWidth: 250, virtualNotchHeight: 40, virtualNotchStyle: style)
+            // A notch is as tall as its setting, a pill as its own: 40 for both here.
+            let config = NotchLayoutConfig(virtualNotchWidth: 250, virtualNotchHeight: 40, virtualNotchStyle: style, pillHeight: 40)
             let frame = LockScreenPanel.frame(on: screen, height: 80, interface: interface(showing: config, on: screen))
             #expect(frame.maxY == 1080 - top - 40 - gap, "\(style)")
             #expect(frame.midX == 960, "\(style)")
@@ -120,7 +132,7 @@ import Testing
             on: external, height: 80, interface: interface(showing: NotchLayoutConfig(virtualNotchStyle: .pill), on: main)
         )
         #expect(frame.midX == 2472)
-        #expect(frame.maxY == 880 - 5 - 24 - gap)
+        #expect(frame.maxY == 880 - 5 - 32 - gap)
     }
 
     @Test func withNoNotchShowingTheDefaultsAreWhatThePanelGoesBy() {

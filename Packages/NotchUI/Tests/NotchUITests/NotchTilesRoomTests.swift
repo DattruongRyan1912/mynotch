@@ -40,8 +40,12 @@ import Testing
     @Test func onlyAnotchMadeOfTilesHasAnyChrome() {
         for (name, screen, style) in Self.displays {
             #expect(geometry(screen, style, tiles: false).tilesChrome(tabCount: 2) == 0, Comment(rawValue: name))
-            #expect(geometry(screen, style, tiles: true).tilesChrome(tabCount: 2) == 24, Comment(rawValue: name))
+            #expect(geometry(screen, style, tiles: false).tilesChrome(tabCount: 1) == 0, Comment(rawValue: name))
             #expect(geometry(screen, style, tiles: true).tilesChrome(tabCount: 1) == 16, Comment(rawValue: name))
+            // With a capsule: 24 under the top inset; a pill's capsule is the pill itself, at the top, so the tile starts a gap under the
+            // pill and the notch is taller by the pill's height less 20.
+            let expected: CGFloat = style == .pill ? 32 - 20 : 24
+            #expect(geometry(screen, style, tiles: true).tilesChrome(tabCount: 2) == expected, Comment(rawValue: name))
         }
     }
 
@@ -93,7 +97,7 @@ import Testing
                     for state in [NotchState.open("a"), .open(nil), .toast] {
                         let a = slab.shapeSize(for: state, contentHeight: content, tabCount: tabs)
                         let b = tiled.shapeSize(for: state, contentHeight: content, tabCount: tabs)
-                        #expect(b.height - a.height == NotchTilesLayout.extraHeight(tabCount: tabs), "\(name) \(state) \(content) \(tabs)")
+                        #expect(b.height - a.height == tiled.tilesChrome(tabCount: tabs), "\(name) \(state) \(content) \(tabs)")
                         #expect(a.width == b.width, "the width is the same: the tile reaches further out instead")
                     }
                 }
@@ -119,7 +123,7 @@ import Testing
             let tiled = geometry(screen, style, tiles: true)
             let frame = screen.frame
             for tabs in [1, 2] {
-                let extra = NotchTilesLayout.extraHeight(tabCount: tabs)
+                let extra = tiled.tilesChrome(tabCount: tabs)
                 let a = slab.hitRect(for: .open(nil), contentHeight: 190, tabCount: tabs, in: frame)
                 let b = tiled.hitRect(for: .open(nil), contentHeight: 190, tabCount: tabs, in: frame)
                 #expect(b.height - a.height == extra && b.minY == a.minY - extra, "\(name) \(tabs): grows down, its top stays")
@@ -178,7 +182,7 @@ import Testing
                 for tabs in [1, 2, 3, 8] {
                     let layout = NotchTilesLayout.open(
                         shapeSize: tiled.shapeSize(for: .open(nil), contentHeight: content, tabCount: tabs), topInset: tiled.openTopInset,
-                        topRadius: tiled.cornerRadii(for: .open(nil)).top, tabCount: tabs
+                        topRadius: tiled.cornerRadii(for: .open(nil)).top, tabCount: tabs, bar: tiled.tabBarCapsule(tabCount: tabs)
                     )
                     let inner = CGSize(width: layout.content.size.width - 2 * tilePad, height: layout.content.size.height - 2 * tilePad)
                     let room = slabRoom(slab, content: content, tabs: tabs)
@@ -194,7 +198,8 @@ import Testing
             for tabs in [1, 2] {
                 let shape = tiled.shapeSize(for: .open(nil), contentHeight: 190, tabCount: tabs)
                 let layout = NotchTilesLayout.open(
-                    shapeSize: shape, topInset: tiled.openTopInset, topRadius: tiled.cornerRadii(for: .open(nil)).top, tabCount: tabs
+                    shapeSize: shape, topInset: tiled.openTopInset, topRadius: tiled.cornerRadii(for: .open(nil)).top, tabCount: tabs,
+                    bar: tiled.tabBarCapsule(tabCount: tabs)
                 )
                 let tile = CGRect(x: (shape.width - layout.content.size.width) / 2, y: layout.content.top, width: layout.content.size.width, height: layout.content.size.height)
                 // The content, as the root view lays it out: the tile's size less the inset all round, from the inset down.
@@ -216,7 +221,7 @@ import Testing
         let tiled = geometry(NotchGeometryTests.macBook14, tiles: true)
         let layout = NotchTilesLayout.open(
             shapeSize: tiled.shapeSize(for: .open(nil), contentHeight: 190, tabCount: 3), topInset: tiled.openTopInset,
-            topRadius: tiled.cornerRadii(for: .open(nil)).top, tabCount: 3
+            topRadius: tiled.cornerRadii(for: .open(nil)).top, tabCount: 3, bar: tiled.tabBarCapsule(tabCount: 3)
         )
         let bar = layout.tabBar!
         #expect(bar.top + bar.size.height + NotchGlassPlan.tileGap == layout.content.top)

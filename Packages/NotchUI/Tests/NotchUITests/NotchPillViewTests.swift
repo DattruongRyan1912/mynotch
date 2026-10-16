@@ -61,14 +61,18 @@ private final class PillModule: FeatureModule {
     let theme: NotchTheme
     /// Whether the open notch is made of tiles, which makes it taller by their chrome, as the window controller's geometry does.
     let tiles: Bool
+    let pillHeight: CGFloat
 
-    static func screenGeometry(_ style: VirtualNotchStyle, on screen: ScreenDescriptor = NotchGeometryTests.external, tiles: Bool = false) -> NotchGeometry {
-        NotchGeometry(screen: screen, config: NotchLayoutConfig(virtualNotchStyle: style, opensAsTiles: tiles))
+    static func screenGeometry(
+        _ style: VirtualNotchStyle, on screen: ScreenDescriptor = NotchGeometryTests.external, tiles: Bool = false, pillHeight: CGFloat = 32
+    ) -> NotchGeometry {
+        NotchGeometry(screen: screen, config: NotchLayoutConfig(virtualNotchStyle: style, opensAsTiles: tiles, pillHeight: pillHeight))
     }
 
     static func make(
         _ style: VirtualNotchStyle, on screen: ScreenDescriptor = NotchGeometryTests.external, look: NotchLook = .classic,
-        clarity: NotchGlassClarity = .balanced, shape: NotchGlassShape = .slab, tabs: Int = 1, opened: Bool = true, height: CGFloat = 190
+        clarity: NotchGlassClarity = .balanced, shape: NotchGlassShape = .slab, tabs: Int = 1, opened: Bool = true, height: CGFloat = 190,
+        pillHeight: CGFloat = 32
     ) async throws -> HostedPill {
         let probe = PillProbe()
         let modules = [PillModule("probe", order: 0, probe: probe, height: height)]
@@ -83,7 +87,7 @@ private final class PillModule: FeatureModule {
             scheduler: harness.scheduler, availableTabs: { [registry = harness.registry] in registry.tabs.map(\.id) }, delays: { (.zero, .zero) }
         )
         let tiles = look == .liquidGlass && shape == .tiles
-        let geometry = screenGeometry(style, on: screen, tiles: tiles)
+        let geometry = screenGeometry(style, on: screen, tiles: tiles, pillHeight: pillHeight)
         let hosting = NSHostingView(
             rootView: NotchRootView(model: model, activities: harness.activities, registry: harness.registry, geometry: geometry, theme: theme)
         )
@@ -91,7 +95,8 @@ private final class PillModule: FeatureModule {
         window.appearance = NSAppearance(named: .aqua)
         window.contentView = hosting
         let host = HostedPill(
-            hosting: hosting, window: window, probe: probe, model: model, settings: harness.settings, harness: harness, theme: theme, tiles: tiles
+            hosting: hosting, window: window, probe: probe, model: model, settings: harness.settings, harness: harness, theme: theme, tiles: tiles,
+            pillHeight: pillHeight
         )
         if opened {
             model.open(tab: "probe")
@@ -108,7 +113,7 @@ private final class PillModule: FeatureModule {
 
     /// What the window controller does when the geometry changes: a new root view of the new geometry, and a panel of the new size.
     func show(_ style: VirtualNotchStyle, on screen: ScreenDescriptor = NotchGeometryTests.external) {
-        let geometry = Self.screenGeometry(style, on: screen, tiles: tiles)
+        let geometry = Self.screenGeometry(style, on: screen, tiles: tiles, pillHeight: pillHeight)
         hosting.rootView = NotchRootView(
             model: model, activities: harness.activities, registry: harness.registry, geometry: geometry, theme: theme
         )
@@ -176,8 +181,14 @@ private final class PillModule: FeatureModule {
                 let (notch, _) = try await tab(.notch, look, tabs: tabs)
                 let (pill, _) = try await tab(.pill, look, tabs: tabs)
                 let name = "\(look) \(tabs) tabs"
-                #expect(abs(pill.minY - notch.minY - gap) < 0.01, "\(name): the gap, and nothing else, moves it down (\(notch) -> \(pill))")
-                #expect(abs(pill.maxY - notch.maxY - gap) < 0.01, "\(name): it is as tall")
+                // With tiles and several tabs the pill's capsule is the pill, so the tile is where the pill's height and the gap put it;
+                // everywhere else the gap, and nothing else, moves the pill down.
+                let tilesWithABar = look.0 == .liquidGlass && look.2 == .tiles && tabs >= 2
+                if !tilesWithABar {
+                    #expect(abs(pill.minY - notch.minY - gap) < 0.01, "\(name): the gap, and nothing else, moves it down (\(notch) -> \(pill))")
+                    #expect(abs(pill.maxY - notch.maxY - gap) < 0.01, "\(name): it is as tall")
+                }
+                #expect(abs(pill.height - notch.height) < 0.01, "\(name): the tab has the same room")
                 #expect(abs(pill.midX - HostedPill.screenGeometry(.pill).panelSize.width / 2) < 0.5, "\(name): centred \(pill)")
                 // No ears: only the padding insets the content sideways, 8 pt less than the notch's ear and padding.
                 #expect(abs(pill.width - notch.width - 8 * 2) < 0.01, "\(name): \(notch.width) -> \(pill.width)")
@@ -279,10 +290,12 @@ private final class PillModule: FeatureModule {
             let notch = try #require(host.probe.frame)
 
             host.show(.pill)
-            try await host.wait("the pill") { host.probe.frame.map { abs($0.minY - notch.minY - gap) < 0.5 } ?? false }
+            // Where the pill puts the tab: the gap lower, and with tiles and a capsule where the pill's height puts the tile.
+            let expected = expectedTabTop(HostedPill.screenGeometry(.pill), look, tabs: 2)
+            try await host.wait("the pill") { host.probe.frame.map { abs($0.minY - expected) < 0.5 } ?? false }
             try await host.settle()
             let pill = try #require(host.probe.frame)
-            #expect(abs(pill.minY - notch.minY - gap) < 0.01 && abs(pill.width - notch.width - 16) < 0.01, "\(look): \(notch) -> \(pill)")
+            #expect(abs(pill.minY - expected) < 0.01 && abs(pill.width - notch.width - 16) < 0.01, "\(look): \(notch) -> \(pill)")
 
             host.show(.notch)
             try await host.wait("the notch again") { host.probe.frame == notch }
@@ -318,7 +331,9 @@ private final class PillModule: FeatureModule {
         case (false, true): return top + TabBarMetrics.iconSize.height + 6
         case (true, false): return top + NotchGlassPlan.tilePadding
         case (true, true):
-            return top + TabBarMetrics.iconSize.height + 2 * NotchGlassPlan.tabBarInset.height + NotchGlassPlan.tileGap + NotchGlassPlan.tilePadding
+            // Under the capsule and its gap: a notch's capsule is under the top inset, a pill's is the pill, at the top.
+            let bar = geometry.tabBarCapsule(tabCount: tabs)!
+            return geometry.topGap + bar.top + bar.height + NotchGlassPlan.tileGap + NotchGlassPlan.tilePadding
         }
     }
 
@@ -444,6 +459,24 @@ private final class PillModule: FeatureModule {
             }
             let expected = NotchTilesLayout.extraHeight(tabCount: tabs)
             #expect(abs((heights[true] ?? 0) - (heights[false] ?? 0) - expected) < 0.01, "\(tabs) tabs: \(heights)")
+        }
+    }
+
+    // MARK: the pill opens into the tab bar
+
+    @Test func withTilesThePillsTabBarIsWhereThePillWasAndTheTileIsUnderItWithTheRoomOfOnePiece() async throws {
+        for height in [CGFloat(24), 32, 40, 56] {
+            for tabs in [2, 5] {
+                let slab = try await HostedPill.make(.pill, look: .liquidGlass, shape: .slab, tabs: tabs, pillHeight: height)
+                defer { slab.close() }
+                let tiled = try await HostedPill.make(.pill, look: .liquidGlass, shape: .tiles, tabs: tabs, pillHeight: height)
+                defer { tiled.close() }
+                let (a, b) = (try #require(slab.probe.frame), try #require(tiled.probe.frame))
+                let name = "pill \(height), \(tabs) tabs"
+                // The tile starts under the pill (its height) and a gap, and the tile's padding.
+                #expect(abs(b.minY - (NotchGeometry.pillTopGap + height + NotchGlassPlan.tileGap + NotchGlassPlan.tilePadding)) < 0.01, "\(name): \(b)")
+                #expect(abs(b.width - a.width) < 0.01 && abs(b.height - a.height) < 0.01 && abs(b.minX - a.minX) < 0.01, "\(name): the room of one piece")
+            }
         }
     }
 }

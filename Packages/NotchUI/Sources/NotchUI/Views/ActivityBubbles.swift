@@ -26,6 +26,8 @@ struct ActivityBubbles: View {
     let geometry: NotchGeometry
     /// The width the current activity's strip asked for: the pill is that much wider, and the bubbles are beside it.
     var stripWidth: CGFloat = 0
+    /// How much bigger the icons are drawn on a tall pill (`NotchGeometry.collapsedContentScale`).
+    var iconScale: CGFloat = 1
     let label: (ActivityCenter.Entry) -> String
     let activate: (ActivitySlot) -> Void
     @Environment(\.notchSurface) private var surface
@@ -38,7 +40,7 @@ struct ActivityBubbles: View {
             Spacer().frame(width: half).allowsHitTesting(false)
             HStack(spacing: NotchGeometry.bubbleGap) {
                 ForEach(slots) { slot in
-                    ActivityBubble(slot: slot, diameter: geometry.bubbleDiameter, label: label, activate: activate)
+                    ActivityBubble(slot: slot, diameter: geometry.bubbleDiameter, iconScale: iconScale, label: label, activate: activate)
                         // On glass the shape materializes where it is (the glass transition of `ActivityBubble`), so only what is
                         // drawn on it fades.
                         .transition(
@@ -60,6 +62,7 @@ struct ActivityBubbles: View {
 private struct ActivityBubble: View {
     let slot: ActivitySlot
     let diameter: CGFloat
+    let iconScale: CGFloat
     let label: (ActivityCenter.Entry) -> String
     let activate: (ActivitySlot) -> Void
     @Environment(\.notchSurface) private var surface
@@ -74,12 +77,15 @@ private struct ActivityBubble: View {
             ZStack {
                 // Black, or nothing: on glass the circle is the glass.
                 if !surface.isLiquidGlass { Circle().fill(NotchTokens.background) }
-                switch slot {
-                case .activity(let entry):
-                    ActivityIcon(activity: entry.activity, size: diameter, minimalSize: NotchTokens.bubbleIconSize)
-                case .overflow(let count):
-                    Text("+\(count)").font(.system(size: 11, weight: .semibold)).foregroundStyle(surface.primaryStyle)
+                Group {
+                    switch slot {
+                    case .activity(let entry):
+                        ActivityIcon(activity: entry.activity, size: diameter, minimalSize: NotchTokens.bubbleIconSize)
+                    case .overflow(let count):
+                        Text("+\(count)").font(.system(size: 11, weight: .semibold)).foregroundStyle(surface.primaryStyle)
+                    }
                 }
+                .scaled(iconScale)
             }
             .frame(width: diameter, height: diameter)
             .notchGlass(planned, in: Circle(), namespace: namespace)

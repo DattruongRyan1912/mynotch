@@ -56,16 +56,19 @@ struct NotchPillCanaryTests {
 
     func rig(
         shape: NotchGlassShape, clarity: NotchGlassClarity = .balanced, bubbles: Int = 0, style: VirtualNotchStyle = .pill,
-        screen: ScreenDescriptor = NotchGeometryTests.external
+        screen: ScreenDescriptor = NotchGeometryTests.external, pillHeight: CGFloat = 32, tabs: Int = 2
     ) async throws -> Rig {
-        let geometry = NotchGeometry(screen: screen, config: NotchLayoutConfig(virtualNotchStyle: style, opensAsTiles: shape == .tiles))
-        let harness = RegistryHarness([PillTabModule("a", order: 0), PillTabModule("b", order: 1)])
+        let geometry = NotchGeometry(
+            screen: screen, config: NotchLayoutConfig(virtualNotchStyle: style, opensAsTiles: shape == .tiles, pillHeight: pillHeight)
+        )
+        let ids = (0..<tabs).map { ModuleID(stringLiteral: "t\($0)") }
+        let harness = RegistryHarness(ids.enumerated().map { PillTabModule($0.element, order: $0.offset) })
         await harness.registry.bootstrap()
         harness.settings.set(.liquidGlass, for: InterfaceSettings.look)
         harness.settings.set(shape, for: InterfaceSettings.glassShape)
         harness.settings.set(clarity, for: InterfaceSettings.glassClarity)
         let theme = NotchTheme(settings: harness.settings, systemAccent: { NotchAccent.Palette.blue.rgb }, notifications: NotificationCenter())
-        let model = NotchViewModel(scheduler: harness.scheduler, availableTabs: { ["a", "b"] }, delays: { (.zero, .zero) })
+        let model = NotchViewModel(scheduler: harness.scheduler, availableTabs: { ids }, delays: { (.zero, .zero) })
         model.hasActivity = true
         harness.activities.set(
             LiveActivity(
@@ -223,7 +226,7 @@ struct NotchPillCanaryTests {
             let pill = geometry.shapeSize(for: .compact)
             let final = NotchTilesLayout.open(
                 shapeSize: tilesGeometry.shapeSize(for: .open(nil), contentHeight: 190, tabCount: 2), topInset: tilesGeometry.openTopInset,
-                topRadius: 0, tabCount: 2
+                topRadius: 0, tabCount: 2, bar: tilesGeometry.tabBarCapsule(tabCount: 2)
             )
             let opening = await sample(rig) { rig.model.open(tab: nil, onPurpose: false) }
             print("CANARY pill tiles \(clarity): \(timeline(opening))")
@@ -287,7 +290,7 @@ struct NotchPillCanaryTests {
         // The notch's own glass is its shape grown by 4 pt; the open tiles' (the biggest elements, with tiles) are their shapes.
         let tile = NotchTilesLayout.open(
             shapeSize: tilesGeometry.shapeSize(for: .open(nil), contentHeight: 190, tabCount: 2), topInset: tilesGeometry.openTopInset,
-            topRadius: 0, tabCount: 2
+            topRadius: 0, tabCount: 2, bar: tilesGeometry.tabBarCapsule(tabCount: 2)
         ).content
         let expectedTop = shape == .tiles && opened ? gap + tile.top : gap - 4
         #expect(abs(settled.minY - expectedTop) < 3, "and ends a gap below where it was: \(settled)")
@@ -306,7 +309,7 @@ struct NotchPillCanaryTests {
         defer { rig.window.contentView = nil }
         let final = NotchTilesLayout.open(
             shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 190, tabCount: 2), topInset: geometry.openTopInset,
-            topRadius: geometry.cornerRadii(for: .open(nil)).top, tabCount: 2
+            topRadius: geometry.cornerRadii(for: .open(nil)).top, tabCount: 2, bar: geometry.tabBarCapsule(tabCount: 2)
         )
         let opening = await sample(rig) { rig.model.open(tab: nil, onPurpose: false) }
         print("CANARY open from the top (\(style), \(shape)): \(timeline(opening))")
@@ -357,7 +360,10 @@ struct NotchPillCanaryTests {
         let first = try #require(before.first)
         let settled = try #require(moving.last?.elements.first)
         #expect(abs(settled.height - (shape == .slab ? first.height - 18 : first.height)) < 3, "18 pt shorter with the slab, the same tile with tiles: \(first) -> \(settled)")
-        #expect(abs(settled.minY - (shape == .slab ? first.minY + 5 : first.minY - 13)) < 3, "the slab's top is the pill's gap lower (a MacBook's sits at the edge) and the tile 18 pt higher less the gap: \(first) -> \(settled)")
+        // The slab's top is the pill's gap lower (a MacBook's sits at the edge); the tile starts under the pill, a gap lower.
+        let bar = try #require(external.tabBarCapsule(tabCount: 2))
+        let expectedTop = shape == .slab ? first.minY + 5 : external.topGap + bar.top + bar.height + NotchGlassPlan.tileGap
+        #expect(abs(settled.minY - expectedTop) < 3, "\(first) -> \(settled)")
     }
 
     // MARK: a strip that wants a wider notch
@@ -429,5 +435,54 @@ struct NotchPillCanaryTests {
         let narrowing = await sample(rig) { box.width = 330 }
         let back = try #require(narrowing.last?.elements.first { $0.width > 200 })
         #expect(abs(back.width - (before + 8)) < 6, "\(back.width) against \(before + 8)")
+    }
+
+    // MARK: the pill opens into the tab bar
+
+    @Test(arguments: [CGFloat(24), 32, 40, 56], [2, 12])
+    func withTilesThePillWidensOrNarrowsIntoTheTabBarAtTheSameTopAndHeightWhileTheTileComesOutUnderIt(height: CGFloat, tabs: Int) async throws {
+        let geometry = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig(virtualNotchStyle: .pill, opensAsTiles: true, pillHeight: height))
+        let rig = try await rig(shape: .tiles, pillHeight: height, tabs: tabs)
+        defer { rig.window.contentView = nil }
+        let final = NotchTilesLayout.open(
+            shapeSize: geometry.shapeSize(for: .open(nil), contentHeight: 190, tabCount: tabs), topInset: geometry.openTopInset,
+            topRadius: 0, tabCount: tabs, bar: geometry.tabBarCapsule(tabCount: tabs)
+        )
+        let bar = try #require(final.tabBar)
+        let pillWidth = geometry.shapeSize(for: .compact).width
+        // The capsule is the element as tall as the pill with its top under the gap: in every sample there is one. (When the tiles are
+        // gone, the pill's own glass is left, which is its shape grown by 4 pt.)
+        func capsules(_ elements: [CGRect]) -> [CGRect] {
+            elements.filter {
+                (abs($0.height - height) < 3 && abs($0.minY - geometry.topGap) < 3)
+                    || (abs($0.height - (height + 8)) < 3 && abs($0.minY - (geometry.topGap - 4)) < 3)
+            }
+        }
+        let opening = await sample(rig) { rig.model.open(tab: nil, onPurpose: false) }
+        print("CANARY pill opens into the bar (\(height), \(tabs) tabs): \(timeline(opening))")
+        #expect(opening.allSatisfy { !$0.elements.isEmpty }, "no sample without glass")
+        #expect(opening.allSatisfy { !capsules($0.elements).isEmpty }, "the capsule never leaves the pill's top and height")
+        #expect(worstCentreOffset(opening, wider: 60) < 4, "centred")
+        let first = try #require(opening.first)
+        #expect(capsules(first.elements).contains { abs($0.width - pillWidth) < 60 }, "it starts as the pill: \(first.elements)")
+        let last = try #require(opening.last)
+        let capsule = try #require(capsules(last.elements).first)
+        #expect(abs(capsule.width - bar.size.width) < 4, "and ends as wide as the tab bar needs: \(capsule.width) against \(bar.size.width)")
+        let tile = try #require(last.elements.first { $0.width > 300 })
+        #expect(abs(tile.minY - (geometry.topGap + height + NotchGlassPlan.tileGap)) < 3, "the tile is under it, a gap lower: \(tile)")
+        // Widening or narrowing: the capsule's width only goes one way, between the two, and its height and top do not move.
+        let widths = opening.compactMap { capsules($0.elements).first?.width }
+        if bar.size.width > pillWidth {
+            #expect(zip(widths, widths.dropFirst()).allSatisfy { $1 >= $0 - 3 }, "widening")
+        } else {
+            // (The spring overshoots the bar's width by a few points and comes back.)
+            #expect(zip(widths, widths.dropFirst()).allSatisfy { $1 <= $0 + 6 }, "narrowing")
+        }
+        // Closing is the reverse: the tile merges up into the bar, and the bar goes back to the pill, with glass the whole time.
+        let closing = await sample(rig) { rig.model.close() }
+        #expect(closing.allSatisfy { !$0.elements.isEmpty }, "no sample without glass")
+        #expect(closing.allSatisfy { !capsules($0.elements).isEmpty }, "the bar stays at the pill's top and height while it narrows back")
+        let rest = try #require(closing.last?.elements)
+        #expect(rest.count == 1 && abs(rest[0].width - (pillWidth + 8)) < 6, "back to the pill's glass alone: \(rest)")
     }
 }

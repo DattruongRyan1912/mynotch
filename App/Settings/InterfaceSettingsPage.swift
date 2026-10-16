@@ -28,9 +28,15 @@ struct InterfaceSettingsPage: View {
                 Text("Viên thuốc nổi cách mép trên một chút, như Dynamic Island. Máy có phần khuyết giữ nguyên.")
                     .font(.caption).foregroundStyle(.secondary)
                 slider("Chiều rộng", InterfaceSettings.virtualNotchWidth, 120...300, unit: "pt")
-                Toggle("Cao bằng menu bar", isOn: settings.binding(InterfaceSettings.virtualNotchMatchesMenuBar))
-                slider("Chiều cao", InterfaceSettings.virtualNotchHeight, 24...40, unit: "pt")
-                    .disabled(settings.value(InterfaceSettings.virtualNotchMatchesMenuBar))
+                if settings.value(InterfaceSettings.virtualNotchStyle) == .pill {
+                    slider("Chiều cao viên thuốc", InterfaceSettings.pillHeight, NotchGeometry.pillHeightLimits, unit: "pt")
+                    Text("Viên thuốc cao có thể che mép trên của các cửa sổ nằm dưới menu bar.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Toggle("Cao bằng menu bar", isOn: settings.binding(InterfaceSettings.virtualNotchMatchesMenuBar))
+                    slider("Chiều cao", InterfaceSettings.virtualNotchHeight, 24...40, unit: "pt")
+                        .disabled(settings.value(InterfaceSettings.virtualNotchMatchesMenuBar))
+                }
             }
             Section("Khi mở rộng") {
                 slider("Chiều rộng", InterfaceSettings.openWidth, NotchGeometry.openWidthLimits, unit: "pt")
