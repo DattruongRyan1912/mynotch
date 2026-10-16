@@ -58,6 +58,8 @@ final class ClipboardLibraryModel: ClipboardPreviewHosting {
     }
     /// Cards per row now; set by the view, which knows the width. Arrow keys move by this many in the grid.
     var columns = 1
+    /// Whether the popover of the card size and the layout, which opens from a toolbar button, is open.
+    var isViewOptionsOpen = false
 
     // MARK: What follows from it
 

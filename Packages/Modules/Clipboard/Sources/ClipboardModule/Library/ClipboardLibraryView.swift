@@ -179,34 +179,15 @@ struct ClipboardLibraryView: View {
             }
             .help("Lọc theo loại")
         }
-        ToolbarItemGroup {
-            if model.layout == .grid {
-                HStack(spacing: 6) {
-                    Image(systemName: "square.grid.3x3")
-                        .imageScale(.small)
-                        .foregroundStyle(.secondary)
-                    Slider(
-                        value: Binding(
-                            get: { model.cardSize.sliderValue },
-                            set: { model.cardSize = ClipboardLibraryCardSize(sliderValue: $0) }
-                        ),
-                        in: 0...2, step: 1
-                    )
-                    .frame(width: 80)
-                    .labelsHidden()
-                    Image(systemName: "square.grid.2x2")
-                        .imageScale(.small)
-                        .foregroundStyle(.secondary)
-                }
-                .help("Cỡ thẻ")
+        ToolbarItem {
+            Button { model.isViewOptionsOpen.toggle() } label: {
+                Label("Cỡ thẻ và kiểu xem", systemImage: "slider.horizontal.3")
             }
-            Picker("Kiểu xem", selection: $model.layout) {
-                Label("Lưới", systemImage: "square.grid.2x2").tag(ClipboardLibraryLayout.grid)
-                Label("Danh sách", systemImage: "list.bullet").tag(ClipboardLibraryLayout.list)
+            .help("Cỡ thẻ và kiểu xem")
+            // Made when it opens, so the slider and the switch do not exist while it is closed.
+            .popover(isPresented: $model.isViewOptionsOpen, arrowEdge: .bottom) {
+                ClipboardLibraryViewOptions(model: model)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .help("Lưới hoặc danh sách")
         }
         ToolbarItem {
             Button {
