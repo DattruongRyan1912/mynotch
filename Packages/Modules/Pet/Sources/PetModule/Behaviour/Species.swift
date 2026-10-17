@@ -37,6 +37,7 @@ extension CharacterKind {
         switch self {
         case .cat: CatSpecies.shared
         case .capybara: CapybaraSpecies.shared
+        case .hamster: HamsterSpecies.shared
         }
     }
 }

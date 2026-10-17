@@ -159,9 +159,12 @@ final class CatSpriteView: NSView {
 
     /// The character drawn at `point` (in this view's coordinates), the topmost when several are: its number on the stage. One that sits on
     /// another is drawn over it, whatever its number, and so is the one that is hit.
+    ///
+    /// Every picture is the size of the cat's, and a small character (the hamster) is a little of its own: where the pictures of two overlap,
+    /// the one that has a pixel drawn where the click is is the one that was clicked, over one that is only clear there.
     private func drawnCharacter(at point: CGPoint) -> Int? {
         let topmost = characters.indices.sorted { (characters[$0].sprite.zPosition, $0) > (characters[$1].sprite.zPosition, $1) }
-        return topmost.first { index in
+        let under = topmost.filter { index in
             let sprite = characters[index].sprite
             guard !sprite.isHidden else { return false }
             let drawn = sprite.presentation() ?? sprite
@@ -170,6 +173,11 @@ final class CatSpriteView: NSView {
             // otherwise take the strokes that are for the one under it.
             return sprite.zPosition > 0 ? Self.hasInk(drawn, near: point) : true
         }
+        guard under.count > 1 else { return under.first }
+        return under.first { index in
+            let sprite = characters[index].sprite
+            return Self.hasInk(sprite.presentation() ?? sprite, near: point)
+        } ?? under.first
     }
 
     /// Whether the picture a layer shows has a pixel that is not clear within a pixel of `point` (in the view's coordinates).

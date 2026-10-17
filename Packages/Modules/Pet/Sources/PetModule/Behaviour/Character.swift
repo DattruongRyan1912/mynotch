@@ -5,6 +5,7 @@ import Foundation
 nonisolated enum CharacterKind: String, CaseIterable, Codable, Sendable {
     case cat
     case capybara
+    case hamster
 
     /// The most characters one screen has: the room to play in is two wings of 100 points, or a pill of 280.
     static let maxPerScreen = 3
@@ -14,6 +15,7 @@ nonisolated enum CharacterKind: String, CaseIterable, Codable, Sendable {
         switch self {
         case .cat: "Mèo"
         case .capybara: "Capybara"
+        case .hamster: "Hamster"
         }
     }
 }
