@@ -34,6 +34,8 @@ packages:
     path: Packages/Modules/Calendar
   ClipboardModule:
     path: Packages/Modules/Clipboard
+  EqualizerModule:
+    path: Packages/Modules/Equalizer
   LockScreenModule:
     path: Packages/Modules/LockScreen
   MediaModule:
@@ -94,6 +96,7 @@ targets:
       - package: BatteryModule
       - package: CalendarModule
       - package: ClipboardModule
+      - package: EqualizerModule
       - package: LockScreenModule
       - package: MediaModule
       - package: PerformanceModule
@@ -156,7 +159,7 @@ targets:
         NSBluetoothAlwaysUsageDescription: "MyNotch hiển thị pin của thiết bị Bluetooth trong notch."
         NSAppleEventsUsageDescription: "MyNotch điều khiển ứng dụng khác từ notch, ví dụ trình phát nhạc, hoặc Terminal và iTerm để mở đúng tab của một phiên AI."
         NSMicrophoneUsageDescription: "MyNotch dùng micro cho các tính năng ghi âm trong notch."
-        NSAudioCaptureUsageDescription: "MyNotch hiển thị phổ âm thanh của nhạc đang phát."
+        NSAudioCaptureUsageDescription: "MyNotch dùng âm thanh hệ thống để vẽ phổ nhạc và để chỉnh âm (EQ)."
         NSDesktopFolderUsageDescription: "MyNotch lưu ảnh chụp màn hình vào Desktop khi bạn chọn."
         NSDownloadsFolderUsageDescription: "MyNotch lưu ảnh chụp và theo dõi file tải xong trong Downloads khi bạn bật."
         # Each NSMessage is a method of App/ServicesProvider.swift.
