@@ -28,8 +28,11 @@ nonisolated struct PointerReading: Equatable, Sendable {
 nonisolated struct CatSenses: Equatable, Sendable {
     /// Seconds since the user last touched the keyboard or the pointer.
     var idleSeconds: TimeInterval = 0
-    /// How busy the processors are, 0 to 1.
+    /// How busy the processors are, 0 to 1, as of the last second: what a busy Mac does to the cat's mood and pace.
     var cpuLoad: Double = 0
+    /// The Mac is busy by its own standards: a load clearly over what it usually is, held for some seconds, and not for long (`BusyWatch`).
+    /// This, and not the load, is what makes the cat run.
+    var busyBurst = false
     var pointer: PointerReading?
     /// The Mac is playing sound.
     var audioPlaying = false
@@ -43,6 +46,8 @@ nonisolated struct CatSenses: Equatable, Sendable {
 nonisolated struct CatTuning: Equatable, Sendable {
     /// Idle time after which the cat falls asleep, in the daytime.
     var sleepAfter: TimeInterval = 300
+    /// Whether a busy Mac has any effect on the cat: the burst of running, and the quicker walks and the sweat that go with a high load.
+    var reactsToBusyMachine = true
     /// At night it nods off in this share of that time.
     static let nightSleepFactor = 0.3
     /// Never sooner than this, so a short setting at night is not a cat that sleeps through a pause for thought.

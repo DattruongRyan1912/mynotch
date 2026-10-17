@@ -222,6 +222,7 @@ import Testing
         #expect(settings.value(keys.coat) == .tabby)
         #expect(!settings.value(keys.meow))
         #expect(settings.value(keys.sleepMinutes) == 5)
+        #expect(settings.value(keys.busyReaction) == .occasionally)
         #expect(keys.show.name == "module.pet.show")
     }
 
@@ -263,6 +264,19 @@ import Testing
         harness.setting("sleepMinutes", 2)
         await harness.settle(until: { stage.tuning.sleepAfter == 120 })
         #expect(stage.tuning.sleepAfter == 120)
+    }
+
+    @Test func theBusyReactionReachesTheCatTheMomentItIsChanged() async throws {
+        let harness = PetHarness()
+        await harness.start()
+        let stage = try #require(harness.madeStage)
+        #expect(stage.tuning.reactsToBusyMachine, "Thỉnh thoảng")
+        harness.setting("busyReaction", BusyReaction.off)
+        await harness.settle(until: { !stage.tuning.reactsToBusyMachine })
+        #expect(!stage.tuning.reactsToBusyMachine, "Tắt, with nothing else changed")
+        harness.setting("busyReaction", BusyReaction.occasionally)
+        await harness.settle(until: { stage.tuning.reactsToBusyMachine })
+        #expect(stage.tuning.reactsToBusyMachine)
     }
 
     // MARK: Stopping

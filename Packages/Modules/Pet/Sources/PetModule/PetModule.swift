@@ -60,7 +60,10 @@ public final class PetModule: FeatureModule {
         let id = descriptor.id
         context.run { [weak self] in
             for await _ in Observations({
-                (settings.value(keys.show), settings.value(keys.coat), settings.value(keys.meow), settings.value(keys.sleepMinutes))
+                (
+                    settings.value(keys.show), settings.value(keys.coat), settings.value(keys.meow), settings.value(keys.sleepMinutes),
+                    settings.value(keys.busyReaction)
+                )
             }) {
                 self?.applySettings()
                 self?.reconcile()

@@ -21,11 +21,13 @@ nonisolated enum CatScene: CaseIterable, Equatable, Sendable {
     /// Trots to the middle of the strip, under the notch's middle, ducks out of sight below its edge and peeks back up.
     case peekaboo
     case dash
+    /// Sits and sweats a little, with the Mac as busy as it is: the only scene a quiet Mac does not bring on.
+    case fret
     /// Not one it picks: the pointer came close.
     case pounceAtPointer
 
-    /// How much it likes to, by day and at night. A cat does not nap at its desk by day.
-    func weight(night: Bool) -> Double {
+    /// How much it likes to, by day and at night, and with the Mac busy or not. A cat does not nap at its desk by day.
+    func weight(night: Bool, busy: Bool = false) -> Double {
         switch self {
         case .wander: night ? 8 : 22
         case .restSit: night ? 16 : 10
@@ -40,6 +42,7 @@ nonisolated enum CatScene: CaseIterable, Equatable, Sendable {
         case .yarnPlay: night ? 3 : 8
         case .peekaboo: night ? 2 : 6
         case .dash: night ? 2 : 5
+        case .fret: busy ? 9 : 0
         case .pounceAtPointer: 0
         }
     }
@@ -124,6 +127,8 @@ nonisolated extension CatScene {
             return [.go(.trot, .centre), .once(.peek), .once(.peek), .go(.walk, .away(30...90)), .stay(.sit, seconds(1.5, 3))]
         case .dash:
             return [.go(.trot, .farEdge), .stay(.sit, seconds(2, 4))]
+        case .fret:
+            return [.stay(.sit, seconds(0.8, 1.5)), .stay(.sweat, seconds(3, 5)), .stay(.sit, seconds(1, 2))]
         case .pounceAtPointer:
             return [.pounce, .stay(.sit, seconds(1.5, 3))]
         }

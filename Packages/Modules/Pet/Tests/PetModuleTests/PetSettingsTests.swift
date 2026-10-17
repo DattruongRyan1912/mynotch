@@ -17,6 +17,21 @@ import Testing
         #expect(settings.value(keys.show), "Hiện mèo trên notch")
         #expect(settings.value(keys.coat) == .tabby, "Màu mèo")
         #expect(!settings.value(keys.meow), "Tiếng mèo khi bấm")
+        #expect(settings.value(keys.busyReaction) == .occasionally, "Mèo phản ứng khi máy bận: Thỉnh thoảng")
+        #expect(keys.tuning(settings).reactsToBusyMachine)
+    }
+
+    @Test func theBusyReactionIsOccasionallyOrOffAndOffIsWhatTheCatIsTold() throws {
+        let settings = try environment()
+        let keys = PetSettingsKeys(settings)
+        #expect(BusyReaction.allCases == [.occasionally, .off])
+        #expect(BusyReaction.occasionally.displayName == "Thỉnh thoảng" && BusyReaction.off.displayName == "Tắt")
+        #expect(BusyReaction(rawValue: "occasionally") == .occasionally && BusyReaction(rawValue: "off") == .off)
+        settings.set(BusyReaction.off, for: keys.busyReaction)
+        #expect(settings.value(keys.busyReaction) == .off)
+        #expect(!keys.tuning(settings).reactsToBusyMachine)
+        settings.set(BusyReaction.occasionally, for: keys.busyReaction)
+        #expect(keys.tuning(settings).reactsToBusyMachine)
     }
 
     @Test func theCoatIsKeptByNameAndAnUnknownOneReadsAsTheDefault() throws {
@@ -31,8 +46,8 @@ import Testing
 
     @Test func theChoicesAreKeptUnderTheModulesOwnNames() throws {
         let keys = PetSettingsKeys(try environment())
-        #expect([keys.show.name, keys.coat.name, keys.meow.name, keys.sleepMinutes.name] == [
-            "module.pet.show", "module.pet.coat", "module.pet.meow", "module.pet.sleepMinutes",
+        #expect([keys.show.name, keys.coat.name, keys.meow.name, keys.sleepMinutes.name, keys.busyReaction.name] == [
+            "module.pet.show", "module.pet.coat", "module.pet.meow", "module.pet.sleepMinutes", "module.pet.busyReaction",
         ])
     }
 

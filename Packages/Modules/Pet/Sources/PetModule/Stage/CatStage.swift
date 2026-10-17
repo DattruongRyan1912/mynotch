@@ -7,7 +7,8 @@ import NotchUI
 /// its window the timer, the reads and the animations all stop, and nothing is left running for a cat nobody is looking at.
 ///
 /// While it is alive it wakes a few times a second, and only to read: the pointer four times a second, the processors, the idle time and
-/// the sound once a second. What it draws it hands to Core Animation, which plays it on its own.
+/// the sound once a second. What the processors do is judged against what this Mac usually does (`BusyWatch`): the cat runs for its life only
+/// when the Mac is much busier than it usually is, and then only now and then. What it draws it hands to Core Animation, which plays it on its own.
 final class CatStage {
     /// What the stage reads and calls, all of it replaceable so that a test touches none of the real things.
     struct Sources {
@@ -48,6 +49,7 @@ final class CatStage {
     private var idle: TimeInterval = 0
     private var load: Double = 0
     private var hasLoad = false
+    private var busy = BusyWatch()
     private var audioPlaying = false
     private var frames: [ObjectIdentifier: CGRect] = [:]
 
@@ -135,6 +137,7 @@ final class CatStage {
         _ = sources.cpu.load()
         load = 0
         hasLoad = false
+        busy.resume()
         tickIndex = 0
         hosts.forEach(show(on:))
         scheduleTick()
@@ -159,10 +162,11 @@ final class CatStage {
         guard isAlive, !isResting, var brain else { return }
         ticks += 1
         let now = sources.clock()
-        if tickIndex % Self.slowEvery == 0 { readSlowSenses() }
+        if tickIndex % Self.slowEvery == 0 { readSlowSenses(at: now) }
         tickIndex += 1
         let senses = CatSenses(
-            idleSeconds: idle, cpuLoad: load, pointer: pointerReading(), audioPlaying: audioPlaying, hour: sources.hour()
+            idleSeconds: idle, cpuLoad: load, busyBurst: busy.isBursting(at: now), pointer: pointerReading(), audioPlaying: audioPlaying,
+            hour: sources.hour()
         )
         let outcome = brain.update(now: now, senses: senses, tuning: tuning, travel: Double(referenceLane()?.travel ?? 0))
         self.brain = brain
@@ -174,12 +178,13 @@ final class CatStage {
     }
 
     /// The things that change slowly, read once a second.
-    private func readSlowSenses() {
+    private func readSlowSenses(at now: TimeInterval) {
         idle = sources.idle.secondsSinceLastInput()
         if let sample = sources.cpu.load() {
-            // Half of the last second and half of what came before, so a spike makes the cat run and a blip does not.
+            // Half of the last second and half of what came before, so that a blip is not a load.
             load = hasLoad ? load * 0.5 + sample * 0.5 : sample
             hasLoad = true
+            busy.record(load, at: now)
         }
         audioPlaying = sources.audio.isPlaying()
     }
@@ -267,6 +272,7 @@ final class CatStage {
             _ = sources.cpu.load()
             load = 0
             hasLoad = false
+            busy.resume()
             tickIndex = 0
             hosts.forEach(show(on:))
             scheduleTick()

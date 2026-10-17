@@ -3,7 +3,7 @@ import Foundation
 /// What the cat is doing, which is which of its animations is playing.
 nonisolated enum CatMove: CaseIterable, Equatable, Sendable {
     // Facing the viewer, in one place.
-    case sit, blink, tailSwish, groom, scratch, lookLeft, lookRight, lookUp, yawn, purr, dance, sleep, loaf
+    case sit, blink, tailSwish, groom, scratch, lookLeft, lookRight, lookUp, yawn, purr, dance, sleep, loaf, sweat
     // Changing between the ways of being in one place, once through.
     case lieDown, sitDown, standUp
     // Side on, on its feet, going somewhere or about to.
@@ -19,7 +19,7 @@ nonisolated enum CatMove: CaseIterable, Equatable, Sendable {
     /// The stance the move is made in and, once through, ends in; nil for a move that is made from any.
     var stance: Stance? {
         switch self {
-        case .sit, .blink, .tailSwish, .groom, .scratch, .lookLeft, .lookRight, .lookUp, .yawn, .purr, .dance, .sitDown: .seated
+        case .sit, .blink, .tailSwish, .groom, .scratch, .lookLeft, .lookRight, .lookUp, .yawn, .purr, .dance, .sweat, .sitDown: .seated
         case .sleep, .loaf, .lieDown: .lying
         case .walk, .trot, .frantic, .chase, .pounce, .stretch, .yarn, .startled, .standUp: .standing
         case .peek: nil
@@ -32,7 +32,7 @@ nonisolated enum CatMove: CaseIterable, Equatable, Sendable {
         case .sit: 4
         case .blink, .lookLeft, .lookRight, .lookUp: 1
         case .tailSwish, .groom, .scratch, .dance, .trot, .frantic, .chase, .stretch, .yarn: 6
-        case .yawn, .purr, .sleep, .lieDown, .sitDown, .standUp, .peek, .startled: 4
+        case .yawn, .purr, .sleep, .lieDown, .sitDown, .standUp, .peek, .startled, .sweat: 4
         case .loaf: 2
         case .walk, .pounce: 8
         }
@@ -43,7 +43,7 @@ nonisolated enum CatMove: CaseIterable, Equatable, Sendable {
         switch self {
         case .sit, .sleep, .loaf, .lookLeft, .lookRight, .lookUp: 2
         case .blink: 4
-        case .yawn, .peek: 5
+        case .yawn, .peek, .sweat: 5
         case .groom, .purr, .lieDown, .sitDown, .standUp, .stretch: 6
         case .tailSwish, .scratch, .dance, .startled: 8
         case .pounce, .yarn: 10

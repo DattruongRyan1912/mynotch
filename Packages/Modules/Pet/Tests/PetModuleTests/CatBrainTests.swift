@@ -108,8 +108,9 @@ let wake = Drive.step
             overnight.run(3600)
             night.formUnion(overnight.scenes)
         }
-        let everyDay = Set(CatScene.allCases).subtracting([.nap, .pounceAtPointer])
+        let everyDay = Set(CatScene.allCases).subtracting([.nap, .pounceAtPointer, .fret])
         #expect(day == everyDay, "\(everyDay.subtracting(day))")
+        #expect(!day.contains(.fret), "a quiet Mac does not make it sweat")
         #expect(night.contains(.nap))
         #expect(!day.contains(.nap))
     }
@@ -120,7 +121,8 @@ let wake = Drive.step
             var drive = Drive(seed: seed, tuning: CatTuning(sleepAfter: 120))
             for minute in 0..<60 {
                 drive.senses.idleSeconds = [14: 400, 11: 60, 12: 60, 13: 60, 8: 20, 9: 20, 10: 20][minute % 15] ?? 5
-                drive.senses.cpuLoad = minute % 11 == 5 ? 0.9 : 0.05
+                drive.senses.cpuLoad = minute % 11 == 5 || minute % 11 == 6 ? 0.9 : 0.05
+                drive.senses.busyBurst = minute % 11 == 5
                 drive.senses.audioPlaying = minute % 13 == 7
                 drive.senses.hour = minute < 30 ? 14 : 23
                 drive.senses.pointer = minute % 9 == 3 ? Drive.pointer(0.6, near: minute % 18 == 3) : nil
@@ -372,6 +374,7 @@ let wake = Drive.step
         drive.run(5)
         drive.senses.pointer = Drive.pointer(0.9, near: true)
         drive.senses.cpuLoad = 0.9
+        drive.senses.busyBurst = true
         drive.senses.audioPlaying = true
         drive.run(wake)
         guard drive.move == .pounce || drive.move == .startled else {
@@ -382,7 +385,7 @@ let wake = Drive.step
         drive.run(0.4)
         #expect(drive.move == reaction, "not taken from it by a busy machine or music")
         drive.run(CatMove.pounce.passDuration + 1)
-        #expect(drive.move == .frantic, "and then the machine is still busy")
+        #expect(drive.move == .frantic, "and then the machine is still in its burst")
     }
 
     @Test func itReactsOnceAndNotAgainWithinTheCooldown() {
@@ -462,21 +465,31 @@ let wake = Drive.step
 
     // MARK: Processors and music
 
-    @Test func whenTheProcessorsAreBusyItRunsFranticallyAndDoesNotStopToSit() {
-        var drive = Drive(seed: 1, senses: CatSenses(cpuLoad: 0.9))
-        drive.run(120)
+    @Test func inABurstOfLoadItRunsFranticallyAndDoesNotStopToSit() {
+        var drive = Drive(seed: 1, senses: CatSenses(cpuLoad: 0.9, busyBurst: true))
+        drive.run(BusyWatch.longestBurst)
         #expect(drive.move == .frantic)
         let others = Set(drive.moves).subtracting([.frantic])
         #expect(others.isEmpty, "\(others)")
     }
 
-    @Test func theBusierTheProcessorsTheFasterItRunsAndTheFasterItsFramesPlay() throws {
+    @Test func aHighLoadThatIsNoBurstDoesNotMakeItRunAtAllAndEveryOtherSceneStillPlays() {
+        for load in [0.65, 0.9, 1.0] {
+            var drive = Drive(seed: 3, senses: CatSenses(idleSeconds: 60, cpuLoad: load, hour: 14))
+            drive.run(3600)
+            #expect(!drive.moves.contains(.frantic), "at \(load)")
+            let missing = Set(CatScene.allCases).subtracting([.nap, .pounceAtPointer]).subtracting(drive.scenes)
+            #expect(missing.isEmpty, "at \(load) an hour of scenes lacks \(missing)")
+        }
+    }
+
+    @Test func theBusierTheProcessorsInABurstTheFasterItRunsAndTheFasterItsFramesPlay() throws {
         func run(load: Double) throws -> CatPlan {
-            var drive = Drive(seed: 1, position: 0, senses: CatSenses(cpuLoad: load))
+            var drive = Drive(seed: 1, position: 0, senses: CatSenses(cpuLoad: load, busyBurst: true))
             drive.run(5)
             return try #require(drive.history.first { $0.plan.move == .frantic }?.plan)
         }
-        let gentle = try run(load: 0.4)
+        let gentle = try run(load: BusyWatch.floor)
         let hard = try run(load: 1.0)
         let speed: (CatPlan) -> Double = { abs($0.to - $0.from) * 260 / $0.duration }
         #expect(speed(hard) > speed(gentle))
@@ -485,30 +498,89 @@ let wake = Drive.step
         #expect(hard.to == 1 && hard.from == 0, "across the lane to the end that is farther off")
     }
 
-    @Test func itRunsBackAndForthAlongTheLane() {
-        var drive = Drive(seed: 1, position: 0, senses: CatSenses(cpuLoad: 0.9))
+    @Test func itRunsBackAndForthAlongTheLaneForAsLongAsTheBurstLasts() {
+        var drive = Drive(seed: 1, position: 0, senses: CatSenses(cpuLoad: 0.9, busyBurst: true))
         drive.run(40)
         let runs = drive.history.map(\.plan).filter { $0.move == .frantic }
         #expect(runs.count >= 3)
         #expect(runs.contains { $0.facing == .right } && runs.contains { $0.facing == .left })
     }
 
-    @Test func aQuietMachineNeverMakesItRunAndTheLoadItStopsAtIsLowerThanTheOneItStartsAt() {
-        var calm = Drive(seed: 1, senses: CatSenses(cpuLoad: CatBrain.runOn - 0.01))
-        calm.run(1200)
-        #expect(!calm.moves.contains(.frantic))
-        var drive = Drive(seed: 1, senses: CatSenses(cpuLoad: 0.9))
+    @Test func whenTheBurstIsOverItStopsAtOnceSitsAndGoesBackToItsScenes() {
+        var drive = Drive(seed: 1, senses: CatSenses(cpuLoad: 0.9, busyBurst: true))
         drive.run(5)
-        drive.senses.cpuLoad = (CatBrain.runOn + CatBrain.runOff) / 2
-        drive.run(15)
         #expect(drive.move == .frantic)
-        drive.senses.cpuLoad = CatBrain.runOff - 0.01
+        // The load is as high as ever: a burst is over when the burst says so, not when the load drops.
+        drive.senses.busyBurst = false
         drive.run(wake)
         #expect(drive.move == .sitDown || drive.move == .sit, "calming down: it sits")
+        drive.run(600)
+        #expect(!drive.history.filter { $0.at > 6 }.contains { $0.plan.move == .frantic }, "and does not run again")
+        #expect(Set(drive.scenes).count >= 5, "it is back to what it does with its day")
+    }
+
+    @Test func aLoadThatIsNoBurstAtAnyLevelNeverMakesItRun() {
+        for load in [0, 0.35, BusyWatch.floor, 0.95] {
+            var drive = Drive(seed: 1, senses: CatSenses(cpuLoad: load))
+            drive.run(1200)
+            #expect(!drive.moves.contains(.frantic), "at \(load)")
+        }
+    }
+
+    @Test func aBusyMacQuickensTheWalksAPartOfTheWayAndANormalOneDoesNot() throws {
+        func walks(load: Double, reacts: Bool = true) -> [CatPlan] {
+            var drive = Drive(
+                seed: 2, senses: CatSenses(idleSeconds: 60, cpuLoad: load, hour: 14), tuning: CatTuning(reactsToBusyMachine: reacts)
+            )
+            drive.run(1800)
+            return drive.history.map(\.plan).filter { [CatMove.walk, .trot].contains($0.move) }
+        }
+        let quiet = walks(load: 0.3)
+        let busy = walks(load: 1.0)
+        let half = walks(load: (CatBrain.busyFrom + 1) / 2)
+        #expect(!quiet.isEmpty && !busy.isEmpty && !half.isEmpty)
+        #expect(quiet.allSatisfy { $0.fpsScale == 1 }, "an ordinary load changes nothing")
+        #expect(busy.allSatisfy { abs($0.fpsScale - (1 + CatBrain.busyBoost)) < 1e-9 }, "a full load quickens them by the most there is")
+        #expect(half.allSatisfy { $0.fpsScale > 1 && $0.fpsScale < 1 + CatBrain.busyBoost }, "and half of it by half")
+        #expect(CatBrain.busyBoost <= 0.25, "a little, not a run")
+        // A quicker walk is quicker: the same distance in less time.
+        let speed: (CatPlan) -> Double = { abs($0.to - $0.from) * 260 / $0.duration / $0.move.speed }
+        #expect(busy.allSatisfy { abs(speed($0) - (1 + CatBrain.busyBoost)) < 0.02 })
+        #expect(walks(load: 1.0, reacts: false).allSatisfy { $0.fpsScale == 1 }, "unless the user has turned the reaction off")
+    }
+
+    @Test func aBusyMacBringsOnTheSweatSceneAndAQuietOneNeverDoes() {
+        for seed in 1...4 as ClosedRange<UInt64> {
+            var busy = Drive(seed: seed, senses: CatSenses(idleSeconds: 60, cpuLoad: 0.9, hour: 14))
+            busy.run(1800)
+            #expect(busy.scenes.contains(.fret), "seed \(seed)")
+            #expect(busy.moves.contains(.sweat), "seed \(seed)")
+            var quiet = Drive(seed: seed, senses: CatSenses(idleSeconds: 60, cpuLoad: 0.3, hour: 14))
+            quiet.run(1800)
+            #expect(!quiet.scenes.contains(.fret) && !quiet.moves.contains(.sweat), "seed \(seed)")
+        }
+    }
+
+    @Test func theSweatSceneIsAShareOfTheDayAndNotAllOfIt() {
+        var busy = Drive(seed: 5, senses: CatSenses(idleSeconds: 60, cpuLoad: 1.0, hour: 14))
+        busy.run(3600)
+        let fretting = Double(busy.scenes.filter { $0 == .fret }.count) / Double(busy.scenes.count)
+        #expect(fretting > 0.03 && fretting < 0.2, "\(fretting) of the scenes")
+    }
+
+    @Test func withTheReactionOffABurstAndAHighLoadChangeNothing() {
+        var drive = Drive(
+            seed: 1, senses: CatSenses(idleSeconds: 60, cpuLoad: 1.0, busyBurst: true, hour: 14), tuning: CatTuning(reactsToBusyMachine: false)
+        )
+        drive.run(3600)
+        #expect(!drive.moves.contains(.frantic))
+        #expect(!drive.scenes.contains(.fret) && !drive.moves.contains(.sweat))
+        let missing = Set(CatScene.allCases).subtracting([.nap, .pounceAtPointer, .fret]).subtracting(drive.scenes)
+        #expect(missing.isEmpty, "\(missing)")
     }
 
     @Test func aLaneTooShortToRunAlongHasTheCatRunOnTheSpot() throws {
-        var drive = Drive(seed: 1, senses: CatSenses(cpuLoad: 0.9), travel: 0)
+        var drive = Drive(seed: 1, senses: CatSenses(cpuLoad: 0.9, busyBurst: true), travel: 0)
         drive.run(10)
         let run = try #require(drive.history.last { $0.plan.move == .frantic }?.plan)
         #expect(run.from == run.to)
@@ -521,9 +593,11 @@ let wake = Drive.step
         drive.run(30)
         #expect(drive.move == .sleep)
         drive.senses.cpuLoad = 0.8
+        drive.senses.busyBurst = true
         drive.run(wake)
         #expect(drive.move == .frantic)
         drive.senses.cpuLoad = 0.05
+        drive.senses.busyBurst = false
         drive.run(wake)
         #expect(drive.move != .frantic)
     }
@@ -549,7 +623,7 @@ let wake = Drive.step
     }
 
     @Test func aBusyMachineBeatsMusicAndAJumpBeatsBoth() {
-        var drive = Drive(seed: 1, senses: CatSenses(cpuLoad: 0.9, audioPlaying: true))
+        var drive = Drive(seed: 1, senses: CatSenses(cpuLoad: 0.9, busyBurst: true, audioPlaying: true))
         drive.run(10)
         #expect(drive.move == .frantic)
         drive.senses.pointer = Drive.pointer(0.9, near: true)
@@ -586,6 +660,7 @@ let wake = Drive.step
         drive.run(3)
         _ = drive.brain.pet(now: drive.now)
         drive.senses.cpuLoad = 0.9
+        drive.senses.busyBurst = true
         drive.senses.audioPlaying = true
         drive.run(1)
         #expect(drive.move == .purr)

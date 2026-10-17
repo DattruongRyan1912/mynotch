@@ -9,7 +9,8 @@ import Foundation
 /// - the pointer comes close to the strip: a pounce at it, or, for a sleeper or now and then, a startled jump (not more often than every
 ///   `reactionCooldown` seconds);
 /// - a petting, a jump and a pounce are finished before anything else;
-/// - the processors are busy: it runs frantically, harder the busier they are, whatever else is going on;
+/// - the Mac is busy by its own standards (`BusyWatch`: a burst, now and then and not for long): it runs frantically, harder the busier the
+///   processors are, whatever else is going on. A load that is merely high is not that, and only quickens its walks and brings on the sweat;
 /// - the Mac plays sound: it dances;
 /// - the user has been away for the sleep time: a yawn, then sleep, which ends with a yawn when the user is back;
 /// - the pointer is within sight and it is sitting: it looks at it.
@@ -27,11 +28,13 @@ nonisolated struct CatBrain: Sendable {
     static let reactionCooldown: TimeInterval = 8
     /// The chance that a pointer coming close makes a cat that is awake pounce, and not jump.
     static let pounceChance = 0.7
-    /// The processors' load at which the cat starts to run, and the lower one at which it stops.
-    static let runOn = 0.35
-    static let runOff = 0.2
     /// The most a run speeds the frames up by.
     static let runFrameBoost = 0.5
+    /// The load from which a Mac is busy enough to bother the cat a little (the walks quicken, it sweats), outside any burst: busyness is
+    /// nothing at this and everything at a full load.
+    static let busyFrom = 0.6
+    /// The most a busy Mac quickens the walks and trots by.
+    static let busyBoost = 0.25
     /// A user who has touched something this recently is at the Mac.
     static let wakeIdle: TimeInterval = 2
     /// A cat does not nap while the user is still at it.
@@ -66,6 +69,8 @@ nonisolated struct CatBrain: Sendable {
     private var ball: Double?
     private var rolling = 1.0
     private var travel = 0.0
+    /// How much the Mac's load bothers the cat, 0 to 1, as of the last update: 0 when the user has turned the reaction off.
+    private var busyness = 0.0
     private var generator: SplitMix64
     private var pointerWasNear = false
     private var lastReaction = -TimeInterval.infinity
@@ -101,6 +106,7 @@ nonisolated struct CatBrain: Sendable {
     mutating func update(now: TimeInterval, senses: CatSenses, tuning: CatTuning, travel: Double) -> Outcome {
         let before = plan
         self.travel = travel
+        busyness = tuning.reactsToBusyMachine ? min(max((senses.cpuLoad - Self.busyFrom) / (1 - Self.busyFrom), 0), 1) : 0
         pointer = senses.pointer
         let arrived = senses.pointerNear && !pointerWasNear
         pointerWasNear = senses.pointerNear
@@ -109,7 +115,7 @@ nonisolated struct CatBrain: Sendable {
         if arrived, !sticky, now - lastReaction >= Self.reactionCooldown {
             lastReaction = now
             react(senses, now: now)
-        } else if !sticky, interruption(senses, now: now) {
+        } else if !sticky, interruption(senses, tuning: tuning, now: now) {
             // Done.
         } else if !sticky, looking(senses, now: now) {
             // Done.
@@ -117,6 +123,11 @@ nonisolated struct CatBrain: Sendable {
             advance(senses, tuning: tuning, now: now)
         }
         return outcome(since: before)
+    }
+
+    /// Whether the cat is to run: the Mac is in a burst and the user wants the cat to mind.
+    private func bursting(_ senses: CatSenses, _ tuning: CatTuning) -> Bool {
+        tuning.reactsToBusyMachine && senses.busyBurst
     }
 
     // MARK: Reacting
@@ -138,9 +149,9 @@ nonisolated struct CatBrain: Sendable {
     private var pointer: PointerReading?
 
     /// What the cat drops what it is doing for. True when it did.
-    private mutating func interruption(_ senses: CatSenses, now: TimeInterval) -> Bool {
+    private mutating func interruption(_ senses: CatSenses, tuning: CatTuning, now: TimeInterval) -> Bool {
         let running = plan.move == .frantic
-        if senses.cpuLoad >= (running ? Self.runOff : Self.runOn) {
+        if bursting(senses, tuning) {
             guard !running else { return false }
             interrupt(with: [])
             plan = frantic(now: now, load: senses.cpuLoad)
@@ -199,8 +210,7 @@ nonisolated struct CatBrain: Sendable {
 
     /// The plan is over: the next step, or the next scene, or sleep, or what the cat is made to do.
     private mutating func advance(_ senses: CatSenses, tuning: CatTuning, now: TimeInterval) {
-        let running = plan.move == .frantic
-        if senses.cpuLoad >= (running ? Self.runOff : Self.runOn) {
+        if bursting(senses, tuning) {
             plan = frantic(now: now, load: senses.cpuLoad)
             stance = .standing
             return
@@ -243,13 +253,14 @@ nonisolated struct CatBrain: Sendable {
 
     private mutating func beginScene(_ senses: CatSenses) {
         let night = CatTuning.isNight(hour: senses.hour)
-        var choices = CatScene.allCases.filter { $0 != lastScene && $0.weight(night: night) > 0 }
+        let busy = busyness > 0
+        var choices = CatScene.allCases.filter { $0 != lastScene && $0.weight(night: night, busy: busy) > 0 }
         if senses.idleSeconds < Self.napMinimumIdle { choices.removeAll { $0 == .nap } }
-        let total = choices.reduce(0) { $0 + $1.weight(night: night) }
+        let total = choices.reduce(0) { $0 + $1.weight(night: night, busy: busy) }
         var roll = Double.random(in: 0..<total, using: &generator)
         var picked = choices[0]
         for choice in choices {
-            let weight = choice.weight(night: night)
+            let weight = choice.weight(night: night, busy: busy)
             if roll < weight {
                 picked = choice
                 break
@@ -358,7 +369,12 @@ nonisolated struct CatBrain: Sendable {
         }
         let covered = abs(target - here) * travel
         guard covered >= 1 else { return nil }
-        return CatPlan(move: move, facing: facing(from: here, to: target), from: here, to: target, began: now, duration: covered / move.speed)
+        // A busy Mac quickens a walk a little: the frames and the pace together.
+        let quickening = 1 + Self.busyBoost * busyness
+        return CatPlan(
+            move: move, facing: facing(from: here, to: target), from: here, to: target, began: now,
+            duration: covered / (move.speed * quickening), fpsScale: quickening
+        )
     }
 
     /// The cat runs the length of the strip after a moth that is always a little ahead and, at the end, gets away.
@@ -414,7 +430,7 @@ nonisolated struct CatBrain: Sendable {
     /// Running for its life, from one end of the lane to the other and back, harder the busier the processors are.
     private func frantic(now: TimeInterval, load: Double) -> CatPlan {
         let here = plan.position(at: now)
-        let strength = min(max((load - Self.runOn) / (1 - Self.runOn), 0), 1)
+        let strength = min(max((load - BusyWatch.floor) / (1 - BusyWatch.floor), 0), 1)
         let scale = 1 + Self.runFrameBoost * strength
         let target = here < 0.5 ? 1.0 : 0.0
         let covered = abs(target - here) * max(travel, 0)

@@ -22,6 +22,7 @@ extension CatArt {
         case .dance: danceFrames
         case .sleep: sleepFrames
         case .loaf: loafFrames
+        case .sweat: sweatFrames
         case .lieDown: lieDownFrames
         case .sitDown: sitDownFrames
         case .standUp: standUpFrames

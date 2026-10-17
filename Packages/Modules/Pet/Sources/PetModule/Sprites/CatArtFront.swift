@@ -83,6 +83,16 @@ extension CatArt {
         }
     }
 
+    /// Squinting in the heat of a busy Mac, a drop of sweat forming by the head, running down and falling.
+    static var sweatFrames: [PixelFrame] {
+        let drops: [(x: Int, y: Int)] = [(21, 2), (22, 5), (22, 8), (22, 11)]
+        return drops.enumerated().map { index, drop in
+            sitting(face: index == 3 ? .blink : .squint, headDY: index % 2, tail: tailFlat) { canvas in
+                canvas.piece(sweat, x: drop.x, y: drop.y)
+            }
+        }
+    }
+
     static var yawnFrames: [PixelFrame] {
         [sit(face: .squint), sitting(face: .yawn), sitting(face: .yawn, headDY: -1), sit(face: .blink)]
     }

@@ -41,7 +41,7 @@ func contrast(_ first: UInt32, _ second: UInt32) -> Double {
         let asked: [CatMove: Int] = [
             .walk: 8, .trot: 6, .sitDown: 4, .standUp: 4, .lieDown: 4, .stretch: 6, .groom: 6, .scratch: 6, .tailSwish: 6, .lookLeft: 1,
             .lookRight: 1, .lookUp: 1, .pounce: 8, .chase: 6, .yarn: 6, .peek: 4, .yawn: 4, .sleep: 4, .startled: 4, .purr: 4, .dance: 6,
-            .frantic: 6, .loaf: 2, .sit: 4, .blink: 1,
+            .frantic: 6, .loaf: 2, .sit: 4, .blink: 1, .sweat: 4,
         ]
         for move in CatMove.allCases { #expect(Self.moves.first { $0.0 == move }?.1.frames.count == asked[move], "\(move)") }
         #expect(Self.moves.reduce(0) { $0 + $1.1.frames.count } >= 110)

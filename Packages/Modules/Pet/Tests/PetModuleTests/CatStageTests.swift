@@ -326,32 +326,6 @@ import Testing
         }
     }
 
-    @Test func busyProcessorsMakeItRunFrantically() throws {
-        let rig = StageRig()
-        rig.cpu.value = 0.9
-        rig.show()
-        rig.advance(1)
-        let plan = try #require(rig.stage.plan)
-        #expect(plan.move == .frantic)
-        #expect(plan.fpsScale > 1)
-        let frames = try #require(rig.host.sprite.animation(forKey: CatSpriteView.framesKey) as? CAKeyframeAnimation)
-        #expect(abs(frames.duration - CatMove.frantic.passDuration / plan.fpsScale) < 1e-9)
-    }
-
-    @Test func aSpikeInTheLoadSmoothedOverTwoReadsDoesNotMakeItRunAtOnce() throws {
-        let rig = StageRig()
-        rig.cpu.value = 0.05
-        rig.show()
-        rig.advance(3)
-        rig.cpu.value = 0.5
-        rig.advance(1)
-        // One read at 0.5 after calm ones is 0.275: under the threshold.
-        #expect(try #require(rig.stage.plan).move != .frantic)
-        rig.advance(1)
-        // A second at 0.5 is 0.39: it runs.
-        #expect(try #require(rig.stage.plan).move == .frantic)
-    }
-
     @Test func soundPlayingMakesItDance() throws {
         let rig = StageRig()
         rig.audio.playing = true
