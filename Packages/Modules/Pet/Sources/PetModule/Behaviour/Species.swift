@@ -36,6 +36,7 @@ extension CharacterKind {
     var species: any Species {
         switch self {
         case .cat: CatSpecies.shared
+        case .capybara: CapybaraSpecies.shared
         }
     }
 }

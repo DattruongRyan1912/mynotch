@@ -19,6 +19,8 @@ final class CatSpriteView: NSView {
         var isStrip: Bool { self == .strip }
     }
 
+    /// How far in front of the others a character is that sits on one of them.
+    static let raisedHeight: CGFloat = 1
     static let framesKey = "catFrames"
     static let walkKey = "catWalk"
     static let bobKey = "propBob"
@@ -155,13 +157,40 @@ final class CatSpriteView: NSView {
         return self
     }
 
-    /// The character drawn at `point` (in this view's coordinates), the topmost when several are: its number on the stage.
+    /// The character drawn at `point` (in this view's coordinates), the topmost when several are: its number on the stage. One that sits on
+    /// another is drawn over it, whatever its number, and so is the one that is hit.
     private func drawnCharacter(at point: CGPoint) -> Int? {
-        characters.indices.reversed().first { index in
+        let topmost = characters.indices.sorted { (characters[$0].sprite.zPosition, $0) > (characters[$1].sprite.zPosition, $1) }
+        return topmost.first { index in
             let sprite = characters[index].sprite
             guard !sprite.isHidden else { return false }
-            return (sprite.presentation() ?? sprite).frame.insetBy(dx: -2, dy: -2).contains(point)
+            let drawn = sprite.presentation() ?? sprite
+            guard drawn.frame.insetBy(dx: -2, dy: -2).contains(point) else { return false }
+            // One that sits on another is hit only where it is drawn: its picture is the size of the other's, and its clear corners would
+            // otherwise take the strokes that are for the one under it.
+            return sprite.zPosition > 0 ? Self.hasInk(drawn, near: point) : true
         }
+    }
+
+    /// Whether the picture a layer shows has a pixel that is not clear within a pixel of `point` (in the view's coordinates).
+    private static func hasInk(_ layer: CALayer, near point: CGPoint) -> Bool {
+        guard let contents = layer.contents, CFGetTypeID(contents as CFTypeRef) == CGImage.typeID else { return true }
+        let image = contents as! CGImage
+        let (frame, rect) = (layer.frame, layer.contentsRect)
+        guard frame.width > 0, frame.height > 0 else { return false }
+        // The point in the picture: left to right as the layer is, and up from the foot as a layer is (rows of the image go down).
+        let across = rect.minX + (point.x - frame.minX) / frame.width * rect.width
+        let up = rect.minY + (point.y - frame.minY) / frame.height * rect.height
+        let (column, row) = (Int((across * CGFloat(image.width)).rounded(.down)), Int(((1 - up) * CGFloat(image.height)).rounded(.down)))
+        let area = CGRect(x: column - 1, y: row - 1, width: 3, height: 3).intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        guard !area.isNull, let piece = image.cropping(to: area) else { return false }
+        var pixels = [UInt8](repeating: 0, count: piece.width * piece.height * 4)
+        guard let context = CGContext(
+            data: &pixels, width: piece.width, height: piece.height, bitsPerComponent: 8, bytesPerRow: piece.width * 4,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return false }
+        context.draw(piece, in: CGRect(x: 0, y: 0, width: piece.width, height: piece.height))
+        return stride(from: 3, to: pixels.count, by: 4).contains { pixels[$0] > 0 }
     }
 
     /// The panel never becomes active, so the first click has to be taken for what it is.
@@ -281,6 +310,9 @@ final class CatSpriteView: NSView {
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        // One that sits on another is over it: it is drawn above every character that does not, with what it plays with.
+        sprite.zPosition = pose.raised ? Self.raisedHeight : 0
+        layers.prop.zPosition = sprite.zPosition
         prepare(sprite, strip: strip, size: size)
         sprite.position = CGPoint(x: from, y: base)
         sprite.removeAllAnimations()
@@ -333,7 +365,7 @@ final class CatSpriteView: NSView {
         // What does not move is still while it lies (a ball of yarn); what flies goes on with its wings (a moth).
         guard item.look.animatesInPlace || path != nil else { return }
         prop.add(
-            Self.framesAnimation(strip: strip, fps: item.look.fps, loops: true, elapsed: elapsed, begin: begin), forKey: Self.framesKey
+            Self.framesAnimation(strip: strip, fps: item.look.fps, loops: item.look.loops, elapsed: elapsed, begin: begin), forKey: Self.framesKey
         )
         if let path { prop.add(path, forKey: Self.walkKey) }
         if item.look.flutters {
@@ -460,6 +492,8 @@ final class CatSpriteView: NSView {
             layers.spriteStands = nil
             layers.propStands = nil
             layers.shownField = nil
+            layers.sprite.zPosition = 0
+            layers.prop.zPosition = 0
             prepare(layers.sprite, strip: strip, size: size)
             layers.sprite.position = CGPoint(
                 x: field.local(places[index].rounded()), y: field.baseY(height: bounds.height, isStrip: role.isStrip)

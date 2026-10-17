@@ -71,6 +71,8 @@ final class CatStage {
     private var frames: [ObjectIdentifier: CGRect] = [:]
     private var fields: [ObjectIdentifier: CatField] = [:]
     private var dwell = PointerDwell()
+    /// Which two characters are playing together, if any, and when the next scene may begin (`JointDirector`).
+    private var joint: JointDirector
 
     /// Counters for tests, never read by anything else.
     private(set) var ticks = 0
@@ -80,6 +82,8 @@ final class CatStage {
     init(scheduler: any Scheduler, sources: Sources = Sources(), characters: [CharacterKind] = [.cat]) {
         self.scheduler = scheduler
         self.sources = sources
+        // Its own stream, so that what it decides never changes what a character does by itself.
+        joint = JointDirector(seed: sources.seed ^ 0x6A09_E667_F3BC_C909)
         self.characters = characters
     }
 
@@ -110,6 +114,10 @@ final class CatStage {
     var poses: [Pose] { slots.compactMap { $0.brain?.pose } }
 
     var attachedHosts: [CatSpriteView] { hosts }
+
+    /// The joint scene the characters are in, if any, and how many have been begun: for tests.
+    var jointPlay: JointDirector.Play? { joint.play }
+    var jointScenesBegun: Int { joint.begun }
 
     // MARK: Views
 
@@ -142,6 +150,7 @@ final class CatStage {
     /// The module stopped: nothing runs and no view is taken on again.
     func shutDown() {
         isShutDown = true
+        joint.reset()
         hosts.forEach { $0.stopShowing() }
         hosts.removeAll()
         frames.removeAll()
@@ -171,6 +180,8 @@ final class CatStage {
         observeMotionPreference()
         refreshFrames()
         makeBrains(now: now)
+        // The characters are not where they were, or in a scene: each sits down where it is, and the next scene is a few minutes away.
+        joint.reset()
         for index in slots.indices {
             let lane = laneContext(for: index, now: now)
             slots[index].brain?.settle(lane: lane)
@@ -194,6 +205,7 @@ final class CatStage {
 
     /// The last view went: nothing of the cat's runs.
     private func doze() {
+        joint.reset()
         nextTick?.cancel()
         nextTick = nil
         motionObserver.map(sources.notifications.removeObserver)
@@ -225,6 +237,7 @@ final class CatStage {
         let travel = Double(field?.lane.travel ?? 0) / Double(field?.scale ?? 1)
         // One at a time, each told where the others stand after the one before it chose: two never pick the same stop, or both the portal.
         var outcome = BrainOutcome.unchanged
+        if directJointScene(now: now) { outcome = .changed }
         for index in slots.indices {
             guard slots[index].brain != nil else { continue }
             let lane = laneContext(for: index, now: now)
@@ -232,6 +245,8 @@ final class CatStage {
                 outcome = .changed
             }
         }
+        // A scene whose guest has just finished is over for the host now, not a waking later.
+        if joint.play != nil, directJointScene(now: now) { outcome = .changed }
         // The notch can move under them (a wider pill, another display) without telling it.
         let moved = lookAtViews()
         if moved { refreshFrames() }
@@ -315,6 +330,8 @@ final class CatStage {
 
     private func hostsDidMove() {
         guard isAlive else { return }
+        // The lane is not what the scene was made for: the characters in it are not where it needs them, so it is over.
+        _ = endJointScene(now: sources.clock())
         refreshFrames()
         // The views they play in are not what they were: where a character must not stop is not either.
         let now = sources.clock()
@@ -360,12 +377,50 @@ final class CatStage {
     }
 
     /// What character `index` has to keep to in the lane: the crossing, where the others stand, and whether the crossing is closed to it.
-    private func laneContext(for index: Int, now: TimeInterval) -> LaneContext {
+    private func laneContext(for index: Int, now: TimeInterval, playing: Set<Int>? = nil) -> LaneContext {
         let crossing = crossingShares()
         guard slots.count > 1 else { return LaneContext(crossing: crossing) }
-        return LaneRules.context(
-            for: index, poses: slots.map { $0.brain?.pose }, crossing: crossing, separation: referenceField()?.separation ?? 0, now: now
+        var lane = LaneRules.context(
+            for: index, poses: slots.map { $0.brain?.pose }, crossing: crossing, separation: referenceField()?.separation ?? 0, now: now,
+            exempt: playing ?? joint.exempt
         )
+        // A character in a joint scene is told where the other is, and which part it plays.
+        if playing == nil, let play = joint.play, index == play.host || index == play.guest {
+            let other = index == play.host ? play.guest : play.host
+            if slots.indices.contains(other), let partner = slots[other].brain?.pose {
+                lane.joint = JointSight(scene: play.scene.id, role: index == play.host ? .host : .guest, partner: partner)
+            }
+        }
+        return lane
+    }
+
+    // MARK: Playing together
+
+    /// Begins a joint scene when it is time and two characters are ready, and ends the one there is when it is over. True if that changed
+    /// what a character is doing. A stage whose characters cannot play together (one kind of them, or none that make a pair) does not so
+    /// much as look.
+    private func directJointScene(now: TimeInterval) -> Bool {
+        guard slots.count > 1, joint.isPossible(among: slots.map(\.kind)) else { return false }
+        var brains = slots.map(\.brain)
+        // The director is a copy while it asks for the lanes, which the stage works out from its own.
+        var director = joint
+        let changed = director.direct(now: now, kinds: slots.map(\.kind), brains: &brains) { index, playing in
+            self.laneContext(for: index, now: now, playing: playing)
+        }
+        joint = director
+        for index in slots.indices { slots[index].brain = brains[index] }
+        return changed
+    }
+
+    /// The scene is over, for whatever reason: both are told. True if that changed what a character is doing.
+    private func endJointScene(now: TimeInterval) -> Bool {
+        guard joint.play != nil else { return false }
+        var brains = slots.map(\.brain)
+        var director = joint
+        let changed = director.end(now: now, brains: &brains)
+        joint = director
+        for index in slots.indices { slots[index].brain = brains[index] }
+        return changed
     }
 
     // MARK: Who is on the stage
@@ -373,6 +428,8 @@ final class CatStage {
     private func setCharacters(_ kinds: [CharacterKind]) {
         let wanted = Array(kinds.prefix(CharacterKind.maxPerScreen))
         guard wanted != characters else { return }
+        // Their numbers change, and one of a scene's two may be going: the scene is over before they do.
+        _ = endJointScene(now: sources.clock())
         // A character that stays keeps what it was doing, and one that is not there before comes with nothing.
         var kept = slots
         slots = wanted.map { kind in
@@ -421,6 +478,8 @@ final class CatStage {
     /// mews.
     func catWasClicked(character index: Int = 0) {
         strokes += 1
+        // A stroke is for one of the two: the one that is stroked is not played with, and the other comes down.
+        if let play = joint.play, index == play.host || index == play.guest, endJointScene(now: sources.clock()) { showAll() }
         if slots.indices.contains(index), !isResting, var brain = slots[index].brain {
             let outcome = brain.pet(now: sources.clock())
             slots[index].brain = brain
@@ -445,6 +504,9 @@ final class CatStage {
         let reduces = sources.reducesMotion()
         guard reduces != isResting else { return }
         isResting = reduces
+        // Still, or about to move again: either way a scene in progress is over, and the next is a few minutes away.
+        _ = endJointScene(now: sources.clock())
+        joint.reset()
         if reduces {
             nextTick?.cancel()
             nextTick = nil

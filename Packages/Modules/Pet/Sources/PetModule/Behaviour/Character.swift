@@ -4,6 +4,7 @@ import Foundation
 /// `species`: nothing in the stage, the views or the settings is about one kind or another.
 nonisolated enum CharacterKind: String, CaseIterable, Codable, Sendable {
     case cat
+    case capybara
 
     /// The most characters one screen has: the room to play in is two wings of 100 points, or a pill of 280.
     static let maxPerScreen = 3
@@ -12,6 +13,7 @@ nonisolated enum CharacterKind: String, CaseIterable, Codable, Sendable {
     var displayName: String {
         switch self {
         case .cat: "Mèo"
+        case .capybara: "Capybara"
         }
     }
 }
@@ -38,6 +40,17 @@ nonisolated struct PropLook: Hashable, Sendable {
     var rise = 0.0
     /// Its pictures play while it stays where it is (a moth), and not only while it moves (a ball of yarn).
     var animatesInPlace = false
+    /// Its pictures go round and round while it plays (a moth), or are played once and held on the last (a tub that comes up out of the
+    /// floor).
+    var loops = true
+    /// It takes up room that another character does not stop in (a tub the capybara sits in), as a character that stands there would.
+    var occupies = false
+}
+
+/// A place on a character where another can sit: how far, in pixels of the picture, the rider's picture is from this one's, left edge to
+/// left edge, for the way this one faces now.
+nonisolated struct Perch: Equatable, Sendable {
+    var dx: Double
 }
 
 /// Something with the character on the lane. Where it is, as a share of the lane like the character's own places (one that leaves goes
@@ -46,6 +59,9 @@ nonisolated struct PoseProp: Equatable, Sendable {
     var look: PropLook
     var from: Double
     var to: Double
+    /// Other places, shares of the lane, that go with it and take up room that others do not stop in, if it does (the place the capybara
+    /// hops into its tub from, which it hops back to).
+    var alsoAt: [Double] = []
 }
 
 /// How a character moves about its lane, as a view and the stage see it, whatever its species: where it is in the lane, as a share of the
@@ -64,6 +80,10 @@ nonisolated struct Pose: Equatable, Sendable {
     /// The share of the pose that goes by before the character starts to go anywhere (the crouch before a pounce).
     var delay = 0.0
     var prop: PoseProp?
+    /// Where another character can sit on it, while it is in a pose that holds still for that (a capybara sitting or in its tub).
+    var perch: Perch?
+    /// Drawn over the characters that are not: one that sits on another is not behind it.
+    var raised = false
 
     var end: TimeInterval { began + duration }
 
@@ -73,7 +93,7 @@ nonisolated struct Pose: Equatable, Sendable {
     /// start over.
     func looksLike(_ other: Pose) -> Bool {
         guard motion.loops, motion == other.motion, facing == other.facing, from == other.from, to == other.to, fpsScale == other.fpsScale,
-              delay == other.delay, prop == other.prop else { return false }
+              delay == other.delay, prop == other.prop, perch == other.perch, raised == other.raised else { return false }
         return (from == to && prop?.from == prop?.to) || duration == other.duration
     }
 
@@ -104,7 +124,10 @@ nonisolated struct LaneContext: Equatable, Sendable {
     /// Where it may not go at all (the crossing, while another character is in it): a walk that would go through is held at the edge.
     var closed: [ClosedRange<Double>] = []
 
-    var isEmpty: Bool { crossing.isEmpty && zones.isEmpty && closed.isEmpty }
+    /// The joint scene it is in with another character, and where the other is: nil for a character that is not in one.
+    var joint: JointSight?
+
+    var isEmpty: Bool { crossing.isEmpty && zones.isEmpty && closed.isEmpty && joint == nil }
 }
 
 /// What an update did to a character's pose.
@@ -134,4 +157,28 @@ nonisolated protocol CharacterBrain: Sendable {
 
     /// A stroke.
     mutating func pet(now: TimeInterval) -> BrainOutcome
+
+    // MARK: Playing together (see `JointScene`)
+
+    /// The scene it is in with another character, nil when it is in none. A brain that is frightened out of a scene, or has finished its
+    /// part, says nil, and the stage then ends the other's.
+    var jointScene: JointScene.ID? { get }
+
+    /// Whether it would take this part now: calm, and in a state the scene can begin from.
+    func canJoin(_ invite: JointInvite, now: TimeInterval) -> Bool
+
+    /// Takes the part. Only called after `canJoin` said yes.
+    mutating func join(_ invite: JointInvite, now: TimeInterval)
+
+    /// Leaves the scene it is in, cleanly, wherever it stands: the other went, or the scene is over. A character that sits on another
+    /// comes down, and one that is sat on goes on with its day.
+    mutating func leaveJoint(now: TimeInterval) -> BrainOutcome
+}
+
+/// Most characters play no joint scene at all, and a character that does only takes its part in the ones it knows.
+nonisolated extension CharacterBrain {
+    var jointScene: JointScene.ID? { nil }
+    func canJoin(_ invite: JointInvite, now: TimeInterval) -> Bool { false }
+    mutating func join(_ invite: JointInvite, now: TimeInterval) {}
+    mutating func leaveJoint(now: TimeInterval) -> BrainOutcome { .unchanged }
 }

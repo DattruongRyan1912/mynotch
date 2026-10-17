@@ -70,6 +70,10 @@ nonisolated struct CatBrain: Sendable {
     private var generator: SplitMix64
     private var pointerWasNear = false
     private var lastReaction = -TimeInterval.infinity
+    /// The joint scene it is playing the guest in, if it is (see `CatJoint`).
+    private var joint: CatJoint?
+    /// What it last sensed, for what it does when a joint scene ends between two updates.
+    private var lastSenses = CatSenses()
 
     init(seed: UInt64, now: TimeInterval, position: Double = 0.5, facing: Facing = .left) {
         generator = SplitMix64(seed: seed)
@@ -83,8 +87,8 @@ nonisolated struct CatBrain: Sendable {
 
     /// A stroke: purring, with hearts.
     mutating func pet(now: TimeInterval) -> Outcome {
-        // A cat that is going through a portal is not to be stopped in it.
-        guard !isCrossing(at: now) else { return .unchanged }
+        // A cat that is going through a portal is not to be stopped in it, and one that is on the capybara comes off it first.
+        guard !isCrossing(at: now), joint == nil else { return .unchanged }
         let before = plan
         interrupt(with: [])
         plan = made(.purr, now: now, duration: Self.purrDuration)
@@ -94,6 +98,7 @@ nonisolated struct CatBrain: Sendable {
 
     /// The cat is back on the notch after being out of sight: where it was, sitting, and the pointer it last saw is not news.
     mutating func resume(now: TimeInterval) {
+        joint = nil
         interrupt(with: [])
         stance = .seated
         plan = made(.sit, now: now, duration: 2)
@@ -111,7 +116,9 @@ nonisolated struct CatBrain: Sendable {
     mutating func update(now: TimeInterval, senses: CatSenses, tuning: CatTuning, travel: Double, lane: LaneContext) -> Outcome {
         let before = plan
         self.travel = travel
+        lastSenses = senses
         settle(lane: lane)
+        if joint != nil { return updateJoint(now: now, lane: lane, before: before) }
         busyness = tuning.reactsToBusyMachine ? min(max((senses.cpuLoad - Self.busyFrom) / (1 - Self.busyFrom), 0), 1) : 0
         pointer = senses.pointer
         let arrived = senses.pointerNear && !pointerWasNear
@@ -142,7 +149,8 @@ nonisolated struct CatBrain: Sendable {
     /// go into a stretch at all.
     mutating func settle(lane: LaneContext) {
         keeper = LaneKeeper(lane)
-        guard plan.from == plan.to, !(lane.crossing.isEmpty && lane.zones.isEmpty) else { return }
+        // A cat on the capybara's back, or going to it, is where the scene puts it.
+        guard joint == nil, plan.from == plan.to, !(lane.crossing.isEmpty && lane.zones.isEmpty) else { return }
         let here = keeper.settled(plan.to)
         guard here != plan.to else { return }
         plan.from = here
@@ -479,5 +487,232 @@ nonisolated struct CatBrain: Sendable {
     private func outcome(since before: CatPlan) -> Outcome {
         if plan == before { return .unchanged }
         return plan.looksLike(before) ? .extended : .changed
+    }
+}
+
+// MARK: Sitting on the capybara
+
+/// The cat's part in a joint scene as the guest: it walks to the host's rump side, hops onto its back, sits or loafs there for a while,
+/// hops off and walks a little way off, and nothing it senses (the pointer, the Mac's load, sound, being away) takes it off before that.
+/// Where it goes is worked out from the host's pose, which the stage hands it at every update, and a host that is not where it was, or is
+/// gone, ends the scene.
+nonisolated struct CatJoint: Sendable {
+    enum Phase: Equatable, Sendable {
+        /// Walking to where it hops from.
+        case approach
+        case hopOn
+        /// On its back, sitting or lying like a loaf.
+        case perched(loaf: Bool)
+        /// Off again, and walking out of the capybara's way: these two need nobody, and the end of the second is the end of the scene for
+        /// the cat.
+        case hopOff
+        case walkOff
+    }
+
+    var scene: JointScene.ID
+    var phase: Phase
+    /// Where it hops from, where it sits, and where it walks to when it is off again (shares of the lane, its left foot), and which way
+    /// it hops on (1 right, -1 left).
+    var launch: Double
+    var seat: Double
+    var exit: Double
+    var direction: Double
+    /// Where the host was when the scene began: it holds still, so a host that is not there is a reason to come down.
+    var host: Double
+    /// Whether it lies down for part of the time on the back.
+    var loafs: Bool
+}
+
+nonisolated extension CatMove {
+    /// How far from the capybara, in pixels, the cat is out of its way: a picture and a little air, which is the room that two characters
+    /// that are not playing together leave each other (`CatField.separation`), and a pixel more.
+    static let clearance = Double(CatField.pictureSize.width + CatField.apart) + 1
+}
+
+nonisolated extension CatBrain {
+    /// The moves it is in a state to leave for a joint scene: it is awake and doing nothing it cannot be taken from.
+    private static let calm: Set<CatMove> = [.sit, .blink, .tailSwish, .groom, .scratch, .lookLeft, .lookRight, .lookUp, .yawn, .walk, .trot, .stretch, .loaf]
+
+    var jointScene: JointScene.ID? { joint?.scene }
+
+    /// Where it would hop from, sit and walk to on `partner`, which has a back to give: nil when there is no room (the lane, the camera,
+    /// the way). It comes from the capybara's rump, which is behind the way it faces, and hops forward onto it; when it has hopped off
+    /// it walks out of the capybara's way, which it must have the room for, or it would be moved out of it with a jump when the scene is
+    /// over.
+    private func seating(
+        on partner: Pose, now: TimeInterval, keeper: LaneKeeper
+    ) -> (launch: Double, seat: Double, exit: Double, direction: Double, host: Double)? {
+        guard travel >= 40, let perch = partner.perch else { return nil }
+        let host = partner.position(at: now)
+        let seat = host + perch.dx / travel
+        let direction = partner.facing == .right ? 1.0 : -1.0
+        let launch = seat - direction * CatMove.hopSpan / travel
+        let exit = seat - direction * CatMove.clearance / travel
+        let here = plan.position(at: now)
+        guard (0.0...1.0).contains(seat), (0.0...1.0).contains(launch), (0.0...1.0).contains(exit),
+              keeper.destination(launch, from: here) == launch, keeper.settled(seat) == seat, keeper.settled(exit) == exit,
+              keeper.reach(from: launch).contains(exit) else { return nil }
+        let (low, high) = (min(exit, seat), max(exit, seat))
+        if keeper.lane.crossing.contains(where: { high > $0.lowerBound && low < $0.upperBound }) { return nil }
+        return (launch, seat, exit, direction, host)
+    }
+
+    func canJoin(_ invite: JointInvite, now: TimeInterval) -> Bool {
+        guard invite.role == .guest, invite.scene == .catOnCapybara, joint == nil, busyness == 0, Self.calm.contains(plan.move),
+              !isCrossing(at: now) else { return false }
+        // The room is judged as it will be once the scene has begun, with the host's own place no longer in the way.
+        return seating(on: invite.partner, now: now, keeper: LaneKeeper(invite.lane)) != nil
+    }
+
+    mutating func join(_ invite: JointInvite, now: TimeInterval) {
+        let lane = LaneKeeper(invite.lane)
+        guard let place = seating(on: invite.partner, now: now, keeper: lane) else { return }
+        keeper = lane
+        interrupt(with: [])
+        stance = .standing
+        joint = CatJoint(
+            scene: invite.scene, phase: .approach, launch: place.launch, seat: place.seat, exit: place.exit, direction: place.direction,
+            host: place.host, loafs: chance(0.6)
+        )
+        plan = approach(now: now)
+        if plan.duration == 0 { advanceJoint(now: now) }
+    }
+
+    /// The cat is done with the scene, wherever it is in it: one that is on the capybara hops off, one that is going to it goes the way it
+    /// is going and then about its day (out of the capybara's way, if it is in it), and one that is hopping off finishes the hop.
+    mutating func leaveJoint(now: TimeInterval) -> Outcome {
+        guard let current = joint else { return .unchanged }
+        let before = plan
+        switch current.phase {
+        case .approach:
+            let here = plan.position(at: now)
+            if abs(here - current.host) * travel < CatMove.clearance { walkOff(now: now) } else { finishJoint(now: now) }
+        case .hopOn, .perched:
+            hopOff(now: now)
+        case .hopOff, .walkOff:
+            break
+        }
+        return outcome(since: before)
+    }
+
+    /// An update of a cat that is in a scene: nothing it senses matters, only the host and the time.
+    fileprivate mutating func updateJoint(now: TimeInterval, lane: LaneContext, before: CatPlan) -> Outcome {
+        guard let current = joint else { return .unchanged }
+        if current.phase != .hopOff, current.phase != .walkOff {
+            // The host is where it was and still gives its back to ride on; if not, down it comes.
+            let hostHolds = lane.joint.map { sight in
+                sight.scene == current.scene && sight.role == .guest && sight.partner.perch != nil
+                    && abs(sight.partner.position(at: now) - current.host) < 1e-9
+            } ?? false
+            if !hostHolds {
+                _ = leaveJoint(now: now)
+                return outcome(since: before)
+            }
+        }
+        if now >= plan.end { advanceJoint(now: now) }
+        return outcome(since: before)
+    }
+
+    /// The walk to where it hops from; no time at all when it is there.
+    private func approach(now: TimeInterval) -> CatPlan {
+        guard let current = joint else { return plan }
+        let here = plan.position(at: now)
+        let covered = abs(current.launch - here) * travel
+        guard covered >= 1 else { return CatPlan(move: .sit, facing: current.direction > 0 ? .right : .left, from: here, to: here, began: now, duration: 0) }
+        return CatPlan(
+            move: .walk, facing: current.launch > here ? .right : .left, from: here, to: current.launch, began: now, duration: covered / CatMove.walk.speed
+        )
+    }
+
+    /// The next part of the scene, as the one before it is over.
+    private mutating func advanceJoint(now: TimeInterval) {
+        guard var current = joint else { return }
+        let facing: Facing = current.direction > 0 ? .right : .left
+        switch current.phase {
+        case .approach:
+            current.phase = .hopOn
+            joint = current
+            plan = CatPlan(
+                move: .hopOn, facing: facing, from: current.launch, to: current.seat, began: now, duration: CatMove.hopOn.passDuration
+            )
+        case .hopOn:
+            let loaf = current.loafs && chance(0.5)
+            current.phase = .perched(loaf: loaf)
+            joint = current
+            plan = CatPlan(
+                move: loaf ? .perchLoaf : .perch, facing: facing, from: current.seat, to: current.seat, began: now,
+                duration: Double.random(in: 6...11, using: &generator)
+            )
+        case .perched(let loaf):
+            if current.loafs, !loaf {
+                current.phase = .perched(loaf: true)
+                joint = current
+                plan = CatPlan(
+                    move: .perchLoaf, facing: facing, from: current.seat, to: current.seat, began: now, duration: Double.random(in: 7...13, using: &generator)
+                )
+            } else if exitIsFree(now: now) {
+                hopOff(now: now)
+            } else {
+                // Nowhere to go once it is down (another has come to stand there, or is on its way through the camera): it stays where it
+                // is a little longer, which the director puts an end to if it goes on.
+                plan = CatPlan(move: plan.move, facing: facing, from: current.seat, to: current.seat, began: now, duration: 2)
+            }
+        case .hopOff:
+            walkOff(now: now)
+        case .walkOff:
+            finishJoint(now: now)
+        }
+    }
+
+    /// Off the back to where it hopped from, facing the way it goes.
+    private mutating func hopOff(now: TimeInterval) {
+        guard var current = joint else { return }
+        let here = plan.position(at: now)
+        current.phase = .hopOff
+        joint = current
+        plan = CatPlan(
+            move: .hopOff, facing: current.launch >= here ? .right : .left, from: here, to: current.launch, began: now, duration: CatMove.hopOff.passDuration
+        )
+    }
+
+    /// Whether there is a place to walk to when it is off the capybara's back, out of the way of everyone, the capybara too.
+    private func exitIsFree(now: TimeInterval) -> Bool {
+        guard let current = joint else { return true }
+        let room = CatMove.clearance / travel
+        var lane = keeper.lane
+        lane.zones.append((current.host - room)...(current.host + room))
+        let keeper = LaneKeeper(lane)
+        let target = keeper.destination(current.exit, from: current.launch)
+        return keeper.settled(target) == target && abs(target - current.host) * travel >= CatMove.clearance - 1e-6
+    }
+
+    /// A few steps to where it is out of the capybara's way; the end of the scene when it already is.
+    private mutating func walkOff(now: TimeInterval) {
+        guard var current = joint else { return }
+        let here = plan.position(at: now)
+        // To where it is out of the way of everyone, the capybara too, whose room the scene did not ask of it: the way out may be past
+        // the other side of it, or short of where the cat first meant, if another stands there now.
+        var lane = keeper.lane
+        let room = CatMove.clearance / travel
+        lane.zones.append((current.host - room)...(current.host + room))
+        let target = LaneKeeper(lane).destination(current.exit, from: here)
+        let covered = abs(target - here) * travel
+        guard covered >= 1 else {
+            finishJoint(now: now)
+            return
+        }
+        current.phase = .walkOff
+        joint = current
+        plan = CatPlan(
+            move: .walk, facing: target > here ? .right : .left, from: here, to: target, began: now, duration: covered / CatMove.walk.speed
+        )
+    }
+
+    /// The scene is over and the day goes on, from where the cat stands.
+    private mutating func finishJoint(now: TimeInterval) {
+        joint = nil
+        stance = .standing
+        interrupt(with: [])
+        startQueue(now: now, senses: lastSenses)
     }
 }

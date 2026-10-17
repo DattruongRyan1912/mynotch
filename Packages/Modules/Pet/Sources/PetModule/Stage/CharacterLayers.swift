@@ -56,6 +56,8 @@ final class CharacterLayers {
         CATransaction.setDisableActions(true)
         all.forEach { $0.removeAllAnimations() }
         all.forEach { $0.isHidden = true }
+        sprite.zPosition = 0
+        prop.zPosition = 0
         CATransaction.commit()
     }
 }

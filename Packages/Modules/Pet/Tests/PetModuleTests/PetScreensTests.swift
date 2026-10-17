@@ -82,7 +82,7 @@ import Testing
 
     @Test func aKindThisBuildDoesNotKnowIsDroppedAndNoOtherScreensChoiceGoesWithIt() throws {
         let stored = """
-        {"\(first)":["cat","capybara"],"\(second)":["capybara","hamster"],"3":[],"4":["capybara","cat","cat","cat","cat"]}
+        {"\(first)":["cat","dragon"],"\(second)":["dragon","unicorn"],"3":[],"4":["dragon","cat","cat","cat","cat"]}
         """
         let screens = try JSONDecoder().decode(PetScreens.self, from: Data(stored.utf8))
         #expect(screens.kinds(for: first) == [.cat], "the one it knows")

@@ -133,7 +133,8 @@ let wake = Drive.step
             }
             seen.formUnion(drive.moves)
         }
-        let missing = Set(CatMove.allCases).subtracting(seen)
+        // The four moves of sitting on the capybara are for a joint scene, which a cat by itself is never in (see `CatJointTests`).
+        let missing = Set(CatMove.allCases).subtracting(seen).subtracting([.hopOn, .hopOff, .perch, .perchLoaf])
         #expect(missing.isEmpty, "never shown: \(missing)")
     }
 

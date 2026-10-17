@@ -55,7 +55,7 @@ nonisolated extension CatPlan {
     var pose: Pose {
         Pose(
             motion: move.motion, facing: facing, from: from, to: to, began: began, duration: duration, fpsScale: fpsScale, delay: delay,
-            prop: prop.map { PoseProp(look: $0.kind.look, from: $0.from, to: $0.to) }
+            prop: prop.map { PoseProp(look: $0.kind.look, from: $0.from, to: $0.to) }, raised: move.ridesOn
         )
     }
 }

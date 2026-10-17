@@ -10,6 +10,8 @@ nonisolated enum CatMove: CaseIterable, Equatable, Sendable {
     case walk, trot, frantic, chase, pounce, stretch, yarn, startled
     // Only its head, from below the edge of the strip.
     case peek
+    // On the capybara's back, and getting on and off it: small, as it has to be to sit there (see `CatArt.miniSit`).
+    case hopOn, hopOff, perch, perchLoaf
 
     /// How the cat is when it is doing this, and so what it has to do to get from one move to another: a cat does not walk from a nap.
     enum Stance: Equatable, Sendable {
@@ -20,9 +22,11 @@ nonisolated enum CatMove: CaseIterable, Equatable, Sendable {
     var stance: Stance? {
         switch self {
         case .sit, .blink, .tailSwish, .groom, .scratch, .lookLeft, .lookRight, .lookUp, .yawn, .purr, .dance, .sweat, .sitDown: .seated
-        case .sleep, .loaf, .lieDown: .lying
-        case .walk, .trot, .frantic, .chase, .pounce, .stretch, .yarn, .startled, .standUp: .standing
+        case .sleep, .loaf, .lieDown, .perchLoaf: .lying
+        case .walk, .trot, .frantic, .chase, .pounce, .stretch, .yarn, .startled, .standUp, .hopOn: .standing
         case .peek: nil
+        case .perch: .seated
+        case .hopOff: .standing
         }
     }
 
@@ -33,7 +37,9 @@ nonisolated enum CatMove: CaseIterable, Equatable, Sendable {
         case .blink, .lookLeft, .lookRight, .lookUp: 1
         case .tailSwish, .groom, .scratch, .dance, .trot, .frantic, .chase, .stretch, .yarn: 6
         case .yawn, .purr, .sleep, .lieDown, .sitDown, .standUp, .peek, .startled, .sweat: 4
-        case .loaf: 2
+        case .loaf, .perchLoaf: 2
+        case .hopOn: 5
+        case .hopOff, .perch: 4
         case .walk, .pounce: 8
         }
     }
@@ -41,12 +47,13 @@ nonisolated enum CatMove: CaseIterable, Equatable, Sendable {
     /// Frames a second at the move's own pace.
     var fps: Double {
         switch self {
-        case .sit, .sleep, .loaf, .lookLeft, .lookRight, .lookUp: 2
+        case .sit, .sleep, .loaf, .lookLeft, .lookRight, .lookUp, .perch, .perchLoaf: 2
         case .blink: 4
         case .yawn, .peek, .sweat: 5
         case .groom, .purr, .lieDown, .sitDown, .standUp, .stretch: 6
         case .tailSwish, .scratch, .dance, .startled: 8
         case .pounce, .yarn: 10
+        case .hopOn, .hopOff: 8
         case .walk, .trot, .chase, .frantic: 12
         }
     }
@@ -54,7 +61,7 @@ nonisolated enum CatMove: CaseIterable, Equatable, Sendable {
     /// Whether it goes round and round, or is played once and held on its last frame.
     var loops: Bool {
         switch self {
-        case .yawn, .lieDown, .sitDown, .standUp, .pounce, .stretch, .peek, .startled: false
+        case .yawn, .lieDown, .sitDown, .standUp, .pounce, .stretch, .peek, .startled, .hopOn, .hopOff: false
         default: true
         }
     }
@@ -75,4 +82,18 @@ nonisolated enum CatMove: CaseIterable, Equatable, Sendable {
 
     /// How fast it goes, in points a second.
     var speed: Double { advance * fps }
+}
+
+nonisolated extension CatMove {
+    /// On the capybara or getting on or off it: drawn over it, not behind it.
+    var ridesOn: Bool {
+        switch self {
+        case .hopOn, .hopOff, .perch, .perchLoaf: true
+        default: false
+        }
+    }
+
+    /// How far, in pixels, the cat's hop onto the capybara goes, from where it crouches to where it sits (and the same back off): whole
+    /// steps of the hop's frames (five in the time of the hop, four pixels each going on, and four of five pixels coming off).
+    static let hopSpan = 20.0
 }

@@ -35,6 +35,10 @@ extension CatArt {
         case .yarn: yarnFrames
         case .peek: peekFrames
         case .startled: startledFrames
+        case .hopOn: hopOnFrames
+        case .hopOff: hopOffFrames
+        case .perch: perchFrames
+        case .perchLoaf: perchLoafFrames
         }
     }
 
