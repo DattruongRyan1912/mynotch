@@ -38,6 +38,7 @@ extension CharacterKind {
         case .cat: CatSpecies.shared
         case .capybara: CapybaraSpecies.shared
         case .hamster: HamsterSpecies.shared
+        case .penguin: PenguinSpecies.shared
         }
     }
 }
