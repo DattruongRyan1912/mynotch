@@ -6,14 +6,18 @@ import os
 
 /// Installs, checks and removes the fan helper, and says where it is. It acts only when the user presses a button, with one
 /// exception: when the app starts and the helper is already installed and running but is not the one inside this app (the app was
-/// replaced), it registers it again, once. Nothing here is faked into doing more than reading: the helper itself can only ping and
-/// read.
+/// replaced), it registers it again, once. Looking again at a helper that did not answer is only ever a ping. Nothing here is faked
+/// into doing more than reading: the helper itself can only ping and read.
 @Observable
 final class FanHelperManager {
     static let macsFanControlBundleID = "com.crystalidea.macsfancontrol"
     /// How long to wait between the system stopping the old helper and registering again: reports from developers say registering
     /// at once can fail with "Operation not permitted".
     static let reRegisterPause = Duration.seconds(1)
+    /// How long the launch check waits before it pings a helper that did not answer. The helper of a replaced app can still be
+    /// running from an executable that is gone, which fails the code-signing check of every new connection; it leaves after 20 s
+    /// without one, so after longer than that launchd starts the bundled binary instead.
+    static let launchRetryPause = Duration.seconds(25)
     static let stillOutdated = "helper cũ vẫn đang chạy. Bấm Gỡ helper rồi Cài lại, hoặc đăng xuất rồi đăng nhập lại"
 
     private(set) var phase: FanHelperPhase = .unknown
@@ -31,6 +35,8 @@ final class FanHelperManager {
     @ObservationIgnored private let pause: (Duration) async -> Void
     @ObservationIgnored private let log = Logger(subsystem: "io.lucasvu.mynotch", category: "fan-helper")
     @ObservationIgnored private var didTryUpdate = false
+    /// Whether a `lookAgain()` is waiting for the helper's answer, so that there is never more than one.
+    @ObservationIgnored private var isLookingAgain = false
     /// What the bundled helper is, read once: working it out means hashing the helper's file, and the views ask often.
     @ObservationIgnored private var bundledHelper: BundledFanHelper?
 
@@ -193,11 +199,19 @@ final class FanHelperManager {
     }
 
     /// Once as the app starts: an installed helper that is not the one in this app is registered again. Does nothing for a helper
-    /// that was never installed, one waiting for approval, or one that does not answer, and tries at most once per launch.
+    /// that was never installed or one waiting for approval, and tries at most once per launch. One that does not answer is pinged
+    /// once more after `launchRetryPause` and, if it then answers, judged like any other; the extra look is only a ping.
     func checkAtLaunch() async {
         refreshMacsFanControl()
         guard !isBusy else { return }
         await readState()
+        if case .unreachable = phase {
+            await pause(Self.launchRetryPause)
+            // The wait is long: the app may have gone, the user may have started an install or the probe, and the policy below must
+            // not act in the middle of either.
+            guard !Task.isCancelled, !isBusy, probeStep == nil else { return }
+            await lookAgain()
+        }
         let status = registration.status
         var running: FanHelperInfo?
         if case let .running(info) = phase { running = info }
@@ -207,6 +221,19 @@ final class FanHelperManager {
         didTryUpdate = true
         log.notice("the running helper is not the bundled one; registering it again")
         await reRegister(bundled: bundled)
+    }
+
+    /// Looks again at a helper that did not answer: the registration's status and, for an enabled helper, a ping. Used by the curve
+    /// while it waits for the helper, and never registers anything. It does nothing unless the phase says the helper is
+    /// unreachable, so it cannot interrupt an install, a removal or a probe, and what an install or a refresh decided while the
+    /// ping was out is not overwritten. One at a time.
+    func lookAgain() async {
+        guard case .unreachable = phase, probeStep == nil, !isLookingAgain else { return }
+        isLookingAgain = true
+        defer { isLookingAgain = false }
+        let found = await lookedPhase()
+        guard case .unreachable = phase else { return }
+        set(found)
     }
 
     /// Reads the fans through the helper and sets them beside what the app read itself.
@@ -265,19 +292,27 @@ final class FanHelperManager {
 
     /// The phase that the registration status says, and for an enabled helper what a ping says.
     private func readState() async {
+        set(await lookedPhase())
+    }
+
+    private func lookedPhase() async -> FanHelperPhase {
         switch registration.status {
-        case .notRegistered, .notFound: set(.notInstalled)
-        case .requiresApproval: set(.needsApproval)
-        case .enabled: await ping()
+        case .notRegistered, .notFound: .notInstalled
+        case .requiresApproval: .needsApproval
+        case .enabled: await pinged()
         }
     }
 
     private func ping() async {
+        set(await pinged())
+    }
+
+    private func pinged() async -> FanHelperPhase {
         do {
             let info = try await client.ping()
-            set(info.euid == 0 ? .running(info) : .failed("helper không chạy với quyền root (euid \(info.euid))"))
+            return info.euid == 0 ? .running(info) : .failed("helper không chạy với quyền root (euid \(info.euid))")
         } catch {
-            set(.unreachable(Self.describe(error)))
+            return .unreachable(Self.describe(error))
         }
     }
 

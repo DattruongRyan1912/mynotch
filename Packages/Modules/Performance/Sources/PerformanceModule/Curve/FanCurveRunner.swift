@@ -25,9 +25,16 @@ final class SystemActivityAssertion: ActivityAssertion {
 /// Runs the user's curve: each time the temperature is read, asks the engine what each fan should do and tells the helper, which holds
 /// it for a lease and renews it at the next read. Only while the curve is the mode, the helper runs, a way of setting the fans is
 /// known from the probe, and Macs Fan Control is not running; otherwise the fans are Apple's. It never decides what is safe: the
-/// helper clamps, refuses and guards; this decides what is wanted.
+/// helper clamps, refuses and guards; this decides what is wanted. A helper that stops answering is looked for again on a schedule,
+/// so that the curve does not wait for the user to open a tab.
 @Observable
 final class FanCurveRunner {
+    /// How long to wait before each look at a helper that does not answer, counted from the moment it was first missed and then
+    /// from the end of the previous look: 5 s, 15 s, 30 s, and `steadyLookDelay` for every one after. None is shorter than 5 s, so
+    /// two looks are never closer than that, and a look is awaited before the next wait begins, so there is never more than one.
+    static let lookDelays: [TimeInterval] = [5, 15, 30]
+    static let steadyLookDelay: TimeInterval = 60
+
     enum Status: Equatable {
         /// The mode is Apple's.
         case off
@@ -55,6 +62,9 @@ final class FanCurveRunner {
     @ObservationIgnored private var holding = false
     /// Whether the app is being kept from App Nap, so that it is begun once and ended once.
     @ObservationIgnored private var isAwake = false
+    /// Since when the helper has been waited for without a look (or since the last look ended), and how many looks this absence has had.
+    @ObservationIgnored private var waitingSince: Date?
+    @ObservationIgnored private var looks = 0
 
     init(helper: FanHelperManager, now: @escaping () -> Date = { Date() }, activity: any ActivityAssertion = SystemActivityAssertion()) {
         self.helper = helper
@@ -84,7 +94,10 @@ final class FanCurveRunner {
         curve = newCurve
         mechanism = newMechanism
         helper.curveIsMode = newMode == .curve
-        if changedMode { engine.reset() }
+        if changedMode {
+            engine.reset()
+            forgetLooks()
+        }
         switch newMode {
         case .apple:
             await stop()
@@ -105,6 +118,7 @@ final class FanCurveRunner {
             isAwake = false
         }
         engine.reset()
+        forgetLooks()
         if holding { await helper.giveFansBack() }
         holding = false
         status = .off
@@ -117,6 +131,13 @@ final class FanCurveRunner {
         // A probe is trying the fans: the curve keeps its hands off them until it is done.
         guard helper.probeStep == nil else { return }
         helper.refreshMacsFanControl()
+        if case .unreachable = helper.phase {
+            await lookAgainWhenDue()
+            // A look that finds the helper is acted on at the next reading, with a temperature read after it.
+            guard mode == .curve else { return }
+            return await pause(.waitingForHelper)
+        }
+        forgetLooks()
         guard case .running = helper.phase else { return await pause(.waitingForHelper) }
         guard !helper.helperIsOutdated else { return await pause(.helperOutdated) }
         guard let mechanism else { return await pause(.needsProbe) }
@@ -164,6 +185,28 @@ final class FanCurveRunner {
         } else {
             status = .active(rpm: asked.reduce(0, +) / Double(asked.count))
         }
+    }
+
+    // MARK: Looking for the helper
+
+    /// The helper did not answer the last time anybody looked (the app was replaced under a helper that has not yet left, say, and
+    /// its signing check fails): asks the manager to look again when the schedule says so. The readings come every two seconds, so a
+    /// look is made at the first reading at or after its time, and the reading that makes it waits for the answer.
+    private func lookAgainWhenDue() async {
+        let moment = now()
+        let since = waitingSince ?? moment
+        waitingSince = since
+        let delay = looks < Self.lookDelays.count ? Self.lookDelays[looks] : Self.steadyLookDelay
+        guard moment.timeIntervalSince(since) >= delay else { return }
+        looks += 1
+        await helper.lookAgain()
+        waitingSince = now()
+    }
+
+    /// The helper is there, or the curve is not the mode: the next absence starts its schedule again.
+    private func forgetLooks() {
+        waitingSince = nil
+        looks = 0
     }
 
     /// The helper's own refusal (Macs Fan Control, a temperature it cannot read, an SMC that did not apply what was written): not the
