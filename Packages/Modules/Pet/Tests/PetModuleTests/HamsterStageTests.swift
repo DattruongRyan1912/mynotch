@@ -153,33 +153,36 @@ import Testing
         }
     }
 
-    @Test func aBurstOfWorkSendsTheHamsterToTheWheelAtOnceAfterAQuietMinuteAndItSprintsInIt() throws {
-        var went = 0
-        for seed: UInt64 in [3, 8, 12, 21, 34, 55] {
+    @Test func aBusyMacAfterAQuietSpellHasTheHamsterInTheWheelAtASprintAndWithTheReactionOffItNeverRunsFasterThanALazyJog() throws {
+        // (That a burst sends it to the wheel at once, once, is the brain's, and tested with it: this is the whole of it through the stage,
+        // the load the stage reads and smooths, and the burst the stage's BusyWatch finds in it.)
+        func trial(seed: UInt64, reacts: Bool) -> (wheel: Bool, sprinted: Bool, faster: Bool) {
             let rig = hamsters(Screens.pill, seed: seed)
+            defer { rig.hide() }
+            rig.stage.tuning.reactsToBusyMachine = reacts
+            // Quiet for long enough to know what is usual.
             rig.cpu.value = 0.05
-            // Quiet for long enough to know what is usual, until it has no wheel out.
             for _ in 0..<(4 * 60 * 3) { rig.advance(0.25) }
-            for _ in 0..<(4 * 60 * 30) {
-                rig.advance(0.25)
-                if rig.stage.poses.first?.prop == nil, rig.stage.poses.first.map({ HamsterMove($0.motion) }) == .sit { break }
-            }
-            guard rig.stage.poses.first?.prop == nil else { continue }
             rig.cpu.value = 0.97
-            var sprinted = false
-            var reached: Double?
-            let start = rig.scheduler.seconds
-            for _ in 0..<(4 * 45) {
+            var result = (wheel: false, sprinted: false, faster: false)
+            for _ in 0..<(4 * 60) {
                 rig.advance(0.25)
                 guard let pose = rig.stage.poses.first else { continue }
-                if let prop = pose.prop, HamsterProp(prop.look).isWheel, reached == nil { reached = rig.scheduler.seconds - start }
-                if HamsterMove(pose.motion) == .wheelSprint { sprinted = true }
+                if let prop = pose.prop, HamsterProp(prop.look).isWheel { result.wheel = true }
+                let move = HamsterMove(pose.motion)
+                if move == .wheelSprint { result.sprinted = true }
+                if [.wheelJog, .wheelRun, .wheelSprint].contains(move) { result.faster = true }
             }
-            if sprinted { went += 1 }
-            #expect(sprinted || reached == nil || reached! > 25, "seed \(seed): sprinted \(sprinted)")
-            rig.hide()
+            return result
         }
-        #expect(went >= 4, "after a burst it was running in the wheel: \(went) of 6")
+        var sprinted = 0, wheels = 0
+        for seed: UInt64 in [3, 8, 12, 21, 34, 55] {
+            let on = trial(seed: seed, reacts: true), off = trial(seed: seed, reacts: false)
+            if on.sprinted { sprinted += 1 }
+            if on.wheel { wheels += 1 }
+            #expect(!off.sprinted && !off.faster, "seed \(seed): with the reaction off it runs no faster than a lazy jog")
+        }
+        #expect(sprinted >= 5 && wheels >= 5, "after a minute of a busy Mac it was in the wheel and sprinting: \(wheels) and \(sprinted) of 6")
     }
 
     // MARK: The pointer

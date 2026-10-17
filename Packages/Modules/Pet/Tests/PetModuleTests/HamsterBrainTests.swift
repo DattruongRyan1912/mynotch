@@ -267,6 +267,25 @@ func hamsterPropProblems(_ trail: [(move: HamsterMove, prop: HamsterProp?)]) -> 
         #expect(checked > 10)
     }
 
+    @Test func theWheelHoldsTheRoomItWasHoppedFromTooSoNobodyElseIsToldToStopThereWhileItIsOut() {
+        var checked = 0
+        for seed in 1...6 as ClosedRange<UInt64> {
+            var drive = HamDrive(seed: seed, senses: CatSenses(idleSeconds: 5, cpuLoad: 0.3, hour: 14), travel: 300)
+            drive.run(2 * 3600)
+            for pose in drive.history.map(\.pose) {
+                guard let prop = pose.prop, HamsterProp(prop.look).isWheel else { continue }
+                #expect(prop.alsoAt.count == 1, "the place it hops from is reserved")
+                guard let home = prop.alsoAt.first else { continue }
+                if HamsterMove(pose.motion) == .hopIn { #expect(abs(home - pose.from) < 1e-9, "it is where the hop began") }
+                // Another character is told not to stop at either (a margin smaller than the hop, so the room is not the hamster's own).
+                let lane = LaneRules.context(for: 1, poses: [pose, nil], crossing: [], separation: 0.05, now: pose.began)
+                #expect(lane.zones.contains { $0.contains(home) } && lane.zones.contains { $0.contains(prop.to) })
+                checked += 1
+            }
+        }
+        #expect(checked > 100, "\(checked)")
+    }
+
     @Test func itFacesTheWayItHopsAndHopsOutBackwardsFacingTheSameWayAndRunsFacingIt() {
         var drive = HamDrive(seed: 5, senses: CatSenses(idleSeconds: 5, cpuLoad: 0.3, hour: 14))
         drive.run(3 * 3600)

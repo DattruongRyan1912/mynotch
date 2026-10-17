@@ -334,7 +334,7 @@ import Testing
         #expect(sheets.builds == 4)
     }
 
-    @Test func theWholeSheetFacingOneWayIsUnderAThirdOfAMegabyteAndBothWaysUnderTwoThirds() {
+    @Test func theWholeSheetFacingOneWayIsUnderHalfAMegabyteAndBothWaysUnderNineHundredKilobytes() {
         let sheets = HamsterSheets()
         for move in HamsterMove.allCases { _ = sheets.strip(for: move, facing: .right) }
         for prop in HamsterProp.allCases { _ = sheets.propStrip(prop) }
