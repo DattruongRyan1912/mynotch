@@ -144,6 +144,34 @@ import Testing
         #expect(places.count > 5, "it covers the strip")
     }
 
+    @Test func everyLegBeginsWhereTheCatWasWhenItBeganThroughTwentyMinutes() {
+        var legs = 0
+        for seed: UInt64 in [5, 9] {
+            let rig = StageRig(seed: seed)
+            rig.show()
+            var previous: CatPlan?
+            var shown = rig.stage.presentations
+            for tick in 0..<(4 * 60 * 20) {
+                let minute = tick / 240
+                rig.cpu.value = minute % 5 == 2 ? 0.9 : 0.05
+                if tick % 700 == 400 { rig.place(pointerAtShare: Double(tick % 3) / 2, above: -10) } else if tick % 700 == 460 { rig.pointer.point = CGPoint(x: 5000, y: 5000) }
+                rig.advance(0.25)
+                guard rig.stage.presentations != shown, let plan = rig.stage.plan else { continue }
+                shown = rig.stage.presentations
+                defer { previous = plan }
+                guard let before = previous, before.began != plan.began else { continue }
+                legs += 1
+                let host = rig.host
+                let walk = host.sprite.animation(forKey: CatSpriteView.walkKey) as? CAKeyframeAnimation
+                let startX = (walk?.values as? [NSNumber])?.first.map { CGFloat($0.doubleValue) } ?? host.sprite.position.x
+                // Where the cat was when the plan began: the plan before it, at that moment, on the lane.
+                let wasAt = host.lane.x(at: before.position(at: plan.began))
+                #expect(abs(startX - wasAt) <= 7, "seed \(seed): a \(plan.move) begins at \(startX), where a \(before.move) had the cat at \(wasAt)")
+            }
+        }
+        #expect(legs > 300)
+    }
+
     @Test func theCatAndWhatItPlaysWithAreShownExactlyWhenThePlanHasThem() {
         let rig = StageRig(seed: 5)
         rig.show()

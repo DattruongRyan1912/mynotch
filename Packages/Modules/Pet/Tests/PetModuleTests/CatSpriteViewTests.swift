@@ -63,7 +63,7 @@ import Testing
             rig.host.show(plan: plan(move), elapsed: 0, coat: .tabby)
             let animation = try frames(of: rig.host.sprite)
             #expect(animation.repeatCount == 0 || animation.repeatCount == 1, "\(move)")
-            #expect(animation.fillMode == .forwards && !animation.isRemovedOnCompletion, "\(move)")
+            #expect(animation.fillMode == .both && !animation.isRemovedOnCompletion, "\(move): held on its first frame and on its last")
             #expect(abs(animation.duration - move.passDuration) < 1e-9)
         }
         for move in CatMove.allCases where move.loops {
@@ -111,7 +111,7 @@ import Testing
         #expect(stops.first == lane.x(at: 0.1).rounded())
         #expect(abs((stops.last ?? 0) - lane.x(at: 0.9)) <= 1.5)
         #expect(host.sprite.position.x == stops.last)
-        #expect(animation.fillMode == .forwards && !animation.isRemovedOnCompletion)
+        #expect(animation.fillMode == .both && !animation.isRemovedOnCompletion, "held on its first place until it begins and on its last")
         #expect(Set(host.sprite.animationKeys() ?? []) == [CatSpriteView.framesKey, CatSpriteView.walkKey])
         // The steps come twelve a second.
         #expect(abs(Double(stops.count) / animation.duration - 12) < 1)
@@ -126,6 +126,75 @@ import Testing
             let step = stops[1] - stops[0]
             #expect(abs(step - move.advance) < 1e-9, "\(move)")
         }
+    }
+
+    // MARK: Turning round
+
+    @Test func aLegBeginsExactlyWhereTheLastOneEndedEvenWhenThatIsNotWhereTheShareRoundsTo() throws {
+        let rig = StageRig()
+        let host = rig.host
+        // Steps of five points: from 32 they land on 237, and the share of 0.9 is at 236.
+        host.show(plan: plan(.walk, from: 0.1, to: 0.9, duration: 3.4), elapsed: 0, coat: .tabby)
+        let stops = places(try walk(of: host.sprite))
+        #expect(stops[1] - stops[0] == 5)
+        let endedAt = try #require(stops.last)
+        let shareX = host.lane.x(at: 0.9).rounded()
+        #expect(endedAt != shareX, "the end of a leg is not where the share rounds to: \(endedAt) and \(shareX)")
+        #expect(host.sprite.position.x == endedAt, "the layer holds where the leg ends")
+
+        host.show(plan: plan(.walk, from: 0.9, to: 0.2, duration: 3, facing: .left), elapsed: 0, coat: .tabby)
+        #expect(places(try walk(of: host.sprite)).first == endedAt, "the next leg starts there, and not a point from it")
+    }
+
+    @Test func aCatThatStaysWhereItEndedStaysThereToTheOnePoint() throws {
+        let rig = StageRig()
+        let host = rig.host
+        host.show(plan: plan(.walk, from: 0.1, to: 0.9, duration: 3.4), elapsed: 0, coat: .tabby)
+        let endedAt = host.sprite.position.x
+        #expect(endedAt != host.lane.x(at: 0.9).rounded())
+        host.show(plan: plan(.sit, from: 0.9), elapsed: 0, coat: .tabby)
+        #expect(host.sprite.position.x == endedAt)
+        #expect(host.sprite.animationKeys() == [CatSpriteView.framesKey], "and does not walk the few points to the share's place")
+    }
+
+    @Test func aPlanThatBeginsSomewhereElseBeginsThereAndNotWhereTheLayerWas() throws {
+        let rig = StageRig()
+        let host = rig.host
+        host.show(plan: plan(.walk, from: 0.1, to: 0.9, duration: 8), elapsed: 0, coat: .tabby)
+        // A pounce that came mid-leg began where the cat was then, which is nowhere near where the leg was going.
+        host.show(plan: plan(.pounce, from: 0.4, to: 0.5, duration: 0.8, delay: 0.625), elapsed: 0, coat: .tabby)
+        #expect(places(try walk(of: host.sprite)).first == host.lane.x(at: 0.4).rounded())
+        // And a cat that was not on show begins at the plan's own place.
+        host.stopShowing()
+        host.show(plan: plan(.sit, from: 0.7), elapsed: 0, coat: .tabby)
+        #expect(host.sprite.position.x == host.lane.x(at: 0.7).rounded())
+    }
+
+    @Test func theCatIsTurnedByTheMirrorImageOfItsPicturesAndNeverByTransformingItsLayer() throws {
+        let rig = StageRig()
+        let host = rig.host
+        host.show(plan: plan(.walk, from: 0.1, to: 0.9, duration: 8), elapsed: 0, coat: .tabby)
+        let size = host.sprite.bounds.size
+        host.show(plan: plan(.walk, from: 0.9, to: 0.1, duration: 8, facing: .left), elapsed: 0, coat: .tabby)
+        #expect(CATransform3DIsIdentity(host.sprite.transform), "no flip of the layer, which would move it about its anchor")
+        #expect(host.sprite.bounds.size == size && host.sprite.anchorPoint == .zero)
+        #expect(host.sprite.contents as AnyObject === CatSheets.shared.strip(for: .walk, facing: .left, coat: .tabby).image)
+    }
+
+    @Test func everyAnimationHoldsItsFirstValueFromTheMomentItIsAddedSoNothingShowsBeforeItBegins() throws {
+        let rig = StageRig()
+        let host = rig.host
+        host.show(
+            plan: plan(.chase, from: 0.1, to: 0.9, duration: 4, prop: CatProp(kind: .moth, from: 0.2, to: 1.2)), elapsed: 0, coat: .tabby
+        )
+        for layer in [host.sprite, host.prop] {
+            for key in layer.animationKeys() ?? [] {
+                #expect((layer.animation(forKey: key)?.fillMode == .both), "\(key) holds its first value until it begins and its last when it is over")
+            }
+        }
+        // And the layer itself is where the leg ends, so that an animation that is dropped leaves the cat where it was going.
+        #expect(host.sprite.position.x == places(try walk(of: host.sprite)).last)
+        #expect(host.prop.position.x == places(try walk(of: host.prop)).last)
     }
 
     @Test func aWalkToTheLeftStepsTheOtherWayAndIsPlayedFromTheMirrorImage() throws {
