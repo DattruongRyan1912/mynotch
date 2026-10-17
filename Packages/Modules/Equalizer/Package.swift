@@ -4,8 +4,12 @@ import PackageDescription
 let package = Package(
     name: "EqualizerModule",
     platforms: [.macOS(.v26)],
+    products: [
+        .library(name: "EqualizerModule", targets: ["EqualizerModule"]),
+    ],
     dependencies: [
         .package(path: "../../MyNotchCore"),
+        .package(path: "../../NotchUI"),
     ],
     targets: [
         // The filters. Foundation, Core Audio's buffer types and Synchronization only, and no main-actor default,
@@ -18,6 +22,13 @@ let package = Package(
         .testTarget(
             name: "EqualizerAudioTests",
             dependencies: ["EqualizerAudio", "EqualizerDSP", "MyNotchCore", .product(name: "MyNotchTestSupport", package: "MyNotchCore")],
+            swiftSettings: [.defaultIsolation(MainActor.self)]
+        ),
+        // The module: the Âm thanh tab, the Settings rows and the engine's life cycle.
+        .target(name: "EqualizerModule", dependencies: ["EqualizerAudio", "MyNotchCore", "NotchUI"], swiftSettings: [.defaultIsolation(MainActor.self)]),
+        .testTarget(
+            name: "EqualizerModuleTests",
+            dependencies: ["EqualizerModule", "EqualizerAudio", "EqualizerDSP", "MyNotchCore", "NotchUI", .product(name: "MyNotchTestSupport", package: "MyNotchCore")],
             swiftSettings: [.defaultIsolation(MainActor.self)]
         ),
     ]
