@@ -1,5 +1,6 @@
 import AgentHookKit
 import Foundation
+import LocalSocketKit
 import Synchronization
 
 /// Listens on a Unix stream socket for the permission requests the `mynotch-hook` helper sends and waits on. The
@@ -116,7 +117,7 @@ final class PermissionServer {
     func start() throws {
         stop()
         guard let address = SocketAddress(path: socketPath) else { throw AgentEventServer.StartError.pathTooLong }
-        try PrivateDirectory.prepare(directory)
+        try AgentEventServer.StartError.preparePrivateDirectory(directory)
         unlink(socketPath)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw AgentEventServer.StartError.socket(errno: errno) }

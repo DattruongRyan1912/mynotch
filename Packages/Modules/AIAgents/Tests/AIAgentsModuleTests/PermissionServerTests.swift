@@ -1,5 +1,6 @@
 import AgentHookKit
 import Foundation
+import LocalSocketKit
 import Testing
 @testable import AIAgentsModule
 

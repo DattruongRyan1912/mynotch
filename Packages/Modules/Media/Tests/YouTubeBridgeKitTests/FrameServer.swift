@@ -1,4 +1,5 @@
 import Foundation
+import LocalSocketKit
 import Synchronization
 @testable import YouTubeBridgeKit
 
@@ -45,7 +46,7 @@ final class FrameServer: Sendable {
 
     func start() throws {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard var address = UnixSocketAddress(path: path)?.value else { close(fd); throw POSIXError(.ENAMETOOLONG) }
+        guard var address = SocketAddress(path: path)?.value else { close(fd); throw POSIXError(.ENAMETOOLONG) }
         unlink(path)
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }

@@ -1,6 +1,8 @@
 import Foundation
+import Synchronization
 import Testing
-@testable import TodoModule
+import MyNotchTestSupport
+@testable import MyNotchCore
 
 /// Time here is a `ManualClock`: a change is fed, the test waits until the coalescer has taken it (its wait is
 /// registered on the clock), then moves time by hand. Nothing depends on how long a real sleep takes.
@@ -60,13 +62,43 @@ import Testing
         #expect(signals.value == 1)
     }
 
+    @Test func changesAfterTheQuietPeriodSignalAgain() async {
+        let (source, input) = AsyncStream<Void>.makeStream()
+        var iterator = ChangeCoalescer.coalescing(source, quietPeriod: quiet, clock: clock).makeAsyncIterator()
+
+        await change(input, takenCalls: 1)
+        clock.advance(by: quiet)
+        #expect(await iterator.next() != nil)
+        input.yield()
+        await change(input, takenCalls: 3)
+        clock.advance(by: quiet)
+        #expect(await iterator.next() != nil)
+        input.finish()
+        #expect(await iterator.next() == nil)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func stoppingTheConsumerReleasesTheSource() async {
+        let (source, input) = AsyncStream<Void>.makeStream()
+        let (released, markReleased) = AsyncStream<Void>.makeStream()
+        input.onTermination = { _ in markReleased.yield() }
+        let consumer = Task { for await _ in ChangeCoalescer.coalescing(source, quietPeriod: quiet) {} }
+
+        consumer.cancel()
+        await consumer.value
+
+        var iterator = released.makeAsyncIterator()
+        #expect(await iterator.next() != nil)
+    }
+
     @Test func aContinuousStreamStillSignalsOnceTheMaxWaitPasses() async {
         let (source, input) = AsyncStream<Void>.makeStream()
         let maxWait = Duration.milliseconds(800)
         let (signals, consumer) = count(ChangeCoalescer.coalescing(source, quietPeriod: quiet, maxWait: maxWait, clock: clock))
         defer { consumer.cancel() }
 
-        // A change every 100 ms is never quiet for 300 ms, so only the max wait can end the burst.
+        // A change every 100 ms is never quiet for 300 ms, so only the max wait can end the burst. The last
+        // change comes at 600 ms: its quiet period would end at 900 ms, after the max wait.
         for call in 1...7 {
             await change(input, takenCalls: call)
             if call < 7 { clock.advance(by: .milliseconds(100)) }
@@ -89,6 +121,7 @@ import Testing
         clock.advance(by: quiet)
         await settle { signals.value == 1 }
 
+        // A new burst gets a new window: it waits for quiet again instead of signaling at once.
         await change(input, takenCalls: 2)
         clock.advance(by: quiet - .milliseconds(1))
         await letAnythingPending()
@@ -97,21 +130,6 @@ import Testing
         clock.advance(by: .milliseconds(1))
         await settle { signals.value == 2 }
         #expect(signals.value == 2)
-    }
-
-    @Test func changesAfterTheQuietPeriodSignalAgain() async {
-        let (source, input) = AsyncStream<Void>.makeStream()
-        var iterator = ChangeCoalescer.coalescing(source, quietPeriod: quiet, clock: clock).makeAsyncIterator()
-
-        await change(input, takenCalls: 1)
-        clock.advance(by: quiet)
-        #expect(await iterator.next() != nil)
-        input.yield()
-        await change(input, takenCalls: 3)
-        clock.advance(by: quiet)
-        #expect(await iterator.next() != nil)
-        input.finish()
-        #expect(await iterator.next() == nil)
     }
 
     @Test(.timeLimit(.minutes(1)))
@@ -127,18 +145,24 @@ import Testing
         var iterator = released.makeAsyncIterator()
         #expect(await iterator.next() != nil)
     }
+}
 
-    @Test(.timeLimit(.minutes(1)))
-    func stoppingTheConsumerReleasesTheSource() async {
-        let (source, input) = AsyncStream<Void>.makeStream()
-        let (released, markReleased) = AsyncStream<Void>.makeStream()
-        input.onTermination = { _ in markReleased.yield() }
-        let consumer = Task { for await _ in ChangeCoalescer.coalescing(source, quietPeriod: quiet) {} }
-
-        consumer.cancel()
-        await consumer.value
-
-        var iterator = released.makeAsyncIterator()
-        #expect(await iterator.next() != nil)
+/// Lets the tasks the coalescer started run: they hop a few times between executors.
+private func settle(timeout: Duration = .seconds(5), until condition: () -> Bool) async {
+    let deadline = ContinuousClock.now + timeout
+    while !condition(), ContinuousClock.now < deadline {
+        try? await Task.sleep(for: .milliseconds(2))
     }
+}
+
+/// A short wait for the "nothing happens" checks, so a late task would have shown up.
+private func letAnythingPending() async {
+    try? await Task.sleep(for: .milliseconds(60))
+}
+
+private nonisolated final class Counter: Sendable {
+    private let count = Mutex(0)
+
+    var value: Int { count.withLock { $0 } }
+    func increment() { count.withLock { $0 += 1 } }
 }

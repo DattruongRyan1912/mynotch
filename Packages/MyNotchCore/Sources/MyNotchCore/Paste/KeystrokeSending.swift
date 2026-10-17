@@ -1,16 +1,18 @@
 import CoreGraphics
 
 /// Sends ⌘V to the app with keyboard focus; a protocol so tests never post real key events.
-protocol PasteKeystroke {
-    func send()
+public protocol KeystrokeSending {
+    func sendPaste()
 }
 
 /// Posts ⌘V through the HID event tap, which needs the Accessibility permission.
-struct CGEventPasteKeystroke: PasteKeystroke {
+public struct CGEventKeystrokeSender: KeystrokeSending {
     /// kVK_ANSI_V is the physical V key, so layouts that move V get a different shortcut (⌘K on Dvorak).
     private static let vKeyCode: CGKeyCode = 9
 
-    func send() {
+    public init() {}
+
+    public func sendPaste() {
         let source = CGEventSource(stateID: .combinedSessionState)
         // Holds back the user's own key presses while ⌘V is posted, so they cannot mix into the shortcut.
         source?.setLocalEventsFilterDuringSuppressionState(

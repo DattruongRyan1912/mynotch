@@ -14,16 +14,22 @@ let package = Package(
     ],
     targets: [
         // Foundation only and no main-actor default, so the tiny `mynotch-clipboard-mcp` CLI can link it.
-        .target(name: "ClipboardMCPKit"),
+        .target(name: "ClipboardMCPKit", dependencies: [.product(name: "LocalSocketKit", package: "MyNotchCore")]),
         .target(
             name: "ClipboardModule",
-            dependencies: ["ClipboardMCPKit", "MyNotchCore", "NotchUI"],
+            dependencies: ["ClipboardMCPKit", "MyNotchCore", "NotchUI", .product(name: "LocalSocketKit", package: "MyNotchCore")],
             swiftSettings: [.defaultIsolation(MainActor.self)]
         ),
-        .testTarget(name: "ClipboardMCPKitTests", dependencies: ["ClipboardMCPKit"]),
+        .testTarget(
+            name: "ClipboardMCPKitTests",
+            dependencies: ["ClipboardMCPKit", .product(name: "LocalSocketKit", package: "MyNotchCore"), .product(name: "MyNotchTestSupport", package: "MyNotchCore")]
+        ),
         .testTarget(
             name: "ClipboardModuleTests",
-            dependencies: ["ClipboardModule", "ClipboardMCPKit", .product(name: "MyNotchTestSupport", package: "MyNotchCore")],
+            dependencies: [
+                "ClipboardModule", "ClipboardMCPKit", .product(name: "LocalSocketKit", package: "MyNotchCore"),
+                .product(name: "MyNotchTestSupport", package: "MyNotchCore"),
+            ],
             swiftSettings: [.defaultIsolation(MainActor.self)]
         ),
     ]

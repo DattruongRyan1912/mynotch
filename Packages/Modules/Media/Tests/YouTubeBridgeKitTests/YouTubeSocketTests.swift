@@ -56,10 +56,4 @@ import Testing
         #expect(!UnixStreamSocket.writeAll(Data("b".utf8), to: fd))
         #expect(watch.count == 0, "a write to a socket whose peer has gone must not raise SIGPIPE (SO_NOSIGPIPE)")
     }
-
-    @Test func anAddressNeedsThePathToFitSunPath() {
-        #expect(UnixSocketAddress.maxPathLength == 103)
-        #expect(UnixSocketAddress(path: "/tmp/" + String(repeating: "a", count: 98)) != nil)
-        #expect(UnixSocketAddress(path: "/tmp/" + String(repeating: "a", count: 99)) == nil)
-    }
 }

@@ -1,5 +1,6 @@
 import AgentHookKit
 import Foundation
+import LocalSocketKit
 
 /// Listens on a Unix datagram socket for what the `mynotch-hook` helper sends. A datagram is one whole message,
 /// so there is no framing and a slow or absent reader never blocks the helper.
@@ -30,7 +31,7 @@ final class AgentEventServer {
     func start() throws {
         stop()
         guard let address = SocketAddress(path: socketPath) else { throw StartError.pathTooLong }
-        try PrivateDirectory.prepare(directory)
+        try StartError.preparePrivateDirectory(directory)
         unlink(socketPath)
         let fd = socket(AF_UNIX, SOCK_DGRAM, 0)
         guard fd >= 0 else { throw StartError.socket(errno: errno) }

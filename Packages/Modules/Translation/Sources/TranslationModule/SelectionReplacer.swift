@@ -1,4 +1,5 @@
 import AppKit
+import MyNotchCore
 
 /// What `SelectionReplacer.replace` did.
 enum ReplaceOutcome: Equatable {
@@ -14,10 +15,6 @@ enum ReplaceOutcome: Equatable {
 
 /// Puts a translation in place of the text it came from, in the app that text was selected in.
 final class SelectionReplacer {
-    /// Added to everything MyNotch puts on the pasteboard, so the Clipboard module's history skips it. The same string
-    /// as `ClipboardClassifier.ownWriteType`, which lives in another package.
-    static let ownWriteType = NSPasteboard.PasteboardType("io.lucasvu.mynotch.clipboard")
-
     /// The app needs a moment to come to the front after `activate`.
     private static let frontPause = Duration.milliseconds(50)
     private static let frontChecks = 10
@@ -31,14 +28,14 @@ final class SelectionReplacer {
 
     private let accessibility: any AccessibilityClient
     private let applications: any ApplicationActivating
-    private let keystroke: any PasteKeystroke
+    private let keystroke: any KeystrokeSending
     private let pasteboard: NSPasteboard
     private let pause: @MainActor (Duration) async throws -> Void
 
     init(
         accessibility: any AccessibilityClient = SystemAccessibilityClient(),
         applications: any ApplicationActivating = SystemApplicationActivator(),
-        keystroke: any PasteKeystroke = CGEventPasteKeystroke(),
+        keystroke: any KeystrokeSending = CGEventKeystrokeSender(),
         pasteboard: NSPasteboard,
         pause: @escaping @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) {
@@ -119,20 +116,20 @@ final class SelectionReplacer {
         let backup = PasteboardBackup(pasteboard)
         let item = NSPasteboardItem()
         item.setString(text, forType: .string)
-        item.setData(Data(), forType: Self.ownWriteType)
+        item.setData(Data(), forType: OwnPasteboardWrite.pasteboardType)
         pasteboard.clearContents()
         guard pasteboard.writeObjects([item]) else {
-            backup.restore(to: pasteboard, marking: Self.ownWriteType)
+            backup.restore(to: pasteboard, marking: OwnPasteboardWrite.pasteboardType)
             return .failed
         }
         let written = pasteboard.changeCount
-        keystroke.send()
+        keystroke.sendPaste()
         // Restoring before the app has read the pasteboard would paste the old clipboard, so a cancel (the module
         // stopping) must not shorten this wait: it runs in a task of its own, which does not inherit the cancellation.
         let pause = pause
         await Task { try? await pause(Self.restoreDelay) }.value
         // Whatever was copied meanwhile is newer than the backup.
-        if pasteboard.changeCount == written { backup.restore(to: pasteboard, marking: Self.ownWriteType) }
+        if pasteboard.changeCount == written { backup.restore(to: pasteboard, marking: OwnPasteboardWrite.pasteboardType) }
         return .pasted
     }
 }

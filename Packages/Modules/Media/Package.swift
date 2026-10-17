@@ -14,16 +14,19 @@ let package = Package(
     ],
     targets: [
         // Foundation only and no main-actor default, so the tiny `mynotch-youtube-host` CLI can link it.
-        .target(name: "YouTubeBridgeKit"),
+        .target(name: "YouTubeBridgeKit", dependencies: [.product(name: "LocalSocketKit", package: "MyNotchCore")]),
         .target(
             name: "MediaModule",
-            dependencies: ["YouTubeBridgeKit", "MyNotchCore", "NotchUI"],
+            dependencies: ["YouTubeBridgeKit", "MyNotchCore", "NotchUI", .product(name: "LocalSocketKit", package: "MyNotchCore")],
             swiftSettings: [.defaultIsolation(MainActor.self)]
         ),
-        .testTarget(name: "YouTubeBridgeKitTests", dependencies: ["YouTubeBridgeKit"]),
+        .testTarget(name: "YouTubeBridgeKitTests", dependencies: ["YouTubeBridgeKit", .product(name: "LocalSocketKit", package: "MyNotchCore")]),
         .testTarget(
             name: "MediaModuleTests",
-            dependencies: ["MediaModule", "YouTubeBridgeKit", .product(name: "MyNotchTestSupport", package: "MyNotchCore")],
+            dependencies: [
+                "MediaModule", "YouTubeBridgeKit", .product(name: "LocalSocketKit", package: "MyNotchCore"),
+                .product(name: "MyNotchTestSupport", package: "MyNotchCore"),
+            ],
             swiftSettings: [.defaultIsolation(MainActor.self)]
         ),
     ]

@@ -1,4 +1,5 @@
 import Foundation
+import LocalSocketKit
 import Testing
 @testable import AgentHookKit
 

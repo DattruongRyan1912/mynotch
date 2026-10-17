@@ -1,4 +1,5 @@
 import Foundation
+import LocalSocketKit
 
 /// The host's side of the stream socket: connect, send whole frames. The thread that reads the connection notices that the app has gone.
 enum UnixStreamSocket {
@@ -39,7 +40,7 @@ enum UnixStreamSocket {
     /// another user's socket. The owner is asked of the connection itself, so a socket file swapped in after the path
     /// was looked at makes no difference; nothing is sent before that.
     static func open(to path: String, expectedOwner: uid_t) -> Result<Int32, ConnectFailure> {
-        guard var address = UnixSocketAddress(path: path)?.value else { return .failure(.pathTooLong) }
+        guard var address = SocketAddress(path: path)?.value else { return .failure(.pathTooLong) }
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return .failure(.failed(errno: errno)) }
         var yes: Int32 = 1
@@ -67,9 +68,7 @@ enum UnixStreamSocket {
             default: return .failure(.failed(errno: code))
             }
         }
-        var owner: uid_t = 0
-        var group: gid_t = 0
-        guard getpeereid(fd, &owner, &group) == 0, owner == expectedOwner else {
+        guard SocketTrust.isPeer(fd, user: expectedOwner) else {
             close(fd)
             return .failure(.otherUser)
         }

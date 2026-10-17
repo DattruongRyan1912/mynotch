@@ -1,4 +1,5 @@
 import AppKit
+import MyNotchCore
 
 /// The pasteboard the monitor polls and the paster writes, behind a protocol so both are testable without `NSPasteboard`.
 protocol PasteboardAccess: AnyObject {
@@ -6,7 +7,7 @@ protocol PasteboardAccess: AnyObject {
     var changeCount: Int { get }
     /// The first item's types and data plus the file URLs of every item; nil when the pasteboard is empty.
     func snapshot() -> PasteboardSnapshot?
-    /// Replaces the content and always adds `ClipboardClassifier.ownWriteType`, so the monitor skips the write.
+    /// Replaces the content and always adds `OwnPasteboardWrite`'s type, so the monitor skips the write.
     /// `plainTextOnly` drops the RTF of rich text; `sourceBundleID` tells other clipboard managers where the item came from.
     /// Returns false and leaves the user's clipboard untouched when the content cannot be written (missing image, no files).
     /// A picture is written from `imageData` when there is some (a picture held in memory has no file), otherwise from `imageURL`.
@@ -28,7 +29,7 @@ extension PasteboardAccess {
 
 /// `PasteboardAccess` on an `NSPasteboard`; tests pass a private named pasteboard instead of `.general`.
 final class SystemPasteboard: PasteboardAccess {
-    private static let marker = NSPasteboard.PasteboardType(ClipboardClassifier.ownWriteType)
+    private static let marker = OwnPasteboardWrite.pasteboardType
     /// nspasteboard.org convention naming the app the content came from.
     private static let source = NSPasteboard.PasteboardType("org.nspasteboard.source")
 

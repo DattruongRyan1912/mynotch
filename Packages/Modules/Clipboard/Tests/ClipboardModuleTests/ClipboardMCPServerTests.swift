@@ -1,5 +1,6 @@
 import ClipboardMCPKit
 import Foundation
+import LocalSocketKit
 import Synchronization
 import Testing
 @testable import ClipboardModule
@@ -57,7 +58,7 @@ import Testing
 
     /// Connects without the client: raw bytes, to see what the server does with them.
     func connectRaw() -> Int32? {
-        guard let address = MCPSocketAddress(path: folder.socketPath) else { return nil }
+        guard let address = SocketAddress(path: folder.socketPath) else { return nil }
         signal(SIGPIPE, SIG_IGN)
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         var target = address.value
@@ -152,7 +153,7 @@ import Testing
         try server.start()
         #expect(mode(of: folder.socketPath) == 0o600)
         #expect(mode(of: folder.directory.path) == 0o700)
-        #expect(MCPSocketTrust.inspect(socketPath: folder.socketPath) == .trusted)
+        #expect(SocketTrust.inspect(socketPath: folder.socketPath) == .trusted)
         server.stop()
     }
 
@@ -337,7 +338,7 @@ import Testing
         chmod(folder.directory.path, 0o700)
         // What a crashed run leaves: a real socket file whose listener is gone.
         let leftover = socket(AF_UNIX, SOCK_STREAM, 0)
-        var address = try #require(MCPSocketAddress(path: folder.socketPath)).value
+        var address = try #require(SocketAddress(path: folder.socketPath)).value
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(leftover, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }

@@ -1,14 +1,15 @@
 import Foundation
 
-/// How the helper tells that what listens is the user's own MyNotch before it sends anything. A request names the tool
-/// and the command, and what comes back can let the agent run it. In the folder under `/tmp` that the app uses for a
-/// long user name anybody can create the folder first and listen in it, so the folder, the socket and the process behind
-/// the connection are all checked, and anything else is not spoken to.
+/// How a helper tells that what listens is the user's own MyNotch before it sends anything. A request can name a tool,
+/// a command or what the user is looking for, and what comes back can be what they copied or what lets an agent run
+/// something. In the folder under `/tmp` that the app uses for a long user name anybody can create the folder first and
+/// listen in it, so the folder, the socket and the process behind the connection are all checked, and anything else is
+/// not spoken to.
 public enum SocketTrust {
     public enum Verdict: Equatable, Sendable {
         /// The folder and the socket file are the user's and the folder is closed to everyone else.
         case trusted
-        /// There is no folder or no socket file: the app is not running.
+        /// There is no folder or no socket file: the app is not running, or the feature is off.
         case absent
         /// Something is there that is not what the app makes.
         case untrusted

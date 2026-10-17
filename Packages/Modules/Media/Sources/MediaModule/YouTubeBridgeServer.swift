@@ -1,4 +1,5 @@
 import Foundation
+import LocalSocketKit
 import Synchronization
 import YouTubeBridgeKit
 
@@ -227,7 +228,7 @@ final class YouTubeBridgeServer {
     }
 
     private func open() throws {
-        guard let address = UnixSocketAddress(path: socketPath) else { throw StartError.pathTooLong }
+        guard let address = SocketAddress(path: socketPath) else { throw StartError.pathTooLong }
         try preparePrivateDirectory()
         unlink(socketPath)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -291,16 +292,14 @@ final class YouTubeBridgeServer {
         stop()
     }
 
-    /// The folder is the user's own and closed to everyone else. One that exists is checked before anything is
-    /// created or changed in it: `/tmp/mynotch-<uid>` is in a folder every user can write to, so someone else may
-    /// have made it first.
+    /// The folder is the user's own and closed to everyone else. Anything else that goes wrong is passed on as it is, and the log
+    /// says `folder-error`.
     private func preparePrivateDirectory() throws {
-        let directory = URL(filePath: socketPath).deletingLastPathComponent()
-        var info = stat()
-        if stat(directory.path, &info) == 0, info.st_uid != geteuid() { throw StartError.directoryNotOwned }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        // `attributes` of `createDirectory` apply only to a directory it creates.
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        do {
+            try PrivateDirectory.prepare(URL(filePath: socketPath).deletingLastPathComponent())
+        } catch PrivateDirectory.Failure.notOwned {
+            throw StartError.directoryNotOwned
+        }
     }
 
     // MARK: private queue
@@ -312,10 +311,8 @@ final class YouTubeBridgeServer {
         while true {
             let fd = Foundation.accept(listener, nil, nil)
             guard fd >= 0 else { return }
-            var uid: uid_t = 0
-            var gid: gid_t = 0
             // The socket's mode already keeps others out; this also refuses a peer that got a descriptor some other way.
-            guard fcntl(fd, F_SETFL, O_NONBLOCK) == 0, getpeereid(fd, &uid, &gid) == 0, uid == geteuid() else {
+            guard fcntl(fd, F_SETFL, O_NONBLOCK) == 0, SocketTrust.isPeer(fd) else {
                 close(fd)
                 session.log("app connection refused: peer user")
                 continue

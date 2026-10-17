@@ -1,4 +1,5 @@
 import Foundation
+import LocalSocketKit
 
 /// The helper's side of the socket: sends one request and waits, never past `timeout`, for the app's answer. Whatever goes
 /// wrong is an outcome, not an error, because the helper must keep answering its agent.
@@ -27,8 +28,8 @@ public enum ClipboardMCPClient {
 
     /// With the user of the process on the other end apart from the owner of the files, which a test cannot otherwise tell.
     static func send(_ request: ClipboardMCPRequest, socketPath: String, timeout: TimeInterval, trustedUser: uid_t, peerUser: uid_t) -> Outcome {
-        guard let line = ClipboardMCPWire.requestLine(request), let address = MCPSocketAddress(path: socketPath) else { return .unreachable }
-        switch MCPSocketTrust.inspect(socketPath: socketPath, user: trustedUser) {
+        guard let line = ClipboardMCPWire.requestLine(request), let address = SocketAddress(path: socketPath) else { return .unreachable }
+        switch SocketTrust.inspect(socketPath: socketPath, user: trustedUser) {
         case .absent: return .unreachable
         case .untrusted: return .untrusted
         case .trusted: break
@@ -49,7 +50,7 @@ public enum ClipboardMCPClient {
         }
         guard connected == 0 else { return .unreachable }
         // Before a byte is written: the folder was right, but it is the process on the connection that answers.
-        guard MCPSocketTrust.isPeer(descriptor, user: peerUser) else { return .untrusted }
+        guard SocketTrust.isPeer(descriptor, user: peerUser) else { return .untrusted }
         guard MCPSocketIO.writeAll(line, to: descriptor, until: deadline) else { return .noAnswer }
         switch MCPSocketIO.readLine(from: descriptor, maxLength: ClipboardMCPWire.maxReplyLength, until: deadline) {
         case .line(let data), .endOfStream(let data):

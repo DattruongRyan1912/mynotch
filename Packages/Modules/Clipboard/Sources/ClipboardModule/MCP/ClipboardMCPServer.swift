@@ -1,32 +1,7 @@
 import ClipboardMCPKit
 import Foundation
+import LocalSocketKit
 import Synchronization
-
-/// A counter shared with the closures that run on a server's private queues. Work those queues hand to the main thread cannot
-/// be recalled when the server stops; `stop` advances this instead, and the work that finds another value is dropped.
-nonisolated final class ServerGeneration: Sendable {
-    private let value = Mutex(0)
-    var current: Int { value.withLock { $0 } }
-    func advance() { value.withLock { $0 += 1 } }
-}
-
-/// The folder the socket lives in: the user's own and closed to everyone else.
-enum PrivateDirectory {
-    /// `/tmp/mynotch-<uid>` is in a folder every user can write to, so someone else may have made it first, or made it a link. The
-    /// folder is made with `mkdir`, which fails when something is there, and then checked and changed through a descriptor opened
-    /// without following a link, so nothing can be put in its place between the check and the change.
-    static func prepare(_ directory: URL, user: uid_t) throws {
-        try FileManager.default.createDirectory(at: directory.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if mkdir(directory.path, 0o700) != 0, errno != EEXIST { throw ClipboardMCPServer.StartError.socket(errno: errno) }
-        let descriptor = open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
-        guard descriptor >= 0 else { throw ClipboardMCPServer.StartError.directoryNotOwned }
-        defer { close(descriptor) }
-        var info = stat()
-        guard fstat(descriptor, &info) == 0, info.st_uid == user else { throw ClipboardMCPServer.StartError.directoryNotOwned }
-        // `mkdir` makes it 0700 less the umask, and one that was there may be anything.
-        guard fchmod(descriptor, 0o700) == 0 else { throw ClipboardMCPServer.StartError.socket(errno: errno) }
-    }
-}
 
 /// Listens on a Unix stream socket for the `mynotch-clipboard-mcp` helper. Each connection carries one request line and gets
 /// one answer line; the answer is worked out on the main actor, where the history is, and the connection is closed.
@@ -79,7 +54,7 @@ final class ClipboardMCPServer {
                 let client = accept(listener, nil, nil)
                 guard client >= 0 else { return }
                 var enable: Int32 = 1
-                guard MCPSocketTrust.isPeer(client, user: servedUser), fcntl(client, F_SETFL, O_NONBLOCK) == 0,
+                guard SocketTrust.isPeer(client, user: servedUser), fcntl(client, F_SETFL, O_NONBLOCK) == 0,
                       setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &enable, socklen_t(MemoryLayout<Int32>.size)) == 0,
                       reserveConnection()
                 else {
@@ -169,8 +144,8 @@ final class ClipboardMCPServer {
     /// Replaces a socket file a crashed run left behind. The folder is made private to the user.
     func start() throws {
         stop()
-        guard let address = MCPSocketAddress(path: socketPath) else { throw StartError.pathTooLong }
-        try PrivateDirectory.prepare(URL(filePath: socketPath).deletingLastPathComponent(), user: trustedUser)
+        guard let address = SocketAddress(path: socketPath) else { throw StartError.pathTooLong }
+        try preparePrivateDirectory()
         // A file with a listener behind it is another MyNotch's: taking it over would leave that one without a socket, and the one
         // that stops last would remove the other's. A file with nobody behind it is what a crashed run leaves.
         if Self.hasListener(at: socketPath) { throw StartError.alreadyInUse }
@@ -226,9 +201,20 @@ final class ClipboardMCPServer {
         madeFile = nil
     }
 
+    /// Makes the folder of the socket the user's own and closed to everyone else.
+    private func preparePrivateDirectory() throws {
+        do {
+            try PrivateDirectory.prepare(URL(filePath: socketPath).deletingLastPathComponent(), user: trustedUser)
+        } catch PrivateDirectory.Failure.notOwned {
+            throw StartError.directoryNotOwned
+        } catch PrivateDirectory.Failure.system(let code) {
+            throw StartError.socket(errno: code)
+        }
+    }
+
     /// Whether something accepts connections at `path`: a connection that is made, or waits because the queue is full.
     private static func hasListener(at path: String) -> Bool {
-        guard let address = MCPSocketAddress(path: path) else { return false }
+        guard let address = SocketAddress(path: path) else { return false }
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else { return false }
         defer { close(descriptor) }

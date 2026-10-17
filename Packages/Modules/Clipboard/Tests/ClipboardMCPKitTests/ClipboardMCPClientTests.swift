@@ -1,4 +1,5 @@
 import Foundation
+import MyNotchTestSupport
 import Testing
 @testable import ClipboardMCPKit
 
@@ -95,14 +96,14 @@ import Testing
     }
 
     @Test func aSocketFileNobodyListensOnIsUnreachable() throws {
-        let folder = try SocketFolder()
+        let folder = try SocketFolder(socketName: "mcp.sock")
         try folder.bindSocket()
         folder.stopListening()
         #expect(ClipboardMCPClient.send(request, socketPath: folder.socketPath, timeout: 30) == .unreachable)
     }
 
     @Test func aFileThatIsNotASocketIsNotTalkedTo() throws {
-        let folder = try SocketFolder()
+        let folder = try SocketFolder(socketName: "mcp.sock")
         try Data("stale".utf8).write(to: URL(filePath: folder.socketPath))
         #expect(ClipboardMCPClient.send(request, socketPath: folder.socketPath, timeout: 30) == .untrusted)
     }

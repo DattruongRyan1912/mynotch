@@ -19,6 +19,28 @@ import MyNotchTestSupport
         #expect(!exists(first))
     }
 
+    @Test func aShortPathIsNamedMnAndEightCharactersUnderTmpAndFitsASocketFile() {
+        let folders = ScratchFolders()
+        let first = folders.reserveShort()
+        let second = folders.reserveShort()
+        #expect(first != second)
+        #expect(first.deletingLastPathComponent().path == "/tmp")
+        #expect(first.lastPathComponent.count == "mn-".count + 8)
+        #expect(first.lastPathComponent.hasPrefix("mn-"))
+        // The longest name a socket in it has among the helpers' sockets, with room to spare for a longer one.
+        #expect((first.path + "/clipboard-mcp.sock").utf8.count <= 103 - 20)
+        #expect(!exists(first))
+    }
+
+    @Test func removeAllDeletesShortFoldersWithTheirContentsToo() throws {
+        let folders = ScratchFolders()
+        let folder = folders.reserveShort()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: folder.appending(path: "mcp.sock"))
+        folders.removeAll()
+        #expect(!exists(folder))
+    }
+
     @Test func removeAllDeletesEveryReservedFolderWithItsContentsAndForgetsThem() throws {
         let folders = ScratchFolders()
         let first = folders.reserve("A")

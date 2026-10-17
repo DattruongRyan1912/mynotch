@@ -354,7 +354,7 @@ public final class ClipboardModule: FeatureModule {
                     let pasteboard = NSPasteboard.general
                     pasteboard.clearContents()
                     pasteboard.setString(text, forType: .string)
-                    pasteboard.setData(Data(), forType: NSPasteboard.PasteboardType(ClipboardClassifier.ownWriteType))
+                    pasteboard.setData(Data(), forType: OwnPasteboardWrite.pasteboardType)
                 },
                 turnOff: { [weak self] in self?.turnOffMCPNow(settings: environment.settings) }
             ),

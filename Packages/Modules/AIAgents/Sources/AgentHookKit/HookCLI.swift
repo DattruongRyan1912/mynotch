@@ -1,4 +1,5 @@
 import Foundation
+import LocalSocketKit
 
 /// What the `mynotch-hook` executable does. It always returns 0 and prints nothing, except the one decision JSON an
 /// answered permission request calls for: Claude Code can put a hook's stdout into the model's context, and a failing

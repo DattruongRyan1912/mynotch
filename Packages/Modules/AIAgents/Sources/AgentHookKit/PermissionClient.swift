@@ -1,4 +1,5 @@
 import Foundation
+import LocalSocketKit
 
 /// The helper's side of the permission socket: sends one request and waits, never past `timeout`, for the app's
 /// answer. Whatever goes wrong is an outcome, not an error, because a hook must never fail or hang.

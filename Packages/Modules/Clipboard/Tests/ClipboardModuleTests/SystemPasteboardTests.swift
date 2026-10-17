@@ -1,4 +1,5 @@
 import AppKit
+import MyNotchCore
 import Testing
 @testable import ClipboardModule
 
@@ -41,7 +42,7 @@ import Testing
     /// What the monitor would record if the marker were missing, so a write must read back as the content written.
     func unmarked(_ snapshot: PasteboardSnapshot) -> ClassificationResult {
         var snapshot = snapshot
-        snapshot.types.removeAll { $0 == ClipboardClassifier.ownWriteType }
+        snapshot.types.removeAll { $0 == OwnPasteboardWrite.typeIdentifier }
         return classifier.classify(snapshot)
     }
 
@@ -56,7 +57,7 @@ import Testing
     func textualContentReadsBackWithTheMarker(content: ClipboardContent) throws {
         let snapshot = try writeAndRead(content)
 
-        #expect(snapshot.types.contains(ClipboardClassifier.ownWriteType))
+        #expect(snapshot.types.contains(OwnPasteboardWrite.typeIdentifier))
         #expect(classifier.classify(snapshot) == .skipped(.ownWrite))
         #expect(unmarked(snapshot) == .content(content, imageData: nil))
     }
@@ -73,7 +74,7 @@ import Testing
         let snapshot = try writeAndRead(.richText(plain: "Xin chào", rtf: Self.rtf), plainTextOnly: true)
 
         #expect(snapshot.rtf == nil)
-        #expect(snapshot.types.contains(ClipboardClassifier.ownWriteType))
+        #expect(snapshot.types.contains(OwnPasteboardWrite.typeIdentifier))
         #expect(unmarked(snapshot) == .content(.text("Xin chào"), imageData: nil))
     }
 
@@ -91,7 +92,7 @@ import Testing
         let snapshot = try writeAndRead(content, imageURL: imageURL)
 
         #expect(snapshot.png == png)
-        #expect(snapshot.types.contains(ClipboardClassifier.ownWriteType))
+        #expect(snapshot.types.contains(OwnPasteboardWrite.typeIdentifier))
         #expect(unmarked(snapshot) == .content(content, imageData: png))
     }
 
@@ -101,7 +102,7 @@ import Testing
 
         #expect(snapshot.fileURLs == urls)
         #expect(pasteboard.pasteboardItems?.count == 2)
-        #expect(snapshot.types.contains(ClipboardClassifier.ownWriteType))
+        #expect(snapshot.types.contains(OwnPasteboardWrite.typeIdentifier))
         #expect(snapshot.types.contains(Self.sourceType))
         #expect(unmarked(snapshot) == .content(.files(urls), imageData: nil))
     }

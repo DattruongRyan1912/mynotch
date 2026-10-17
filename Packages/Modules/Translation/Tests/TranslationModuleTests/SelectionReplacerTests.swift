@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import MyNotchCore
 import Testing
 @testable import TranslationModule
 
@@ -30,11 +31,11 @@ final class FakeApplications: ApplicationActivating {
 }
 
 /// Counts ⌘V instead of posting it; `onSend` sees the world at the moment the app would read the pasteboard.
-final class FakeKeystroke: PasteKeystroke {
+final class FakeKeystroke: KeystrokeSending {
     private(set) var sent = 0
     var onSend: (() -> Void)?
 
-    func send() {
+    func sendPaste() {
         sent += 1
         onSend?()
     }
@@ -345,11 +346,6 @@ extension NSPasteboard {
         #expect(await replace() == .failed)
         #expect(keystroke.sent == 0)
         #expect(pasteboard.snapshot == before)
-    }
-
-    @Test func ourOwnWriteUsesTheTypeClipboardHistoryIgnores() {
-        // Must stay equal to ClipboardClassifier.ownWriteType in the Clipboard module.
-        #expect(SelectionReplacer.ownWriteType.rawValue == "io.lucasvu.mynotch.clipboard")
     }
 
     @Test func putsTheUsersClipboardBackWithEveryItemAndType() async {

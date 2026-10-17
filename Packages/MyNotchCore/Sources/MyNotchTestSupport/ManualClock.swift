@@ -2,13 +2,15 @@ import Foundation
 import Synchronization
 
 /// A clock that only moves when a test says so, so nothing depends on how accurately the machine sleeps.
-nonisolated final class ManualClock: Clock {
-    struct Instant: InstantProtocol {
-        var offset: Duration
+public nonisolated final class ManualClock: Clock {
+    public struct Instant: InstantProtocol {
+        public var offset: Duration
 
-        func advanced(by duration: Duration) -> Instant { Instant(offset: offset + duration) }
-        func duration(to other: Instant) -> Duration { other.offset - offset }
-        static func < (lhs: Instant, rhs: Instant) -> Bool { lhs.offset < rhs.offset }
+        public init(offset: Duration) { self.offset = offset }
+
+        public func advanced(by duration: Duration) -> Instant { Instant(offset: offset + duration) }
+        public func duration(to other: Instant) -> Duration { other.offset - offset }
+        public static func < (lhs: Instant, rhs: Instant) -> Bool { lhs.offset < rhs.offset }
     }
 
     private struct Sleeper {
@@ -25,14 +27,16 @@ nonisolated final class ManualClock: Clock {
 
     private let state = Mutex(State())
 
-    var now: Instant { state.withLock { $0.now } }
-    var minimumResolution: Duration { .zero }
+    public init() {}
+
+    public var now: Instant { state.withLock { $0.now } }
+    public var minimumResolution: Duration { .zero }
 
     /// How many times something has started waiting on this clock, cancelled waits included. A test that fed a
     /// change waits for this to grow, which tells it the change has been taken and its wait is in place.
-    var sleepCalls: Int { state.withLock { $0.sleepCalls } }
+    public var sleepCalls: Int { state.withLock { $0.sleepCalls } }
 
-    func sleep(until deadline: Instant, tolerance: Duration?) async throws {
+    public func sleep(until deadline: Instant, tolerance: Duration?) async throws {
         let id = state.withLock { state -> Int in
             state.sleepCalls += 1
             return state.sleepCalls
@@ -56,7 +60,7 @@ nonisolated final class ManualClock: Clock {
     }
 
     /// Moves time forward and wakes everything whose deadline has come.
-    func advance(by duration: Duration) {
+    public func advance(by duration: Duration) {
         let due = state.withLock { state -> [Sleeper] in
             state.now = state.now.advanced(by: duration)
             let due = state.sleepers.filter { $0.deadline <= state.now }

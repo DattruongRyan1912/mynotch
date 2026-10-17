@@ -1,4 +1,5 @@
 import Foundation
+import LocalSocketKit
 
 /// Where the app listens and the helper sends. Both derive the path here, so they cannot drift apart.
 public enum AgentSocket {

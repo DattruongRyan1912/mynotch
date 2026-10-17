@@ -1,4 +1,6 @@
 import Foundation
+import LocalSocketKit
+import MyNotchTestSupport
 import Testing
 @testable import AgentHookKit
 
@@ -88,7 +90,7 @@ import Testing
     }
 
     @Test func aSocketFileNobodyListensOnIsUnreachable() throws {
-        let folder = try SocketTrustTests.Folder()
+        let folder = try SocketFolder(socketName: "perm.sock")
         // What a crashed app leaves: the socket file, with nothing behind it.
         try folder.bindSocket()
         folder.stopListening()
@@ -96,7 +98,7 @@ import Testing
     }
 
     @Test func aFileThatIsNotASocketIsNotTalkedTo() throws {
-        let folder = try SocketTrustTests.Folder()
+        let folder = try SocketFolder(socketName: "perm.sock")
         try Data("stale".utf8).write(to: URL(filePath: folder.socketPath))
         #expect(PermissionClient.ask(request, socketPath: folder.socketPath, timeout: 30) == .untrusted)
     }
