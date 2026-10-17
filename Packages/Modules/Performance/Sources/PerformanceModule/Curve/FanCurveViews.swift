@@ -81,6 +81,7 @@ nonisolated enum FanCurvePresentation {
         switch status {
         case .off: return "Đường cong đang chờ lần đọc nhiệt độ đầu tiên."
         case .waitingForHelper: return "Đang chờ helper chạy: cài và cho phép helper ở trên."
+        case .helperOutdated: return "Helper đang chạy là bản cũ: bấm Gỡ helper rồi Cài lại ở trên."
         case .needsProbe: return "Hãy bấm \"Thử điều khiển quạt\" ở trên trước, để biết máy này cho phép cách nào."
         case .blockedByMacsFanControl: return "Đường cong tạm dừng: thoát Macs Fan Control trước khi điều khiển quạt."
         case let .active(rpm?): return "Đang điều khiển: quạt khoảng \(Int(rpm.rounded())) vòng/phút."

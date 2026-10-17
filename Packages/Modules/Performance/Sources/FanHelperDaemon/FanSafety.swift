@@ -12,6 +12,9 @@ public enum FanSafety {
     /// does not switch the fan between automatic and manual at every step.
     public static let takeBackMargin = 150.0
 
+    /// Why a fan is left automatic when Apple's own speed is above the request.
+    public static let appleIsHigher = "Apple's own speed is higher"
+
     public enum ForcedDecision: Equatable, Sendable {
         case force(Double)
         /// Do not force: the fan stays (or goes back to) automatic, for this reason.
@@ -29,7 +32,7 @@ public enum FanSafety {
         if let dieTemperature, let baselineTemperature, dieTemperature > baselineTemperature + drift {
             return .automatic("hotter than when Apple's speed was read")
         }
-        if requested < baseline - takeBackMargin { return .automatic("Apple's own speed is higher") }
+        if requested < baseline - takeBackMargin { return .automatic(appleIsHigher) }
         return .force(max(requested, baseline))
     }
 

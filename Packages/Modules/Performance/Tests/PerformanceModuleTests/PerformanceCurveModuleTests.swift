@@ -35,7 +35,7 @@ import Testing
         await settle { await f.reads() >= 2 }
         #expect(await f.reads() >= 2, "it reads every two seconds because the curve needs the temperature")
         await settle { !f.rig.client.commands.isEmpty }
-        #expect(f.rig.client.commands.contains { if case .forced(0, _) = $0 { true } else { false } }, "and the curve told the helper what to do with the fan")
+        #expect(f.rig.client.commands.contains { if case .forced(FanCommandResult.allFans, _) = $0 { true } else { false } }, "and the curve told the helper what to do with the fans, all at once")
     }
 
     @Test func theCurveWithTheFloorProbeResultAsksForAFloor() async {

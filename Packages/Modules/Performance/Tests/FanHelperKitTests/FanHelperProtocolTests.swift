@@ -56,6 +56,24 @@ final class PartialPing: NSObject, NSSecureCoding {
         #expect(decoded.appliedRPM == 3200 && decoded.detail == "clamped to the fan's range" && decoded.leaseSeconds == 14.5)
     }
 
+    @Test func aResultCarriesHowLongTheModesTookAndAnOlderOneWithoutItDecodesAsUnknown() throws {
+        let timed = try roundTrip(FanHelperResult(ok: true, state: .forced, modeReadBackMS: 150))
+        #expect(timed.modeReadBackMS == 150)
+        #expect(FanHelperResult(ok: true, state: .forced).modeReadBackMS == -1)
+
+        let archiver = NSKeyedArchiver(requiringSecureCoding: true)
+        archiver.setClassName("MyNotchFanHelperResult", for: ResultBeforeTheLatencyField.self)
+        archiver.encode(ResultBeforeTheLatencyField(), forKey: NSKeyedArchiveRootObjectKey)
+        archiver.finishEncoding()
+        let old = try #require(try NSKeyedUnarchiver.unarchivedObject(ofClass: FanHelperResult.self, from: archiver.encodedData))
+        #expect(old.modeReadBackMS == -1 && old.appliedRPM == 3200, "a helper from before the field was added still decodes")
+    }
+
+    /// The every-fan form of `setForced` is new in version 3, so the app must not take an older helper for the current one.
+    @Test func theHelperVersionWasBumpedForTheEveryFanCommand() {
+        #expect(Int(FanHelperIdentity.version).map { $0 >= 3 } == true)
+    }
+
     @Test func eachStateOfAFanHasItsNumberOnTheWire() {
         #expect(FanHelperResult.State.automatic.rawValue == 0)
         #expect(FanHelperResult.State.floor.rawValue == 1)
@@ -116,5 +134,20 @@ final class PartialPing: NSObject, NSSecureCoding {
             let selector = NSStringFromSelector(required![index].name!)
             #expect(selector.lowercased().contains("key") == false && selector.lowercased().contains("write") == false, "\(selector)")
         }
+    }
+}
+
+/// What a version 2 helper sent: a result without the latency field.
+@objc(MyNotchTestResultBeforeTheLatencyField)
+final class ResultBeforeTheLatencyField: NSObject, NSSecureCoding {
+    static let supportsSecureCoding = true
+    override init() { super.init() }
+    required init?(coder: NSCoder) { nil }
+    func encode(with coder: NSCoder) {
+        coder.encode(true, forKey: "ok")
+        coder.encode(2, forKey: "state")
+        coder.encode(3200.0, forKey: "appliedRPM")
+        coder.encode("x" as NSString, forKey: "detail")
+        coder.encode(14.5, forKey: "leaseSeconds")
     }
 }

@@ -100,7 +100,7 @@ public final class FanHelperResult: NSObject, NSSecureCoding, @unchecked Sendabl
         case forced = 2
     }
 
-    /// The fan index that means "every fan" for `setAuto`.
+    /// The fan index that means "every fan", for `setAuto` and `setForced`.
     public static let allFans = -1
 
     public let ok: Bool
@@ -111,15 +111,19 @@ public final class FanHelperResult: NSObject, NSSecureCoding, @unchecked Sendabl
     public let detail: String
     /// Seconds left of the lease; 0 when the fan is automatic.
     public let leaseSeconds: Double
+    /// How long the slowest of the modes that this command wrote took to read back as written, in milliseconds; -1 when it wrote
+    /// none (a renewal, a refusal) or the helper does not say.
+    public let modeReadBackMS: Int
 
     public var state: State? { State(rawValue: stateValue) }
 
-    public init(ok: Bool, state: State, appliedRPM: Double = -1, detail: String = "", leaseSeconds: Double = 0) {
+    public init(ok: Bool, state: State, appliedRPM: Double = -1, detail: String = "", leaseSeconds: Double = 0, modeReadBackMS: Int = -1) {
         self.ok = ok
         stateValue = state.rawValue
         self.appliedRPM = appliedRPM
         self.detail = detail
         self.leaseSeconds = leaseSeconds
+        self.modeReadBackMS = modeReadBackMS
     }
 
     public required init?(coder: NSCoder) {
@@ -131,6 +135,7 @@ public final class FanHelperResult: NSObject, NSSecureCoding, @unchecked Sendabl
         appliedRPM = coder.decodeDouble(forKey: "appliedRPM")
         self.detail = detail
         leaseSeconds = coder.decodeDouble(forKey: "leaseSeconds")
+        modeReadBackMS = coder.containsValue(forKey: "modeReadBackMS") ? coder.decodeInteger(forKey: "modeReadBackMS") : -1
     }
 
     public func encode(with coder: NSCoder) {
@@ -139,6 +144,7 @@ public final class FanHelperResult: NSObject, NSSecureCoding, @unchecked Sendabl
         coder.encode(appliedRPM, forKey: "appliedRPM")
         coder.encode(detail as NSString, forKey: "detail")
         coder.encode(leaseSeconds, forKey: "leaseSeconds")
+        coder.encode(modeReadBackMS, forKey: "modeReadBackMS")
     }
 }
 
@@ -158,7 +164,10 @@ public protocol FanHelperProtocol {
     /// Asks for at least `rpm` on one fan while Apple's automatic control stays on: the speed goes to the fan's target key and the
     /// mode is left alone. Whether the firmware honours it is for the probe to find out.
     func setFloor(fan: Int, rpm: Double, reply: @escaping @Sendable (FanHelperResult) -> Void)
-    /// Takes one fan to a manual `rpm`, unless Apple's own speed is higher, in which case the fan stays automatic.
+    /// Takes one fan to a manual `rpm`, unless Apple's own speed is higher, in which case the fan stays automatic. With
+    /// `FanHelperResult.allFans` it takes every fan, the same `rpm` held to each fan's own range: the helper writes every fan's mode
+    /// first and then every fan's target, and waits for the SMC to apply each before it answers. (Version 3 of the helper; an older
+    /// one does not know the index and refuses it.)
     func setForced(fan: Int, rpm: Double, reply: @escaping @Sendable (FanHelperResult) -> Void)
     /// Gives one fan, or with `FanHelperResult.allFans` every fan, back to Apple's automatic control.
     func setAuto(fan: Int, reply: @escaping @Sendable (FanHelperResult) -> Void)

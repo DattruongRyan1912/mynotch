@@ -32,6 +32,8 @@ final class FanCurveRunner {
         /// The mode is Apple's.
         case off
         case waitingForHelper
+        /// A helper answers, but it is not the one inside this app, so it is not given commands.
+        case helperOutdated
         case needsProbe
         case blockedByMacsFanControl
         /// The curve is the mode and working: `rpm` is the average speed the fans were asked for, nil while Apple is still in charge
@@ -69,7 +71,7 @@ final class FanCurveRunner {
         case .off: nil
         case let .active(rpm?): "Đường cong · \(Int(rpm.rounded())) vòng/phút"
         case .active(nil): "Đường cong · đang để Apple"
-        case .waitingForHelper, .needsProbe, .blockedByMacsFanControl, .error: "Đường cong · tạm dừng"
+        case .waitingForHelper, .helperOutdated, .needsProbe, .blockedByMacsFanControl, .error: "Đường cong · tạm dừng"
         }
     }
 
@@ -116,6 +118,7 @@ final class FanCurveRunner {
         guard helper.probeStep == nil else { return }
         helper.refreshMacsFanControl()
         guard case .running = helper.phase else { return await pause(.waitingForHelper) }
+        guard !helper.helperIsOutdated else { return await pause(.helperOutdated) }
         guard let mechanism else { return await pause(.needsProbe) }
         guard !helper.macsFanControlRunning else { return await pause(.blockedByMacsFanControl) }
         guard let temperature = snapshot.soc, !snapshot.fans.isEmpty else {
@@ -124,22 +127,32 @@ final class FanCurveRunner {
         let fans = snapshot.fans.map { FanLimits(index: $0.index, minRPM: $0.minRPM, maxRPM: $0.maxRPM, currentRPM: $0.rpm) }
         let directives = engine.step(temperature: temperature, at: now(), curve: curve, fans: fans)
         var asked: [Double] = []
-        for (fan, directive) in zip(fans, directives) {
-            guard case let .rpm(rpm) = directive else { continue }
-            holding = true
-            do {
-                let result = switch mechanism {
-                case .floor: try await helper.commandClient.setFloor(fan: fan.index, rpm: rpm)
-                case .forced: try await helper.commandClient.setForced(fan: fan.index, rpm: rpm)
+        do {
+            switch mechanism {
+            case .floor:
+                for (fan, directive) in zip(fans, directives) {
+                    guard case let .rpm(rpm) = directive else { continue }
+                    holding = true
+                    let result = try await helper.commandClient.setFloor(fan: fan.index, rpm: rpm)
+                    guard result.ok else { return await refused(result) }
+                    if result.state != .automatic { asked.append(result.appliedRPM ?? rpm) }
                 }
-                guard result.ok else {
-                    // The helper's own refusal (Macs Fan Control, a temperature it cannot read): not the curve's to argue with.
-                    return await pause(.error(result.detail.isEmpty ? "helper từ chối" : result.detail))
+            case .forced:
+                // One command for every fan, the way the probe found the SMC takes it: the helper sets all the modes and then all the
+                // targets. It holds the speed to each fan's own range, so the fastest any fan is asked for is the speed to send: no
+                // fan gets less than the curve asks for it.
+                let speeds = directives.compactMap { directive -> Double? in
+                    if case let .rpm(rpm) = directive { rpm } else { nil }
                 }
-                if result.state != .automatic { asked.append(result.appliedRPM ?? rpm) }
-            } catch {
-                return await pause(.error(FanHelperManager.describe(error)))
+                if let rpm = speeds.max() {
+                    holding = true
+                    let result = try await helper.commandClient.setForced(fan: FanCommandResult.allFans, rpm: rpm)
+                    guard result.ok else { return await refused(result) }
+                    if result.state != .automatic { asked.append(result.appliedRPM ?? rpm) }
+                }
             }
+        } catch {
+            return await pause(.error(FanHelperManager.describe(error)))
         }
         if asked.isEmpty {
             // Nothing is held: below the start, or Apple's own speed is higher everywhere.
@@ -151,6 +164,12 @@ final class FanCurveRunner {
         } else {
             status = .active(rpm: asked.reduce(0, +) / Double(asked.count))
         }
+    }
+
+    /// The helper's own refusal (Macs Fan Control, a temperature it cannot read, an SMC that did not apply what was written): not the
+    /// curve's to argue with.
+    private func refused(_ result: FanCommandResult) async {
+        await pause(.error(result.detail.isEmpty ? "helper từ chối" : result.detail))
     }
 
     /// The curve cannot run now, for this reason: the fans go back to Apple if they were held.

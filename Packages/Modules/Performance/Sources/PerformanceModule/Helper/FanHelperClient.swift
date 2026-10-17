@@ -8,7 +8,9 @@ protocol FanHelperClient: Sendable {
     func readFans() async throws -> [FanHelperFanInfo]
     /// Asks for at least `rpm` while Apple's control stays on. The helper holds it for a lease of 15 s.
     func setFloor(fan: Int, rpm: Double) async throws -> FanCommandResult
-    /// Takes a fan to a manual speed (unless Apple's own is higher). A lease of 15 s, renewed by sending it again.
+    /// Takes a fan to a manual speed (unless Apple's own is higher), or with `FanCommandResult.allFans` every fan to that speed, each
+    /// held to its own range: the helper sets all the modes, then all the targets, and waits for the SMC to apply them. A lease of
+    /// 15 s, renewed by sending it again.
     func setForced(fan: Int, rpm: Double) async throws -> FanCommandResult
     /// Gives one fan, or with `FanCommandResult.allFans` every fan, back to Apple.
     func setAuto(fan: Int) async throws -> FanCommandResult
@@ -29,13 +31,16 @@ nonisolated struct FanCommandResult: Equatable, Sendable {
     /// The helper's own short English line: why a request was clamped, refused or turned into automatic.
     let detail: String
     let leaseSeconds: Double
+    /// How long the slowest mode this command wrote took to read back as written, in milliseconds; nil when it wrote none.
+    let modeReadBackMS: Int?
 
-    init(ok: Bool, state: State, appliedRPM: Double? = nil, detail: String = "", leaseSeconds: Double = 0) {
+    init(ok: Bool, state: State, appliedRPM: Double? = nil, detail: String = "", leaseSeconds: Double = 0, modeReadBackMS: Int? = nil) {
         self.ok = ok
         self.state = state
         self.appliedRPM = appliedRPM
         self.detail = detail
         self.leaseSeconds = leaseSeconds
+        self.modeReadBackMS = modeReadBackMS
     }
 
     init(_ result: FanHelperResult) {
@@ -46,7 +51,7 @@ nonisolated struct FanCommandResult: Equatable, Sendable {
         }
         self.init(
             ok: result.ok, state: state, appliedRPM: result.appliedRPM >= 0 ? result.appliedRPM : nil, detail: result.detail,
-            leaseSeconds: result.leaseSeconds
+            leaseSeconds: result.leaseSeconds, modeReadBackMS: result.modeReadBackMS >= 0 ? result.modeReadBackMS : nil
         )
     }
 }

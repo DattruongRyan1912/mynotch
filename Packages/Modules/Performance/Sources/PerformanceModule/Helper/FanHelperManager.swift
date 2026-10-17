@@ -26,11 +26,13 @@ final class FanHelperManager {
 
     @ObservationIgnored private let registration: any FanHelperRegistering
     @ObservationIgnored private let client: any FanHelperClient
-    @ObservationIgnored private let bundled: () -> BundledFanHelper
+    @ObservationIgnored private let bundledProvider: () -> BundledFanHelper
     @ObservationIgnored private let runningApps: () -> Set<String>
     @ObservationIgnored private let pause: (Duration) async -> Void
     @ObservationIgnored private let log = Logger(subsystem: "io.lucasvu.mynotch", category: "fan-helper")
     @ObservationIgnored private var didTryUpdate = false
+    /// What the bundled helper is, read once: working it out means hashing the helper's file, and the views ask often.
+    @ObservationIgnored private var bundledHelper: BundledFanHelper?
 
     init(
         registration: any FanHelperRegistering,
@@ -41,7 +43,7 @@ final class FanHelperManager {
     ) {
         self.registration = registration
         self.client = client
-        self.bundled = bundled
+        bundledProvider = bundled
         self.runningApps = runningApps
         self.pause = pause
     }
@@ -54,10 +56,30 @@ final class FanHelperManager {
         return false
     }
 
-    /// Whether the probe may be started: the helper runs, Macs Fan Control does not, the fans are Apple's (the curve is off), and
-    /// nothing else is going on.
+    /// Whether the helper that answers is the one inside this app. Commands only go to that one: an older helper does not know the
+    /// every-fan form of a command, and would answer a probe or a curve with a refusal that looks like the fans' own.
+    var helperIsCurrent: Bool {
+        guard case let .running(info) = phase else { return false }
+        return !FanHelperUpdatePolicy.isOutdated(info, bundled: bundled())
+    }
+
+    /// A helper answers, but it is not the one inside this app.
+    var helperIsOutdated: Bool {
+        guard case let .running(info) = phase else { return false }
+        return FanHelperUpdatePolicy.isOutdated(info, bundled: bundled())
+    }
+
+    private func bundled() -> BundledFanHelper {
+        if let bundledHelper { return bundledHelper }
+        let found = bundledProvider()
+        bundledHelper = found
+        return found
+    }
+
+    /// Whether the probe may be started: the helper runs and is this app's, Macs Fan Control does not, the fans are Apple's (the
+    /// curve is off), and nothing else is going on.
     var canProbe: Bool {
-        guard case .running = phase else { return false }
+        guard helperIsCurrent else { return false }
         return !macsFanControlRunning && !curveIsMode && probeStep == nil
     }
 
@@ -108,8 +130,12 @@ final class FanHelperManager {
     }
 
     /// The ten-second probe of how the fans can be set. Only while the helper runs and Macs Fan Control does not; nil when not allowed.
+    /// The helper is asked who it is first, because what the manager last saw can be old: a probe is never sent to a helper that is
+    /// not the one in this app.
     func runProbe() async -> FanProbeOutcome? {
         refreshMacsFanControl()
+        guard canProbe else { return nil }
+        await ping()
         guard canProbe else { return nil }
         probeStep = "Bắt đầu"
         defer { probeStep = nil }

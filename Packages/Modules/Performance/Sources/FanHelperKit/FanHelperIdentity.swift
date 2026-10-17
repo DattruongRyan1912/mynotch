@@ -13,5 +13,8 @@ public enum FanHelperIdentity {
 
     /// Bumped by hand when the helper's behaviour or its launchd plist changes without the executable changing in a way a build
     /// would show: the build id (the code directory hash) changes with every build, the plist is not part of it.
-    public static let version = "2"
+    ///
+    /// 3: `setForced` takes `FanHelperResult.allFans`, and every write is waited for. The app does not send commands to a helper
+    /// whose version is not this one.
+    public static let version = "3"
 }

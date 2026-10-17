@@ -107,6 +107,21 @@ import Testing
         #expect(rig.writes == [.mode(0, 1), .target(0, 3200)])
     }
 
+    @Test func everyFanAtOnceTravelsAsOneCommandWithTheMeanSpeedAndHowLongTheModesTook() async {
+        let rig = Rig(actual: 2000) { $0.applyModeOn(after: 0.1) }
+        let (proxy, close) = connect(to: service(rig))
+        defer { close() }
+        let result = await withCheckedContinuation { continuation in
+            proxy.setForced(fan: FanHelperResult.allFans, rpm: 6000) { continuation.resume(returning: $0) }
+        }
+        #expect(result.ok && result.state == .forced)
+        #expect(result.appliedRPM == 5889.5, "each fan to its own range, and the mean of what was written")
+        #expect(result.modeReadBackMS == 100)
+        #expect(rig.writes == [.mode(0, 1), .mode(1, 1), .target(0, 5779), .target(1, 6000)])
+        let back = await withCheckedContinuation { continuation in proxy.setAuto(fan: -1) { continuation.resume(returning: $0) } }
+        #expect(back.ok && back.state == .automatic && back.modeReadBackMS == -1)
+    }
+
     @Test func aFloorGoesToTheTargetKeyAloneAndAutoGivesTheFanBack() async {
         let rig = Rig(actual: 2000)
         let (proxy, close) = connect(to: service(rig))

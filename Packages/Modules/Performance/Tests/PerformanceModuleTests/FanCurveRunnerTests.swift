@@ -32,8 +32,8 @@ import Testing
         let activity = FakeActivity()
         let runner: FanCurveRunner
 
-        init(status: FanHelperRegistrationStatus = .enabled, runningApps: Set<String> = []) async {
-            rig = HelperRig(status: status, runningApps: runningApps)
+        init(status: FanHelperRegistrationStatus = .enabled, runningApps: Set<String> = [], bundled: BundledFanHelper = .matching) async {
+            rig = HelperRig(status: status, bundled: bundled, runningApps: runningApps)
             await rig.manager.refresh()
             let clock = clock
             runner = FanCurveRunner(helper: rig.manager, now: { clock.date }, activity: activity)
@@ -116,21 +116,44 @@ import Testing
 
     // MARK: Setting the fans
 
-    @Test func aHotMacHasEachFanAskedForItsOwnSpeedThroughTheWayTheProbeFound() async {
+    @Test func aHotMacHasEveryFanAskedForOneSpeedWhenTheWayIsTheManualSpeedAndEachFanForItsOwnWhenItIsTheFloor() async {
         let forced = await Setup()
         await forced.runner.configure(mode: .curve, curve: .standard, mechanism: .forced)
         await forced.runner.step(snapshot(95))
-        guard case let .forced(0, first)? = forced.rig.client.commands.first, case let .forced(1, second)? = forced.rig.client.commands.last else {
-            Issue.record("expected a forced command for each fan: \(forced.rig.client.commands)")
-            return
-        }
-        #expect(first == 2800 && second == 2800, "from the fans' own 2000, 800 in the first two-second step")
+        #expect(forced.rig.client.commands == [.forced(FanCommandResult.allFans, 2800)], "from the fans' own 2000, 800 in the first two-second step")
 
         let floor = await Setup()
         await floor.runner.configure(mode: .curve, curve: .standard, mechanism: .floor)
         await floor.runner.step(snapshot(95))
         #expect(floor.rig.client.commands.allSatisfy { if case .floor = $0 { true } else { false } })
         #expect(floor.rig.client.commands.count == 2)
+    }
+
+    @Test func theSpeedSentForEveryFanIsTheFastestAnyFanIsAskedForSoNoFanGetsLessThanTheCurveWants() async {
+        let setup = await Setup()
+        await setup.runner.configure(mode: .curve, curve: FanCurve(start: 30, full: 40), mechanism: .forced)
+        // At full the curve wants each fan at its own maximum: 5779 and 6241. The helper holds each to its own range.
+        var fans = self.fans
+        for _ in 0..<20 {
+            await setup.runner.step(snapshot(95, fans: fans))
+            setup.clock.tick()
+            fans = fans.map { FanReading(index: $0.index, rpm: $0.maxRPM, minRPM: $0.minRPM, maxRPM: $0.maxRPM) }
+        }
+        guard case let .forced(-1, last)? = setup.rig.client.commands.last else {
+            Issue.record("expected an every-fan command: \(setup.rig.client.commands)")
+            return
+        }
+        #expect(last == 6241)
+    }
+
+    @Test func aHelperThatIsNotTheOneInThisAppIsGivenNoCommandsAndTheCurveSaysSo() async {
+        let setup = await Setup(bundled: BundledFanHelper(version: "2", buildID: "aaaa"))
+        await setup.runner.configure(mode: .curve, curve: .standard, mechanism: .forced)
+        await setup.runner.step(snapshot(95))
+        #expect(setup.runner.status == .helperOutdated)
+        #expect(setup.runner.activeText == "Đường cong · tạm dừng")
+        #expect(setup.rig.client.commands.isEmpty)
+        #expect(FanCurvePresentation.status(.helperOutdated, mode: .curve, curve: .standard).contains("bản cũ"))
     }
 
     @Test func everyStepRenewsTheLeaseEvenWhenTheSpeedHasNotChanged() async {
@@ -143,8 +166,8 @@ import Testing
             fans = fans.map { FanReading(index: $0.index, rpm: $0.maxRPM, minRPM: $0.minRPM, maxRPM: $0.maxRPM) }
         }
         let commands = setup.rig.client.commands
-        #expect(commands.count == 24, "two fans at every step, the speed settled at the maximum or not")
-        #expect(commands.suffix(4).map { if case let .forced(_, rpm) = $0 { rpm } else { -1 } }.allSatisfy { $0 > 0 })
+        #expect(commands.count == 12, "one command for every fan at each step, the speed settled at the maximum or not")
+        #expect(commands.suffix(2).map { if case let .forced(_, rpm) = $0 { rpm } else { -1 } }.allSatisfy { $0 > 0 })
     }
 
     @Test func theStatusTellsTheAverageSpeedItWasGiven() async {

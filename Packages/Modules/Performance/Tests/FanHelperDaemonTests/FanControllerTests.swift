@@ -42,7 +42,7 @@ import Testing
 
     @Test func aFanThatDoesNotExistAndASpeedThatIsNotANumberAreRefusedWithoutAWrite() {
         let rig = Rig()
-        for fan in [-1, 2, 9] { #expect(rig.controller.setForced(fan: fan, rpm: 3000).ok == false, "\(fan)") }
+        for fan in [-2, 2, 9] { #expect(rig.controller.setForced(fan: fan, rpm: 3000).ok == false, "\(fan)") }
         for rpm in [Double.nan, .infinity, -5] { #expect(rig.controller.setForced(fan: 0, rpm: rpm).ok == false, "\(rpm)") }
         #expect(rig.controller.setFloor(fan: 7, rpm: 3000).ok == false)
         #expect(rig.writes.isEmpty)
@@ -413,7 +413,8 @@ import Testing
         rig.clock.advance(16)
         rig.controller.tick()
         let lines = rig.logs.all
-        #expect(lines.contains("write fan 0 mode 1") && lines.contains("write fan 0 target 3200") && lines.contains("write fan 0 mode 0"))
+        #expect(lines.contains("F0Md=1 read back after 0 ms (1)") && lines.contains("F0Tg=3200 read back after 0 ms (3200)"))
+        #expect(lines.contains("F0Md=0 read back after 0 ms (0)"))
         #expect(lines.allSatisfy { !$0.contains("61") }, "no temperature in the log")
     }
 }

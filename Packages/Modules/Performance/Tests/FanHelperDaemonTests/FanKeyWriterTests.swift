@@ -4,8 +4,9 @@ import Testing
 @testable import FanHelperDaemon
 
 @Suite struct FanKeyWriterTests {
+    /// Waiting costs nothing: the writer's clock is a fake that its own sleeps move.
     func writer(_ smc: FakeFanSMC = FakeFanSMC(), log: LogLines = LogLines()) throws -> FanKeyWriter {
-        try FanKeyWriter(channel: smc, log: { log.add($0) })
+        try FanKeyWriter(channel: smc, log: { log.add($0) }, timing: .fake(FakeClock()))
     }
 
     // MARK: Which keys
@@ -130,7 +131,7 @@ import Testing
 
     @Test func anOKAnswerWithAnotherValueReadingBackIsAnError() throws {
         // The firmware acknowledges the write and quietly keeps the old value: what reads back is not what was written.
-        let strict = try FanKeyWriter(channel: StubbornSMC(FakeFanSMC()))
+        let strict = try FanKeyWriter(channel: StubbornSMC(FakeFanSMC()), timing: .fake(FakeClock()))
         #expect(throws: FanWriteError.readBackDiffers("F0Tg")) { try strict.setTarget(0, rpm: 3000) }
         #expect(throws: FanWriteError.readBackDiffers("F0Md")) { try strict.setManual(0, true) }
     }
@@ -143,7 +144,7 @@ import Testing
         try writer.setManual(0, true)
         try writer.setTarget(0, rpm: 3200.4)
         try writer.setManual(0, false)
-        #expect(log.all == ["write fan 0 mode 1", "write fan 0 target 3200", "write fan 0 mode 0"])
+        #expect(log.all == ["F0Md=1 read back after 0 ms (1)", "F0Tg=3200 read back after 0 ms (3200)", "F0Md=0 read back after 0 ms (0)"])
     }
 
     @Test func aWriteThatFailedIsNotLoggedAsDone() throws {
@@ -152,7 +153,7 @@ import Testing
         let writer = try writer(smc, log: log)
         smc.refuse("F0Md")
         _ = try? writer.setManual(0, true)
-        #expect(log.all.isEmpty)
+        #expect(log.all == ["F0Md=1 result 130 and reads 0"], "said so, and not as a write that was read back")
     }
 
     /// The real writer needs root: a test is never root, so it cannot be made, and no test can write to the real SMC.

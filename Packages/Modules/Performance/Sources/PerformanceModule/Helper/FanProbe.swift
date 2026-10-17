@@ -100,9 +100,10 @@ nonisolated enum FanProbeJudge {
     }
 }
 
-/// The ten-second probe of how the fans can be set, over the helper's own commands. For one fan: reads the baseline, tries the floor
-/// for 3 s, gives the fan back and looks at it for 2 s, then the same with the manual speed. Whatever happens, every fan is given back
-/// at the end, and the helper's own lease and heat guard stay on throughout.
+/// The ten-second probe of how the fans can be set, over the helper's own commands. Reads fan 0's baseline, tries the floor on it for
+/// 3 s, gives it back and looks at it for 2 s, then the same with the manual speed, which is asked of every fan at once (the helper
+/// sets all the modes, then all the targets, as the SMC may need) while fan 0 is the one that is watched. Whatever happens, every fan
+/// is given back at the end, and the helper's own lease and heat guard stay on throughout.
 struct FanControlProbe {
     static let holdSeconds = 3
     static let settleSeconds = 2
@@ -222,20 +223,25 @@ struct FanControlProbe {
         return mechanism == .floor || sample.mode == 1
     }
 
+    /// The floor is asked of the probed fan alone; the manual speed of every fan, which is how the curve will ask for it. Fan 0 is the
+    /// one whose speed and mode are read each second, after the helper has waited for the SMC to apply what it was told.
     private func trial(_ mechanism: FanMechanism, baseline: FanHelperFanInfo, requested: Double) async -> MechanismTrial {
         var accepted = true
         var detail = ""
         var peak = baseline.rpm
         var heldAsAsked = true
+        var modeMS: Int?
+        let holdTarget = mechanism == .floor ? fan : FanCommandResult.allFans
         for _ in 0..<Self.holdSeconds {
             do {
                 let result = mechanism == .floor
-                    ? try await client.setFloor(fan: fan, rpm: requested) : try await client.setForced(fan: fan, rpm: requested)
+                    ? try await client.setFloor(fan: fan, rpm: requested) : try await client.setForced(fan: holdTarget, rpm: requested)
                 let expected: FanCommandResult.State = mechanism == .floor ? .floor : .forced
                 if !result.ok || result.state != expected {
                     accepted = false
                     detail = result.detail
                 }
+                if let ms = result.modeReadBackMS { modeMS = max(modeMS ?? 0, ms) }
             } catch {
                 accepted = false
                 detail = FanHelperManager.describe(error)
@@ -249,8 +255,9 @@ struct FanControlProbe {
             }
             if !accepted { break }
         }
-        _ = try? await client.setAuto(fan: fan)
+        _ = try? await client.setAuto(fan: holdTarget)
         await pause(.seconds(Self.settleSeconds))
+        if accepted, let modeMS { detail = FanProbePresentation.modeLatency(modeMS) }
         let after = try? await client.readFans().first { $0.index == fan }
         let modeAfter = after.map(\.mode)
         let targetAfter = after.map(\.target)

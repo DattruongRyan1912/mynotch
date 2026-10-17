@@ -489,6 +489,45 @@ import Testing
         #expect(unreachable.manager.canProbe == false)
     }
 
+    @Test func aHelperThatIsNotTheOneInThisAppIsNeverGivenAProbe() async {
+        // The app ships version 2 and a helper of version 1 answers: it would not know the every-fan form of a command.
+        let rig = HelperRig(status: .enabled, bundled: BundledFanHelper(version: "2", buildID: "aaaa"))
+        await rig.manager.refresh()
+        #expect(rig.manager.helperIsOutdated && rig.manager.helperIsCurrent == false && rig.manager.canProbe == false)
+        #expect(await rig.manager.runProbe() == nil)
+        #expect(rig.client.commands.isEmpty && rig.client.readCount == 0)
+
+        let current = HelperRig(status: .enabled)
+        await current.manager.refresh()
+        #expect(current.manager.helperIsCurrent && current.manager.helperIsOutdated == false)
+    }
+
+    @Test func anotherBuildOfTheSameVersionIsNotTheHelperInThisAppEither() async {
+        let rig = HelperRig(status: .enabled, pings: [.success(.oldBuild)])
+        await rig.manager.refresh()
+        #expect(rig.manager.helperIsOutdated && rig.manager.canProbe == false)
+    }
+
+    @Test func theHelperIsAskedWhoItIsRightBeforeAProbeBecauseWhatWasSeenLastCanBeOld() async {
+        // The last look found the current helper; by the time of the press an older one answers.
+        let rig = HelperRig(status: .enabled, pings: [.success(.matching), .success(.oldBuild)])
+        await rig.manager.refresh()
+        #expect(rig.manager.canProbe)
+        #expect(await rig.manager.runProbe() == nil)
+        #expect(rig.manager.helperIsOutdated)
+        #expect(rig.client.commands.isEmpty && rig.client.readCount == 0, "the probe sent nothing to it")
+        #expect(rig.client.pingCount == 2)
+    }
+
+    @Test func theProbeAsksTheHelperForItsPingAndThenRuns() async {
+        let rig = HelperRig(status: .enabled)
+        await rig.manager.refresh()
+        rig.client.answerFans(.success(FanHelperFanInfo.both))
+        let before = rig.client.pingCount
+        #expect(await rig.manager.runProbe() != nil)
+        #expect(rig.client.pingCount == before + 1)
+    }
+
     @Test func theProbeIsNotAllowedWhileTheCurveIsTheMode() async {
         let rig = HelperRig(status: .enabled)
         await rig.manager.refresh()

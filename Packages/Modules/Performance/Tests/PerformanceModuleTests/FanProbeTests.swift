@@ -21,6 +21,8 @@ nonisolated final class SimulatedFanClient: FanHelperClient, Sendable {
         var emptyFirstReads = 0
         /// The answer leaves out the fan being probed.
         var omitFan0 = false
+        /// How long the helper says the first manual command's modes took to read back; nothing for the ones after it.
+        var modeReadBackMS: Int?
     }
 
     private struct State {
@@ -34,6 +36,7 @@ nonisolated final class SimulatedFanClient: FanHelperClient, Sendable {
         var behaviour: Behaviour
         var commands: [FakeFanHelperClient.Command] = []
         var errorOnCommand: Int?
+        var forcedCommands = 0
     }
 
     private let state: Mutex<State>
@@ -72,9 +75,13 @@ nonisolated final class SimulatedFanClient: FanHelperClient, Sendable {
     func setForced(fan: Int, rpm: Double) async throws -> FanCommandResult {
         try command(.forced(fan, rpm)) { state in
             if state.behaviour.forcedRefused { return FanCommandResult(ok: false, state: .automatic, detail: "the SMC refused F0Md (0x82)") }
+            state.forcedCommands += 1
             state.mode = state.behaviour.forcedWorks ? 1 : 0
             state.target = rpm
-            return FanCommandResult(ok: true, state: .forced, appliedRPM: rpm, leaseSeconds: 15)
+            return FanCommandResult(
+                ok: true, state: .forced, appliedRPM: rpm, leaseSeconds: 15,
+                modeReadBackMS: state.forcedCommands == 1 ? state.behaviour.modeReadBackMS : nil
+            )
         }
     }
 
@@ -219,7 +226,7 @@ nonisolated final class OverlapWatchingClient: FanHelperClient, Sendable {
         #expect(outcome.trials.map(\.mechanism) == [.floor, .forced] && outcome.trials.allSatisfy(\.usable))
         #expect(client.commands == [
             .floor(0, 3600), .floor(0, 3600), .floor(0, 3600), .auto(0), .auto(-1),
-            .forced(0, 3600), .forced(0, 3600), .forced(0, 3600), .auto(0), .auto(-1),
+            .forced(-1, 3600), .forced(-1, 3600), .forced(-1, 3600), .auto(-1), .auto(-1),
             .auto(-1),
         ])
         #expect(pauses.durations == [.seconds(1), .seconds(1), .seconds(1), .seconds(2), .seconds(1), .seconds(1), .seconds(1), .seconds(2)])
@@ -275,6 +282,47 @@ nonisolated final class OverlapWatchingClient: FanHelperClient, Sendable {
         #expect(FanControlProbe.holds(automatic, mechanism: .floor, requested: 3600), "a floor is held with the mode automatic")
         #expect(FanControlProbe.holds(moved, mechanism: .floor, requested: 3600) == false, "300 away is not what was written")
         #expect(FanControlProbe.holds(FanHelperFanInfo(index: 0, rpm: 0, minRPM: 0, maxRPM: 0, mode: 1, target: 3550), mechanism: .forced, requested: 3600))
+    }
+
+    @MainActor @Test func theManualSpeedIsAskedOfEveryFanAtOnceAndEveryFanIsGivenBackWhileTheFloorStaysOnTheProbedFan() async {
+        let client = SimulatedFanClient()
+        _ = await probe(client).run()
+        let commands = client.commands
+        #expect(commands.filter { if case .floor = $0 { true } else { false } }.allSatisfy { $0 == .floor(0, 3600) })
+        #expect(commands.filter { if case .forced = $0 { true } else { false } } == Array(repeating: .forced(FanCommandResult.allFans, 3600), count: 3))
+        #expect(FanCommandResult.allFans == -1)
+        let forcedStart = commands.firstIndex(of: .forced(-1, 3600)) ?? 0
+        #expect(commands[(forcedStart + 3)...].first == .auto(-1), "after the manual speed, every fan, not only fan 0")
+    }
+
+    @MainActor @Test func howLongTheSMCTookToTakeTheModeIsInTheTrialAndOnTheScreen() async {
+        let client = SimulatedFanClient(behaviour: .init(modeReadBackMS: 150))
+        let outcome = await probe(client).run()
+        let forced = outcome.trials[1]
+        #expect(forced.accepted && forced.usable && forced.detail == "chế độ nhận sau 150 ms")
+        #expect(outcome.trials[0].detail.isEmpty, "the floor writes no mode")
+        let lines = FanProbePresentation.lines(outcome)
+        #expect(lines[1].hasSuffix("trả về tự động: được; chế độ nhận sau 150 ms."), "\(lines[1])")
+        #expect(lines[0].hasSuffix("trả về tự động: được."), "nothing to say about the floor")
+    }
+
+    @MainActor @Test func aHelperThatSaysNothingAboutTheModesLeavesTheTrialWithoutANote() async {
+        let outcome = await probe(SimulatedFanClient()).run()
+        #expect(outcome.trials[1].detail.isEmpty)
+    }
+
+    @MainActor @Test func aManualSpeedWhoseModeNeverTakesIsNotUsableAndTheVerdictIsNone() async {
+        let client = SimulatedFanClient(behaviour: .init(floorWorks: false, forcedWorks: false))
+        let outcome = await probe(client).run()
+        #expect(outcome.trials[1].accepted && outcome.trials[1].heldAsAsked == false && outcome.trials[1].usable == false)
+        #expect(outcome.verdict == .none)
+    }
+
+    @MainActor @Test func aManualSpeedThatTheFanFollowsAfterTheEveryFanCommandIsTheWayWhenTheFloorIsIgnored() async {
+        let client = SimulatedFanClient(behaviour: .init(floorWorks: false, modeReadBackMS: 100))
+        let outcome = await probe(client).run()
+        #expect(outcome.verdict == .forced && outcome.mechanism == .forced)
+        #expect(outcome.trials[1].changed && outcome.trials[1].heldAsAsked && outcome.trials[1].restored)
     }
 
     @MainActor @Test func aManualSpeedTheHelperRefusesIsReportedWithItsReasonAndTheFloorStillWins() async {
