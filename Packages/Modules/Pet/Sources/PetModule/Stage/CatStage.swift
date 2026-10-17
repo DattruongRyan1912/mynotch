@@ -158,7 +158,7 @@ final class CatStage {
         hasLoad = false
         busy.resume()
         tickIndex = 0
-        hosts.forEach(show(on:))
+        showAll()
         scheduleTick()
     }
 
@@ -200,7 +200,7 @@ final class CatStage {
         // The notch can move under the cat (a wider pill, another display) without telling it.
         let moved = framesChanged()
         if moved { refreshFrames() }
-        if outcome == .changed || moved { hosts.forEach(show(on:)) }
+        if outcome == .changed || moved { showAll() }
         scheduleTick()
     }
 
@@ -247,13 +247,22 @@ final class CatStage {
 
     // MARK: Showing
 
-    private func show(on host: CatSpriteView) {
+    /// Shows the cat on one view, from `media` (a reading of the animation clock) and `clock` (one of the cat's own).
+    private func show(on host: CatSpriteView, media: CFTimeInterval = CACurrentMediaTime(), clock: TimeInterval? = nil) {
         guard let brain else {
             host.stopShowing()
             return
         }
         presentations += 1
-        host.show(plan: brain.plan, elapsed: max(sources.clock() - brain.plan.began, 0), coat: coat)
+        host.show(plan: brain.plan, elapsed: max((clock ?? sources.clock()) - brain.plan.began, 0), coat: coat, at: media)
+    }
+
+    /// Shows the cat on every view, all of them from the same moment: one reading of each clock for them all. That is what keeps the two
+    /// views of a notch's top row in step, whatever the machine is doing between one and the next, with the cat going out of one into the
+    /// other, and the portals at their edges opening and closing together.
+    private func showAll() {
+        let (media, clock) = (CACurrentMediaTime(), sources.clock())
+        for host in hosts { show(on: host, media: media, clock: clock) }
     }
 
     private func hostsDidMove() {
@@ -261,9 +270,7 @@ final class CatStage {
         refreshFrames()
         // The views the cat plays in are not what they were: where it must not stop is not either.
         brain?.settle(gaps: crossingShares())
-        for host in hosts {
-            if isResting { host.showResting(coat: coat) } else { show(on: host) }
-        }
+        if isResting { hosts.forEach { $0.showResting(coat: coat) } } else { showAll() }
     }
 
     private func refreshFrames() {
@@ -298,7 +305,7 @@ final class CatStage {
         if var brain, !isResting {
             let outcome = brain.pet(now: sources.clock())
             self.brain = brain
-            if outcome == .changed { hosts.forEach(show(on:)) }
+            if outcome == .changed { showAll() }
         }
         if playsMeow { sources.meow.play() }
     }
@@ -330,7 +337,7 @@ final class CatStage {
             hasLoad = false
             busy.resume()
             tickIndex = 0
-            hosts.forEach(show(on:))
+            showAll()
             scheduleTick()
         }
     }

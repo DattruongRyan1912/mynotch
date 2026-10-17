@@ -177,7 +177,10 @@ final class CatSpriteView: NSView {
     /// When a leg takes the place of another, in the one transaction: the layer is set to where the new leg begins, and only then is the
     /// old animation taken away, so that the layer never shows a place it has been left at by the old leg (where that began), and then the
     /// new animations go on. Nothing here waits for the old leg to say it is over.
-    func show(plan: CatPlan, elapsed: TimeInterval, coat: CatCoat) {
+    ///
+    /// `mediaTime` is the moment it is shown at, on the animation clock: the two views of a notch's top row are shown the same one, so that
+    /// everything they play begins together.
+    func show(plan: CatPlan, elapsed: TimeInterval, coat: CatCoat, at mediaTime: CFTimeInterval = CACurrentMediaTime()) {
         let field = field
         let scale = CGFloat(field.scale)
         let strip = CatSheets.shared.strip(for: plan.move, facing: plan.facing, coat: coat)
@@ -193,7 +196,7 @@ final class CatSpriteView: NSView {
         let floor = field.baseY(height: bounds.height, isStrip: role.isStrip)
         // A head that peeks comes up from below the edge: the strip's, or the bottom of the notch's body.
         let base = plan.move == .peek ? (role.isStrip ? floor : 0) - Self.peekSink * scale : floor
-        let begin = sprite.convertTime(CACurrentMediaTime(), from: nil)
+        let begin = sprite.convertTime(mediaTime, from: nil)
         spriteLeg += 1
         let leg = spriteLeg
         var walk: CAKeyframeAnimation?

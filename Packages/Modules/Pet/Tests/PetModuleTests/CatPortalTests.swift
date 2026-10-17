@@ -149,9 +149,14 @@ import Testing
             checked += 1
             // Never a time offset (which wraps an animation round), and begun as the leg is.
             #expect(one.timeOffset == 0 && two.timeOffset == 0)
+            // Both views are shown from one reading of the clock, so everything they play begins at the very same time: a walk, the cat's
+            // frames and the portals alike, however busy the machine is between one view and the next.
             let otherWalk = try #require(right.sprite.animation(forKey: CatSpriteView.walkKey) as? CAKeyframeAnimation)
-            #expect(abs(one.beginTime - walk.beginTime) < 1e-9 && abs(two.beginTime - otherWalk.beginTime) < 1e-9, "each begun as its own view's leg is")
-            #expect(abs(one.beginTime - two.beginTime) < 0.005, "and the two together")
+            #expect(one.beginTime == walk.beginTime && two.beginTime == otherWalk.beginTime, "each begun as its own view's leg is")
+            #expect(one.beginTime == two.beginTime && walk.beginTime == otherWalk.beginTime, "and the two together: \(one.beginTime) and \(two.beginTime)")
+            for key in [CatSpriteView.framesKey] {
+                #expect(left.sprite.animation(forKey: key)?.beginTime == right.sprite.animation(forKey: key)?.beginTime, "\(key)")
+            }
             #expect(one.fillMode == .both && !one.isRemovedOnCompletion, "held on its last picture, which is clear")
             // Clear until it opens, unless the cat begins its leg at the crossing: then it is open from the first moment of the leg.
             let startsAt = place(of: walk, at: 0, origin: left.field.origin)
