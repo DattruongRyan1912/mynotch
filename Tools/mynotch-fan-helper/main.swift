@@ -67,27 +67,22 @@ let controller: FanController? = {
 // Every way out gives the fans back: a signal, `exit()` (the idle exit included), the system going to sleep.
 restoreBeforeExit = { controller?.restoreAutoForExit() }
 installExitHandler()
-var signalSources: [DispatchSourceSignal] = []
+// The sources come from FanHelperDaemon, not from closures written here: this target defaults to the main actor, so a handler written
+// here would be main-actor isolated and trap on the controller queue.
+var signalSources: [any DispatchSourceSignal] = []
 for signalNumber in [SIGTERM, SIGINT, SIGHUP] {
-    signal(signalNumber, SIG_IGN)
-    let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: controllerQueue)
-    source.setEventHandler {
+    signalSources.append(HelperSources.signal(signalNumber, on: controllerQueue) {
         log.info("signal \(signalNumber, privacy: .public), leaving")
         controller?.restoreAutoForExit()
         exit(EXIT_SUCCESS)
-    }
-    source.resume()
-    signalSources.append(source)
+    })
 }
 let powerEvents = PowerEvents(
     queue: controllerQueue, onWillSleep: { controller?.systemWillSleep() }, onDidWake: { controller?.systemDidWake() }
 )
 if !powerEvents.start() { log.notice("no power notifications; the fans are not given back around sleep") }
 
-let tick = DispatchSource.makeTimerSource(queue: controllerQueue)
-tick.schedule(deadline: .now() + 1, repeating: 1)
-tick.setEventHandler { controller?.tick() }
-tick.resume()
+let tick = HelperSources.timer(on: controllerQueue, every: 1) { controller?.tick() }
 controller?.startUp()
 
 let idle = IdleExit(after: 20, isBusy: { controller?.isHoldingFans ?? false }, onExit: {
