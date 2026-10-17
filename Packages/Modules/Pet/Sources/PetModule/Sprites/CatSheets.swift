@@ -15,6 +15,7 @@ final class CatSheets {
     private var strips: [Key: PixelStrip] = [:]
     private var resting: [CatCoat: PixelStrip] = [:]
     private var props: [PropKind: PixelStrip] = [:]
+    private var portals: PixelStrip?
 
     /// How many strips have been made, for tests: they are made once, however many displays show them.
     private(set) var builds = 0
@@ -43,6 +44,14 @@ final class CatSheets {
         let frames = kind == .moth ? PropArt.moth.frames : PropArt.yarn.frames
         let strip = make(frames, facing: .right, palette: CatCoat.tabby.palette)
         props[kind] = strip
+        return strip
+    }
+
+    /// The portal's four pictures (see `PortalArt`), the same for both edges and every coat.
+    func portalStrip() -> PixelStrip {
+        if let portals { return portals }
+        let strip = make(PortalArt.frames, facing: .right, palette: CatCoat.tabby.palette)
+        portals = strip
         return strip
     }
 

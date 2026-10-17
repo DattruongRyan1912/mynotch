@@ -32,6 +32,8 @@ public final class PetModule: FeatureModule {
     private var stage: CatStage?
     private var pendingShow: ScheduledAction?
     private var isPublished = false
+    /// Where the cat was put to play when it was published, so that a change of the setting puts it somewhere else.
+    private var publishedPlace: PlayPlace?
 
     public convenience init(activities: ActivityCenter) {
         self.init(activities: activities, makeStage: { CatStage(scheduler: $0) })
@@ -62,7 +64,7 @@ public final class PetModule: FeatureModule {
             for await _ in Observations({
                 (
                     settings.value(keys.show), settings.value(keys.coat), settings.value(keys.meow), settings.value(keys.sleepMinutes),
-                    settings.value(keys.busyReaction)
+                    settings.value(keys.busyReaction), settings.value(keys.playPlace)
                 )
             }) {
                 self?.applySettings()
@@ -84,6 +86,7 @@ public final class PetModule: FeatureModule {
         stage = nil
         context = nil
         isPublished = false
+        publishedPlace = nil
     }
 
     public func makeTab() -> NotchTab? { nil }
@@ -104,6 +107,10 @@ public final class PetModule: FeatureModule {
         stage.playsMeow = context.settings.value(keys.meow)
     }
 
+    private func place(in context: ModuleContext) -> PlayPlace {
+        context.settings.value(PetSettingsKeys(context.settings).playPlace)
+    }
+
     // MARK: On the notch or off it
 
     /// Puts the cat on the notch when it is wanted and the notch is free, takes it off at once when it is not, and waits `settleDelay`
@@ -117,8 +124,14 @@ public final class PetModule: FeatureModule {
             if isPublished {
                 context.activities.clear(id: Self.activityID)
                 isPublished = false
+                publishedPlace = nil
             }
             return
+        }
+        // Where the cat plays is the user's to change while it is on the notch: it is put again, in its new place, at once.
+        if isPublished, let stage, publishedPlace != place(in: context) {
+            context.activities.set(CatActivity.make(stage: stage, place: place(in: context)))
+            publishedPlace = place(in: context)
         }
         guard !isPublished, pendingShow == nil else { return }
         pendingShow = context.scheduler.schedule(after: Self.settleDelay) { [weak self] in
@@ -130,7 +143,9 @@ public final class PetModule: FeatureModule {
     private func publishIfFree() {
         guard let context, let stage, !isPublished, !othersAreLive,
               context.settings.value(PetSettingsKeys(context.settings).show) else { return }
-        context.activities.set(CatActivity.make(stage: stage))
+        let place = place(in: context)
+        context.activities.set(CatActivity.make(stage: stage, place: place))
         isPublished = true
+        publishedPlace = place
     }
 }

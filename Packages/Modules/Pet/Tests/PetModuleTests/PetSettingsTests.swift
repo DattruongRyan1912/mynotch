@@ -18,7 +18,20 @@ import Testing
         #expect(settings.value(keys.coat) == .tabby, "Màu mèo")
         #expect(!settings.value(keys.meow), "Tiếng mèo khi bấm")
         #expect(settings.value(keys.busyReaction) == .occasionally, "Mèo phản ứng khi máy bận: Thỉnh thoảng")
+        #expect(settings.value(keys.playPlace) == .portal, "Chỗ chơi trên màn có tai thỏ: Cạnh tai thỏ (cổng dịch chuyển)")
         #expect(keys.tuning(settings).reactsToBusyMachine)
+    }
+
+    @Test func theCatPlaysBesideTheCameraThroughAPortalOrOnAStripUnderTheNotchAndTheFirstIsTheDefault() throws {
+        let settings = try environment()
+        let keys = PetSettingsKeys(settings)
+        #expect(PlayPlace.allCases == [.portal, .strip])
+        #expect(PlayPlace.portal.displayName == "Cạnh tai thỏ (cổng dịch chuyển)" && PlayPlace.strip.displayName == "Dải dưới notch")
+        #expect(PlayPlace(rawValue: "portal") == .portal && PlayPlace(rawValue: "strip") == .strip)
+        for place in PlayPlace.allCases {
+            settings.set(place, for: keys.playPlace)
+            #expect(settings.value(keys.playPlace) == place)
+        }
     }
 
     @Test func theBusyReactionIsOccasionallyOrOffAndOffIsWhatTheCatIsTold() throws {
@@ -46,8 +59,9 @@ import Testing
 
     @Test func theChoicesAreKeptUnderTheModulesOwnNames() throws {
         let keys = PetSettingsKeys(try environment())
-        #expect([keys.show.name, keys.coat.name, keys.meow.name, keys.sleepMinutes.name, keys.busyReaction.name] == [
+        #expect([keys.show.name, keys.coat.name, keys.meow.name, keys.sleepMinutes.name, keys.busyReaction.name, keys.playPlace.name] == [
             "module.pet.show", "module.pet.coat", "module.pet.meow", "module.pet.sleepMinutes", "module.pet.busyReaction",
+            "module.pet.playPlace",
         ])
     }
 

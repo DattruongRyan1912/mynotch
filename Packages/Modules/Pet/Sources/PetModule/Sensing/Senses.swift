@@ -88,19 +88,54 @@ struct AudioOutputProbe: AudioPlaybackSource {
 
 /// How the pointer looks to the cat.
 nonisolated enum PointerLook {
-    /// How far from the strip counts as near, in points: the cat pounces.
+    /// How far from the strip counts as near, in points: the cat pounces. In the menu bar's own row, where the pointer is all the time on
+    /// its way to something, only so far.
     static let nearMargin: CGFloat = 40
+    static let bandNearMargin: CGFloat = 20
     /// How far it can see, to the side and up or down.
     static let sightX: CGFloat = 170
     static let sightY: CGFloat = 110
 
     /// What the cat makes of `point` (in screen coordinates) with its strip at `strip`, nil for a pointer out of sight. `lane` is the
     /// cat's, in the strip's own coordinates, and the share it is given is that of the cat's centre.
-    static func reading(of point: CGPoint, strip: CGRect, lane: WalkLane, spriteWidth: CGFloat) -> PointerReading? {
+    static func reading(
+        of point: CGPoint, strip: CGRect, lane: WalkLane, spriteWidth: CGFloat, origin: CGFloat = 0, nearMargin: CGFloat = nearMargin
+    ) -> PointerReading? {
         let isNear = strip.insetBy(dx: -nearMargin, dy: -nearMargin).contains(point)
         let isInRange = strip.insetBy(dx: -sightX, dy: -sightY).contains(point)
         guard isNear || isInRange else { return nil }
-        let share = lane.travel > 0 ? Double((point.x - strip.minX - spriteWidth / 2 - lane.minX) / lane.travel) : 0.5
+        // `origin` is where the view's left edge is on the line the cat walks along, which is its own for a view that is one of two.
+        let share = lane.travel > 0 ? Double((point.x - strip.minX + origin - spriteWidth / 2 - lane.minX) / lane.travel) : 0.5
         return PointerReading(share: share, isNear: isNear, isInRange: isInRange, isAbove: point.y >= strip.maxY - 1)
+    }
+}
+
+/// Whether the pointer has stopped near the cat: near, and not moved more than a few points since it was last asked, for a while. A pointer
+/// that is only passing (on its way along the menu bar to a menu) is not.
+nonisolated struct PointerDwell: Sendable {
+    /// How far the pointer may move between two looks and still be at rest, in points, and how long it must be at rest, in seconds.
+    static let restWithin: CGFloat = 8
+    static let hold: TimeInterval = 0.75
+
+    private var since: TimeInterval?
+    private var last: CGPoint?
+
+    /// Whether the pointer, at `point` at `now`, is near and has been at rest for the hold.
+    mutating func isSettled(near: Bool, at point: CGPoint, now: TimeInterval) -> Bool {
+        guard near else {
+            since = nil
+            last = nil
+            return false
+        }
+        if let last, hypot(point.x - last.x, point.y - last.y) > Self.restWithin { since = now }
+        since = since ?? now
+        last = point
+        return now - (since ?? now) >= Self.hold
+    }
+
+    /// The cat's gone: nothing is held.
+    mutating func reset() {
+        since = nil
+        last = nil
     }
 }

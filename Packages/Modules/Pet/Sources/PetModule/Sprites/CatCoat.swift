@@ -32,6 +32,9 @@ nonisolated enum CatCoat: String, CaseIterable, Codable, Sendable {
             "A": 0x5A4636,  // and its body
             "Y": 0xE8505B,  // a ball of yarn
             "U": 0xA8283A,  // and its windings
+            "Q": 0x8B5CF6,  // a portal's ring
+            "I": 0xDDD6FE,  // and its inner edge
+            "C": 0x22D3EE,  // and the swirl in it
         ]
         switch self {
         case .tabby:

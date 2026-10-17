@@ -16,6 +16,22 @@ nonisolated enum BusyReaction: String, CaseIterable, Codable, Sendable {
     }
 }
 
+/// Where the cat plays.
+nonisolated enum PlayPlace: String, CaseIterable, Codable, Sendable {
+    /// In the top row of the notch: beside the camera on a Mac that has one, where it goes from one side to the other through a portal, and
+    /// across the body of a virtual notch. The default.
+    case portal
+    /// On a strip under a hardware notch, as it was (a virtual notch, which has room, keeps the cat in its body).
+    case strip
+
+    var displayName: String {
+        switch self {
+        case .portal: "Cạnh tai thỏ (cổng dịch chuyển)"
+        case .strip: "Dải dưới notch"
+        }
+    }
+}
+
 /// Setting names and defaults in one place, shared by the running module and the Settings rows.
 struct PetSettingsKeys {
     /// The times the cat can be asked to fall asleep after, in minutes.
@@ -31,6 +47,8 @@ struct PetSettingsKeys {
     /// Whether the cat reacts when the Mac is busy. Now and then, and only to a load that is high for this Mac: on a Mac that is busy all day
     /// a cat that ran on every busy moment would never do anything else.
     let busyReaction: SettingKey<BusyReaction>
+    /// Where the cat plays on a screen with a notch cut into it.
+    let playPlace: SettingKey<PlayPlace>
 
     init(_ settings: ModuleSettings) {
         show = settings.key("show", default: true)
@@ -38,6 +56,7 @@ struct PetSettingsKeys {
         meow = settings.key("meow", default: false)
         sleepMinutes = settings.key("sleepMinutes", default: 5)
         busyReaction = settings.key("busyReaction", default: BusyReaction.occasionally)
+        playPlace = settings.key("playPlace", default: PlayPlace.portal)
     }
 
     /// The sleep time as the cat has it: the option nearest to what is stored, so a value that is not one of the three still means one.
@@ -73,6 +92,12 @@ struct PetSettingsView: View {
             }
             Picker("Mèo ngủ sau", selection: sleepBinding) {
                 ForEach(PetSettingsKeys.sleepOptions, id: \.self) { Text("\($0) phút không đụng tới máy").tag($0) }
+            }
+            Picker(selection: settings.binding(keys.playPlace)) {
+                ForEach(PlayPlace.allCases, id: \.self) { Text($0.displayName).tag($0) }
+            } label: {
+                Text("Chỗ chơi trên màn có tai thỏ")
+                Text("Cạnh tai thỏ: mèo chơi ở hai bên camera và đi từ bên này sang bên kia qua cổng dịch chuyển; hai bên được nới rộng nên che bớt các mục menu cạnh notch. Màn không có tai thỏ luôn cho mèo chơi ngay trong thân notch.")
             }
             Picker(selection: settings.binding(keys.busyReaction)) {
                 ForEach(BusyReaction.allCases, id: \.self) { Text($0.displayName).tag($0) }

@@ -29,6 +29,8 @@ final class CatStage {
     /// Between two wakings: the pointer is read at every one, the rest at every `slowEvery`-th.
     static let tick: Duration = .milliseconds(250)
     static let slowEvery = 4
+    /// The least time between one pounce or startle and the next with the cat in the menu bar's row, where the pointer is all the time.
+    static let bandReactionCooldown: TimeInterval = 20
 
     /// What the user chose.
     var tuning = CatTuning()
@@ -52,6 +54,8 @@ final class CatStage {
     private var busy = BusyWatch()
     private var audioPlaying = false
     private var frames: [ObjectIdentifier: CGRect] = [:]
+    private var fields: [ObjectIdentifier: CatField] = [:]
+    private var dwell = PointerDwell()
 
     /// Counters for tests, never read by anything else.
     private(set) var ticks = 0
@@ -87,12 +91,16 @@ final class CatStage {
         guard !isShutDown, !hosts.contains(where: { $0 === host }) else { return }
         hosts.append(host)
         frames[ObjectIdentifier(host)] = host.windowFrame
+        fields[ObjectIdentifier(host)] = host.field
         if hosts.count == 1 {
             wake()
         } else if isResting {
             host.showResting(coat: coat)
-        } else {
+        } else if host.role.isStrip {
             show(on: host)
+        } else {
+            // A view that is one of two changes the field of the other: both are shown it again.
+            hostsDidMove()
         }
     }
 
@@ -100,6 +108,7 @@ final class CatStage {
         guard let index = hosts.firstIndex(where: { $0 === host }) else { return }
         hosts.remove(at: index)
         frames[ObjectIdentifier(host)] = nil
+        fields[ObjectIdentifier(host)] = nil
         host.stopShowing()
         if hosts.isEmpty { doze() }
     }
@@ -110,13 +119,21 @@ final class CatStage {
         hosts.forEach { $0.stopShowing() }
         hosts.removeAll()
         frames.removeAll()
+        fields.removeAll()
         doze()
     }
 
     /// A view moved or changed size: the cat's lane is not where it was.
     func hostDidMove(_ host: CatSpriteView) {
-        guard hosts.contains(where: { $0 === host }), frames[ObjectIdentifier(host)] != host.windowFrame else { return }
+        guard hosts.contains(where: { $0 === host }), moved(host) else { return }
         hostsDidMove()
+    }
+
+    /// Whether the view's place in the cat's world is not what the stage last arranged: its frame for a strip, which is its place on the
+    /// screen and is not the whole of the lane, and its field for a view across a notch's top row, whose lane is all the stage goes by (the
+    /// notch moving about the screen changes none of it).
+    private func moved(_ host: CatSpriteView) -> Bool {
+        host.role.isStrip ? frames[ObjectIdentifier(host)] != host.windowFrame : fields[ObjectIdentifier(host)] != host.field
     }
 
     // MARK: Life
@@ -128,7 +145,9 @@ final class CatStage {
         observeMotionPreference()
         refreshFrames()
         if brain == nil { brain = CatBrain(seed: sources.seed, now: now) }
+        brain?.settle(gaps: crossingShares())
         brain?.resume(now: now)
+        dwell.reset()
         if isResting {
             hosts.forEach { $0.showResting(coat: coat) }
             return
@@ -168,7 +187,15 @@ final class CatStage {
             idleSeconds: idle, cpuLoad: load, busyBurst: busy.isBursting(at: now), pointer: pointerReading(), audioPlaying: audioPlaying,
             hour: sources.hour()
         )
-        let outcome = brain.update(now: now, senses: senses, tuning: tuning, travel: Double(referenceLane()?.travel ?? 0))
+        let field = referenceField()
+        // In the menu bar's row the pointer is all the time on its way somewhere: it startles the cat less often.
+        var effective = tuning
+        if inBand { effective.reactionCooldown = max(effective.reactionCooldown, Self.bandReactionCooldown) }
+        // The brain thinks in pixels of the cat's picture, so a bigger cat takes bigger steps in the time of the same ones.
+        let outcome = brain.update(
+            now: now, senses: senses, tuning: effective, travel: Double(field?.lane.travel ?? 0) / Double(field?.scale ?? 1),
+            gaps: crossingShares()
+        )
         self.brain = brain
         // The notch can move under the cat (a wider pill, another display) without telling it.
         let moved = framesChanged()
@@ -189,19 +216,34 @@ final class CatStage {
         audioPlaying = sources.audio.isPlaying()
     }
 
-    /// The pointer as the cat sees it from the strip it is nearest to, nil when no strip can see it.
+    /// The pointer as the cat sees it from the strip it is nearest to, nil when no strip can see it. In the menu bar's row the pointer is
+    /// near only a little way from the cat, and only once it has stopped there.
     private func pointerReading() -> PointerReading? {
         let point = sources.pointer.location()
         var nearest: (distance: CGFloat, reading: PointerReading)?
         for host in hosts {
             guard let strip = host.screenFrame else { continue }
-            let lane = host.lane
-            guard let reading = PointerLook.reading(of: point, strip: strip, lane: lane, spriteWidth: CatSpriteView.spriteSize.width) else { continue }
+            let field = host.field
+            guard let reading = PointerLook.reading(
+                of: point, strip: strip, lane: field.lane, spriteWidth: field.spriteWidth, origin: field.origin,
+                nearMargin: host.role.isStrip ? PointerLook.nearMargin : PointerLook.bandNearMargin
+            ) else { continue }
             let distance = hypot(max(strip.minX - point.x, point.x - strip.maxX, 0), max(strip.minY - point.y, point.y - strip.maxY, 0))
             if nearest == nil || distance < nearest!.distance { nearest = (distance, reading) }
         }
-        return nearest?.reading
+        guard var reading = nearest?.reading else {
+            dwell.reset()
+            return nil
+        }
+        if inBand {
+            let settled = dwell.isSettled(near: reading.isNear, at: point, now: sources.clock())
+            reading = PointerReading(share: reading.share, isNear: settled, isInRange: reading.isInRange, isAbove: reading.isAbove)
+        }
+        return reading
     }
+
+    /// Whether the cat is in the menu bar's row, where the pointer is all the time, and not in a strip under the notch.
+    private var inBand: Bool { hosts.contains { !$0.role.isStrip } }
 
     // MARK: Showing
 
@@ -217,6 +259,8 @@ final class CatStage {
     private func hostsDidMove() {
         guard isAlive else { return }
         refreshFrames()
+        // The views the cat plays in are not what they were: where it must not stop is not either.
+        brain?.settle(gaps: crossingShares())
         for host in hosts {
             if isResting { host.showResting(coat: coat) } else { show(on: host) }
         }
@@ -224,15 +268,27 @@ final class CatStage {
 
     private func refreshFrames() {
         frames = Dictionary(uniqueKeysWithValues: hosts.map { (ObjectIdentifier($0), $0.windowFrame) })
+        fields = Dictionary(uniqueKeysWithValues: hosts.map { (ObjectIdentifier($0), $0.field) })
     }
 
     private func framesChanged() -> Bool {
-        hosts.contains { frames[ObjectIdentifier($0)] != $0.windowFrame }
+        hosts.contains { moved($0) }
     }
 
-    /// The lane of the first view, which is the one the cat's timings are worked out for: on another display with a lane of another length
+    /// The field of the first view, which is the one the cat's timings are worked out for: on another display with a lane of another length
     /// it covers the same share of it in the same time.
-    private func referenceLane() -> WalkLane? { hosts.first?.lane }
+    private func referenceField() -> CatField? { hosts.first?.field }
+
+    /// Where the cat must not stop, as shares of the lane: the crossing of every view, which are the same share of each (the same field of
+    /// the two views of a notch) or near enough on another display.
+    private func crossingShares() -> [ClosedRange<Double>] {
+        var shares: [ClosedRange<Double>] = []
+        for host in hosts {
+            guard let share = host.field.crossingShares, !shares.contains(share) else { continue }
+            shares.append(share)
+        }
+        return shares
+    }
 
     // MARK: Petting
 

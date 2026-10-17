@@ -10,6 +10,8 @@ struct Drive {
     var tuning = CatTuning()
     /// How far the cat can walk, in points.
     var travel = 260.0
+    /// The stretches of the lane, as shares of it, where the cat must not stop.
+    var gaps: [ClosedRange<Double>] = []
 
     struct Entry {
         let at: TimeInterval
@@ -40,7 +42,7 @@ struct Drive {
         let end = now + seconds
         while now < end - 1e-9 {
             now += Self.step
-            let outcome = brain.update(now: now, senses: senses, tuning: tuning, travel: travel)
+            let outcome = brain.update(now: now, senses: senses, tuning: tuning, travel: travel, gaps: gaps)
             if outcome == .changed { history.append(Entry(at: now, plan: brain.plan)) }
             if outcome != .unchanged { last = outcome }
             if brain.sceneSerial != serial {
@@ -811,5 +813,166 @@ let wake = Drive.step
             #expect(move.speed == move.advance * move.fps)
         }
         #expect(CatMove.allCases.filter { $0.advance > 0 } == [.walk, .trot, .frantic, .chase])
+    }
+}
+
+
+/// A lane with a stretch in it that the cat goes through and never stops in: the crossing between the two views of a notch's top row.
+@Suite struct CatBrainCrossingTests {
+    /// About a third of the lane, a little right of the middle: what the camera's two portals and a cat's width are of a lane of 150 points.
+    static let gap = 0.38...0.72
+
+    func inside(_ share: Double) -> Bool { share > Self.gap.lowerBound && share < Self.gap.upperBound }
+
+    @Test func theCatNeverStopsInTheCrossingThroughAnHourOfAnyOfEveryDay() {
+        for seed in 1...8 as ClosedRange<UInt64> {
+            var drive = Drive(seed: seed, position: 0.5, senses: CatSenses(idleSeconds: 60, hour: 14), travel: 150)
+            drive.gaps = [Self.gap]
+            for minute in 0..<60 {
+                drive.senses.audioPlaying = minute % 17 == 9
+                drive.senses.pointer = minute % 11 == 4 ? Drive.pointer(Double(minute % 3) / 2, near: minute % 22 == 4) : nil
+                drive.senses.busyBurst = minute % 23 == 12
+                drive.senses.cpuLoad = drive.senses.busyBurst ? 0.9 : 0.1
+                if minute % 19 == 6 { drive.pet() }
+                drive.run(60)
+            }
+            var stationary = 0
+            for entry in drive.history {
+                let plan = entry.plan
+                #expect(!inside(plan.to), "seed \(seed): a \(plan.move) ends at \(plan.to)")
+                if plan.from == plan.to {
+                    stationary += 1
+                    #expect(!inside(plan.from), "seed \(seed): a \(plan.move) stands at \(plan.from)")
+                }
+                if let prop = plan.prop, prop.kind == .yarn {
+                    #expect(!inside(prop.from) && !inside(prop.to), "seed \(seed): the ball \(prop.from) to \(prop.to)")
+                }
+            }
+            #expect(stationary > 100, "it does things while it stays where it is")
+        }
+    }
+
+    @Test func itDoesGoThroughTheCrossingFromOneSideToTheOtherInBothDirections() {
+        var right = false
+        var left = false
+        for seed in 1...6 as ClosedRange<UInt64> {
+            var drive = Drive(seed: seed, position: 0.1, senses: CatSenses(idleSeconds: 60, hour: 14), travel: 150)
+            drive.gaps = [Self.gap]
+            drive.run(1800)
+            for entry in drive.history {
+                let plan = entry.plan
+                if plan.from <= Self.gap.lowerBound, plan.to >= Self.gap.upperBound { right = true }
+                if plan.from >= Self.gap.upperBound, plan.to <= Self.gap.lowerBound { left = true }
+            }
+        }
+        #expect(right && left, "from the left view to the right and back")
+    }
+
+    @Test func aCatThatIsGoingThroughIsNotInterruptedByTheWorldAndFinishesFirst() throws {
+        var interrupted = 0
+        var crossings = 0
+        for seed in 1...12 as ClosedRange<UInt64> {
+            var drive = Drive(seed: seed, position: 0.1, senses: CatSenses(idleSeconds: 60, hour: 14), travel: 150)
+            drive.gaps = [Self.gap]
+            // Until the cat is in the middle of the crossing.
+            var waited = 0.0
+            while waited < 1200 {
+                drive.run(wake)
+                waited += wake
+                let plan = drive.brain.plan
+                guard plan.from != plan.to, inside(plan.position(at: drive.now)), plan.end - drive.now > 0.6 else { continue }
+                crossings += 1
+                let began = plan.began
+                // Everything that could stop it comes at once.
+                drive.senses.pointer = Drive.pointer(0.5, near: true)
+                drive.senses.busyBurst = true
+                drive.senses.cpuLoad = 1
+                drive.senses.audioPlaying = true
+                drive.pet()
+                drive.run(wake)
+                if drive.brain.plan.began != began { interrupted += 1 }
+                #expect(drive.brain.plan.to == plan.to, "seed \(seed): still going where it was going")
+                break
+            }
+        }
+        #expect(crossings >= 6, "the test found \(crossings) cats in the middle of a crossing")
+        #expect(interrupted == 0, "\(interrupted) of them were stopped in it")
+    }
+
+    @Test func aCatThatIsPutInTheCrossingBySomeChangeIsMovedToTheNearerEndAtOnce() {
+        for (start, expected) in [(0.45, Self.gap.lowerBound), (0.65, Self.gap.upperBound), (0.55, Self.gap.upperBound)] {
+            var brain = CatBrain(seed: 1, now: 0, position: start)
+            brain.settle(gaps: [Self.gap])
+            #expect(brain.plan.from == expected && brain.plan.to == expected, "from \(start)")
+        }
+        // A cat outside it, or going somewhere, is left as it is.
+        var outside = CatBrain(seed: 1, now: 0, position: 0.2)
+        outside.settle(gaps: [Self.gap])
+        #expect(outside.plan.from == 0.2 && outside.plan.to == 0.2)
+        var none = CatBrain(seed: 1, now: 0, position: 0.5)
+        none.settle(gaps: [])
+        #expect(none.plan.to == 0.5)
+        var drive = Drive(seed: 2, position: 0.5, travel: 150)
+        drive.gaps = [Self.gap]
+        _ = drive.run(wake)
+        #expect(!inside(drive.brain.plan.to) || drive.brain.plan.from != drive.brain.plan.to)
+    }
+
+    @Test func aCatOnAnyDayPlaysAsManyScenesWithACrossingAsWithout() {
+        func scenes(gaps: [ClosedRange<Double>]) -> Set<CatScene> {
+            var seen = Set<CatScene>()
+            for seed in 1...4 as ClosedRange<UInt64> {
+                var drive = Drive(seed: seed, senses: CatSenses(idleSeconds: 60, hour: 14), travel: 150)
+                drive.gaps = gaps
+                drive.run(1800)
+                seen.formUnion(drive.scenes)
+            }
+            return seen
+        }
+        let with = scenes(gaps: [Self.gap])
+        let without = scenes(gaps: [])
+        #expect(with.count >= 8, "\(with.count) scenes: \(with)")
+        #expect(with.count >= without.count - 1, "\(with.count) with it, \(without.count) without")
+    }
+
+    @Test func aPetOnACatThatIsGoingThroughIsNotTakenAndAnyOtherIsTaken() throws {
+        var drive = Drive(seed: 3, position: 0.1, senses: CatSenses(idleSeconds: 60, hour: 14), travel: 150)
+        drive.gaps = [Self.gap]
+        var found = false
+        for _ in 0..<4800 {
+            drive.run(wake)
+            let plan = drive.brain.plan
+            if plan.from != plan.to, inside(plan.position(at: drive.now)), plan.end - drive.now > 0.6 {
+                #expect(drive.brain.pet(now: drive.now) == .unchanged, "not in the portal")
+                #expect(drive.brain.plan == plan)
+                found = true
+                break
+            }
+        }
+        #expect(found)
+        var other = Drive(seed: 3, position: 0.1, senses: CatSenses(idleSeconds: 60, hour: 14), travel: 150)
+        #expect(other.brain.pet(now: other.now) == .changed)
+        _ = other.run(0.1)
+    }
+
+    // MARK: Reacting to the pointer
+
+    @Test func theCooldownBetweenTwoReactionsIsTheTuningsAndTheCatReactsAgainOnlyAfterIt() {
+        func reactions(after gap: Double, cooldown: TimeInterval) -> Int {
+            var drive = Drive(seed: 4, senses: CatSenses(idleSeconds: 60, hour: 14), tuning: CatTuning(reactionCooldown: cooldown))
+            drive.run(5)
+            for round in 0..<2 {
+                drive.senses.pointer = Drive.pointer(0.8, near: true)
+                drive.run(wake)
+                drive.senses.pointer = nil
+                drive.run(round == 0 ? gap : 2)
+            }
+            return drive.moves.filter { $0 == .pounce || $0 == .startled }.count
+        }
+        #expect(CatBrain.reactionCooldown == 8 && CatTuning().reactionCooldown == 8, "as it was")
+        #expect(reactions(after: 12, cooldown: 8) == 2, "twelve seconds on, with the old cooldown: again")
+        #expect(reactions(after: 12, cooldown: CatStage.bandReactionCooldown) == 1, "and with the one in the menu bar's row: not yet")
+        #expect(reactions(after: 25, cooldown: CatStage.bandReactionCooldown) == 2, "after it: again")
+        #expect(CatStage.bandReactionCooldown >= 20)
     }
 }

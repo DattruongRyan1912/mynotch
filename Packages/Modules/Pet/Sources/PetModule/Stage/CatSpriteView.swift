@@ -10,13 +10,22 @@ import SwiftUI
 /// The cat is drawn at one pixel of its picture to the point, which is two device pixels on a Retina display and three on a bigger
 /// scale, with nearest-neighbour filtering, so it is sharp on all of them.
 final class CatSpriteView: NSView {
+    /// What the view is: the strip under the notch (today's), one view across the body of a virtual notch, or one of the two views of a
+    /// hardware notch's top row, left and right of the camera.
+    enum Role: Equatable {
+        case strip, lane, leftWing, rightWing
+
+        var isStrip: Bool { self == .strip }
+    }
+
     static let framesKey = "catFrames"
     static let walkKey = "catWalk"
     static let bobKey = "propBob"
+    static let portalKey = "catPortal"
     /// The frame rate the render server is asked to hold the cat's animations to, whatever the display can do.
     static let frameRateCeiling: Float = 24
     /// Between the cat's feet and the bottom of the strip, in points.
-    static let floor: CGFloat = 1
+    static let floor = CatField.stripFloor
     /// A head that peeks comes up from below the edge: the bottom of its picture, which is the rim, is below the strip's own bottom and is
     /// cut off by it, so that nothing is left of the head's cut but the head.
     static let peekSink: CGFloat = 2
@@ -27,6 +36,9 @@ final class CatSpriteView: NSView {
     static let mothBob: [CGFloat] = [0, 3, 5, 4, 1, -1, 2, 4, 3, 0]
 
     private(set) weak var stage: CatStage?
+    let role: Role
+    /// The view on the other side of the camera, for a view that is one of two.
+    weak var partner: CatSpriteView?
     /// Which leg of its walk the cat is on, and the prop on: a leg that says it is over when another has taken its place is not heard.
     private var spriteLeg = 0
     private var propLeg = 0
@@ -34,20 +46,26 @@ final class CatSpriteView: NSView {
     /// the leg began until it says it is over.
     private var spriteStands: CGFloat?
     private var propStands: CGFloat?
+    /// The field the last leg was shown in: where a leg ended is a place in that field and means another in a field that is not the same
+    /// (the notch grew, or the other view of the pair has come), so a leg goes on from where the last one ended only in the same one.
+    private var shownField: CatField?
     /// The cat. Anchored at its bottom left corner, so its position is the place of its left foot.
     let sprite: CALayer
     /// The moth or the ball of yarn.
     let prop: CALayer
+    /// The portal at the inner edge of a view that is one of two, which opens before the cat crosses and closes after.
+    let portal = CALayer()
 
     /// The layers can be handed in, which is what a test does to see in what order they are told things.
-    init(stage: CatStage, sprite: CALayer = CALayer(), prop: CALayer = CALayer()) {
+    init(stage: CatStage, role: Role = .strip, sprite: CALayer = CALayer(), prop: CALayer = CALayer()) {
         self.stage = stage
+        self.role = role
         self.sprite = sprite
         self.prop = prop
         super.init(frame: .zero)
         wantsLayer = true
         layer?.masksToBounds = true
-        for layer in [sprite, prop] {
+        for layer in [sprite, prop, portal] {
             layer.anchorPoint = .zero
             layer.contentsGravity = .resize
             // Nearest neighbour both ways: any other filter smears the pixels.
@@ -69,11 +87,23 @@ final class CatSpriteView: NSView {
     /// The strip's frame in its window's coordinates, which is how a change of place is noticed.
     var windowFrame: CGRect { convert(bounds, to: nil) }
 
-    /// Where the cat can walk, in this view's coordinates.
-    var lane: WalkLane { WalkLane(width: bounds.width, spriteWidth: Self.spriteSize.width) }
+    /// Where the cat plays, and how this view lies in it.
+    var field: CatField {
+        switch role {
+        case .strip: .strip(width: bounds.width)
+        case .lane: .lane(width: bounds.width, height: bounds.height)
+        case .leftWing: .wings(side: .left, own: bounds.size, partner: partner?.bounds.size)
+        case .rightWing: .wings(side: .right, own: bounds.size, partner: partner?.bounds.size)
+        }
+    }
+
+    /// Where the cat can walk, along the field's line (in this view's coordinates when it is the one view there is).
+    var lane: WalkLane { field.lane }
 
     /// Whether anything is animating on the layers.
-    var isAnimating: Bool { !(sprite.animationKeys() ?? []).isEmpty || !(prop.animationKeys() ?? []).isEmpty }
+    var isAnimating: Bool {
+        [sprite, prop, portal].contains { !($0.animationKeys() ?? []).isEmpty }
+    }
 
     /// Whether the cat is drawn: false when it has been taken away.
     var isShowingCat: Bool { !sprite.isHidden }
@@ -132,8 +162,8 @@ final class CatSpriteView: NSView {
     /// Where a leg that begins at `place` really begins: where the last leg ended, if that is the same place within half a step (so that one
     /// leg begins exactly where the last one ended, and the cat never jumps a few points), and `place` if the cat is elsewhere (a leg that was
     /// cut short) or was not shown.
-    static func continued(from current: CGFloat?, near place: CGFloat) -> CGFloat {
-        guard let current, abs(current - place) <= continuityLimit else { return place }
+    static func continued(from current: CGFloat?, near place: CGFloat, scale: Int = 1) -> CGFloat {
+        guard let current, abs(current - place) <= continuityLimit * CGFloat(scale) else { return place }
         return current
     }
 
@@ -148,14 +178,21 @@ final class CatSpriteView: NSView {
     /// old animation taken away, so that the layer never shows a place it has been left at by the old leg (where that began), and then the
     /// new animations go on. Nothing here waits for the old leg to say it is over.
     func show(plan: CatPlan, elapsed: TimeInterval, coat: CatCoat) {
-        let lane = lane
+        let field = field
+        let scale = CGFloat(field.scale)
         let strip = CatSheets.shared.strip(for: plan.move, facing: plan.facing, coat: coat)
         let rate = max(plan.fpsScale, 0.1)
         let effectiveFPS = plan.move.fps * rate
-        let from = Self.continued(from: sprite.isHidden ? nil : spriteStands, near: lane.x(at: plan.from).rounded())
+        let sameField = shownField == field
+        shownField = field
+        let from = Self.continued(
+            from: sprite.isHidden || !sameField ? nil : spriteStands, near: field.local(share: plan.from), scale: field.scale
+        )
         // A cat that stays where it is stays where it is, on whatever whole step the last leg ended.
-        let to = plan.to == plan.from ? from : lane.x(at: plan.to).rounded()
-        let base = plan.move == .peek ? Self.floor - Self.peekSink : Self.floor
+        let to = plan.to == plan.from ? from : field.local(share: plan.to)
+        let floor = field.baseY(height: bounds.height, isStrip: role.isStrip)
+        // A head that peeks comes up from below the edge: the strip's, or the bottom of the notch's body.
+        let base = plan.move == .peek ? (role.isStrip ? floor : 0) - Self.peekSink * scale : floor
         let begin = sprite.convertTime(CACurrentMediaTime(), from: nil)
         spriteLeg += 1
         let leg = spriteLeg
@@ -172,22 +209,27 @@ final class CatSpriteView: NSView {
         }
         spriteStands = walk.map(Self.lastValue(of:)) ?? from
         let frames = Self.framesAnimation(strip: strip, fps: effectiveFPS, loops: plan.move.loops, elapsed: elapsed, begin: begin)
+        let size = CGSize(width: Self.spriteSize.width * scale, height: Self.spriteSize.height * scale)
+        let portals = walk.flatMap { portalAnimation(for: $0, field: field, begin: begin, elapsed: elapsed) }
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        prepare(sprite, strip: strip, size: Self.spriteSize)
+        prepare(sprite, strip: strip, size: size)
         sprite.position = CGPoint(x: from, y: base)
         sprite.removeAllAnimations()
         sprite.add(frames, forKey: Self.framesKey)
         if let walk { sprite.add(walk, forKey: Self.walkKey) }
-        showProp(of: plan, lane: lane, elapsed: elapsed, begin: begin)
+        showPortal(portals, field: field, y: floor)
+        showProp(of: plan, field: field, floor: floor, sameField: sameField, elapsed: elapsed, begin: begin)
         CATransaction.commit()
     }
 
     /// What the cat plays with: a moth that flutters along a path of its own, or a ball of yarn that lies or rolls. Like the cat, it is
     /// where it begins until its path says it is going, and it is set there before its old animations go.
-    private func showProp(of plan: CatPlan, lane: WalkLane, elapsed: TimeInterval, begin: CFTimeInterval) {
-        let current = prop.isHidden ? nil : propStands
+    private func showProp(
+        of plan: CatPlan, field: CatField, floor: CGFloat, sameField: Bool, elapsed: TimeInterval, begin: CFTimeInterval
+    ) {
+        let current = prop.isHidden || !sameField ? nil : propStands
         propLeg += 1
         guard let item = plan.prop else {
             prop.removeAllAnimations()
@@ -196,11 +238,13 @@ final class CatSpriteView: NSView {
             return
         }
         let leg = propLeg
+        let scale = CGFloat(field.scale)
         let strip = CatSheets.shared.propStrip(item.kind)
-        let size = CGSize(width: strip.frameWidth, height: strip.frameHeight)
-        let from = Self.continued(from: current, near: lane.unboundedX(at: item.from).rounded())
-        let to = item.to == item.from ? from : lane.unboundedX(at: item.to).rounded()
-        let height = item.kind == .moth ? Self.mothHeight : Self.floor
+        let size = CGSize(width: CGFloat(strip.frameWidth) * scale, height: CGFloat(strip.frameHeight) * scale)
+        let from = Self.continued(from: current, near: field.local(unbounded: item.from), scale: field.scale)
+        let to = item.to == item.from ? from : field.local(unbounded: item.to)
+        // A moth flutters as high above the cat's feet as it does in the strip.
+        let height = item.kind == .moth ? floor + (Self.mothHeight - Self.floor) * scale : floor
         var path: CAKeyframeAnimation?
         if from != to {
             let step = max((abs(to - from) / (plan.duration * 12)).rounded(), 1)
@@ -221,7 +265,7 @@ final class CatSpriteView: NSView {
                 Self.framesAnimation(strip: strip, fps: PropArt.moth.fps, loops: true, elapsed: elapsed, begin: begin), forKey: Self.framesKey
             )
             if let path { prop.add(path, forKey: Self.walkKey) }
-            prop.add(Self.bobAnimation(base: height, elapsed: elapsed, begin: begin), forKey: Self.bobKey)
+            prop.add(Self.bobAnimation(base: height, elapsed: elapsed, begin: begin, scale: scale), forKey: Self.bobKey)
         case .yarn:
             guard let path else { return }
             prop.add(
@@ -229,6 +273,74 @@ final class CatSpriteView: NSView {
             )
             prop.add(path, forKey: Self.walkKey)
         }
+    }
+
+    // MARK: Portals
+
+    /// How long a portal takes to open before the cat is at it, and to close after the cat is through, in seconds, and how fast its swirl
+    /// turns.
+    static let portalLead: TimeInterval = 0.2
+    static let portalLag: TimeInterval = 0.2
+    static let portalFPS = 10.0
+
+    /// The portal's frames from the start of a leg: nothing until a little before the cat reaches the crossing, then the portal opening,
+    /// swirling for as long as the cat is in the crossing, and closing, and nothing again. Played from `contentsRect` of the portal's strip
+    /// (frame 0 is clear), begun when the leg began, so the portal is on the layer as clear as it is after, and never shows before its time.
+    /// Nil for a leg that does not go through the crossing.
+    private func portalAnimation(
+        for walk: CAKeyframeAnimation, field: CatField, begin: CFTimeInterval, elapsed: TimeInterval
+    ) -> CAKeyframeAnimation? {
+        guard let crossing = field.crossing, role == .leftWing || role == .rightWing,
+              let places = walk.values as? [NSNumber], places.count > 1 else { return nil }
+        // Where the cat's foot is at each stop of the walk, along the field's line, and the slot of the walk it is shown in.
+        let stops = places.map { CGFloat($0.doubleValue) + field.origin }
+        let slot = walk.duration / Double(stops.count)
+        guard let first = stops.first, let last = stops.last, first != last else { return nil }
+        let rising = last > first
+        // Only a leg that goes through the crossing, from before it or from inside it, to after it, has a portal.
+        guard rising ? (first < crossing.upperBound && last >= crossing.upperBound) : (first > crossing.lowerBound && last <= crossing.lowerBound),
+              let inside = stops.firstIndex(where: { rising ? $0 >= crossing.lowerBound : $0 <= crossing.upperBound }),
+              let outside = stops.firstIndex(where: { rising ? $0 >= crossing.upperBound : $0 <= crossing.lowerBound }) else { return nil }
+        let opens = max(Double(inside) * slot - Self.portalLead, 0)
+        let closes = Double(outside) * slot + Self.portalLag
+        let period = 1 / Self.portalFPS
+        func count(_ seconds: Double) -> Int { max(Int((seconds / period).rounded()), 1) }
+        let strip = CatSheets.shared.portalStrip()
+        func rect(_ picture: Int) -> NSValue { NSValue(rect: strip.contentsRect(of: picture)) }
+        // Clear until it opens (never fewer than one picture, so it is clear before it begins), opening, swirling while the cat goes through,
+        // closing, clear.
+        var sequence = Array(repeating: rect(PortalArt.clear), count: count(opens))
+        sequence += [rect(PortalArt.opening), rect(PortalArt.opening)]
+        for index in 0..<max(count(closes - opens - Self.portalLead - Self.portalLag), 2) {
+            sequence.append(rect(index % 2 == 0 ? PortalArt.swirlA : PortalArt.swirlB))
+        }
+        sequence += [rect(PortalArt.opening), rect(PortalArt.opening), rect(PortalArt.clear)]
+        let animation = CAKeyframeAnimation(keyPath: "contentsRect")
+        animation.values = sequence
+        animation.calculationMode = .discrete
+        animation.duration = Double(sequence.count) * period
+        animation.fillMode = .both
+        animation.isRemovedOnCompletion = false
+        animation.preferredFrameRateRange = CAFrameRateRange(minimum: 4, maximum: Self.frameRateCeiling, preferred: Float(Self.portalFPS))
+        Self.started(animation, at: begin, elapsed: min(max(elapsed, 0), walk.duration))
+        return animation
+    }
+
+    /// Sets the portal at the inner edge of this view, clear, with the animation that opens it (nil: none, and it stays clear).
+    private func showPortal(_ animation: CAKeyframeAnimation?, field: CatField, y: CGFloat) {
+        portal.removeAllAnimations()
+        guard role == .leftWing || role == .rightWing else {
+            portal.isHidden = true
+            return
+        }
+        let strip = CatSheets.shared.portalStrip()
+        portal.isHidden = false
+        portal.contents = strip.image
+        portal.contentsScale = window?.backingScaleFactor ?? 2
+        portal.contentsRect = strip.contentsRect(of: PortalArt.clear)
+        portal.bounds = CGRect(origin: .zero, size: field.portalSize)
+        portal.position = CGPoint(x: role == .leftWing ? bounds.width - field.portalSize.width : 0, y: y)
+        if let animation { portal.add(animation, forKey: Self.portalKey) }
     }
 
     /// The cat's leg (or the prop's) is over, and the animation is holding its last place: the layer is moved there too, so that whatever
@@ -257,20 +369,26 @@ final class CatSpriteView: NSView {
 
     /// The cat sitting in the middle of the strip, its eyes shutting slowly now and then and nothing else moving: what Reduce Motion asks for.
     func showResting(coat: CatCoat) {
-        let lane = lane
+        let field = field
         let strip = CatSheets.shared.restingStrip(coat: coat)
+        let size = CGSize(width: Self.spriteSize.width * CGFloat(field.scale), height: Self.spriteSize.height * CGFloat(field.scale))
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         spriteLeg += 1
         propLeg += 1
         spriteStands = nil
         propStands = nil
-        prepare(sprite, strip: strip, size: Self.spriteSize)
-        sprite.position = CGPoint(x: lane.restingX.rounded(), y: Self.floor)
+        shownField = nil
+        prepare(sprite, strip: strip, size: size)
+        sprite.position = CGPoint(
+            x: field.local(field.lane.restingX.rounded()), y: field.baseY(height: bounds.height, isStrip: role.isStrip)
+        )
         sprite.removeAllAnimations()
         sprite.add(Self.restingBlink(strip: strip), forKey: Self.framesKey)
         prop.removeAllAnimations()
         prop.isHidden = true
+        portal.removeAllAnimations()
+        portal.isHidden = true
         CATransaction.commit()
     }
 
@@ -280,12 +398,15 @@ final class CatSpriteView: NSView {
         propLeg += 1
         spriteStands = nil
         propStands = nil
+        shownField = nil
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         sprite.removeAllAnimations()
         prop.removeAllAnimations()
+        portal.removeAllAnimations()
         sprite.isHidden = true
         prop.isHidden = true
+        portal.isHidden = true
         CATransaction.commit()
     }
 
@@ -381,9 +502,9 @@ final class CatSpriteView: NSView {
     }
 
     /// A moth does not fly straight: it bobs, round and round, ten times a second.
-    static func bobAnimation(base: CGFloat, elapsed: TimeInterval, begin: CFTimeInterval) -> CAKeyframeAnimation {
+    static func bobAnimation(base: CGFloat, elapsed: TimeInterval, begin: CFTimeInterval, scale: CGFloat = 1) -> CAKeyframeAnimation {
         let animation = CAKeyframeAnimation(keyPath: "position.y")
-        animation.values = mothBob.map { NSNumber(value: Double(base + $0)) }
+        animation.values = mothBob.map { NSNumber(value: Double(base + $0 * scale)) }
         animation.calculationMode = .discrete
         animation.duration = Double(mothBob.count) / 10
         animation.repeatCount = .infinity

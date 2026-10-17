@@ -62,7 +62,7 @@ func contrast(_ first: UInt32, _ second: UInt32) -> Double {
     // MARK: Colours
 
     static let everyLetter: Set<Character> = Set(moves.flatMap { $0.1.frames.flatMap(\.cells) }).union(
-        (PropArt.moth.frames + PropArt.yarn.frames).flatMap(\.cells)
+        (PropArt.moth.frames + PropArt.yarn.frames + PortalArt.frames).flatMap(\.cells)
     ).subtracting(["."])
 
     @Test func everyColourTheArtUsesIsInEveryCoatsPalette() {

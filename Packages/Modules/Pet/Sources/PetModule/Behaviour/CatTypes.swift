@@ -46,6 +46,8 @@ nonisolated struct CatSenses: Equatable, Sendable {
 nonisolated struct CatTuning: Equatable, Sendable {
     /// Idle time after which the cat falls asleep, in the daytime.
     var sleepAfter: TimeInterval = 300
+    /// The least time, in seconds, between one pounce or startle at the pointer and the next.
+    var reactionCooldown: TimeInterval = CatBrain.reactionCooldown
     /// Whether a busy Mac has any effect on the cat: the burst of running, and the quicker walks and the sweat that go with a high load.
     var reactsToBusyMachine = true
     /// At night it nods off in this share of that time.

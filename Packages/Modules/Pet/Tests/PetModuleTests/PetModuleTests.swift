@@ -108,15 +108,14 @@ import Testing
         #expect(harness.activities.current?.module == "pet")
     }
 
-    @Test func itIsAtTheLowestPriorityThereIsAndHasAStripUnderTheNotchForTheCatToPlayOn() async throws {
+    @Test func itIsAtTheLowestPriorityThereIsAndPlaysInTheTopRowOfTheNotchWithNoStripUnderIt() async throws {
         let harness = PetHarness()
         await harness.start()
         harness.advance(2)
         let activity = try #require(harness.cat).activity
         #expect(activity.priority == .low)
-        #expect(activity.bottom != nil)
-        #expect(activity.bottomHeight == 26)
-        #expect(activity.hasBottom, "so the notch grows downward by the strip's height and no more")
+        #expect(activity.hasBody, "the cat is drawn across the top row of the notch")
+        #expect(activity.bottom == nil && activity.bottomHeight == 0 && !activity.hasBottom, "and the notch does not grow downward for it")
         #expect(activity.expiresAfter == nil)
         #expect(activity.id == "cat")
         #expect(activity.summary != nil)
@@ -223,6 +222,7 @@ import Testing
         #expect(!settings.value(keys.meow))
         #expect(settings.value(keys.sleepMinutes) == 5)
         #expect(settings.value(keys.busyReaction) == .occasionally)
+        #expect(settings.value(keys.playPlace) == .portal)
         #expect(keys.show.name == "module.pet.show")
     }
 
@@ -264,6 +264,24 @@ import Testing
         harness.setting("sleepMinutes", 2)
         await harness.settle(until: { stage.tuning.sleepAfter == 120 })
         #expect(stage.tuning.sleepAfter == 120)
+    }
+
+    @Test func changingWhereTheCatPlaysPutsItThereAtOnceWithoutTakingItOffTheNotch() async throws {
+        let harness = PetHarness()
+        await harness.start()
+        harness.advance(2)
+        let before = try #require(harness.cat).activity
+        #expect(before.hasBody && !before.hasBottom, "beside the camera, in the top row")
+        harness.setting("playPlace", PlayPlace.strip)
+        await harness.settle(until: { harness.cat?.activity.hasBottom == true })
+        let strip = try #require(harness.cat).activity
+        #expect(strip.hasBottom && strip.bottomHeight == 26 && strip.bottomScope == .hardwareNotchOnly && strip.hasBody)
+        #expect(harness.entries.count == 1 && harness.cat?.id == "pet/cat", "the same activity, in its new place")
+        #expect(harness.module.isShowing && harness.pendingShowIsEmpty, "it was not taken off and brought back")
+        harness.setting("playPlace", PlayPlace.portal)
+        await harness.settle(until: { harness.cat?.activity.hasBottom == false })
+        #expect(harness.cat?.activity.hasBottom == false && harness.cat?.activity.hasBody == true)
+        #expect(harness.module.isShowing)
     }
 
     @Test func theBusyReactionReachesTheCatTheMomentItIsChanged() async throws {
@@ -309,8 +327,20 @@ import Testing
         #expect(!stage.isTicking)
     }
 
+    @Test func withTheStripChosenTheStripIsForTheScreensWithAHardwareNotchOnlyAndTheBodyIsStillThere() async throws {
+        let harness = PetHarness()
+        harness.setting("playPlace", PlayPlace.strip)
+        await harness.start()
+        harness.advance(2)
+        let activity = try #require(harness.cat).activity
+        #expect(activity.bottom != nil && activity.bottomHeight == 26 && activity.hasBottom)
+        #expect(activity.bottomScope == .hardwareNotchOnly, "a virtual notch, which has room in its body, keeps the cat there")
+        #expect(activity.hasBody)
+    }
+
     @Test func theStripAsTheNotchBuildsItAsksForNothingAndTheWingsAreEmpty() async throws {
         let harness = PetHarness()
+        harness.setting("playPlace", PlayPlace.strip)
         await harness.start()
         harness.advance(2)
         let activity = try #require(harness.cat).activity
