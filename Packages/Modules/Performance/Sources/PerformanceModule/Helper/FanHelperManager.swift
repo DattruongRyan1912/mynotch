@@ -113,7 +113,8 @@ final class FanHelperManager {
         guard canProbe else { return nil }
         probeStep = "Bắt đầu"
         defer { probeStep = nil }
-        return await FanControlProbe(client: client, pause: pause).run { probeStep = $0 }
+        let log = log
+        return await FanControlProbe(client: client, pause: pause, log: { log.notice("\($0, privacy: .public)") }).run { probeStep = $0 }
     }
 
     /// "Gỡ helper".

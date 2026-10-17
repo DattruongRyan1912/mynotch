@@ -92,7 +92,11 @@ nonisolated enum XPCReply {
 /// it (so a process that took the name without being the helper is not talked to). The connection is closed after the call: the
 /// helper leaves by itself when nobody is connected.
 final class XPCFanHelperClient: FanHelperClient {
-    static let timeout = Duration.seconds(3)
+    /// How long a call may wait for the helper. A helper that was not running is started by the first call: launchd takes its time
+    /// (seconds, on a busy Mac) and the helper then spends about half a second finding its sensors before it listens, so the wait has
+    /// to be long enough for a cold start. It was 3 s, which a cold start can exceed: the helper's log showed it serving a
+    /// request after the app had given up on it.
+    static let timeout = Duration.seconds(10)
 
     func ping() async throws -> FanHelperInfo {
         try await call { proxy, reply in

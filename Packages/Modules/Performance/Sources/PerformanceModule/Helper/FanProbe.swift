@@ -107,19 +107,25 @@ struct FanControlProbe {
     static let holdSeconds = 3
     static let settleSeconds = 2
 
+    /// How long to wait before looking for the baseline a second time: a helper that is still starting may not have answered.
+    static let baselineRetryPause = Duration.seconds(1)
+
     let client: any FanHelperClient
     let pause: (Duration) async -> Void
     let now: () -> Date
+    /// Hears a line for the log; never a value, only what went wrong.
+    let log: (String) -> Void
     var fan = 0
 
     init(
         client: any FanHelperClient, fan: Int = 0, pause: @escaping (Duration) async -> Void = { try? await Task.sleep(for: $0) },
-        now: @escaping () -> Date = { Date() }
+        now: @escaping () -> Date = { Date() }, log: @escaping (String) -> Void = { _ in }
     ) {
         self.client = client
         self.fan = fan
         self.pause = pause
         self.now = now
+        self.log = log
     }
 
     /// `step` hears "what is happening now" for the progress line.
@@ -132,8 +138,11 @@ struct FanControlProbe {
 
     private func sequence(step: (String) -> Void) async -> FanProbeOutcome {
         step("Đọc tốc độ quạt hiện tại")
-        guard let baseline = try? await client.readFans().first(where: { $0.index == fan }) else {
-            return FanProbeOutcome(verdict: .inconclusive, trials: [], note: "Helper không đọc được quạt.", at: now())
+        let baseline: FanHelperFanInfo
+        switch await readBaseline() {
+        case let .success(found): baseline = found
+        case let .failure(failure):
+            return FanProbeOutcome(verdict: .inconclusive, trials: [], note: failure.note, at: now())
         }
         guard let requested = FanProbeJudge.requestedRPM(baseline: baseline.rpm, maximum: baseline.maxRPM) else {
             return FanProbeOutcome(
@@ -151,6 +160,60 @@ struct FanControlProbe {
         }
         let verdict = trials.count == 2 ? FanProbeJudge.verdict(for: trials) : .inconclusive
         return FanProbeOutcome(verdict: verdict, trials: trials, note: trials.count == 2 ? "" : "Đã dừng giữa chừng.", at: now())
+    }
+
+    /// Why the baseline could not be had.
+    enum BaselineFailure: Error, Equatable {
+        /// The call to the helper failed; the reason in words.
+        case threw(String)
+        /// The helper answered with no fans at all.
+        case noFans
+        /// The helper answered with fans, none of them the one being probed.
+        case noSuchFan
+
+        var note: String {
+            switch self {
+            case let .threw(reason): "Helper không đọc được quạt: \(reason)."
+            case .noFans: "Helper không thấy quạt nào."
+            case .noSuchFan: "Helper không có quạt được thử."
+            }
+        }
+
+        /// The line for the log: what happened and nothing measured.
+        var logLine: String {
+            switch self {
+            case let .threw(reason): "probe baseline: readFans failed (\(reason))"
+            case .noFans: "probe baseline: readFans returned no fans"
+            case .noSuchFan: "probe baseline: readFans has no fan with the probed index"
+            }
+        }
+    }
+
+    /// The fan's reading before anything is set. A helper that was not running has to be started by the first call and may answer
+    /// late or not at all, so the read is tried twice, a second apart; each failure is logged with its reason.
+    private func readBaseline() async -> Result<FanHelperFanInfo, BaselineFailure> {
+        var last = BaselineFailure.noFans
+        for attempt in 0..<2 {
+            if attempt > 0 { await pause(Self.baselineRetryPause) }
+            switch await attemptBaseline() {
+            case let .success(found): return .success(found)
+            case let .failure(failure):
+                last = failure
+                log(failure.logLine + (attempt == 0 ? "; trying again" : ""))
+            }
+        }
+        return .failure(last)
+    }
+
+    private func attemptBaseline() async -> Result<FanHelperFanInfo, BaselineFailure> {
+        do {
+            let fans = try await client.readFans()
+            guard !fans.isEmpty else { return .failure(.noFans) }
+            guard let found = fans.first(where: { $0.index == fan }) else { return .failure(.noSuchFan) }
+            return .success(found)
+        } catch {
+            return .failure(.threw(FanHelperManager.describe(error)))
+        }
     }
 
     /// A reading taken while a command is held shows what was asked for: the target as written, and for the manual speed the mode 1.

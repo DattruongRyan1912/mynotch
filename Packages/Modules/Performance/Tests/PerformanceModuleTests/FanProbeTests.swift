@@ -16,6 +16,11 @@ nonisolated final class SimulatedFanClient: FanHelperClient, Sendable {
         var failReading = false
         /// The firmware reports its own target instead of the one written while a floor is held, as if it were rewriting it.
         var floorTargetNotKept = false
+        /// The first this many readings fail (a helper that is still starting), and the first this many that do not fail are empty.
+        var failFirstReads = 0
+        var emptyFirstReads = 0
+        /// The answer leaves out the fan being probed.
+        var omitFan0 = false
     }
 
     private struct State {
@@ -25,6 +30,7 @@ nonisolated final class SimulatedFanClient: FanHelperClient, Sendable {
         var mode = 0.0
         var target: Double
         var floorActive = false
+        var reads = 0
         var behaviour: Behaviour
         var commands: [FakeFanHelperClient.Command] = []
         var errorOnCommand: Int?
@@ -43,14 +49,15 @@ nonisolated final class SimulatedFanClient: FanHelperClient, Sendable {
 
     func readFans() async throws -> [FanHelperFanInfo] {
         try state.withLock { state in
-            if state.behaviour.failReading { throw FanHelperError.timeout }
+            state.reads += 1
+            if state.behaviour.failReading || state.reads <= state.behaviour.failFirstReads { throw FanHelperError.timeout }
+            if state.reads <= state.behaviour.failFirstReads + state.behaviour.emptyFirstReads { return [] }
             let heldAt = state.mode == 1 || state.floorActive ? state.target : state.apple
             state.rpm += 0.6 * (heldAt - state.rpm)
             let reported = state.floorActive && state.behaviour.floorTargetNotKept ? state.apple : state.target
-            return [
-                FanHelperFanInfo(index: 0, rpm: state.rpm, minRPM: 1200, maxRPM: state.maximum, mode: state.mode, target: reported),
-                FanHelperFanInfo(index: 1, rpm: state.apple, minRPM: 1200, maxRPM: state.maximum, mode: 0, target: state.apple),
-            ]
+            let first = FanHelperFanInfo(index: 0, rpm: state.rpm, minRPM: 1200, maxRPM: state.maximum, mode: state.mode, target: reported)
+            let second = FanHelperFanInfo(index: 1, rpm: state.apple, minRPM: 1200, maxRPM: state.maximum, mode: 0, target: state.apple)
+            return state.behaviour.omitFan0 ? [second] : [first, second]
         }
     }
 
@@ -98,14 +105,49 @@ nonisolated final class SimulatedFanClient: FanHelperClient, Sendable {
     }
 }
 
+/// A client that notices if two calls to the helper are ever in flight at once.
+nonisolated final class OverlapWatchingClient: FanHelperClient, Sendable {
+    private let base: SimulatedFanClient
+    private let counts = Mutex((inFlight: 0, mostInFlight: 0, calls: 0))
+
+    init(_ base: SimulatedFanClient) { self.base = base }
+
+    var mostInFlight: Int { counts.withLock { $0.mostInFlight } }
+    var calls: Int { counts.withLock { $0.calls } }
+
+    private func watched<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T {
+        counts.withLock {
+            $0.inFlight += 1
+            $0.calls += 1
+            $0.mostInFlight = max($0.mostInFlight, $0.inFlight)
+        }
+        defer { counts.withLock { $0.inFlight -= 1 } }
+        await Task.yield()
+        return try await body()
+    }
+
+    func ping() async throws -> FanHelperInfo { try await watched { try await base.ping() } }
+    func readFans() async throws -> [FanHelperFanInfo] { try await watched { try await base.readFans() } }
+    func setFloor(fan: Int, rpm: Double) async throws -> FanCommandResult { try await watched { try await base.setFloor(fan: fan, rpm: rpm) } }
+    func setForced(fan: Int, rpm: Double) async throws -> FanCommandResult { try await watched { try await base.setForced(fan: fan, rpm: rpm) } }
+    func setAuto(fan: Int) async throws -> FanCommandResult { try await watched { try await base.setAuto(fan: fan) } }
+}
+
 @Suite struct FanProbeTests {
     /// The pauses a probe asked for, instead of waiting them.
     @MainActor final class Pauses {
         var durations: [Duration] = []
     }
 
-    @MainActor func probe(_ client: SimulatedFanClient, _ pauses: Pauses = Pauses()) -> FanControlProbe {
-        FanControlProbe(client: client, pause: { pauses.durations.append($0) }, now: { Date(timeIntervalSinceReferenceDate: 7) })
+    @MainActor final class Lines {
+        var all: [String] = []
+    }
+
+    @MainActor func probe(_ client: SimulatedFanClient, _ pauses: Pauses = Pauses(), _ lines: Lines = Lines()) -> FanControlProbe {
+        FanControlProbe(
+            client: client, pause: { pauses.durations.append($0) }, now: { Date(timeIntervalSinceReferenceDate: 7) },
+            log: { lines.all.append($0) }
+        )
     }
 
     // MARK: The rules
@@ -289,6 +331,110 @@ nonisolated final class SimulatedFanClient: FanHelperClient, Sendable {
         nonisolated(unsafe) var steps: [String] = []
         _ = await probe(client).run { steps.append($0) }
         #expect(steps == ["Đọc tốc độ quạt hiện tại", "Thử đặt sàn tốc độ", "Thử đặt tốc độ thủ công"])
+    }
+
+    // MARK: The baseline (a helper that was not running answers late, or not at all)
+
+    @MainActor @Test func aBaselineThatFailsOnceIsReadAgainAfterASecondAndTheProbeCarriesOn() async {
+        let client = SimulatedFanClient(behaviour: .init(failFirstReads: 1))
+        let pauses = Pauses()
+        let lines = Lines()
+        let outcome = await probe(client, pauses, lines).run()
+        #expect(outcome.verdict == .floor, "the second look found the fan and the probe ran")
+        #expect(pauses.durations.first == .seconds(1) && pauses.durations.count == 9, "one second to wait, then the eight pauses of the two trials")
+        #expect(lines.all == ["probe baseline: readFans failed (helper không trả lời); trying again"])
+    }
+
+    @MainActor @Test func aBaselineThatFailsTwiceIsInconclusiveWithTheReasonAndNothingIsSet() async {
+        let client = SimulatedFanClient(behaviour: .init(failReading: true))
+        let pauses = Pauses()
+        let lines = Lines()
+        let outcome = await probe(client, pauses, lines).run()
+        #expect(outcome.verdict == .inconclusive && outcome.mechanism == nil)
+        #expect(outcome.note == "Helper không đọc được quạt: helper không trả lời.")
+        #expect(client.commands == [.auto(-1)])
+        #expect(pauses.durations == [.seconds(1)], "it waited once, between the two looks")
+        #expect(lines.all == [
+            "probe baseline: readFans failed (helper không trả lời); trying again",
+            "probe baseline: readFans failed (helper không trả lời)",
+        ])
+    }
+
+    @MainActor @Test func anAnswerWithNoFansIsReadAgainAndThenSaidSoWithItsOwnReason() async {
+        let client = SimulatedFanClient(behaviour: .init(emptyFirstReads: 5))
+        let lines = Lines()
+        let outcome = await probe(client, Pauses(), lines).run()
+        #expect(outcome.verdict == .inconclusive && outcome.note == "Helper không thấy quạt nào.")
+        #expect(lines.all == ["probe baseline: readFans returned no fans; trying again", "probe baseline: readFans returned no fans"])
+        #expect(client.commands == [.auto(-1)])
+    }
+
+    @MainActor @Test func anAnswerWithNoFansOnceAndFansTheNextTimeCarriesOn() async {
+        let client = SimulatedFanClient(behaviour: .init(emptyFirstReads: 1))
+        let outcome = await probe(client).run()
+        #expect(outcome.verdict == .floor)
+    }
+
+    @MainActor @Test func anAnswerThatLeavesOutTheProbedFanIsSaidSoAndStillReadAgain() async {
+        let client = SimulatedFanClient(behaviour: .init(omitFan0: true))
+        let pauses = Pauses()
+        let lines = Lines()
+        let outcome = await probe(client, pauses, lines).run()
+        #expect(outcome.verdict == .inconclusive && outcome.note == "Helper không có quạt được thử.")
+        #expect(lines.all == [
+            "probe baseline: readFans has no fan with the probed index; trying again", "probe baseline: readFans has no fan with the probed index",
+        ])
+        #expect(pauses.durations == [.seconds(1)])
+        #expect(client.commands == [.auto(-1)])
+    }
+
+    @MainActor @Test func aFailureThatIsNotATimeoutIsDescribedByItsOwnReason() async {
+        let client = SimulatedFanClient(behaviour: .init(failReading: true))
+        let result = FanControlProbe.BaselineFailure.threw(FanHelperManager.describe(NSError(domain: NSCocoaErrorDomain, code: 4099)))
+        #expect(result.note == "Helper không đọc được quạt: không có helper nào trả lời.")
+        #expect(result.logLine == "probe baseline: readFans failed (không có helper nào trả lời)")
+        _ = client
+    }
+
+    @MainActor @Test func theLogLinesCarryTheReasonAndNoMeasuredValue() async {
+        for behaviour in [
+            SimulatedFanClient.Behaviour(failReading: true), .init(emptyFirstReads: 9), .init(omitFan0: true),
+        ] {
+            let lines = Lines()
+            _ = await probe(SimulatedFanClient(behaviour: behaviour), Pauses(), lines).run()
+            #expect(lines.all.count == 2)
+            #expect(lines.all.allSatisfy { line in !line.contains { $0.isNumber } }, "no number in \(lines.all)")
+        }
+    }
+
+    /// In the helper's log the baseline read and the give-back arrived at the same instant. The probe never has two calls in flight:
+    /// that happens when a call has given up and the next one starts while the helper is still on its way up.
+    @MainActor @Test func theProbeNeverHasTwoCallsToTheHelperInFlightAtOnce() async {
+        for behaviour in [SimulatedFanClient.Behaviour(), .init(failFirstReads: 1), .init(failReading: true)] {
+            let watcher = OverlapWatchingClient(SimulatedFanClient(behaviour: behaviour))
+            _ = await FanControlProbe(client: watcher, pause: { _ in }, now: { Date() }).run()
+            #expect(watcher.mostInFlight == 1)
+            #expect(watcher.calls > 0)
+        }
+    }
+
+    @MainActor @Test func theProbedFanIsTheFirstFanAndTheHelperNumbersFromZero() async {
+        let client = SimulatedFanClient()
+        _ = await probe(client).run()
+        #expect(client.commands.first == .floor(0, 3600))
+        #expect(FanControlProbe(client: client).fan == 0)
+    }
+
+    @MainActor @Test func aProbeThatFindsItsBaselineLogsNothing() async {
+        let lines = Lines()
+        _ = await probe(SimulatedFanClient(), Pauses(), lines).run()
+        #expect(lines.all.isEmpty)
+    }
+
+    /// The probe is the first call to a helper that has been idle-exited, so it starts the helper: launchd takes its time and the
+    /// helper half a second more before it listens. The helper's log showed it serving a request after the app had given up at 3 s.
+    @Test func aCallToAHelperThatHasToBeStartedMayWaitLongerThanAColdStartTakes() {
+        #expect(XPCFanHelperClient.timeout >= .seconds(10))
     }
 
     // MARK: Words
