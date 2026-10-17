@@ -147,10 +147,7 @@ struct ShelfCardView: View {
         case .text: NSImage(systemSymbolName: "text.alignleft", accessibilityDescription: nil) ?? NSImage()
         case .link: NSImage(systemSymbolName: "link", accessibilityDescription: nil) ?? NSImage()
         }
-        return NSImage(size: NSSize(width: 40, height: 40), flipped: false) { rect in
-            source.draw(in: rect)
-            return true
-        }
+        return ShelfDragPreview.image(of: source)
     }
 }
 
