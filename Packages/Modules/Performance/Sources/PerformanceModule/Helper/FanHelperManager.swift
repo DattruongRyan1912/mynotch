@@ -56,17 +56,18 @@ final class FanHelperManager {
         return false
     }
 
-    /// Whether the helper that answers is the one inside this app. Commands only go to that one: an older helper does not know the
-    /// every-fan form of a command, and would answer a probe or a curve with a refusal that looks like the fans' own.
+    /// Whether the helper that answers is of this app's version. Commands only go to such a helper: an older one does not know the
+    /// every-fan form of a command, and would answer a probe or a curve with a refusal that looks like the fans' own. Only the
+    /// version decides this; a different build of the same version is replaced at launch, not refused.
     var helperIsCurrent: Bool {
         guard case let .running(info) = phase else { return false }
-        return !FanHelperUpdatePolicy.isOutdated(info, bundled: bundled())
+        return FanHelperUpdatePolicy.speaksTheProtocol(info, bundled: bundled())
     }
 
-    /// A helper answers, but it is not the one inside this app.
+    /// A helper answers, but it is of another version than the one inside this app.
     var helperIsOutdated: Bool {
         guard case let .running(info) = phase else { return false }
-        return FanHelperUpdatePolicy.isOutdated(info, bundled: bundled())
+        return !FanHelperUpdatePolicy.speaksTheProtocol(info, bundled: bundled())
     }
 
     private func bundled() -> BundledFanHelper {

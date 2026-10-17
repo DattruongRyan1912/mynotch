@@ -113,6 +113,8 @@ nonisolated extension FanHelperInfo {
     /// The helper that is in `BundledFanHelper.matching`.
     static let matching = FanHelperInfo(version: "1", buildID: "aaaa", euid: 0, pid: 321)
     static let oldBuild = FanHelperInfo(version: "1", buildID: "bbbb", euid: 0, pid: 322)
+    /// A helper of an older version than `BundledFanHelper.matching`'s, which does not know what a newer app sends.
+    static let oldVersion = FanHelperInfo(version: "0", buildID: "aaaa", euid: 0, pid: 323)
 }
 
 nonisolated extension BundledFanHelper {

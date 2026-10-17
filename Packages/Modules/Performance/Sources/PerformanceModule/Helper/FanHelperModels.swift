@@ -99,6 +99,13 @@ nonisolated enum FanHelperUpdatePolicy {
         return running.buildID != bundledID
     }
 
+    /// Whether the running helper understands what this app sends it. That is the version's meaning, and only it: a build that differs
+    /// within one version is replaced at the next launch but is not refused commands, so that the comparison of two hashes that
+    /// could disagree for a real signed helper can never keep the probe or the curve from running.
+    static func speaksTheProtocol(_ running: FanHelperInfo, bundled: BundledFanHelper) -> Bool {
+        running.version == bundled.version
+    }
+
     /// Only an enabled helper that answered is ever touched: one that is not registered was not asked for, one that waits for the
     /// user's approval is not running, and one that does not answer is reported, not retried in a loop. At most one attempt per
     /// launch of the app.

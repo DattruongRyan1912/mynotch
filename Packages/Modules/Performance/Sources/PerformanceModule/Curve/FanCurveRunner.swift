@@ -32,7 +32,7 @@ final class FanCurveRunner {
         /// The mode is Apple's.
         case off
         case waitingForHelper
-        /// A helper answers, but it is not the one inside this app, so it is not given commands.
+        /// A helper answers, but it is of another version than the one inside this app, so it is not given commands.
         case helperOutdated
         case needsProbe
         case blockedByMacsFanControl

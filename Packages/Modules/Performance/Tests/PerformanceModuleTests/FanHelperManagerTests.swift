@@ -502,15 +502,23 @@ import Testing
         #expect(current.manager.helperIsCurrent && current.manager.helperIsOutdated == false)
     }
 
-    @Test func anotherBuildOfTheSameVersionIsNotTheHelperInThisAppEither() async {
+    @Test func anotherBuildOfTheSameVersionIsStillGivenCommandsAndIsReplacedAtLaunchInstead() async {
+        // The two hashes (the running image's and the file's) are compared at launch only; if they ever disagreed for the real helper,
+        // the probe and the curve would otherwise be shut out for good.
         let rig = HelperRig(status: .enabled, pings: [.success(.oldBuild)])
+        await rig.manager.refresh()
+        #expect(rig.manager.helperIsCurrent && rig.manager.helperIsOutdated == false && rig.manager.canProbe)
+    }
+
+    @Test func aHelperOfAnotherVersionIsNotGivenCommands() async {
+        let rig = HelperRig(status: .enabled, pings: [.success(.oldVersion)])
         await rig.manager.refresh()
         #expect(rig.manager.helperIsOutdated && rig.manager.canProbe == false)
     }
 
     @Test func theHelperIsAskedWhoItIsRightBeforeAProbeBecauseWhatWasSeenLastCanBeOld() async {
         // The last look found the current helper; by the time of the press an older one answers.
-        let rig = HelperRig(status: .enabled, pings: [.success(.matching), .success(.oldBuild)])
+        let rig = HelperRig(status: .enabled, pings: [.success(.matching), .success(.oldVersion)])
         await rig.manager.refresh()
         #expect(rig.manager.canProbe)
         #expect(await rig.manager.runProbe() == nil)

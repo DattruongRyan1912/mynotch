@@ -60,6 +60,13 @@ import Testing
         #expect(Policy.isOutdated(FanHelperInfo(version: "2", buildID: "aaaa", euid: 0, pid: 1), bundled: .matching))
     }
 
+    @Test func aHelperIsGivenCommandsWhenItsVersionIsTheAppsWhateverItsBuild() {
+        #expect(Policy.speaksTheProtocol(.matching, bundled: .matching))
+        #expect(Policy.speaksTheProtocol(.oldBuild, bundled: .matching), "another build of the same version is replaced at launch, not refused")
+        #expect(Policy.speaksTheProtocol(.oldVersion, bundled: .matching) == false)
+        #expect(Policy.speaksTheProtocol(.matching, bundled: BundledFanHelper(version: "2", buildID: nil)) == false)
+    }
+
     // MARK: The system's status
 
     @Test func eachStatusOfTheServiceManagerMapsToOurs() {
