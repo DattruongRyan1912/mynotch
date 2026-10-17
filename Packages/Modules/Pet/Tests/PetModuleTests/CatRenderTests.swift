@@ -54,12 +54,14 @@ import Testing
 
     /// The real view, 64 by 40 points, scaled up `scale` times by the layer above it as a Retina display scales, with the cat sitting at
     /// its lane's left end.
-    func scene(move: CatMove, facing: Facing, coat: CatCoat = .tabby, scale: Int = 1) -> (CatSpriteView, Offscreen, CFTimeInterval)? {
+    func scene(
+        move: CatMove, facing: Facing, coat: CatCoat = .tabby, scale: Int = 1, elapsed: TimeInterval = 0
+    ) -> (CatSpriteView, Offscreen, CFTimeInterval)? {
         let stage = CatStage(scheduler: ManualSchedulerStub.make())
         let host = CatSpriteView(stage: stage)
         host.frame = CGRect(x: 0, y: 0, width: 64, height: 40)
         host.layer?.backgroundColor = Self.ground
-        host.show(plan: CatPlan(move: move, facing: facing, from: 0, to: 0, began: 0, duration: 99), elapsed: 0, coat: coat)
+        host.show(plan: CatPlan(move: move, facing: facing, from: 0, to: 0, began: 0, duration: 99), elapsed: elapsed, coat: coat)
         let root = CALayer()
         root.bounds = CGRect(x: 0, y: 0, width: 64, height: 40)
         root.anchorPoint = .zero
@@ -68,10 +70,11 @@ import Testing
         guard let layer = host.layer else { return nil }
         root.addSublayer(layer)
         guard let offscreen = Offscreen(layer: root, width: 64 * scale, height: 40 * scale) else { return nil }
-        // Pin the loop to the layer's own time, so that a frame rendered `seconds` later is `seconds` into the animation.
+        // Pin the loop to the layer's own time, so that a frame rendered `seconds` later is `seconds` into the animation (less the
+        // `elapsed` it was shown at).
         let begin = host.sprite.convertTime(CACurrentMediaTime(), from: nil)
         guard let added = host.sprite.animation(forKey: CatSpriteView.framesKey)?.copy() as? CAKeyframeAnimation else { return nil }
-        added.beginTime = begin
+        added.beginTime = begin - elapsed
         host.sprite.add(added, forKey: CatSpriteView.framesKey)
         CATransaction.flush()
         return (host, offscreen, begin)
@@ -363,5 +366,65 @@ import Testing
         #expect(abs(centres[5] - leftAt) <= 14, "\(delay): and a quarter of a second on, with nothing animating it yet: \(centres[5])")
         let turnedAt = host.lane.x(at: start) + 16
         #expect(abs((centres.last ?? 0) - turnedAt) <= 14, "\(delay): and it ends where the second leg goes")
+    }
+
+    // MARK: Held when over
+
+    /// A plan is shown some milliseconds after it began, because the stage wakes four times a second, and never at exactly its beginning. What
+    /// the tests above do is show it at exactly its beginning, which is the one time at which it makes no difference how an animation is
+    /// begun part of the way in. Begun with a `timeOffset` the animation wraps round, and when it is over and held it is held on what it
+    /// showed at the offset, which is its first frame and its first place: the cat was seen back at the start of the walk it had just made
+    /// for as long as it took the next plan to come, and playing the first steps of it again.
+    @Test(arguments: [CatMove.yawn, .lieDown, .sitDown, .standUp, .stretch, .startled, .pounce], [0.002, 0.1])
+    func aMovePlayedOnceIsHeldOnItsLastFrameWhenItIsOverWhateverHowFarInItWasShown(move: CatMove, elapsed: TimeInterval) throws {
+        let (_, offscreen, begin) = try #require(scene(move: move, facing: .right, elapsed: elapsed))
+        let over = begin - elapsed + move.passDuration
+        let last = try #require(reference(move: move, facing: .right, frame: move.frameCount - 1)).render(atTime: CACurrentMediaTime())
+        for late in [0.03, 0.4, 3] {
+            let differing = difference(offscreen.render(atTime: over + late), last)
+            #expect(differing == 0, "\(move) shown \(elapsed) in, \(late) after its end: \(differing) bytes differ from its last frame")
+        }
+    }
+
+    @Test(arguments: [0.002, 0.2], [true, false])
+    func aWalkIsHeldAtItsEndWhenItIsOverWhateverHowFarInItWasShown(elapsed: TimeInterval, toTheRight: Bool) throws {
+        let stage = CatStage(scheduler: ManualSchedulerStub.make())
+        let host = CatSpriteView(stage: stage)
+        host.frame = CGRect(x: 0, y: 0, width: 300, height: 26)
+        host.layer?.backgroundColor = Self.ground
+        let lane = host.lane
+        let (start, end) = toTheRight ? (0.1, 1.0) : (0.9, 0.0)
+        let distance = abs(end - start) * Double(lane.travel)
+        let leg = CatPlan(
+            move: .frantic, facing: toTheRight ? .right : .left, from: start, to: end, began: 0, duration: distance / CatMove.frantic.speed
+        )
+        host.show(plan: leg, elapsed: elapsed, coat: .tabby)
+        let root = CALayer()
+        root.bounds = CGRect(x: 0, y: 0, width: 300, height: 26)
+        root.anchorPoint = .zero
+        root.position = .zero
+        root.addSublayer(try #require(host.layer))
+        let offscreen = try #require(Offscreen(layer: root, width: 300, height: 26))
+        // Every animation is begun `elapsed` before the moment it is pinned to, as it was shown.
+        let begin = host.sprite.convertTime(CACurrentMediaTime(), from: nil)
+        for key in host.sprite.animationKeys() ?? [] {
+            guard let added = host.sprite.animation(forKey: key)?.copy() as? CAAnimation else { continue }
+            added.beginTime = begin - elapsed
+            host.sprite.add(added, forKey: key)
+        }
+        CATransaction.flush()
+        let over = begin - elapsed + leg.duration
+        func centre(at time: CFTimeInterval) throws -> Double {
+            try #require(catCentre(offscreen.render(atTime: time), width: 300, height: 26))
+        }
+        // It walks: about half way along at half the time.
+        let half = lane.x(at: (start + end) / 2) + 16
+        #expect(abs(try centre(at: over - leg.duration / 2) - half) <= 30, "half way along at half the time")
+        // And is where the walk ends, for as long as the next plan takes to come.
+        let endsAt = lane.x(at: end) + 16
+        for late in [0.02, 0.1, 0.5, 3] {
+            let at = try centre(at: over + late)
+            #expect(abs(at - endsAt) <= 14, "shown \(elapsed) in, \(late) after the walk is over: at \(at), not at its end \(endsAt) (it began at \(lane.x(at: start) + 16))")
+        }
     }
 }

@@ -35,12 +35,15 @@ final class CatSpriteView: NSView {
     private var spriteStands: CGFloat?
     private var propStands: CGFloat?
     /// The cat. Anchored at its bottom left corner, so its position is the place of its left foot.
-    let sprite = CALayer()
+    let sprite: CALayer
     /// The moth or the ball of yarn.
-    let prop = CALayer()
+    let prop: CALayer
 
-    init(stage: CatStage) {
+    /// The layers can be handed in, which is what a test does to see in what order they are told things.
+    init(stage: CatStage, sprite: CALayer = CALayer(), prop: CALayer = CALayer()) {
         self.stage = stage
+        self.sprite = sprite
+        self.prop = prop
         super.init(frame: .zero)
         wantsLayer = true
         layer?.masksToBounds = true
@@ -137,11 +140,13 @@ final class CatSpriteView: NSView {
     /// Plays `plan` along the lane from `elapsed` seconds into it, in the coat given.
     ///
     /// **The layer itself is where the cat stands, never where it is going.** A leg is an animation of the layer's position, and until the
-    /// render server is drawing that animation (which on a real screen can be a few frames after the commit: it is not for a layer that
-    /// is drawn at a low rate, and nothing here can tell) the layer's own value is what is on the screen. So the layer is set to where the
-    /// leg begins, together with the animation that takes it away, and it is moved to where the leg ends only when the animation says it
-    /// is over (`LegEnd`); the animation, which holds its last place (`.forwards`) and its first until it begins (`.backwards`), shows the
-    /// rest. It begins at the time it is added, and not at the commit, which can be later.
+    /// render server is drawing that animation the layer's own value is what is on the screen. So the layer is set to where the leg begins,
+    /// together with the animation that takes it away, and is moved to where the leg ends only when the animation says it is over
+    /// (`LegEnd`); the animation, which holds its last place (`.forwards`) and its first until it begins (`.backwards`), shows the rest.
+    ///
+    /// When a leg takes the place of another, in the one transaction: the layer is set to where the new leg begins, and only then is the
+    /// old animation taken away, so that the layer never shows a place it has been left at by the old leg (where that began), and then the
+    /// new animations go on. Nothing here waits for the old leg to say it is over.
     func show(plan: CatPlan, elapsed: TimeInterval, coat: CatCoat) {
         let lane = lane
         let strip = CatSheets.shared.strip(for: plan.move, facing: plan.facing, coat: coat)
@@ -159,22 +164,20 @@ final class CatSpriteView: NSView {
             let moving = max(plan.duration * (1 - plan.delay), 0.05)
             let step = max((abs(to - from) / (moving * effectiveFPS)).rounded(), 1)
             let animation = Self.walkAnimation(
-                from: from, to: to, step: step, duration: plan.duration, delay: plan.delay, elapsed: elapsed, rate: effectiveFPS
+                from: from, to: to, step: step, duration: plan.duration, delay: plan.delay, elapsed: elapsed, begin: begin, rate: effectiveFPS
             )
-            animation.beginTime = begin
             let ends = Self.lastValue(of: animation)
             animation.delegate = LegEnd { [weak self] in self?.arrived(at: ends, leg: leg, onTheCat: true) }
             walk = animation
         }
         spriteStands = walk.map(Self.lastValue(of:)) ?? from
-        let frames = Self.framesAnimation(strip: strip, fps: effectiveFPS, loops: plan.move.loops, elapsed: elapsed)
-        frames.beginTime = begin
+        let frames = Self.framesAnimation(strip: strip, fps: effectiveFPS, loops: plan.move.loops, elapsed: elapsed, begin: begin)
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         prepare(sprite, strip: strip, size: Self.spriteSize)
-        sprite.removeAllAnimations()
         sprite.position = CGPoint(x: from, y: base)
+        sprite.removeAllAnimations()
         sprite.add(frames, forKey: Self.framesKey)
         if let walk { sprite.add(walk, forKey: Self.walkKey) }
         showProp(of: plan, lane: lane, elapsed: elapsed, begin: begin)
@@ -182,12 +185,12 @@ final class CatSpriteView: NSView {
     }
 
     /// What the cat plays with: a moth that flutters along a path of its own, or a ball of yarn that lies or rolls. Like the cat, it is
-    /// where it begins until its path says it is going.
+    /// where it begins until its path says it is going, and it is set there before its old animations go.
     private func showProp(of plan: CatPlan, lane: WalkLane, elapsed: TimeInterval, begin: CFTimeInterval) {
         let current = prop.isHidden ? nil : propStands
-        prop.removeAllAnimations()
         propLeg += 1
         guard let item = plan.prop else {
+            prop.removeAllAnimations()
             prop.isHidden = true
             propStands = nil
             return
@@ -195,33 +198,35 @@ final class CatSpriteView: NSView {
         let leg = propLeg
         let strip = CatSheets.shared.propStrip(item.kind)
         let size = CGSize(width: strip.frameWidth, height: strip.frameHeight)
-        prepare(prop, strip: strip, size: size)
         let from = Self.continued(from: current, near: lane.unboundedX(at: item.from).rounded())
         let to = item.to == item.from ? from : lane.unboundedX(at: item.to).rounded()
         let height = item.kind == .moth ? Self.mothHeight : Self.floor
         var path: CAKeyframeAnimation?
         if from != to {
             let step = max((abs(to - from) / (plan.duration * 12)).rounded(), 1)
-            let animation = Self.walkAnimation(from: from, to: to, step: step, duration: plan.duration, delay: 0, elapsed: elapsed, rate: 12)
-            animation.beginTime = begin
+            let animation = Self.walkAnimation(
+                from: from, to: to, step: step, duration: plan.duration, delay: 0, elapsed: elapsed, begin: begin, rate: 12
+            )
             let ends = Self.lastValue(of: animation)
             animation.delegate = LegEnd { [weak self] in self?.arrived(at: ends, leg: leg, onTheCat: false) }
             path = animation
         }
-        prop.position = CGPoint(x: from, y: height)
         propStands = path.map(Self.lastValue(of:)) ?? from
-        func timed(_ animation: CAKeyframeAnimation) -> CAKeyframeAnimation {
-            animation.beginTime = begin
-            return animation
-        }
+        prepare(prop, strip: strip, size: size)
+        prop.position = CGPoint(x: from, y: height)
+        prop.removeAllAnimations()
         switch item.kind {
         case .moth:
-            prop.add(timed(Self.framesAnimation(strip: strip, fps: PropArt.moth.fps, loops: true, elapsed: elapsed)), forKey: Self.framesKey)
+            prop.add(
+                Self.framesAnimation(strip: strip, fps: PropArt.moth.fps, loops: true, elapsed: elapsed, begin: begin), forKey: Self.framesKey
+            )
             if let path { prop.add(path, forKey: Self.walkKey) }
-            prop.add(timed(Self.bobAnimation(base: height, elapsed: elapsed)), forKey: Self.bobKey)
+            prop.add(Self.bobAnimation(base: height, elapsed: elapsed, begin: begin), forKey: Self.bobKey)
         case .yarn:
             guard let path else { return }
-            prop.add(timed(Self.framesAnimation(strip: strip, fps: PropArt.yarn.fps, loops: true, elapsed: elapsed)), forKey: Self.framesKey)
+            prop.add(
+                Self.framesAnimation(strip: strip, fps: PropArt.yarn.fps, loops: true, elapsed: elapsed, begin: begin), forKey: Self.framesKey
+            )
             prop.add(path, forKey: Self.walkKey)
         }
     }
@@ -261,9 +266,9 @@ final class CatSpriteView: NSView {
         spriteStands = nil
         propStands = nil
         prepare(sprite, strip: strip, size: Self.spriteSize)
+        sprite.position = CGPoint(x: lane.restingX.rounded(), y: Self.floor)
         sprite.removeAllAnimations()
         sprite.add(Self.restingBlink(strip: strip), forKey: Self.framesKey)
-        sprite.position = CGPoint(x: lane.restingX.rounded(), y: Self.floor)
         prop.removeAllAnimations()
         prop.isHidden = true
         CATransaction.commit()
@@ -294,9 +299,19 @@ final class CatSpriteView: NSView {
 
     // MARK: Animations
 
+    /// Where on its timeline an animation that is `elapsed` seconds in begins: it begins at `begin`, which is now, less that. **Never with
+    /// `timeOffset`**, which does not skip the first part of an animation but moves it to the end: the timeline wraps round, so that an
+    /// animation held when it is over (`.forwards`) is held on what it showed at the offset, which is its first frame and not its last,
+    /// and for the `elapsed` seconds before its end it plays its first part once more.
+    private static func started(_ animation: CAKeyframeAnimation, at begin: CFTimeInterval, elapsed: TimeInterval) {
+        animation.beginTime = begin - elapsed
+    }
+
     /// The picture steps from one frame to the next, held, never blended: round and round, or once and then held on the last frame. It
-    /// begins `elapsed` seconds in.
-    static func framesAnimation(strip: PixelStrip, fps: Double, loops: Bool, elapsed: TimeInterval) -> CAKeyframeAnimation {
+    /// began `elapsed` seconds before `begin`.
+    static func framesAnimation(
+        strip: PixelStrip, fps: Double, loops: Bool, elapsed: TimeInterval, begin: CFTimeInterval
+    ) -> CAKeyframeAnimation {
         let animation = CAKeyframeAnimation(keyPath: "contentsRect")
         animation.values = (0..<strip.frameCount).map { NSValue(rect: strip.contentsRect(of: $0)) }
         animation.calculationMode = .discrete
@@ -308,10 +323,10 @@ final class CatSpriteView: NSView {
         animation.fillMode = .both
         if loops {
             animation.repeatCount = .infinity
-            animation.timeOffset = elapsed.truncatingRemainder(dividingBy: animation.duration)
+            started(animation, at: begin, elapsed: elapsed.truncatingRemainder(dividingBy: animation.duration))
         } else {
             animation.isRemovedOnCompletion = false
-            animation.timeOffset = min(max(elapsed, 0), animation.duration)
+            started(animation, at: begin, elapsed: min(max(elapsed, 0), animation.duration))
         }
         return animation
     }
@@ -334,7 +349,8 @@ final class CatSpriteView: NSView {
     /// the way a pixel cat does and the render server has nothing to do between steps. For the first `delay` of the plan it stays where it
     /// is.
     static func walkAnimation(
-        from: CGFloat, to: CGFloat, step: CGFloat, duration: TimeInterval, delay: Double, elapsed: TimeInterval, rate: Double
+        from: CGFloat, to: CGFloat, step: CGFloat, duration: TimeInterval, delay: Double, elapsed: TimeInterval, begin: CFTimeInterval,
+        rate: Double
     ) -> CAKeyframeAnimation {
         let animation = CAKeyframeAnimation(keyPath: "position.x")
         var places = walkStops(from: from, to: to, step: step)
@@ -345,7 +361,7 @@ final class CatSpriteView: NSView {
         animation.values = places.map { NSNumber(value: Double($0)) }
         animation.calculationMode = .discrete
         animation.duration = duration
-        animation.timeOffset = min(max(elapsed, 0), duration)
+        started(animation, at: begin, elapsed: min(max(elapsed, 0), duration))
         // Held on its first place until it begins, and on its last when it is over.
         animation.fillMode = .both
         animation.isRemovedOnCompletion = false
@@ -365,14 +381,14 @@ final class CatSpriteView: NSView {
     }
 
     /// A moth does not fly straight: it bobs, round and round, ten times a second.
-    static func bobAnimation(base: CGFloat, elapsed: TimeInterval) -> CAKeyframeAnimation {
+    static func bobAnimation(base: CGFloat, elapsed: TimeInterval, begin: CFTimeInterval) -> CAKeyframeAnimation {
         let animation = CAKeyframeAnimation(keyPath: "position.y")
         animation.values = mothBob.map { NSNumber(value: Double(base + $0)) }
         animation.calculationMode = .discrete
         animation.duration = Double(mothBob.count) / 10
         animation.repeatCount = .infinity
         animation.fillMode = .both
-        animation.timeOffset = elapsed.truncatingRemainder(dividingBy: animation.duration)
+        started(animation, at: begin, elapsed: elapsed.truncatingRemainder(dividingBy: animation.duration))
         animation.preferredFrameRateRange = CAFrameRateRange(minimum: 4, maximum: frameRateCeiling, preferred: 10)
         return animation
     }

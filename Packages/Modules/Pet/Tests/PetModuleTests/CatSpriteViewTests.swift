@@ -278,17 +278,60 @@ import Testing
         #expect(CatSpriteView.walkStops(from: 0, to: 5, step: 0) == [0])
     }
 
-    @Test func aPlanThatIsAlreadyUnderWayIsPlayedFromWhereItIs() throws {
+    /// An animation that was shown `elapsed` seconds into its plan began that long ago, on the layer's own time, which is not the time it was
+    /// added at. It is never given a `timeOffset`: that wraps an animation round, so that one held when it is over is held on its first value.
+    func expectBegan(
+        _ animation: CAAnimation, ago: TimeInterval, between before: CFTimeInterval, and after: CFTimeInterval, _ label: String
+    ) {
+        #expect(animation.timeOffset == 0, "\(label): a time offset wraps the animation round, and holds its first value when it is over")
+        #expect(
+            animation.beginTime >= before - ago - 1e-9 && animation.beginTime <= after - ago + 1e-9,
+            "\(label): began \(after - animation.beginTime) seconds ago, not \(ago)"
+        )
+    }
+
+    @Test func aPlanThatIsAlreadyUnderWayBeganThatLongAgoAndIsNeverGivenATimeOffset() throws {
         let rig = StageRig()
-        rig.host.show(plan: plan(.walk, from: 0.1, to: 0.9, duration: 10), elapsed: 1.3, coat: .tabby)
-        let animation = try frames(of: rig.host.sprite)
-        #expect(abs(animation.timeOffset - 1.3.truncatingRemainder(dividingBy: CatMove.walk.passDuration)) < 1e-9)
-        #expect(abs(try walk(of: rig.host.sprite).timeOffset - 1.3) < 1e-9)
+        let host = rig.host
+        func show(_ plan: CatPlan, elapsed: TimeInterval) -> (before: CFTimeInterval, after: CFTimeInterval) {
+            let before = host.sprite.convertTime(CACurrentMediaTime(), from: nil)
+            host.show(plan: plan, elapsed: elapsed, coat: .tabby)
+            return (before, host.sprite.convertTime(CACurrentMediaTime(), from: nil))
+        }
+        var (before, after) = show(plan(.walk, from: 0.1, to: 0.9, duration: 10), elapsed: 1.3)
+        expectBegan(try walk(of: host.sprite), ago: 1.3, between: before, and: after, "walk")
+        expectBegan(
+            try frames(of: host.sprite), ago: 1.3.truncatingRemainder(dividingBy: CatMove.walk.passDuration), between: before, and: after, "frames"
+        )
         // One that has run past its end is held at the end rather than asked for a time it does not have.
-        rig.host.show(plan: plan(.walk, from: 0.1, to: 0.9, duration: 4), elapsed: 9, coat: .tabby)
-        #expect(try walk(of: rig.host.sprite).timeOffset == 4)
-        rig.host.show(plan: plan(.yawn), elapsed: 99, coat: .tabby)
-        #expect(try frames(of: rig.host.sprite).timeOffset == CatMove.yawn.passDuration, "a move played once is held on its last frame")
+        (before, after) = show(plan(.walk, from: 0.1, to: 0.9, duration: 4), elapsed: 9)
+        expectBegan(try walk(of: host.sprite), ago: 4, between: before, and: after, "a walk run past its end")
+        (before, after) = show(plan(.yawn), elapsed: 99)
+        expectBegan(try frames(of: host.sprite), ago: CatMove.yawn.passDuration, between: before, and: after, "a move played once is held on its last frame")
+        // The moth is as far along as the cat is.
+        (before, after) = show(plan(.chase, from: 0.1, to: 0.9, duration: 4, prop: CatProp(kind: .moth, from: 0.2, to: 1.2)), elapsed: 0.7)
+        expectBegan(try walk(of: host.prop), ago: 0.7, between: before, and: after, "the moth's path")
+        expectBegan(try frames(of: host.prop), ago: 0.7.truncatingRemainder(dividingBy: PropArt.moth.duration), between: before, and: after, "its wings")
+        let bob = try #require(host.prop.animation(forKey: CatSpriteView.bobKey))
+        expectBegan(bob, ago: 0.7.truncatingRemainder(dividingBy: bob.duration), between: before, and: after, "its bob")
+    }
+
+    @Test func noAnimationOfAnyMoveIsEverGivenATimeOffsetWhateverTheTimeItIsShownAt() throws {
+        let rig = StageRig()
+        let host = rig.host
+        let props: [CatProp?] = [nil, CatProp(kind: .moth, from: 0.2, to: 1.2), CatProp(kind: .yarn, from: 0.4, to: 0.7)]
+        for move in CatMove.allCases {
+            for elapsed in [0.000_02, 0.002, 0.3, 11] {
+                for item in props {
+                    host.show(plan: plan(move, from: 0.2, to: move.advance > 0 ? 0.8 : 0.2, duration: 4, prop: item), elapsed: elapsed, coat: .tabby)
+                    for layer in [host.sprite, host.prop] {
+                        for key in layer.animationKeys() ?? [] {
+                            #expect(layer.animation(forKey: key)?.timeOffset == 0, "\(move) at \(elapsed), \(key)")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     @Test func aNewPlanTakesTheOldAnimationsAwayFirst() throws {
