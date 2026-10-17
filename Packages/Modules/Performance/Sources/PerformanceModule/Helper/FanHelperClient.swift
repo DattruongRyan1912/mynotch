@@ -6,6 +6,49 @@ import Synchronization
 protocol FanHelperClient: Sendable {
     func ping() async throws -> FanHelperInfo
     func readFans() async throws -> [FanHelperFanInfo]
+    /// Asks for at least `rpm` while Apple's control stays on. The helper holds it for a lease of 15 s.
+    func setFloor(fan: Int, rpm: Double) async throws -> FanCommandResult
+    /// Takes a fan to a manual speed (unless Apple's own is higher). A lease of 15 s, renewed by sending it again.
+    func setForced(fan: Int, rpm: Double) async throws -> FanCommandResult
+    /// Gives one fan, or with `FanCommandResult.allFans` every fan, back to Apple.
+    func setAuto(fan: Int) async throws -> FanCommandResult
+}
+
+/// What the helper answered to a command that sets a fan.
+nonisolated struct FanCommandResult: Equatable, Sendable {
+    enum State: Equatable, Sendable {
+        case automatic, floor, forced
+    }
+
+    static let allFans = FanHelperResult.allFans
+
+    let ok: Bool
+    let state: State
+    /// What the helper wrote as the target; nil when it wrote none.
+    let appliedRPM: Double?
+    /// The helper's own short English line: why a request was clamped, refused or turned into automatic.
+    let detail: String
+    let leaseSeconds: Double
+
+    init(ok: Bool, state: State, appliedRPM: Double? = nil, detail: String = "", leaseSeconds: Double = 0) {
+        self.ok = ok
+        self.state = state
+        self.appliedRPM = appliedRPM
+        self.detail = detail
+        self.leaseSeconds = leaseSeconds
+    }
+
+    init(_ result: FanHelperResult) {
+        let state: State = switch result.state {
+        case .floor?: .floor
+        case .forced?: .forced
+        default: .automatic
+        }
+        self.init(
+            ok: result.ok, state: state, appliedRPM: result.appliedRPM >= 0 ? result.appliedRPM : nil, detail: result.detail,
+            leaseSeconds: result.leaseSeconds
+        )
+    }
 }
 
 /// Waits for one answer from a call that can answer in three ways at once: a reply, an error handler and a timeout. The first
@@ -71,6 +114,18 @@ final class XPCFanHelperClient: FanHelperClient {
                 }
             }
         }
+    }
+
+    func setFloor(fan: Int, rpm: Double) async throws -> FanCommandResult {
+        try await call { proxy, reply in proxy.setFloor(fan: fan, rpm: rpm) { reply(.success(FanCommandResult($0))) } }
+    }
+
+    func setForced(fan: Int, rpm: Double) async throws -> FanCommandResult {
+        try await call { proxy, reply in proxy.setForced(fan: fan, rpm: rpm) { reply(.success(FanCommandResult($0))) } }
+    }
+
+    func setAuto(fan: Int) async throws -> FanCommandResult {
+        try await call { proxy, reply in proxy.setAuto(fan: fan) { reply(.success(FanCommandResult($0))) } }
     }
 
     private func call<T: Sendable>(

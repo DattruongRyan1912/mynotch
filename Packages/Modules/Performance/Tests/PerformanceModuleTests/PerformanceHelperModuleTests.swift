@@ -84,7 +84,7 @@ import Testing
             let rig = make()
             await rig.manager.refresh()
             let view = PerformanceSettingsView(
-                stripTemperature: .constant(false), stripMemory: .constant(true), helper: rig.manager, readAppFans: { [] }
+                stripTemperature: .constant(false), stripMemory: .constant(true), helper: rig.manager, probe: .constant(.never), readAppFans: { [] }
             )
             let size = NSHostingView(rootView: Form { view }.formStyle(.grouped).frame(width: 480)).fittingSize
             #expect(size.height > 100, "\(name)")

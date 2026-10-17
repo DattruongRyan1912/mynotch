@@ -48,11 +48,20 @@ final class FakeFanHelperRegistration: FanHelperRegistering {
 
 /// A helper that answers what the test queued; the last answer repeats.
 nonisolated final class FakeFanHelperClient: FanHelperClient, Sendable {
+    enum Command: Equatable {
+        case floor(Int, Double)
+        case forced(Int, Double)
+        case auto(Int)
+    }
+
     struct State {
         var pings: [Result<FanHelperInfo, FanHelperError>]
         var fans: Result<[FanHelperFanInfo], FanHelperError> = .success([])
         var pingCount = 0
         var readCount = 0
+        var commands: [Command] = []
+        /// What a setting command answers; by default it does what it was asked.
+        var commandAnswer: (@Sendable (Command) -> Result<FanCommandResult, FanHelperError>)?
     }
 
     private let state: Mutex<State>
@@ -64,7 +73,25 @@ nonisolated final class FakeFanHelperClient: FanHelperClient, Sendable {
     var pingCount: Int { state.withLock { $0.pingCount } }
     var readCount: Int { state.withLock { $0.readCount } }
 
+    var commands: [Command] { state.withLock { $0.commands } }
+
     func answerFans(_ fans: Result<[FanHelperFanInfo], FanHelperError>) { state.withLock { $0.fans = fans } }
+
+    func answerCommands(_ answer: @escaping @Sendable (Command) -> Result<FanCommandResult, FanHelperError>) {
+        state.withLock { $0.commandAnswer = answer }
+    }
+
+    private func record(_ command: Command, as state: FanCommandResult.State) throws -> FanCommandResult {
+        try self.state.withLock { held -> Result<FanCommandResult, FanHelperError> in
+            held.commands.append(command)
+            if let answer = held.commandAnswer { return answer(command) }
+            return .success(FanCommandResult(ok: true, state: state, appliedRPM: nil, leaseSeconds: state == .automatic ? 0 : 15))
+        }.get()
+    }
+
+    func setFloor(fan: Int, rpm: Double) async throws -> FanCommandResult { try record(.floor(fan, rpm), as: .floor) }
+    func setForced(fan: Int, rpm: Double) async throws -> FanCommandResult { try record(.forced(fan, rpm), as: .forced) }
+    func setAuto(fan: Int) async throws -> FanCommandResult { try record(.auto(fan), as: .automatic) }
 
     func ping() async throws -> FanHelperInfo {
         let result = state.withLock { state -> Result<FanHelperInfo, FanHelperError> in

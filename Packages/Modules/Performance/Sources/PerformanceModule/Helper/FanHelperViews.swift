@@ -208,3 +208,41 @@ struct FanHelperSettingsRows: View {
         }
     }
 }
+
+/// The probe of how the fans can be set: the button (only while the helper runs and Macs Fan Control does not), what it is about to do,
+/// and what it found.
+struct FanProbeRows: View {
+    let helper: FanHelperManager
+    @Binding var outcome: FanProbeOutcome
+    @State private var isConfirming = false
+
+    var body: some View {
+        Group {
+            Button(FanProbePresentation.buttonTitle) { isConfirming = true }
+                .disabled(!helper.canProbe)
+            if let step = helper.probeStep {
+                Text("Đang thử: \(step)…").font(.caption).foregroundStyle(.secondary)
+            }
+            if !helper.canProbe, helper.probeStep == nil {
+                Text(unavailableReason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(FanProbePresentation.verdict(outcome)).font(.caption)
+            ForEach(FanProbePresentation.lines(outcome), id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
+        }
+        .confirmationDialog(FanProbePresentation.confirmationTitle, isPresented: $isConfirming, titleVisibility: .visible) {
+            Button(FanProbePresentation.confirmButton) {
+                Task { if let found = await helper.runProbe() { outcome = found } }
+            }
+            Button("Huỷ", role: .cancel) {}
+        } message: {
+            Text(FanProbePresentation.confirmationMessage)
+        }
+    }
+
+    private var unavailableReason: String {
+        if helper.macsFanControlRunning { return FanHelperPresentation.macsFanControlWarning + "." }
+        return "Cần cài và cho phép helper trước."
+    }
+}

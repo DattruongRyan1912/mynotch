@@ -19,6 +19,8 @@ final class FanHelperManager {
     private(set) var phase: FanHelperPhase = .unknown
     private(set) var macsFanControlRunning = false
     private(set) var comparison: FanComparison?
+    /// What the probe is doing, nil when it is not running.
+    private(set) var probeStep: String?
 
     @ObservationIgnored private let registration: any FanHelperRegistering
     @ObservationIgnored private let client: any FanHelperClient
@@ -45,6 +47,12 @@ final class FanHelperManager {
     var isBusy: Bool {
         if case .busy = phase { return true }
         return false
+    }
+
+    /// Whether the probe may be started: the helper runs, Macs Fan Control does not, and nothing else is going on.
+    var canProbe: Bool {
+        guard case .running = phase else { return false }
+        return !macsFanControlRunning && probeStep == nil
     }
 
     var presentation: FanHelperPresentation {
@@ -88,10 +96,26 @@ final class FanHelperManager {
         if phase == .notInstalled { set(.failed(Self.notAccepted)) }
     }
 
+    /// Gives every fan back to Apple, if the helper is there to do it. Never throws: it is what is done on the way out.
+    func giveFansBack() async {
+        if case .running = phase { _ = try? await client.setAuto(fan: FanCommandResult.allFans) }
+    }
+
+    /// The ten-second probe of how the fans can be set. Only while the helper runs and Macs Fan Control does not; nil when not allowed.
+    func runProbe() async -> FanProbeOutcome? {
+        refreshMacsFanControl()
+        guard canProbe else { return nil }
+        probeStep = "Bắt đầu"
+        defer { probeStep = nil }
+        return await FanControlProbe(client: client, pause: pause).run { probeStep = $0 }
+    }
+
     /// "Gỡ helper".
     func uninstall() async {
         guard !isBusy else { return }
         comparison = nil
+        // The fans go back to Apple before the helper is taken away.
+        await giveFansBack()
         // Nothing registered, nothing to remove: asking macOS to would only make it say so as an error.
         guard registration.status != .notRegistered, registration.status != .notFound else {
             set(.notInstalled)

@@ -467,3 +467,85 @@ import Testing
         #expect(FanHelperManager.describe(NSError(domain: NSCocoaErrorDomain, code: 4097)) == "không có helper nào trả lời")
     }
 }
+
+/// The probe's gate and the way out: what the manager allows, and what it does to the fans on the way out.
+@Suite struct FanHelperManagerProbeTests {
+    @Test func theProbeIsOnlyAllowedWhileTheHelperRunsAndMacsFanControlDoesNot() async {
+        let running = HelperRig(status: .enabled)
+        await running.manager.refresh()
+        #expect(running.manager.canProbe)
+
+        let withMacsFanControl = HelperRig(status: .enabled, runningApps: [FanHelperManager.macsFanControlBundleID])
+        await withMacsFanControl.manager.refresh()
+        #expect(withMacsFanControl.manager.canProbe == false)
+
+        for status in [FanHelperRegistrationStatus.notRegistered, .notFound, .requiresApproval] {
+            let rig = HelperRig(status: status)
+            await rig.manager.refresh()
+            #expect(rig.manager.canProbe == false, "\(status)")
+        }
+        let unreachable = HelperRig(status: .enabled, pings: [.failure(.timeout)])
+        await unreachable.manager.refresh()
+        #expect(unreachable.manager.canProbe == false)
+    }
+
+    @Test func aProbeThatIsNotAllowedSendsNothing() async {
+        let rig = HelperRig(status: .enabled, runningApps: [FanHelperManager.macsFanControlBundleID])
+        await rig.manager.refresh()
+        #expect(await rig.manager.runProbe() == nil)
+        #expect(rig.client.commands.isEmpty && rig.client.readCount == 0)
+    }
+
+    @Test func aProbeThatRunsReportsItsStepsAndClearsThemAndEndsWithEveryFanBack() async {
+        let rig = HelperRig(status: .enabled)
+        await rig.manager.refresh()
+        rig.client.answerFans(.success(FanHelperFanInfo.both))
+        let outcome = await rig.manager.runProbe()
+        #expect(outcome != nil)
+        #expect(rig.manager.probeStep == nil, "nothing is running any more")
+        #expect(rig.client.commands.last == .auto(-1))
+    }
+
+    @Test func aMacsFanControlThatStartedAfterTheLastLookStopsTheProbe() async {
+        let apps = AppsBox()
+        let registration = FakeFanHelperRegistration(status: .enabled)
+        let client = FakeFanHelperClient()
+        let manager = FanHelperManager(
+            registration: registration, client: client, bundled: { .matching }, runningApps: { apps.value }, pause: { _ in }
+        )
+        await manager.refresh()
+        apps.value = [FanHelperManager.macsFanControlBundleID]
+        #expect(await manager.runProbe() == nil)
+        #expect(client.commands.isEmpty)
+    }
+
+    @Test func removingTheHelperGivesTheFansBackBeforeUnregistering() async {
+        let rig = HelperRig(status: .enabled)
+        await rig.manager.refresh()
+        await rig.manager.uninstall()
+        #expect(rig.client.commands == [.auto(-1)])
+        #expect(rig.registration.calls == [.unregister])
+    }
+
+    @Test func removingAHelperThatIsNotRunningAsksItForNothing() async {
+        let rig = HelperRig(status: .requiresApproval)
+        await rig.manager.refresh()
+        await rig.manager.uninstall()
+        #expect(rig.client.commands.isEmpty)
+    }
+
+    @Test func giveFansBackOnlyTalksToAHelperThatRuns() async {
+        let rig = HelperRig(status: .enabled, pings: [.failure(.timeout)])
+        await rig.manager.refresh()
+        await rig.manager.giveFansBack()
+        #expect(rig.client.commands.isEmpty)
+        let running = HelperRig(status: .enabled)
+        await running.manager.refresh()
+        await running.manager.giveFansBack()
+        #expect(running.client.commands == [.auto(-1)])
+    }
+
+    final class AppsBox {
+        var value: Set<String> = []
+    }
+}

@@ -7,10 +7,13 @@ struct PerformanceSettingsKeys {
     let stripTemperature: SettingKey<Bool>
     /// The share of memory in use, in the same strip.
     let stripMemory: SettingKey<Bool>
+    /// What the last probe of the fans found, to choose the way the curve sets them.
+    let fanProbe: SettingKey<FanProbeOutcome>
 
     init(_ settings: ModuleSettings) {
         stripTemperature = settings.key("stripTemperature", default: false)
         stripMemory = settings.key("stripMemory", default: false)
+        fanProbe = settings.key("fanProbe", default: FanProbeOutcome.never)
     }
 }
 
@@ -19,6 +22,7 @@ struct PerformanceSettingsView: View {
     @Binding var stripTemperature: Bool
     @Binding var stripMemory: Bool
     let helper: FanHelperManager
+    @Binding var probe: FanProbeOutcome
     let readAppFans: () async -> [FanReading]
 
     var body: some View {
@@ -29,6 +33,7 @@ struct PerformanceSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             FanHelperSettingsRows(helper: helper, readAppFans: readAppFans)
+            FanProbeRows(helper: helper, outcome: $probe)
         }
     }
 }

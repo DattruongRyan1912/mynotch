@@ -124,6 +124,7 @@ public final class PerformanceModule: FeatureModule {
             stripTemperature: environment.settings.binding(keys.stripTemperature),
             stripMemory: environment.settings.binding(keys.stripMemory),
             helper: helper,
+            probe: environment.settings.binding(keys.fanProbe),
             readAppFans: { await thermal.read()?.fans ?? [] }
         ))
     }
