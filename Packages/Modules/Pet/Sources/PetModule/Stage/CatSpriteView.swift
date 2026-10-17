@@ -27,6 +27,13 @@ final class CatSpriteView: NSView {
     static let mothBob: [CGFloat] = [0, 3, 5, 4, 1, -1, 2, 4, 3, 0]
 
     private(set) weak var stage: CatStage?
+    /// Which leg of its walk the cat is on, and the prop on: a leg that says it is over when another has taken its place is not heard.
+    private var spriteLeg = 0
+    private var propLeg = 0
+    /// Where the cat will stand when its leg is over, and the prop: what the next leg goes on from. Not the layer's own value, which is where
+    /// the leg began until it says it is over.
+    private var spriteStands: CGFloat?
+    private var propStands: CGFloat?
     /// The cat. Anchored at its bottom left corner, so its position is the place of its left foot.
     let sprite = CALayer()
     /// The moth or the ball of yarn.
@@ -115,12 +122,13 @@ final class CatSpriteView: NSView {
 
     // MARK: Showing
 
-    /// How far the model's place may be from where a plan says it begins for the plan to go on from the model's: a leg of a walk ends on a
-    /// whole step, a few points from where the share of the lane rounds to.
-    static let continuityLimit: CGFloat = 8
+    /// How far the place a leg ended may be from where the next plan says it begins for the plan to go on from where the leg ended: a leg of
+    /// a walk ends on a whole step, up to half a step from where the share of the lane rounds to.
+    static let continuityLimit: CGFloat = 4
 
-    /// Where a leg that begins at `place` really begins: where the layer already is, if that is the same place within a step (so that one
-    /// leg begins exactly where the last one ended, and the cat never jumps a few points), and `place` if the layer is elsewhere or not shown.
+    /// Where a leg that begins at `place` really begins: where the last leg ended, if that is the same place within half a step (so that one
+    /// leg begins exactly where the last one ended, and the cat never jumps a few points), and `place` if the cat is elsewhere (a leg that was
+    /// cut short) or was not shown.
     static func continued(from current: CGFloat?, near place: CGFloat) -> CGFloat {
         guard let current, abs(current - place) <= continuityLimit else { return place }
         return current
@@ -128,47 +136,63 @@ final class CatSpriteView: NSView {
 
     /// Plays `plan` along the lane from `elapsed` seconds into it, in the coat given.
     ///
-    /// What the layer holds when nothing animates it is set first, and is where the leg ends; every animation holds its own first value
-    /// from the moment it is added (`.both`), because the render server may draw the first frame from a moment that is before the
-    /// animation's begin time, and that frame shows the layer's own value: which, for a leg back across the strip, is the other end of it.
+    /// **The layer itself is where the cat stands, never where it is going.** A leg is an animation of the layer's position, and until the
+    /// render server is drawing that animation (which on a real screen can be a few frames after the commit: it is not for a layer that
+    /// is drawn at a low rate, and nothing here can tell) the layer's own value is what is on the screen. So the layer is set to where the
+    /// leg begins, together with the animation that takes it away, and it is moved to where the leg ends only when the animation says it
+    /// is over (`LegEnd`); the animation, which holds its last place (`.forwards`) and its first until it begins (`.backwards`), shows the
+    /// rest. It begins at the time it is added, and not at the commit, which can be later.
     func show(plan: CatPlan, elapsed: TimeInterval, coat: CatCoat) {
         let lane = lane
         let strip = CatSheets.shared.strip(for: plan.move, facing: plan.facing, coat: coat)
         let rate = max(plan.fpsScale, 0.1)
         let effectiveFPS = plan.move.fps * rate
-        let from = Self.continued(from: sprite.isHidden ? nil : sprite.position.x, near: lane.x(at: plan.from).rounded())
+        let from = Self.continued(from: sprite.isHidden ? nil : spriteStands, near: lane.x(at: plan.from).rounded())
         // A cat that stays where it is stays where it is, on whatever whole step the last leg ended.
         let to = plan.to == plan.from ? from : lane.x(at: plan.to).rounded()
         let base = plan.move == .peek ? Self.floor - Self.peekSink : Self.floor
+        let begin = sprite.convertTime(CACurrentMediaTime(), from: nil)
+        spriteLeg += 1
+        let leg = spriteLeg
         var walk: CAKeyframeAnimation?
         if from != to {
             let moving = max(plan.duration * (1 - plan.delay), 0.05)
             let step = max((abs(to - from) / (moving * effectiveFPS)).rounded(), 1)
-            walk = Self.walkAnimation(
+            let animation = Self.walkAnimation(
                 from: from, to: to, step: step, duration: plan.duration, delay: plan.delay, elapsed: elapsed, rate: effectiveFPS
             )
+            animation.beginTime = begin
+            let ends = Self.lastValue(of: animation)
+            animation.delegate = LegEnd { [weak self] in self?.arrived(at: ends, leg: leg, onTheCat: true) }
+            walk = animation
         }
+        spriteStands = walk.map(Self.lastValue(of:)) ?? from
         let frames = Self.framesAnimation(strip: strip, fps: effectiveFPS, loops: plan.move.loops, elapsed: elapsed)
+        frames.beginTime = begin
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         prepare(sprite, strip: strip, size: Self.spriteSize)
         sprite.removeAllAnimations()
-        sprite.position = CGPoint(x: walk.map(Self.lastValue(of:)) ?? from, y: base)
+        sprite.position = CGPoint(x: from, y: base)
         sprite.add(frames, forKey: Self.framesKey)
         if let walk { sprite.add(walk, forKey: Self.walkKey) }
-        showProp(of: plan, lane: lane, elapsed: elapsed)
+        showProp(of: plan, lane: lane, elapsed: elapsed, begin: begin)
         CATransaction.commit()
     }
 
-    /// What the cat plays with: a moth that flutters along a path of its own, or a ball of yarn that lies or rolls.
-    private func showProp(of plan: CatPlan, lane: WalkLane, elapsed: TimeInterval) {
-        let current = prop.isHidden ? nil : prop.position.x
+    /// What the cat plays with: a moth that flutters along a path of its own, or a ball of yarn that lies or rolls. Like the cat, it is
+    /// where it begins until its path says it is going.
+    private func showProp(of plan: CatPlan, lane: WalkLane, elapsed: TimeInterval, begin: CFTimeInterval) {
+        let current = prop.isHidden ? nil : propStands
         prop.removeAllAnimations()
+        propLeg += 1
         guard let item = plan.prop else {
             prop.isHidden = true
+            propStands = nil
             return
         }
+        let leg = propLeg
         let strip = CatSheets.shared.propStrip(item.kind)
         let size = CGSize(width: strip.frameWidth, height: strip.frameHeight)
         prepare(prop, strip: strip, size: size)
@@ -178,19 +202,51 @@ final class CatSpriteView: NSView {
         var path: CAKeyframeAnimation?
         if from != to {
             let step = max((abs(to - from) / (plan.duration * 12)).rounded(), 1)
-            path = Self.walkAnimation(from: from, to: to, step: step, duration: plan.duration, delay: 0, elapsed: elapsed, rate: 12)
+            let animation = Self.walkAnimation(from: from, to: to, step: step, duration: plan.duration, delay: 0, elapsed: elapsed, rate: 12)
+            animation.beginTime = begin
+            let ends = Self.lastValue(of: animation)
+            animation.delegate = LegEnd { [weak self] in self?.arrived(at: ends, leg: leg, onTheCat: false) }
+            path = animation
         }
-        // Where it stops is where the next plan of the scene finds it.
-        prop.position = CGPoint(x: path.map(Self.lastValue(of:)) ?? from, y: height)
+        prop.position = CGPoint(x: from, y: height)
+        propStands = path.map(Self.lastValue(of:)) ?? from
+        func timed(_ animation: CAKeyframeAnimation) -> CAKeyframeAnimation {
+            animation.beginTime = begin
+            return animation
+        }
         switch item.kind {
         case .moth:
-            prop.add(Self.framesAnimation(strip: strip, fps: PropArt.moth.fps, loops: true, elapsed: elapsed), forKey: Self.framesKey)
+            prop.add(timed(Self.framesAnimation(strip: strip, fps: PropArt.moth.fps, loops: true, elapsed: elapsed)), forKey: Self.framesKey)
             if let path { prop.add(path, forKey: Self.walkKey) }
-            prop.add(Self.bobAnimation(base: height, elapsed: elapsed), forKey: Self.bobKey)
+            prop.add(timed(Self.bobAnimation(base: height, elapsed: elapsed)), forKey: Self.bobKey)
         case .yarn:
             guard let path else { return }
-            prop.add(Self.framesAnimation(strip: strip, fps: PropArt.yarn.fps, loops: true, elapsed: elapsed), forKey: Self.framesKey)
+            prop.add(timed(Self.framesAnimation(strip: strip, fps: PropArt.yarn.fps, loops: true, elapsed: elapsed)), forKey: Self.framesKey)
             prop.add(path, forKey: Self.walkKey)
+        }
+    }
+
+    /// The cat's leg (or the prop's) is over, and the animation is holding its last place: the layer is moved there too, so that whatever
+    /// shows the layer without the animation shows where the cat stands, and the next leg begins there. A leg that has been replaced by
+    /// another is not the one to say so.
+    func arrived(at x: CGFloat, leg: Int, onTheCat: Bool) {
+        let layer = onTheCat ? sprite : prop
+        guard leg == (onTheCat ? spriteLeg : propLeg), !layer.isHidden else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.position = CGPoint(x: x, y: layer.position.y)
+        CATransaction.commit()
+    }
+
+    /// Tells a view when an animation of its position is over, which the animation's delegate does when it ran to its end.
+    private final class LegEnd: NSObject, CAAnimationDelegate {
+        private let handler: @MainActor () -> Void
+
+        init(_ handler: @escaping @MainActor () -> Void) { self.handler = handler }
+
+        nonisolated func animationDidStop(_ animation: CAAnimation, finished: Bool) {
+            guard finished else { return }
+            MainActor.assumeIsolated { handler() }
         }
     }
 
@@ -200,6 +256,10 @@ final class CatSpriteView: NSView {
         let strip = CatSheets.shared.restingStrip(coat: coat)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        spriteLeg += 1
+        propLeg += 1
+        spriteStands = nil
+        propStands = nil
         prepare(sprite, strip: strip, size: Self.spriteSize)
         sprite.removeAllAnimations()
         sprite.add(Self.restingBlink(strip: strip), forKey: Self.framesKey)
@@ -211,6 +271,10 @@ final class CatSpriteView: NSView {
 
     /// Takes the cat and every animation away: what a view does when it has nobody to show the cat to.
     func stopShowing() {
+        spriteLeg += 1
+        propLeg += 1
+        spriteStands = nil
+        propStands = nil
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         sprite.removeAllAnimations()

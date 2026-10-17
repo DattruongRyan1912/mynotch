@@ -1,5 +1,6 @@
 import AppKit
 import MyNotchCore
+import Testing
 import MyNotchTestSupport
 @testable import PetModule
 
@@ -141,4 +142,11 @@ final class Knobs {
 /// A scheduler for a stage that is never woken.
 enum ManualSchedulerStub {
     static func make() -> ManualScheduler { ManualScheduler() }
+}
+
+/// What the render server does when a leg runs to its end: the animation's delegate is told.
+@MainActor func arrive(_ layer: CALayer) throws {
+    let walk = try #require(layer.animation(forKey: CatSpriteView.walkKey) as? CAKeyframeAnimation)
+    let delegate = try #require(walk.delegate)
+    delegate.animationDidStop?(walk, finished: true)
 }

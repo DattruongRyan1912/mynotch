@@ -166,7 +166,14 @@ import Testing
                 let startX = (walk?.values as? [NSNumber])?.first.map { CGFloat($0.doubleValue) } ?? host.sprite.position.x
                 // Where the cat was when the plan began: the plan before it, at that moment, on the lane.
                 let wasAt = host.lane.x(at: before.position(at: plan.began))
-                #expect(abs(startX - wasAt) <= 7, "seed \(seed): a \(plan.move) begins at \(startX), where a \(before.move) had the cat at \(wasAt)")
+                #expect(abs(startX - wasAt) <= 4, "seed \(seed): a \(plan.move) begins at \(startX), where a \(before.move) had the cat at \(wasAt)")
+                // The layer's own value is what the screen shows of a layer that its animation is not drawing: it is where the cat was, and
+                // never where the leg is going, for as long as the animation has not taken over.
+                #expect(host.sprite.position.x == startX, "seed \(seed): the layer is at \(host.sprite.position.x) and the leg begins at \(startX)")
+                if let prop = plan.prop, let path = host.prop.animation(forKey: CatSpriteView.walkKey) as? CAKeyframeAnimation {
+                    let first = (path.values as? [NSNumber])?.first.map { CGFloat($0.doubleValue) }
+                    #expect(host.prop.position.x == first, "seed \(seed): the \(prop.kind) lies at the start of its path")
+                }
             }
         }
         #expect(legs > 300)

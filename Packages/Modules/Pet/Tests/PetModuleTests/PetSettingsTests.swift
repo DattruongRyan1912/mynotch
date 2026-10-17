@@ -104,13 +104,17 @@ import Testing
     @Test func theProcessorLoadIsNothingTheFirstTimeAndAShareOfOneAfter() async throws {
         let sensor = HostCPULoad()
         #expect(sensor.load() == nil, "a first read has nothing to compare with")
-        // Some work for the counters to count.
+        // Some work for the counters to count; the kernel's tick counters are not updated at every instant, so a read that finds nothing
+        // new says nil and is asked again.
         var sum = 0.0
         for index in 0..<2_000_000 { sum += Double(index).squareRoot() }
         #expect(sum > 0)
-        try await Task.sleep(for: .milliseconds(150))
-        let load = try #require(sensor.load())
-        #expect((0.0...1.0).contains(load))
+        var load: Double?
+        for _ in 0..<40 where load == nil {
+            try await Task.sleep(for: .milliseconds(100))
+            load = sensor.load()
+        }
+        #expect((0.0...1.0).contains(try #require(load)))
     }
 
     @Test func theIdleTimeIsSomeNumberOfSecondsAndNeverNegative() {

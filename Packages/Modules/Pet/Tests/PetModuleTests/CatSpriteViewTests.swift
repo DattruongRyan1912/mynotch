@@ -110,6 +110,9 @@ import Testing
         for place in stops { #expect(place == place.rounded()) }
         #expect(stops.first == lane.x(at: 0.1).rounded())
         #expect(abs((stops.last ?? 0) - lane.x(at: 0.9)) <= 1.5)
+        // The layer is where the cat stands until the leg says it is over.
+        #expect(host.sprite.position.x == stops.first)
+        try arrive(host.sprite)
         #expect(host.sprite.position.x == stops.last)
         #expect(animation.fillMode == .both && !animation.isRemovedOnCompletion, "held on its first place until it begins and on its last")
         #expect(Set(host.sprite.animationKeys() ?? []) == [CatSpriteView.framesKey, CatSpriteView.walkKey])
@@ -140,18 +143,20 @@ import Testing
         let endedAt = try #require(stops.last)
         let shareX = host.lane.x(at: 0.9).rounded()
         #expect(endedAt != shareX, "the end of a leg is not where the share rounds to: \(endedAt) and \(shareX)")
-        #expect(host.sprite.position.x == endedAt, "the layer holds where the leg ends")
 
+        // The leg has not said it is over (a render server that is a little late): the next one begins at its end all the same.
         host.show(plan: plan(.walk, from: 0.9, to: 0.2, duration: 3, facing: .left), elapsed: 0, coat: .tabby)
         #expect(places(try walk(of: host.sprite)).first == endedAt, "the next leg starts there, and not a point from it")
+        #expect(host.sprite.position.x == endedAt, "and the layer is there until the leg is away")
     }
 
     @Test func aCatThatStaysWhereItEndedStaysThereToTheOnePoint() throws {
         let rig = StageRig()
         let host = rig.host
         host.show(plan: plan(.walk, from: 0.1, to: 0.9, duration: 3.4), elapsed: 0, coat: .tabby)
-        let endedAt = host.sprite.position.x
+        let endedAt = try #require(places(try walk(of: host.sprite)).last)
         #expect(endedAt != host.lane.x(at: 0.9).rounded())
+        try arrive(host.sprite)
         host.show(plan: plan(.sit, from: 0.9), elapsed: 0, coat: .tabby)
         #expect(host.sprite.position.x == endedAt)
         #expect(host.sprite.animationKeys() == [CatSpriteView.framesKey], "and does not walk the few points to the share's place")
@@ -192,9 +197,56 @@ import Testing
                 #expect((layer.animation(forKey: key)?.fillMode == .both), "\(key) holds its first value until it begins and its last when it is over")
             }
         }
-        // And the layer itself is where the leg ends, so that an animation that is dropped leaves the cat where it was going.
-        #expect(host.sprite.position.x == places(try walk(of: host.sprite)).last)
-        #expect(host.prop.position.x == places(try walk(of: host.prop)).last)
+    }
+
+    @Test func theLayerIsWhereTheCatStandsAndNeverWhereItIsGoingWhileTheAnimationHasNotTakenOver() throws {
+        let rig = StageRig()
+        let host = rig.host
+        let lane = host.lane
+        host.show(
+            plan: plan(.chase, from: 0.1, to: 0.9, duration: 4, prop: CatProp(kind: .moth, from: 0.2, to: 1.2)), elapsed: 0, coat: .tabby
+        )
+        // What the screen shows of a layer that its animation is not (yet) drawing: the layer's own value.
+        let (cat, moth) = (try walk(of: host.sprite), try walk(of: host.prop))
+        host.sprite.removeAllAnimations()
+        host.prop.removeAllAnimations()
+        #expect(host.sprite.position.x == places(cat).first, "the cat at the start of its leg, not at its end \(places(cat).last ?? 0)")
+        #expect(host.sprite.position.x < lane.x(at: 0.2))
+        #expect(host.prop.position.x == places(moth).first, "and the moth at the start of its path")
+        #expect(host.prop.position.x < lane.x(at: 0.4))
+    }
+
+    @Test func aLegIsBegunAtTheTimeItIsAddedAndNotAtTheCommit() throws {
+        let rig = StageRig()
+        let host = rig.host
+        let before = host.sprite.convertTime(CACurrentMediaTime(), from: nil)
+        host.show(plan: plan(.walk, from: 0.1, to: 0.9, duration: 6), elapsed: 0, coat: .tabby)
+        let after = host.sprite.convertTime(CACurrentMediaTime(), from: nil)
+        for key in [CatSpriteView.framesKey, CatSpriteView.walkKey] {
+            let begin = try #require(host.sprite.animation(forKey: key)?.beginTime)
+            #expect(begin >= before && begin <= after, "\(key) begins now, never at a time that is yet to come: \(begin - after)")
+        }
+    }
+
+    @Test func aLegThatIsOverMovesTheLayerToItsEndOnlyIfItIsStillTheLegOnShow() throws {
+        let rig = StageRig()
+        let host = rig.host
+        host.show(plan: plan(.walk, from: 0.1, to: 0.9, duration: 8), elapsed: 0, coat: .tabby)
+        let first = try walk(of: host.sprite)
+        let firstEnd = try #require(places(first).last)
+        // Another leg takes its place before it is over, and then the first one is heard to say that it is: it is not the one to say so.
+        host.show(plan: plan(.walk, from: 0.5, to: 0.2, duration: 8, facing: .left), elapsed: 0, coat: .tabby)
+        let place = host.sprite.position.x
+        first.delegate?.animationDidStop?(first, finished: true)
+        #expect(host.sprite.position.x == place, "the layer was not moved to \(firstEnd) by a leg that had been replaced")
+        // A leg that was removed rather than run to its end does not say it is over either.
+        let second = try walk(of: host.sprite)
+        second.delegate?.animationDidStop?(second, finished: false)
+        #expect(host.sprite.position.x == place)
+        // And one that is heard when the view has stopped showing the cat does nothing.
+        host.stopShowing()
+        second.delegate?.animationDidStop?(second, finished: true)
+        #expect(host.sprite.isHidden)
     }
 
     @Test func aWalkToTheLeftStepsTheOtherWayAndIsPlayedFromTheMirrorImage() throws {
@@ -296,7 +348,9 @@ import Testing
         let stops = places(try walk(of: host.prop))
         #expect(stops.first == lane.unboundedX(at: 0.5).rounded())
         #expect(abs((stops.last ?? 0) - lane.unboundedX(at: 0.62)) <= 2)
-        #expect(host.prop.position.x == stops.last, "it stays where it stopped")
+        #expect(host.prop.position.x == stops.first, "it is where it lay until it has rolled")
+        try arrive(host.prop)
+        #expect(host.prop.position.x == stops.last, "and where it stopped once it has")
     }
 
     @Test func aPlanWithNothingToPlayWithHidesWhatWasThere() {

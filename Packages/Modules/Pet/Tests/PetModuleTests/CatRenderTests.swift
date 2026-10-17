@@ -276,11 +276,22 @@ import Testing
         }
     }
 
-    /// The cat runs the length of the lane, and runs back: every moment from just before the second leg begins to its end, as the render
-    /// server may draw it. The first frame of a leg is drawn from a moment that can be before the animation's own begin time, and then
-    /// shows what the layer holds when nothing animates it: so a leg must hold its first place then, and not the place it is going to, or
-    /// the cat is seen for one frame at the other end of the strip.
-    @Test(arguments: [true, false]) func aTurnAtTheEndOfTheLaneNeverShowsTheCatAtTheOtherEndFirst(atTheRightEnd: Bool) throws {
+    /// How the render server may treat the animations of a leg that has just been added.
+    enum Delay: CaseIterable {
+        /// Begins at once, as it should.
+        case none
+        /// Begins a quarter of a second after it is added: a begin time that is yet to come.
+        case late
+        /// Is not on the layer at all for a quarter of a second, and then is: what a screen that draws a layer only now and then, and an
+        /// animation that is only now taken up, make of it, as far as the layer can tell.
+        case absent
+    }
+
+    /// The cat runs the length of the lane, and runs back: every moment from before the second leg begins to its end, as the render
+    /// server may draw it. The first frames of a leg can be drawn before its animation is: then what is shown of the layer is its own value,
+    /// which must be where the cat stands, and not where it is going, or the cat is seen at the other end of the strip until the animation
+    /// takes over, which on a screen can be for a few frames (the cat was seen to flash at the opposite edge for 66 to 230 ms).
+    @Test(arguments: [true, false], Delay.allCases) func aTurnAtTheEndOfTheLaneNeverShowsTheCatAtTheOtherEndFirst(atTheRightEnd: Bool, delay: Delay) throws {
         let stage = CatStage(scheduler: ManualSchedulerStub.make())
         let host = CatSpriteView(stage: stage)
         host.frame = CGRect(x: 0, y: 0, width: 300, height: 26)
@@ -290,6 +301,7 @@ import Testing
         let outward = CatPlan(move: .frantic, facing: atTheRightEnd ? .right : .left, from: start, to: end, began: 0, duration: distance / CatMove.frantic.speed)
         // The first leg has been run: the cat is at the end of the lane and stays there.
         host.show(plan: outward, elapsed: outward.duration, coat: .tabby)
+        try arrive(host.sprite)
         let root = CALayer()
         root.bounds = CGRect(x: 0, y: 0, width: 300, height: 26)
         root.anchorPoint = .zero
@@ -300,15 +312,41 @@ import Testing
 
         // And the second leg: back the way it came.
         let back = CatPlan(move: .frantic, facing: atTheRightEnd ? .left : .right, from: end, to: start, began: 0, duration: outward.duration)
+        let now = host.sprite.convertTime(CACurrentMediaTime(), from: nil)
         host.show(plan: back, elapsed: 0, coat: .tabby)
-        let begin = host.sprite.convertTime(CACurrentMediaTime(), from: nil)
-        pin(host.sprite, at: begin)
+        var animations: [(String, CAAnimation)] = []
+        for key in host.sprite.animationKeys() ?? [] {
+            if let added = host.sprite.animation(forKey: key) { animations.append((key, added)) }
+        }
+        let begin: CFTimeInterval
+        switch delay {
+        case .none:
+            begin = now
+            pin(host.sprite, at: begin)
+        case .late:
+            begin = now + 0.25
+            pin(host.sprite, at: begin)
+        case .absent:
+            begin = now + 0.25
+            host.sprite.removeAllAnimations()
+        }
         CATransaction.flush()
 
-        // From before the animation begins, to after it ends, a twenty-fourth of a second apart.
+        // From before the second leg is shown to after it ends, a twenty-fourth of a second apart.
         var centres: [Double] = []
-        var time = begin - 0.1
+        var time = now - 0.1
+        var added = delay != .absent
         while time < begin + back.duration + 0.2 {
+            if !added, time >= begin {
+                // The animations arrive: as they were made, and begun now.
+                for (key, animation) in animations {
+                    guard let copy = animation.copy() as? CAAnimation else { continue }
+                    copy.beginTime = begin
+                    host.sprite.add(copy, forKey: key)
+                }
+                CATransaction.flush()
+                added = true
+            }
             centres.append(try #require(catCentre(offscreen.render(atTime: time), width: 300, height: 26)))
             time += 1.0 / 24
         }
@@ -316,12 +354,14 @@ import Testing
         // The most the cat goes in a twenty-fourth of a second is a frame's step, and what the frames' own shapes move the middle of it.
         let longestStep = CatMove.frantic.advance * 12 / 24 + 8
         for (before, after) in zip(centres, centres.dropFirst()) {
-            #expect(abs(after - before) <= longestStep, "a jump from \(before) to \(after)")
+            #expect(abs(after - before) <= longestStep, "\(delay): a jump from \(before) to \(after)")
         }
-        // Just before the turn the cat is where the first leg ended (the sprite's middle is about sixteen points from its left edge).
+        // For as long as nothing animates the layer, the cat stands where the first leg ended (the sprite's middle is about sixteen points
+        // from its left edge); a quarter of a second after the leg is shown it has not moved far from it, in any of the three.
         let leftAt = host.lane.x(at: end) + 16
-        #expect(abs(centres[0] - leftAt) <= 14, "just before the second leg begins the cat is at the end of the first: \(centres[0]) and \(leftAt)")
+        #expect(abs(centres[0] - leftAt) <= 14, "\(delay): before the second leg begins the cat is at the end of the first: \(centres[0]) and \(leftAt)")
+        #expect(abs(centres[5] - leftAt) <= 14, "\(delay): and a quarter of a second on, with nothing animating it yet: \(centres[5])")
         let turnedAt = host.lane.x(at: start) + 16
-        #expect(abs((centres.last ?? 0) - turnedAt) <= 14, "and it ends where the second leg goes")
+        #expect(abs((centres.last ?? 0) - turnedAt) <= 14, "\(delay): and it ends where the second leg goes")
     }
 }
