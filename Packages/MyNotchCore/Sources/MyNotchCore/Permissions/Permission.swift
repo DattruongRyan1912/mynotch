@@ -7,7 +7,7 @@ nonisolated public enum Permission: Hashable, Sendable {
     case bluetooth
     case automation(bundleID: String)
     case microphone
-    /// A Core Audio tap of what the system plays (Media's real spectrum). macOS reports no status for it.
+    /// A Core Audio tap of what the system plays (Media's real spectrum, the equalizer). macOS reports no status for it.
     case systemAudio
     /// Listing the folder. macOS asks the first time and reports no status afterwards.
     case downloadsFolder
@@ -59,7 +59,7 @@ nonisolated public enum Permission: Hashable, Sendable {
         case .bluetooth: "Cho MyNotch biết thiết bị Bluetooth nào đang kết nối."
         case .automation(let bundleID): "Cho MyNotch điều khiển ứng dụng \(bundleID)."
         case .microphone: "Cho MyNotch dùng micro."
-        case .systemAudio: "Cho MyNotch nghe âm thanh đang phát để vẽ phổ nhạc."
+        case .systemAudio: "Cho MyNotch nghe âm thanh đang phát để vẽ phổ nhạc và chỉnh âm (EQ)."
         case .downloadsFolder: "Cho MyNotch xem và lưu file trong thư mục Downloads."
         case .desktopFolder: "Cho MyNotch lưu file vào thư mục Desktop."
         case .pasteboard: "Cho MyNotch đọc nội dung bạn chép từ app khác mà không hỏi lại mỗi lần."
@@ -72,7 +72,7 @@ nonisolated public enum Permission: Hashable, Sendable {
     /// What else to do there, when switching MyNotch on is not the whole step.
     private var hint: String? {
         switch self {
-        case .systemAudio: "Chưa thấy MyNotch trong danh sách? Bật phổ âm thanh thật trong Media để macOS hỏi trước."
+        case .systemAudio: "Chưa thấy MyNotch trong danh sách? Bật phổ âm thanh thật trong Media hoặc bật EQ trong tab Âm thanh để macOS hỏi trước."
         case .pasteboard: "Chọn “Luôn cho phép” (Always Allow) cho MyNotch."
         default: nil
         }
