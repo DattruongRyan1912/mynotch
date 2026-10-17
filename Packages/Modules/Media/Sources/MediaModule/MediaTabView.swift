@@ -1,3 +1,4 @@
+import MyNotchCore
 import NotchUI
 import SwiftUI
 
@@ -12,11 +13,12 @@ struct MediaTabView: View {
     /// The tab's declared height: the player with its lyric row, plus what the notch adds around a tab's content.
     static let preferredHeight = artworkSize + lyricGap + CurrentLyricView.height + NotchTokens.padding + tabBarHeight
 
-    // With two sources or more the chips take a row above the player, and the tab's height does not change: what they take is taken
-    // from the player. Without a lyric row the player is as tall as before, less nothing (the chips and their gap are the lyric row's
+    // With two sources or more the chips take a row above the player, and so does the EQ control while the Âm thanh module runs
+    // (at the end of the same row, alone in it when there are no chips); the tab's height does not change: what they take is taken
+    // from the player. Without a lyric row the player is as tall as before, less nothing (the row and its gap are the lyric row's
     // room); with one it is a smaller cover beside a column of one line less.
     static let chipGap: CGFloat = 2
-    /// The cover while the chips and the lyric row are both there.
+    /// The cover while the row above it (the chips, the EQ control) and the lyric row are both there.
     static let compactArtworkSize: CGFloat = artworkSize - 18
     static let compactLyricGap: CGFloat = 4
 
@@ -27,16 +29,19 @@ struct MediaTabView: View {
     var sources: MediaSourceModel?
     /// What the player shows while the user has chosen a source other than the primary one.
     var displayStore: NowPlayingStore?
+    /// What the EQ control switches; nil is a tab with none, as it always was.
+    var equalizer: EqualizerState?
 
     init(
         store: NowPlayingStore, actions: MediaActions, volume: VolumeModel, sources: MediaSourceModel? = nil,
-        displayStore: NowPlayingStore? = nil, icons: PlayerAppCache = PlayerAppCache()
+        displayStore: NowPlayingStore? = nil, icons: PlayerAppCache = PlayerAppCache(), equalizer: EqualizerState? = nil
     ) {
         self.store = store
         self.actions = actions
         self.volume = volume
         self.sources = sources
         self.displayStore = displayStore
+        self.equalizer = equalizer
         _icons = State(initialValue: icons)
     }
 
@@ -47,6 +52,9 @@ struct MediaTabView: View {
 
     /// Whether the chips are up: there are sources to choose between.
     private var hasChips: Bool { sources?.showsChips ?? false }
+
+    /// Whether the row above the player is up: the chips, the EQ control, or both.
+    private var hasSourceRow: Bool { hasChips || EQQuickControl.isShown(equalizer) }
 
     @State private var isAppeared = false
     @Environment(\.notchIsOnScreen) private var isOnScreen
@@ -80,10 +88,10 @@ struct MediaTabView: View {
         // The lyric row is its own row at the bottom, across the whole tab, so the cover and the controls above it
         // stay where they are whether it holds a line, the note or nothing.
         let hasLyricRow = shown.lyricRow != .absent
-        let compact = hasChips && hasLyricRow
+        let compact = hasSourceRow && hasLyricRow
         return VStack(spacing: 0) {
-            if let sources, hasChips {
-                MediaSourceChipsView(model: sources, icons: icons)
+            if hasSourceRow {
+                sourceRow
                     .padding(.bottom, Self.chipGap)
             }
             coverAndControls(compact: compact)
@@ -95,15 +103,37 @@ struct MediaTabView: View {
         .background { ArtworkGlow(tint: shown.activeTint) }
     }
 
+    /// The chips, which scroll in the room the EQ control leaves, and the control at the end of the row.
+    private var sourceRow: some View {
+        HStack(spacing: 0) {
+            if let sources, hasChips {
+                MediaSourceChipsView(model: sources, icons: icons)
+            } else {
+                Spacer(minLength: 0)
+            }
+            EQQuickControl(equalizer: equalizer)
+        }
+        .frame(height: MediaSourceChipsView.height)
+    }
+
     private func coverAndControls(compact: Bool) -> some View {
         let size = compact ? Self.compactArtworkSize : Self.artworkSize
         return HStack(spacing: 14) {
             ArtworkView(artwork: shown.artworkImage, icon: shown.appIcon, size: size, cornerRadius: compact ? 10 : 12)
             VStack(alignment: .leading, spacing: 0) {
                 if compact {
-                    // One line for what two lines said, and no badge: the chips say which app it is.
-                    Text("\(Text(shown.state.title ?? "").font(.system(size: 14, weight: .semibold)).foregroundStyle(NotchTokens.primaryText))\(Text(subtitle.isEmpty ? "" : "  ·  " + subtitle).font(.system(size: 12)).foregroundStyle(NotchTokens.secondaryText))")
-                        .lineLimit(1)
+                    // One line for what two lines said, and no badge: the chips say which app it is. With no chips (only the EQ
+                    // control above) nothing does, so the badge stays at the end of the line.
+                    if hasChips {
+                        compactTitle
+                    } else {
+                        HStack(spacing: 8) {
+                            compactTitle
+                            Spacer(minLength: 0)
+                            PlayerBadge(store: shown)
+                                .layoutPriority(1)
+                        }
+                    }
                 } else {
                     HStack(spacing: 8) {
                         Text(shown.state.title ?? "")
@@ -131,6 +161,11 @@ struct MediaTabView: View {
             .frame(minHeight: size)
             .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var compactTitle: some View {
+        Text("\(Text(shown.state.title ?? "").font(.system(size: 14, weight: .semibold)).foregroundStyle(NotchTokens.primaryText))\(Text(subtitle.isEmpty ? "" : "  ·  " + subtitle).font(.system(size: 12)).foregroundStyle(NotchTokens.secondaryText))")
+            .lineLimit(1)
     }
 
     private var subtitle: String { shown.state.artist ?? shown.state.album ?? "" }

@@ -115,6 +115,8 @@ public final class MediaModule: FeatureModule {
     private let lyricsClient: any HTTPClient
     /// The system output volume the row's slider shows and sets; Core Audio is only called on its queue.
     let volume: VolumeModel
+    /// The profiles and the switch the Âm thanh module shares with this tab, for the EQ row; nil when the app has none.
+    let equalizer: EqualizerState?
     /// The user's Apple Music sign-in, which Settings shows and lyrics lookups use.
     let appleAccount: AppleMusicAccount
     let appleClient: AppleMusicLyricsClient
@@ -209,8 +211,9 @@ public final class MediaModule: FeatureModule {
     var lyricsPanelController: LyricsPanelController? { lyricsPanel?.controller }
     var lyricsPanelModel: LyricsPanelModel? { lyricsPanel?.model }
 
-    /// The app passes the bundled mediaremote-adapter script and framework; nil when the build did not include them.
-    public convenience init(adapterScript: URL?, adapterFramework: URL?) {
+    /// The app passes the bundled mediaremote-adapter script and framework; nil when the build did not include them, and the
+    /// equalizer state it shares with the Âm thanh module, which the tab's EQ row switches profiles in.
+    public convenience init(adapterScript: URL?, adapterFramework: URL?, equalizer: EqualizerState? = nil) {
         // Creating the tap object does nothing yet: it touches Core Audio only when it starts.
         let spectrum = SystemAudioTap(bandCount: NowPlayingBars.barCount)
         let client = URLSessionHTTPClient()
@@ -224,13 +227,13 @@ public final class MediaModule: FeatureModule {
                 tokens: KeychainTokenStore(),
                 signIn: AppleMusicLoginWindow(),
                 volume: .system(),
-                appControls: controls, appEnvironment: .system, updatesInstalledBridge: true
+                appControls: controls, appEnvironment: .system, updatesInstalledBridge: true, equalizer: equalizer
             )
         } else {
             self.init(
                 makeSource: nil, spectrum: spectrum, lyricsClient: client,
                 tokens: KeychainTokenStore(), signIn: AppleMusicLoginWindow(), volume: .system(),
-                appControls: controls, appEnvironment: .system, updatesInstalledBridge: true
+                appControls: controls, appEnvironment: .system, updatesInstalledBridge: true, equalizer: equalizer
             )
         }
     }
@@ -253,13 +256,15 @@ public final class MediaModule: FeatureModule {
         tintExtract: @escaping ArtworkTinter.Extract = ArtworkTinter.backgroundExtract,
         appControls: [any AppPlayerControl] = [],
         appEnvironment: MediaAppEnvironment = .inert,
-        updatesInstalledBridge: Bool = false
+        updatesInstalledBridge: Bool = false,
+        equalizer: EqualizerState? = nil
     ) {
         self.init(
             makeSource: { _ in source }, spectrum: spectrum, lyricsClient: lyricsClient,
             tokens: tokens, signIn: signIn, volume: volume, lookUpApp: lookUpApp, youtubeSocketPath: youtubeSocketPath,
             youtubeSetup: youtubeSetup, youtubeLog: youtubeLog, tintExtract: tintExtract,
-            appControls: appControls, appEnvironment: appEnvironment, updatesInstalledBridge: updatesInstalledBridge
+            appControls: appControls, appEnvironment: appEnvironment, updatesInstalledBridge: updatesInstalledBridge,
+            equalizer: equalizer
         )
     }
 
@@ -286,9 +291,11 @@ public final class MediaModule: FeatureModule {
         tintExtract: @escaping ArtworkTinter.Extract = ArtworkTinter.backgroundExtract,
         appControls: [any AppPlayerControl] = [],
         appEnvironment: MediaAppEnvironment = .inert,
-        updatesInstalledBridge: Bool = false
+        updatesInstalledBridge: Bool = false,
+        equalizer: EqualizerState? = nil
     ) {
         self.volume = volume
+        self.equalizer = equalizer
         self.lookUpApp = lookUpApp
         self.youtubeSocketPath = youtubeSocketPath
         self.youtubeSetup = youtubeSetup
@@ -458,7 +465,7 @@ public final class MediaModule: FeatureModule {
             id: descriptor.id, title: "Media", systemImage: "music.note", preferredHeight: MediaTabView.preferredHeight,
             content: AnyView(MediaTabView(
                 store: store, actions: tabActions, volume: volume, sources: sources.model, displayStore: displayStore,
-                icons: PlayerAppCache(lookUp: lookUpApp)
+                icons: PlayerAppCache(lookUp: lookUpApp), equalizer: equalizer
             ))
         )
     }
