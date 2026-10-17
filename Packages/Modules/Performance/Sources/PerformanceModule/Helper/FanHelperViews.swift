@@ -176,7 +176,15 @@ struct FanHelperSettingsRows: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .task { await helper.refresh() }
+        // While the user is expected to approve the helper in System Settings, look every 2 s: macOS sends nothing when they do.
+        .task(id: helper.phase == .needsApproval) {
+            await helper.refresh()
+            while helper.phase == .needsApproval {
+                try? await Task.sleep(for: .seconds(2))
+                if Task.isCancelled { break }
+                await helper.refresh()
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await helper.refresh() }
         }

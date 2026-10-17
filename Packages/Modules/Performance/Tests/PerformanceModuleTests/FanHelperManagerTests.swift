@@ -82,6 +82,59 @@ import Testing
     }
 
     /// On macOS 26.5 a daemon that was never registered reads `.notFound`; it must not look like an error with nothing to press.
+    // MARK: Operation not permitted (what macOS 26.5 throws for a daemon that waits for approval)
+
+    @Test func aNotPermittedThatTheStatusCatchesUpWithIsNeedsApprovalNotAnError() async {
+        let rig = HelperRig(status: .notFound)
+        rig.registration.registerError = smError(1, "Operation not permitted")
+        rig.registration.script = [.notFound, .notFound, .requiresApproval]
+        await rig.manager.install()
+        #expect(rig.manager.phase == .needsApproval)
+        let presentation = rig.manager.presentation
+        #expect(presentation.status == "Cần cho phép trong Cài đặt hệ thống")
+        #expect(presentation.primary == .openSettings)
+        #expect(rig.pauses.durations == [.milliseconds(200), .milliseconds(200)], "it looked three times, waiting between looks")
+    }
+
+    @Test func approvingThenShowsRunningAtTheNextLook() async {
+        let rig = HelperRig(status: .notFound)
+        rig.registration.registerError = smError(1, "Operation not permitted")
+        rig.registration.script = [.notFound, .requiresApproval]
+        await rig.manager.install()
+        #expect(rig.manager.phase == .needsApproval)
+        rig.registration.status = .enabled
+        await rig.manager.refresh()
+        #expect(rig.manager.phase == .running(.matching), "the error did not hide the change")
+    }
+
+    @Test func aNotPermittedWhoseStatusAlreadyAsksForApprovalDoesNotWait() async {
+        let rig = HelperRig(status: .notFound)
+        rig.registration.statusAfterRegister = .requiresApproval
+        rig.registration.registerError = smError(1, "Operation not permitted")
+        await rig.manager.install()
+        #expect(rig.manager.phase == .needsApproval)
+        #expect(rig.pauses.durations.isEmpty)
+    }
+
+    @Test func aNotPermittedThatNeverBecomesApprovalIsTheErrorAfterAboutTwoSeconds() async {
+        let rig = HelperRig(status: .notFound)
+        rig.registration.statusAfterRegister = .notFound
+        rig.registration.registerError = smError(1, "Operation not permitted")
+        await rig.manager.install()
+        #expect(rig.manager.phase == .failed("Operation not permitted (SMAppServiceErrorDomain 1)"))
+        #expect(rig.pauses.durations.count == FanHelperManager.approvalLooks)
+        #expect(rig.pauses.durations.reduce(Duration.zero, +) == .seconds(2))
+        #expect(rig.manager.presentation.primary == .retry)
+    }
+
+    @Test func aNotPermittedThatLeavesTheHelperEnabledGoesStraightToTheHelper() async {
+        let rig = HelperRig(status: .notFound)
+        rig.registration.statusAfterRegister = .enabled
+        rig.registration.registerError = smError(1, "Operation not permitted")
+        await rig.manager.install()
+        #expect(rig.manager.phase == .running(.matching))
+    }
+
     @Test func aDaemonMacOSCallsNotFoundBeforeTheFirstRegisterIsOfferedForInstall() async {
         let rig = HelperRig(status: .notFound)
         await rig.manager.refresh()

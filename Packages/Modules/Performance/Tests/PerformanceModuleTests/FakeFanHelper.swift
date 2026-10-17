@@ -7,7 +7,20 @@ import Synchronization
 final class FakeFanHelperRegistration: FanHelperRegistering {
     enum Call: Equatable { case register, unregister, openSystemSettings }
 
-    var status: FanHelperRegistrationStatus
+    /// What the system says now; setting it drops any script.
+    var status: FanHelperRegistrationStatus {
+        get {
+            if !script.isEmpty { return script.count > 1 ? script.removeFirst() : script[0] }
+            return current
+        }
+        set {
+            current = newValue
+            script = []
+        }
+    }
+    private var current: FanHelperRegistrationStatus
+    /// Answers for the next reads of `status`, one each, the last one repeating: macOS catching up after a call.
+    var script: [FanHelperRegistrationStatus] = []
     /// What the status is once `register()` has run, whether or not it threw.
     var statusAfterRegister = FanHelperRegistrationStatus.enabled
     var registerError: (any Error)?
@@ -15,19 +28,19 @@ final class FakeFanHelperRegistration: FanHelperRegistering {
     private(set) var calls: [Call] = []
 
     init(status: FanHelperRegistrationStatus = .notRegistered) {
-        self.status = status
+        current = status
     }
 
     func register() throws {
         calls.append(.register)
-        status = statusAfterRegister
+        current = statusAfterRegister
         if let registerError { throw registerError }
     }
 
     func unregister() async throws {
         calls.append(.unregister)
         if let unregisterError { throw unregisterError }
-        status = .notRegistered
+        current = .notRegistered
     }
 
     func openSystemSettings() { calls.append(.openSystemSettings) }

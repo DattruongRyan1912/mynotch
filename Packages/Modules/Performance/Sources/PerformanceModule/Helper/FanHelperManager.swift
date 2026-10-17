@@ -69,6 +69,13 @@ final class FanHelperManager {
                 return
             case .alreadyRegistered:
                 break
+            case .notPermitted:
+                // The status moves to "requires approval" a moment after the throw; an error only if it never does.
+                await waitForApprovalToShow()
+                if registration.status == .notRegistered || registration.status == .notFound {
+                    set(.failed(Self.describe(error)))
+                    return
+                }
             case .other:
                 // Waiting for approval or enabled is as good as registered, and the status tells which.
                 if registration.status == .notRegistered || registration.status == .notFound {
@@ -185,6 +192,15 @@ final class FanHelperManager {
         }
     }
 
+    /// Looks at the status until it says approval is wanted (or the helper is enabled), for at most `approvalLooks` looks.
+    private func waitForApprovalToShow() async {
+        for _ in 0..<Self.approvalLooks {
+            let status = registration.status
+            if status == .requiresApproval || status == .enabled { return }
+            await pause(Self.approvalLookInterval)
+        }
+    }
+
     private func settleAfterChange() async {
         await readState()
     }
@@ -219,14 +235,24 @@ final class FanHelperManager {
     enum RegisterOutcome: Equatable {
         case denied
         case alreadyRegistered
+        /// "Operation not permitted" (code 1): what macOS 26.5 throws for a daemon that waits for the user's approval, while it
+        /// posts the approval request and, a moment later, moves the status to `requiresApproval`.
+        case notPermitted
         case other
     }
 
+    /// How long `install()` waits for the status to catch up with a "not permitted": 10 looks, 200 ms apart.
+    static let approvalLooks = 10
+    static let approvalLookInterval = Duration.milliseconds(200)
+
     static let serviceManagementDomain = "SMAppServiceErrorDomain"
+    /// EPERM, which is not in `SMErrors.h`.
+    static let notPermittedCode = 1
 
     static func outcome(of error: any Error) -> RegisterOutcome {
         let nsError = error as NSError
         guard nsError.domain == serviceManagementDomain else { return .other }
+        if nsError.code == notPermittedCode { return .notPermitted }
         switch nsError.code {
         case kSMErrorLaunchDeniedByUser: return .denied
         case kSMErrorAlreadyRegistered: return .alreadyRegistered

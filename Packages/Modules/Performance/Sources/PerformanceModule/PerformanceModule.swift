@@ -222,6 +222,11 @@ public final class PerformanceModule: FeatureModule {
         if demand.thermal, let thermal { apply(thermal) }
         if demand.memory, let memory { apply(memory, listedProcesses: listedProcesses && demand.processes) }
         guard needsPolling else { return }
+        // The user approving the helper in System Settings sends nothing; the tick is the chance to see it.
+        if helper.phase == .needsApproval {
+            let helper = helper
+            Task { await helper.refresh() }
+        }
         pollTimer = context.scheduler.schedule(after: Self.pollInterval) { [weak self] in
             self?.pollTimer = nil
             self?.beginRead()
