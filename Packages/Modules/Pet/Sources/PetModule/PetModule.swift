@@ -27,21 +27,21 @@ public final class PetModule: FeatureModule {
     static let settleDelay: Duration = .milliseconds(1500)
 
     private let activities: ActivityCenter
-    private let makeStage: (any Scheduler) -> CatStage
+    private let makeStages: (any Scheduler) -> CatStages
     private var context: ModuleContext?
-    private var stage: CatStage?
+    private var stages: CatStages?
     private var pendingShow: ScheduledAction?
     private var isPublished = false
     /// Where the cat was put to play when it was published, so that a change of the setting puts it somewhere else.
     private var publishedPlace: PlayPlace?
 
     public convenience init(activities: ActivityCenter) {
-        self.init(activities: activities, makeStage: { CatStage(scheduler: $0) })
+        self.init(activities: activities, makeStages: { CatStages(scheduler: $0) })
     }
 
-    init(activities: ActivityCenter, makeStage: @escaping (any Scheduler) -> CatStage) {
+    init(activities: ActivityCenter, makeStages: @escaping (any Scheduler) -> CatStages) {
         self.activities = activities
-        self.makeStage = makeStage
+        self.makeStages = makeStages
     }
 
     /// Whether the cat's activity is on the notch's list (for tests).
@@ -54,7 +54,7 @@ public final class PetModule: FeatureModule {
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
         self.context = context
-        stage = makeStage(context.scheduler)
+        stages = makeStages(context.scheduler)
         applySettings()
         let settings = context.settings
         let keys = PetSettingsKeys(settings)
@@ -82,8 +82,8 @@ public final class PetModule: FeatureModule {
     public func stop() async {
         pendingShow?.cancel()
         pendingShow = nil
-        stage?.shutDown()
-        stage = nil
+        stages?.shutDown()
+        stages = nil
         context = nil
         isPublished = false
         publishedPlace = nil
@@ -100,11 +100,14 @@ public final class PetModule: FeatureModule {
     // MARK: Settings
 
     private func applySettings() {
-        guard let context, let stage else { return }
+        guard let context, let stages else { return }
         let keys = PetSettingsKeys(context.settings)
-        stage.tuning = keys.tuning(context.settings)
-        stage.coat = context.settings.value(keys.coat)
-        stage.playsMeow = context.settings.value(keys.meow)
+        // What the user chose is for every cat there is.
+        for stage in stages.all {
+            stage.tuning = keys.tuning(context.settings)
+            stage.coat = context.settings.value(keys.coat)
+            stage.playsMeow = context.settings.value(keys.meow)
+        }
     }
 
     private func place(in context: ModuleContext) -> PlayPlace {
@@ -129,8 +132,8 @@ public final class PetModule: FeatureModule {
             return
         }
         // Where the cat plays is the user's to change while it is on the notch: it is put again, in its new place, at once.
-        if isPublished, let stage, publishedPlace != place(in: context) {
-            context.activities.set(CatActivity.make(stage: stage, place: place(in: context)))
+        if isPublished, let stages, publishedPlace != place(in: context) {
+            context.activities.set(CatActivity.make(stages: stages, place: place(in: context)))
             publishedPlace = place(in: context)
         }
         guard !isPublished, pendingShow == nil else { return }
@@ -141,10 +144,10 @@ public final class PetModule: FeatureModule {
     }
 
     private func publishIfFree() {
-        guard let context, let stage, !isPublished, !othersAreLive,
+        guard let context, let stages, !isPublished, !othersAreLive,
               context.settings.value(PetSettingsKeys(context.settings).show) else { return }
         let place = place(in: context)
-        context.activities.set(CatActivity.make(stage: stage, place: place))
+        context.activities.set(CatActivity.make(stages: stages, place: place))
         isPublished = true
         publishedPlace = place
     }

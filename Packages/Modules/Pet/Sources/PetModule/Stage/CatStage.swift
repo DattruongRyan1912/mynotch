@@ -2,9 +2,12 @@ import AppKit
 import MyNotchCore
 import NotchUI
 
-/// Where the cat lives: the views of the strip under the notches that show it, the brain that decides what it does, and the few things it
-/// reads from the Mac to decide. The cat is alive only while some view of it can be seen, which is to say that when the last view leaves
-/// its window the timer, the reads and the animations all stop, and nothing is left running for a cat nobody is looking at.
+/// Where the cat lives: the views of the notches that show it, the brain that decides what it does, and the few things it reads from the
+/// Mac to decide. There is one for each kind of notch (`CatStages`), so what is of a screen is of the stage of its kind: the pointer that
+/// is near, the cooldown of its reactions, the places the cat must not stop, a click.
+///
+/// The cat is alive only while some view of it can be seen, which is to say that when the last view leaves its window the timer, the reads
+/// and the animations all stop, and nothing is left running for a cat nobody is looking at.
 ///
 /// While it is alive it wakes a few times a second, and only to read: the pointer four times a second, the processors, the idle time and
 /// the sound once a second. What the processors do is judged against what this Mac usually does (`BusyWatch`): the cat runs for its life only
@@ -198,7 +201,7 @@ final class CatStage {
         )
         self.brain = brain
         // The notch can move under the cat (a wider pill, another display) without telling it.
-        let moved = framesChanged()
+        let moved = lookAtViews()
         if moved { refreshFrames() }
         if outcome == .changed || moved { showAll() }
         scheduleTick()
@@ -278,8 +281,18 @@ final class CatStage {
         fields = Dictionary(uniqueKeysWithValues: hosts.map { (ObjectIdentifier($0), $0.field) })
     }
 
-    private func framesChanged() -> Bool {
-        hosts.contains { moved($0) }
+    /// The stage's own look at its views, which finds what nothing says. A view that is not where it was arranged is a reason to show the cat
+    /// again (the answer), and with one whose container has the wings laid out for a camera that is not where it is now (a window that moved,
+    /// or got its screen, in silence) is a reason to lay the container out again: the cat is shown again for that once the layout has moved a
+    /// view, which `hostDidMove` sees.
+    private func lookAtViews() -> Bool {
+        var anyMoved = false
+        for host in hosts {
+            let hostMoved = moved(host)
+            anyMoved = anyMoved || hostMoved
+            if hostMoved || host.isInStaleLayout { host.askForLayout() }
+        }
+        return anyMoved
     }
 
     /// The field of the first view, which is the one the cat's timings are worked out for: on another display with a lane of another length
@@ -287,8 +300,8 @@ final class CatStage {
     private func referenceField() -> CatField? { hosts.first?.field }
 
     /// Where the cat must not stop, as shares of the lane: the crossing of every view, which are the same share of each (the same field of
-    /// the two views of a notch) or near enough on another display.
-    private func crossingShares() -> [ClosedRange<Double>] {
+    /// the two views of a notch) or near enough on another display. None for the cat of a virtual notch, which has no camera.
+    func crossingShares() -> [ClosedRange<Double>] {
         var shares: [ClosedRange<Double>] = []
         for host in hosts {
             guard let share = host.field.crossingShares, !shares.contains(share) else { continue }

@@ -81,6 +81,13 @@ final class CatSpriteView: NSView {
 
     // MARK: Geometry
 
+    /// Whether the view that holds this one in the top row of a notch has its wings laid out for a camera that is not where it is now.
+    var isInStaleLayout: Bool { (superview as? CatBodyContainer)?.wingsAreStale ?? false }
+
+    /// Asks the view that holds this one to lay its views out again: it is laid out only when AppKit has a reason to, which a window that
+    /// moved is not.
+    func askForLayout() { (superview as? CatBodyContainer)?.needsLayout = true }
+
     /// The strip's frame on the screen; nil outside a window.
     var screenFrame: CGRect? { window.map { $0.convertToScreen(convert(bounds, to: nil)) } }
 

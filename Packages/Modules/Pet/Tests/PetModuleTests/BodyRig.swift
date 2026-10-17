@@ -32,17 +32,21 @@ enum Screens {
     static func macAreas(frame: CGRect = mac.frame) -> (frame: CGRect, left: CGFloat?, right: CGFloat?) { (frame, 790, 790) }
 }
 
-/// The cat in the top row of one notch, everything it reads held by the test, in a window that is never shown.
+/// The cat in the top row of one notch, everything it reads held by the test, in a window that is never shown. A second rig made to share
+/// the first's (`sharing`) is a second notch of the same cats: one scheduler, one set of things read, one pair of stages.
 @MainActor final class BodyRig {
-    let scheduler = ManualScheduler()
-    let idle = FakeIdle()
-    let cpu = FakeCPU()
-    let pointer = FakePointer()
-    let audio = FakeAudio()
-    let meow = FakeMeow()
-    let notifications = NotificationCenter()
-    let knobs = Knobs()
-    let stage: CatStage
+    let scheduler: ManualScheduler
+    let idle: FakeIdle
+    let cpu: FakeCPU
+    let pointer: FakePointer
+    let audio: FakeAudio
+    let meow: FakeMeow
+    let notifications: NotificationCenter
+    let knobs: Knobs
+    /// Where the container hears of its window moving and changing screen, which the test posts to.
+    let windowNotifications = NotificationCenter()
+    /// The cats of the two kinds of notch; the one for this notch's kind is `stage`.
+    let stages: CatStages
     let window: NSWindow
     let container: CatBodyContainer
     let geometry: NotchGeometry
@@ -51,20 +55,40 @@ enum Screens {
     /// Where the Mac's screen is in the arrangement of displays: its left edge. The external display to its left puts it elsewhere than 0.
     let screenFrame: CGRect
 
+    var stage: CatStage { stages.stage(for: geometry.kind) }
+
     init(
         geometry: NotchGeometry, place: PlayPlace = .portal, seed: UInt64 = 7, hour: Int = 12, reducesMotion: Bool = false, width: CGFloat? = nil,
-        screenOrigin: CGFloat = 0
+        screenOrigin: CGFloat = 0, sharing other: BodyRig? = nil
     ) {
         self.geometry = geometry
-        knobs.hour = hour
-        knobs.reducesMotion = reducesMotion
-        let knobs = knobs
-        let scheduler = scheduler
-        let sources = CatStage.Sources(
-            idle: idle, cpu: cpu, pointer: pointer, audio: audio, meow: meow, hour: { knobs.hour }, reducesMotion: { knobs.reducesMotion },
-            notifications: notifications, clock: { scheduler.seconds }, seed: seed
-        )
-        stage = CatStage(scheduler: scheduler, sources: sources)
+        scheduler = other?.scheduler ?? ManualScheduler()
+        idle = other?.idle ?? FakeIdle()
+        cpu = other?.cpu ?? FakeCPU()
+        pointer = other?.pointer ?? FakePointer()
+        audio = other?.audio ?? FakeAudio()
+        meow = other?.meow ?? FakeMeow()
+        notifications = other?.notifications ?? NotificationCenter()
+        knobs = other?.knobs ?? Knobs()
+        if other == nil {
+            knobs.hour = hour
+            knobs.reducesMotion = reducesMotion
+        }
+        if let other {
+            stages = other.stages
+        } else {
+            let knobs = knobs
+            let scheduler = scheduler
+            let (idle, cpu, pointer, audio, meow, notifications) = (self.idle, self.cpu, self.pointer, self.audio, self.meow, self.notifications)
+            // The same things are read for both, and each has a seed of its own, as it has when it reads the real Mac.
+            func stage(seed: UInt64) -> CatStage {
+                CatStage(scheduler: scheduler, sources: CatStage.Sources(
+                    idle: idle, cpu: cpu, pointer: pointer, audio: audio, meow: meow, hour: { knobs.hour },
+                    reducesMotion: { knobs.reducesMotion }, notifications: notifications, clock: { scheduler.seconds }, seed: seed
+                ))
+            }
+            stages = CatStages(hardware: stage(seed: seed), virtual: stage(seed: seed &+ 1))
+        }
         rowWidth = width ?? Screens.row(of: geometry, place: place)
         // The row is in the middle of the screen's top, as the notch is.
         let screen = geometry.kind == .hardware ? Screens.mac : Screens.external
@@ -76,9 +100,10 @@ enum Screens {
             styleMask: .borderless, backing: .buffered, defer: true
         )
         window.isReleasedWhenClosed = false
-        container = CatBodyContainer(stage: stage)
+        container = CatBodyContainer(stages: stages)
         container.frame = CGRect(x: 0, y: 0, width: rowWidth, height: geometry.notchSize.height)
         container.screenAreas = { _ in geometry.kind == .hardware ? Screens.macAreas(frame: frame) : nil }
+        container.notifications = windowNotifications
     }
 
     /// The notch is on screen: the cat's views are in it.

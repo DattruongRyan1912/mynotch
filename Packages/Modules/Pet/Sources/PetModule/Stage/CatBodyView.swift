@@ -25,7 +25,7 @@ nonisolated struct CatBodyLayout: Equatable, Sendable {
 /// The cat in the top row of the notch, in place of the strip: on a virtual notch one lane across the body, on a hardware one two lanes,
 /// one each side of the camera, which the cat goes from one to the other of through a portal.
 struct CatBodyView: View {
-    let stage: CatStage
+    let stages: CatStages
     let place: PlayPlace
     @Environment(\.notchGeometry) private var geometry
     @Environment(\.notchIsOnScreen) private var isOnScreen
@@ -33,7 +33,7 @@ struct CatBodyView: View {
     var body: some View {
         let layout = CatBodyLayout(kind: geometry?.kind ?? .virtual, place: place)
         if isOnScreen, layout.playsInBody {
-            CatBody(stage: stage, geometry: geometry)
+            CatBody(stages: stages, geometry: geometry)
                 .notchBodyWidth(layout.requestedWidth(cameraWidth: geometry?.notchSize.width ?? 0))
         } else {
             Color.clear
@@ -42,10 +42,10 @@ struct CatBodyView: View {
 }
 
 struct CatBody: NSViewRepresentable {
-    let stage: CatStage
+    let stages: CatStages
     let geometry: NotchGeometry?
 
-    func makeNSView(context: Context) -> CatBodyContainer { CatBodyContainer(stage: stage) }
+    func makeNSView(context: Context) -> CatBodyContainer { CatBodyContainer(stages: stages) }
 
     func updateNSView(_ view: CatBodyContainer, context: Context) { view.configure(geometry: geometry) }
 
@@ -74,8 +74,13 @@ nonisolated enum Cutout {
 
 /// The view that holds the cat's views in the top row of one notch: one across the body of a virtual notch, two (left and right of the
 /// camera) on a hardware one. It takes a click only where one of them has the cat.
+///
+/// Where the wings are is where the camera is on the screen, which is a thing of the window and its screen and not of this view's bounds, so
+/// AppKit does not lay the view out when it changes: a window moves (the screens are plugged in, one wakes, the Space or the resolution
+/// changes), a window that had no screen when the wings were first laid out gets one. The container is laid out again for every one of these
+/// that can be heard of (`placeChanged`), and the stage's own look, a few times a second, finds the ones that cannot (`wingsAreStale`).
 final class CatBodyContainer: NSView {
-    private(set) weak var stage: CatStage?
+    private let stages: CatStages
     private var geometry: NotchGeometry?
     private(set) var lane: CatSpriteView?
     private(set) var leftWing: CatSpriteView?
@@ -86,8 +91,16 @@ final class CatBodyContainer: NSView {
         window.screen.map { ($0.frame, $0.auxiliaryTopLeftArea?.width, $0.auxiliaryTopRightArea?.width) }
     }
 
-    init(stage: CatStage) {
-        self.stage = stage
+    /// Where it hears of its window moving and changing screen, and of the screens changing: a test says where, before the view is in a
+    /// window.
+    var notifications: NotificationCenter = .default
+    /// The center it is listening on, if it is: the one `notifications` was when it went into a window.
+    private var listening: NotificationCenter?
+    /// The camera the wings were last laid out for, in this view's coordinates; nil while there is no pair of wings to lay out.
+    private var laidOutCutout: ClosedRange<CGFloat>?
+
+    init(stages: CatStages) {
+        self.stages = stages
         super.init(frame: .zero)
         // The views it holds draw on layers, and a layer under them that is a layer of its own is what Core Animation does anyway.
         wantsLayer = true
@@ -100,6 +113,9 @@ final class CatBodyContainer: NSView {
     var catViews: [CatSpriteView] { [lane, leftWing, rightWing].compactMap { $0 } }
 
     private var kind: NotchKind { geometry?.kind ?? .virtual }
+
+    /// The cat of this kind of notch: the views it holds are shown by it and by no other (they are made again when the kind changes).
+    private var stage: CatStage { stages.stage(for: kind) }
 
     func configure(geometry: NotchGeometry?) {
         self.geometry = geometry
@@ -114,7 +130,7 @@ final class CatBodyContainer: NSView {
         guard wantsWings ? lane != nil || leftWing == nil : leftWing != nil || lane == nil else { return }
         catViews.forEach { $0.removeFromSuperview() }
         (lane, leftWing, rightWing) = (nil, nil, nil)
-        guard let stage else { return }
+        let stage = stage
         if wantsWings {
             let (left, right) = (CatSpriteView(stage: stage, role: .leftWing), CatSpriteView(stage: stage, role: .rightWing))
             left.partner = right
@@ -141,16 +157,50 @@ final class CatBodyContainer: NSView {
         return Cutout.geometric(rowWidth: bounds.width, cameraWidth: geometry?.notchSize.width ?? 0)
     }
 
+    // MARK: Following the window
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        listening?.removeObserver(self)
+        listening = nil
+    }
+
+    /// In a window it hears of the window moving and changing screen and of the screens changing, and lays out for where it is now. The
+    /// window it was laid out in may not be the one it is in, and a window moved into its place is not heard of if it was never listened to.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        for name in [NSWindow.didMoveNotification, NSWindow.didChangeScreenNotification] {
+            notifications.addObserver(self, selector: #selector(placeChanged), name: name, object: window)
+        }
+        notifications.addObserver(self, selector: #selector(placeChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        listening = notifications
+        needsLayout = true
+    }
+
+    /// The window moved, changed screen, or the screens were arranged again: the camera is not where the wings were laid out for.
+    @objc private func placeChanged(_ notification: Notification) {
+        needsLayout = true
+    }
+
+    /// Whether the camera is somewhere else than the wings were laid out for, which nothing tells this view when what it is on changes
+    /// silently: the stage looks, and lays the view out again if so.
+    var wingsAreStale: Bool {
+        leftWing != nil && cutout() != laidOutCutout
+    }
+
     override func layout() {
         super.layout()
+        laidOutCutout = nil
         if let lane {
             lane.frame = bounds
         } else if let leftWing, let rightWing {
             let camera = cutout()
+            laidOutCutout = camera
             leftWing.frame = CGRect(x: 0, y: 0, width: camera.lowerBound.rounded(), height: bounds.height)
             rightWing.frame = CGRect(x: camera.upperBound.rounded(), y: 0, width: max(bounds.width - camera.upperBound.rounded(), 0), height: bounds.height)
         }
-        for view in catViews { stage?.hostDidMove(view) }
+        for view in catViews { stage.hostDidMove(view) }
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {

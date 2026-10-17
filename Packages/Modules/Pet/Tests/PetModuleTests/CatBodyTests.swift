@@ -74,7 +74,7 @@ import Testing
     func hostedBody(_ geometry: NotchGeometry, place: PlayPlace, onScreen: Bool = true) -> (CatStage, NSWindow, [CGFloat]) {
         let rig = BodyRig(geometry: geometry, place: place)
         let asked = AskedWidths()
-        let view = CatBodyView(stage: rig.stage, place: place)
+        let view = CatBodyView(stages: rig.stages, place: place)
             .environment(\.notchGeometry, geometry)
             .environment(\.notchIsOnScreen, onScreen)
             .frame(width: rig.rowWidth, height: geometry.notchSize.height)
@@ -254,17 +254,20 @@ import Testing
         for host in rig.hosts { #expect(!host.isAnimating && !host.isShowingCat) }
     }
 
-    @Test func aNotchThatBecomesAnotherKindOfNotchGetsTheViewsThatKindNeeds() throws {
+    @Test func aNotchThatBecomesAnotherKindOfNotchGetsTheViewsThatKindNeedsAndTheCatOfThatKind() throws {
         let rig = BodyRig(geometry: Screens.hardware)
         rig.show()
-        #expect(rig.stage.attachedHosts.count == 2)
+        let stages = rig.stages
+        #expect(stages.hardware.attachedHosts.count == 2 && !stages.virtual.isAlive)
         rig.container.configure(geometry: Screens.pill)
         rig.container.layoutSubtreeIfNeeded()
         #expect(rig.container.lane != nil && rig.container.leftWing == nil && rig.container.rightWing == nil)
-        #expect(rig.stage.attachedHosts.count == 1 && rig.stage.attachedHosts.first?.role == .lane, "the wings left and the lane came")
+        #expect(stages.virtual.attachedHosts.count == 1 && stages.virtual.attachedHosts.first?.role == .lane, "the wings left and the lane came")
+        #expect(stages.hardware.attachedHosts.isEmpty && !stages.hardware.isAlive && !stages.hardware.isTicking, "the Mac's cat has no view left to be seen by")
         rig.container.configure(geometry: Screens.hardware)
         rig.container.layoutSubtreeIfNeeded()
-        #expect(rig.container.lane == nil && rig.stage.attachedHosts.count == 2)
+        #expect(rig.container.lane == nil && stages.hardware.attachedHosts.count == 2)
+        #expect(!stages.virtual.isAlive && !stages.virtual.isTicking)
     }
 
     @Test func aNotchThatGrowsMovesTheCatWithItAndTheCatIsShownAgainOnlyWhenItsPlaceInItChanges() throws {
