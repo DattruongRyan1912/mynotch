@@ -12,6 +12,9 @@ struct FanHelperRow: View {
     }
 
     let helper: FanHelperManager
+    /// What the fan curve is doing, when it is the mode ("Đường cong · 3200 vòng/phút"): it takes the place of the helper's own status
+    /// in the line, since a helper that works is what the curve is running on.
+    var curveText: String?
     /// Hears where each part of the line ended up, in the line's own coordinates; set by a test, nil in the app (nothing is measured).
     var report: (([Part: CGRect]) -> Void)?
 
@@ -53,11 +56,19 @@ struct FanHelperRow: View {
 
     /// The dot and the status in words: with "Helper:" in front when there is room, without it when there is not, and cut off at the
     /// end as the last resort.
-    private func status(_ presentation: FanHelperPresentation) -> some View {
-        ViewThatFits(in: .horizontal) {
-            statusLabel("Helper: \(presentation.shortStatus)", tone: presentation.tone, cuts: false)
-            statusLabel(presentation.shortStatus, tone: presentation.tone, cuts: false)
-            statusLabel(presentation.shortStatus, tone: presentation.tone, cuts: true)
+    @ViewBuilder private func status(_ presentation: FanHelperPresentation) -> some View {
+        if let curveText, case .running = helper.phase {
+            ViewThatFits(in: .horizontal) {
+                statusLabel(curveText, tone: .normal, cuts: false)
+                statusLabel(curveText.components(separatedBy: " · ").first ?? curveText, tone: .normal, cuts: false)
+                statusLabel(curveText, tone: .normal, cuts: true)
+            }
+        } else {
+            ViewThatFits(in: .horizontal) {
+                statusLabel("Helper: \(presentation.shortStatus)", tone: presentation.tone, cuts: false)
+                statusLabel(presentation.shortStatus, tone: presentation.tone, cuts: false)
+                statusLabel(presentation.shortStatus, tone: presentation.tone, cuts: true)
+            }
         }
     }
 
@@ -172,7 +183,7 @@ struct FanHelperSettingsRows: View {
             if let comparison = helper.comparison {
                 comparisonRows(comparison)
             }
-            Text("Helper chạy với quyền root và hiện chỉ đọc quạt, chưa điều khiển được gì. Cần bấm cài và cho phép trong Cài đặt hệ thống.")
+            Text("Helper chạy với quyền root. Nó chỉ đổi tốc độ quạt khi MyNotch nhờ, mỗi lần 15 giây, và trả quạt về chế độ tự động của Apple khi hết hạn hoặc khi máy nóng quá 95 °C. Cần bấm cài và cho phép trong Cài đặt hệ thống.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

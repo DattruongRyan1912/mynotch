@@ -7,9 +7,9 @@ import Testing
 /// narrowest, and the memory column can take more than its half), and with Macs Fan Control running it has a warning too.
 @Suite struct FanHelperRowLayoutTests {
     /// The row hosted at `width`, laid out, with where it put its parts.
-    func frames(of helper: FanHelperManager, width: CGFloat) async -> [FanHelperRow.Part: CGRect] {
+    func frames(of helper: FanHelperManager, width: CGFloat, curveText: String? = nil) async -> [FanHelperRow.Part: CGRect] {
         nonisolated(unsafe) var seen: [FanHelperRow.Part: CGRect] = [:]
-        let host = NSHostingView(rootView: FanHelperRow(helper: helper, report: { seen = $0 }).frame(width: width))
+        let host = NSHostingView(rootView: FanHelperRow(helper: helper, curveText: curveText, report: { seen = $0 }).frame(width: width))
         host.frame = CGRect(x: 0, y: 0, width: width, height: FanHelperRow.height)
         host.layoutSubtreeIfNeeded()
         for _ in 0..<50 where seen.isEmpty {
@@ -79,6 +79,30 @@ import Testing
         let rig = HelperRig(status: .notRegistered)
         await rig.manager.refresh()
         #expect(await frames(of: rig.manager, width: 216)[.warning] == nil)
+    }
+
+    @Test func theCurvesLineKeepsTheButtonWholeToo() async {
+        let rig = HelperRig(status: .enabled, runningApps: [FanHelperManager.macsFanControlBundleID])
+        await rig.manager.refresh()
+        let ideal = idealSize(of: "Gỡ")
+        for text in ["Đường cong · 3200 vòng/phút", "Đường cong · đang để Apple", "Đường cong · tạm dừng"] {
+            for width in [CGFloat(216), 180, 150] {
+                let parts = await frames(of: rig.manager, width: width, curveText: text)
+                guard let button = parts[.button] else {
+                    Issue.record("\(text) at \(width): no button")
+                    continue
+                }
+                #expect(button.maxX <= width + 0.5 && button.width >= ideal.width - 0.5, "\(text) at \(width): \(button)")
+                if let warning = parts[.warning] { #expect(warning.minX >= button.maxX - 0.5 && warning.maxX <= width + 0.5, "\(text) at \(width)") }
+            }
+        }
+    }
+
+    @Test func theCurvesLineTakesTheHelpersPlaceOnlyWhileTheHelperRuns() async {
+        let rig = HelperRig(status: .requiresApproval)
+        await rig.manager.refresh()
+        let parts = await frames(of: rig.manager, width: 216, curveText: "Đường cong · 3200 vòng/phút")
+        #expect(parts[.button] != nil, "the approval button is still there: the curve text does not hide a helper that needs the user")
     }
 
     @Test func aRunningHelperOffersRemovalAsAButtonThatFitsToo() async {

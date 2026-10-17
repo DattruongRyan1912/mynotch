@@ -15,21 +15,24 @@ import Testing
         let reader: FakeThermalReader
         let memory: FakeMemoryReader
         let rig: HelperRig
+        let activity: FakeActivity
         let harness: RegistryHarness
         let clock: TestClock
 
         /// `strip` turns the temperature strip on before the module starts, `memoryStrip` the memory one.
         @MainActor init(
             _ reader: FakeThermalReader = FakeThermalReader(), memory: FakeMemoryReader = FakeMemoryReader(),
-            strip: Bool = false, memoryStrip: Bool = false, rig: HelperRig = HelperRig()
+            strip: Bool = false, memoryStrip: Bool = false, rig: HelperRig = HelperRig(), activity: FakeActivity = FakeActivity(),
+            configure: (RegistryHarness) -> Void = { _ in }
         ) async {
             let clock = TestClock()
-            let module = PerformanceModule(thermal: reader, memory: memory, helper: rig.manager, now: { clock.date })
+            let module = PerformanceModule(thermal: reader, memory: memory, helper: rig.manager, now: { clock.date }, activity: activity)
             let harness = RegistryHarness([module])
             if strip { harness.settings.set(true, for: PerformanceModuleTests.stripKey) }
             if memoryStrip { harness.settings.set(true, for: PerformanceModuleTests.memoryStripKey) }
+            configure(harness)
             await harness.registry.bootstrap()
-            (self.module, self.reader, self.memory, self.rig, self.harness, self.clock) = (module, reader, memory, rig, harness, clock)
+            (self.module, self.reader, self.memory, self.rig, self.activity, self.harness, self.clock) = (module, reader, memory, rig, activity, harness, clock)
         }
 
         /// A tab on screen; `disappear` is what removing it does.

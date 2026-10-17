@@ -15,6 +15,10 @@ final class PerformanceState {
     var stripMemory = false
     /// The fan helper's installation, for the row in the tab; nil where there is none (a test of a view that has no use for one).
     var helper: FanHelperManager?
+    /// The fan curve's runner, for the line in the tab; nil where there is none.
+    var curve: FanCurveRunner?
+    /// Whether the curve is the fan mode: it keeps the temperature being read with no tab open.
+    var curveWanted = false
 }
 
 /// What the tab tells the module about itself.

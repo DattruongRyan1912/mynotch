@@ -25,11 +25,15 @@ public final class PerformanceModule: FeatureModule {
     private let thermal: any ThermalReading
     private let memory: any MemoryReading
     private let helper: FanHelperManager
+    private let curve: FanCurveRunner
     private let identity = ProcessIdentity()
     private let now: () -> Date
     private var context: ModuleContext?
     private var pollTimer: ScheduledAction?
     private var readTask: Task<Void, Never>?
+    /// The runner's configuration and its steps are run one after the other, in the order they came.
+    private var configureTask: Task<Void, Never>?
+    private var curveStepTask: Task<Void, Never>?
     /// What the published strip shows; nil when there is none.
     private var stripShown: StripContent?
     /// Tabs on screen: each screen has its own notch, so more than one can show this tab at a time.
@@ -49,12 +53,17 @@ public final class PerformanceModule: FeatureModule {
 
     /// The helper manager is passed in: the real one talks to the system's service manager and to a root daemon, which no test
     /// does, so the tests pass one built on fakes.
-    init(thermal: any ThermalReading, memory: any MemoryReading, helper: FanHelperManager, now: @escaping () -> Date) {
+    init(
+        thermal: any ThermalReading, memory: any MemoryReading, helper: FanHelperManager, now: @escaping () -> Date,
+        activity: any ActivityAssertion = SystemActivityAssertion()
+    ) {
         self.thermal = thermal
         self.memory = memory
         self.helper = helper
         self.now = now
+        curve = FanCurveRunner(helper: helper, now: now, activity: activity)
         state.helper = helper
+        state.curve = curve
     }
 
     public convenience init() {
@@ -82,7 +91,7 @@ public final class PerformanceModule: FeatureModule {
         let settings = context.settings
         let keys = PerformanceSettingsKeys(settings)
         context.run { [weak self] in
-            for await _ in Observations({ (settings.value(keys.stripTemperature), settings.value(keys.stripMemory)) }) {
+            for await _ in Observations({ keys.values(settings) }) {
                 self?.settingsChanged()
             }
         }
@@ -95,6 +104,13 @@ public final class PerformanceModule: FeatureModule {
         stopPolling()
         readTask?.cancel()
         readTask = nil
+        curveStepTask?.cancel()
+        curveStepTask = nil
+        await configureTask?.value
+        configureTask = nil
+        // The fans go back to Apple before the module goes.
+        await curve.stop()
+        state.curveWanted = false
         context = nil
         stripShown = nil
         visibleTabs = 0
@@ -125,6 +141,10 @@ public final class PerformanceModule: FeatureModule {
             stripMemory: environment.settings.binding(keys.stripMemory),
             helper: helper,
             probe: environment.settings.binding(keys.fanProbe),
+            fanMode: environment.settings.binding(keys.fanMode),
+            curveStart: environment.settings.binding(keys.curveStart),
+            curveFull: environment.settings.binding(keys.curveFull),
+            curve: curve,
             readAppFans: { await thermal.read()?.fans ?? [] }
         ))
     }
@@ -149,10 +169,12 @@ public final class PerformanceModule: FeatureModule {
 
     private func settingsChanged() {
         guard let context else { return }
-        let keys = PerformanceSettingsKeys(context.settings)
-        state.stripTemperature = state.hasThermal && context.settings.value(keys.stripTemperature)
-        state.stripMemory = context.settings.value(keys.stripMemory)
+        let values = PerformanceSettingsKeys(context.settings).values(context.settings)
+        state.stripTemperature = state.hasThermal && values.stripTemperature
+        state.stripMemory = values.stripMemory
+        state.curveWanted = values.fanMode == .curve
         syncStrip(context)
+        configureCurve(values)
         updatePolling()
     }
 
@@ -170,11 +192,20 @@ public final class PerformanceModule: FeatureModule {
         }
     }
 
+    private func configureCurve(_ values: PerformanceSettingsValues) {
+        let previous = configureTask
+        let curve = curve
+        configureTask = Task {
+            await previous?.value
+            await curve.configure(mode: values.fanMode, curve: values.curve, mechanism: values.probe.mechanism)
+        }
+    }
+
     // MARK: Polling
 
     private var demand: Demand {
         let tab = visibleTabs > 0
-        return Demand(thermal: state.hasThermal && (tab || state.stripTemperature), memory: tab || state.stripMemory, processes: tab)
+        return Demand(thermal: state.hasThermal && (tab || state.stripTemperature || state.curveWanted), memory: tab || state.stripMemory, processes: tab)
     }
 
     private var needsPolling: Bool { demand.thermal || demand.memory }
@@ -237,6 +268,14 @@ public final class PerformanceModule: FeatureModule {
     private func apply(_ snapshot: ThermalSnapshot) {
         state.thermal = snapshot
         if let soc = snapshot.soc { state.history.append(soc, at: now()) }
+        // The curve is fed at every reading, one at a time: a step still running skips this one, and the next is two seconds away.
+        if state.curveWanted, curveStepTask == nil {
+            let curve = curve
+            curveStepTask = Task { [weak self] in
+                await curve.step(snapshot)
+                self?.curveStepTask = nil
+            }
+        }
     }
 
     /// A read that failed keeps the last numbers; a list is replaced only by a read that asked for one.

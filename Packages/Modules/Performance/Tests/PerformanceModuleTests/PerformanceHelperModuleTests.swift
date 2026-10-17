@@ -84,7 +84,8 @@ import Testing
             let rig = make()
             await rig.manager.refresh()
             let view = PerformanceSettingsView(
-                stripTemperature: .constant(false), stripMemory: .constant(true), helper: rig.manager, probe: .constant(.never), readAppFans: { [] }
+                stripTemperature: .constant(false), stripMemory: .constant(true), helper: rig.manager, probe: .constant(.never), fanMode: .constant(.curve), curveStart: .constant(55), curveFull: .constant(85),
+                curve: FanCurveRunner(helper: rig.manager, activity: FakeActivity()), readAppFans: { [] }
             )
             let size = NSHostingView(rootView: Form { view }.formStyle(.grouped).frame(width: 480)).fittingSize
             #expect(size.height > 100, "\(name)")

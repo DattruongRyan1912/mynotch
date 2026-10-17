@@ -44,6 +44,9 @@ final class FanHelperManager {
         self.pause = pause
     }
 
+    /// What the curve and the probe send their commands through.
+    var commandClient: any FanHelperClient { client }
+
     var isBusy: Bool {
         if case .busy = phase { return true }
         return false

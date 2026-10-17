@@ -69,7 +69,7 @@ struct ThermalColumn: View {
             if !presentation.fans.isEmpty {
                 VStack(spacing: 8) {
                     ForEach(presentation.fans) { FanRowView(row: $0) }
-                    if let helper = state.helper { FanHelperRow(helper: helper) }
+                    if let helper = state.helper { FanHelperRow(helper: helper, curveText: state.curve?.activeText) }
                 }
             }
         }
