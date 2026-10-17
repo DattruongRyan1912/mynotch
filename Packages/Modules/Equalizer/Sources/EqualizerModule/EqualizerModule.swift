@@ -9,9 +9,10 @@ import SwiftUI
 /// `EqualizerState`, which the Nhạc tab shares.
 ///
 /// The engine runs only while the switch is on, and never in the user's way: a tap without the system-audio permission mutes
-/// its device, so on `.permissionLikelyDenied` (and on `.failed`) the engine is stopped at once and the original sound
-/// plays. The switch stays as the user set it; "Thử lại", switching off and on, or opening the tab again (after a missing
-/// permission) starts the engine again.
+/// its device, so on `.permissionLikelyDenied` the engine is stopped at once and the original sound plays. A device that cannot
+/// be set up is reported and left alone while the others keep their EQ; only when no device works is the engine stopped. The
+/// switch stays as the user set it. Only "Thử lại" and switching the EQ off and on start the engine again: opening the tab
+/// does not, because with the permission still off that would silence a device for ten seconds each time.
 public final class EqualizerModule: FeatureModule {
     /// On by default, like the other modules: nothing runs until the user switches the EQ on, and the Nhạc tab's EQ row
     /// exists only while this module does.
@@ -73,7 +74,7 @@ public final class EqualizerModule: FeatureModule {
         engineRunning = false
         engine.stop()
         engine.onEvent = nil
-        status.phase = .off
+        status.reset()
         status.eqMacRunning = false
         applied = nil
         state.isAvailable = false
@@ -104,7 +105,7 @@ public final class EqualizerModule: FeatureModule {
     func syncEngine() {
         guard context != nil else { return }
         guard let profile = state.activeProfile else {
-            status.phase = .off
+            status.reset()
             stopEngine()
             return
         }
@@ -136,29 +137,39 @@ public final class EqualizerModule: FeatureModule {
         switch event {
         case .devices(let names):
             status.phase = names.isEmpty ? .waiting : .processing(names)
+            // A device that is tuned has no failure any more. The reason starts with "<device>: ", which is the manager's own form.
+            status.failures.removeAll { failure in names.contains { failure.hasPrefix($0 + ": ") } }
+        case .failed(let reason):
+            // `.devices` came first, so what is tuned now is what works. With nothing working every device has failed: stop,
+            // and show the first reason still standing. Otherwise the others keep their EQ and the failure is only shown.
+            let nothingWorks = status.tunedDevices.isEmpty
+            status.failures.append(reason)
+            if nothingWorks {
+                status.phase = .failed(status.failures[0])
+                stopEngine()
+            }
         case .permissionLikelyDenied:
             status.phase = .needsPermission
-            stopEngine()
-        case .failed(let reason):
-            status.phase = .failed(reason)
             stopEngine()
         }
     }
 
-    /// "Thử lại": a stop and a start, which also gives a device that was given up on a fresh set of tries.
+    /// "Thử lại": a stop and a start, which also gives a device that was given up on a fresh set of tries. Devices that work
+    /// are rebuilt with it, which is a gap of a moment in their sound.
     func retry() {
-        guard context != nil, status.isPaused else { return }
+        guard context != nil, status.canRetry else { return }
         stopEngine()
+        status.failures = []
         status.phase = .waiting
         syncEngine()
     }
 
-    /// Each time the tab opens: looks for eqMac again, and gives an engine paused for the permission another try, since the
-    /// user may have granted it since. A failed device is not tried again just by looking; only "Thử lại" does that.
+    /// Each time the tab opens: looks for eqMac again and nothing else. An engine paused for the permission is not tried again
+    /// by looking at the tab: with the permission still off, the new try would mute a device for ten seconds and take the hint
+    /// away, so the user starts it (Thử lại, or the switch off and on).
     func tabAppeared() {
         guard context != nil else { return }
         status.eqMacRunning = isEqMacRunning()
-        if status.phase == .needsPermission { retry() }
     }
 
     func openSystemSettings() {

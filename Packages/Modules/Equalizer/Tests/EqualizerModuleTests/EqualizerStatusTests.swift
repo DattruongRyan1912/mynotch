@@ -157,12 +157,38 @@ import Testing
         #expect(module.status.phase == .waiting)
     }
 
-    @Test func openingTheTabAgainRestartsAPausedEngine() async {
+    @Test func openingTheTabAgainDoesNotRestartAPausedEngine() async {
+        await pausedForPermission()
+        // A restart with the permission still off would mute the device again for about ten seconds.
+        module.tabAppeared()
+        module.tabAppeared()
+        #expect(engine.startCount == 1)
+        #expect(!engine.isRunning)
+        #expect(module.status.phase == .needsPermission)
+        #expect(module.status.line == .permission)
+    }
+
+    @Test func theHintStaysUntilTheUserActs() async {
         await pausedForPermission()
         module.tabAppeared()
-        #expect(engine.startCount == 2)
-        #expect(engine.isRunning)
-        #expect(module.status.phase == .waiting)
+        for _ in 0..<30 { await Task.yield() }
+        engine.emit(.devices(["MacBook Pro Speakers"]))
+        #expect(module.status.line == .permission)
+        #expect(module.status.line.actions == [.openSettings, .retry])
+    }
+
+    @Test func openingTheTabStillLooksForEqMacWhilePaused() async {
+        let flag = EqMacFlag()
+        let module = EqualizerModule(state: state, engine: engine, isEqMacRunning: { flag.isRunning })
+        let harness = RegistryHarness([module])
+        await harness.registry.bootstrap()
+        state.isEnabled = true
+        await settle { engine.startCount == 1 }
+        engine.emit(.permissionLikelyDenied)
+        flag.isRunning = true
+        module.tabAppeared()
+        #expect(module.status.eqMacRunning)
+        #expect(engine.startCount == 1)
     }
 
     @Test func openingTheTabDoesNotRestartAnEngineThatIsRunning() async {
@@ -207,21 +233,101 @@ import Testing
         #expect(engine.startCount == 2)
         engine.emit(.permissionLikelyDenied)
         module.actions.appeared()
+        #expect(engine.startCount == 2)
+        module.actions.retry()
         #expect(engine.startCount == 3)
     }
 
     // MARK: A device that cannot be set up
 
-    @Test func aFailedDeviceStopsTheEngineAndShowsTheReason() async {
+    @Test func theOnlyDeviceFailingStopsTheEngineAndShowsTheReason() async {
         await startedAndOn()
-        engine.emit(.devices(["MacBook Pro Speakers"]))
         engine.emit(.failed("Loa Bluetooth: the tap's channels do not match"))
         #expect(engine.stopCount == 1)
         #expect(!engine.isRunning)
         #expect(state.isEnabled)
         #expect(module.status.phase == .failed("Loa Bluetooth: the tap's channels do not match"))
-        #expect(module.status.line.text.contains("Loa Bluetooth: the tap's channels do not match"))
+        #expect(module.status.line.text == "Không chỉnh được Loa Bluetooth: the tap's channels do not match")
         #expect(module.status.line.actions == [.retry])
+    }
+
+    @Test func oneDeviceFailingLeavesTheOthersRunning() async {
+        await startedAndOn()
+        engine.emit(.devices(["Loa trong"]))
+        engine.emit(.failed("AirPods: the tap could not be made"))
+        #expect(engine.stopCount == 0)
+        #expect(engine.isRunning)
+        #expect(module.status.phase == .processing(["Loa trong"]))
+        #expect(module.status.line == .failed("AirPods: the tap could not be made"))
+        #expect(module.status.line.text == "Không chỉnh được AirPods: the tap could not be made")
+        #expect(module.status.line.actions == [.retry])
+        #expect(state.isEnabled)
+    }
+
+    @Test func whatTheWorkingDevicesDoStillReachesTheStatusWhileOneHasFailed() async {
+        await startedAndOn()
+        engine.emit(.devices(["Loa trong"]))
+        engine.emit(.failed("AirPods: x"))
+        engine.emit(.devices(["Loa trong", "Loa USB"]))
+        #expect(module.status.phase == .processing(["Loa trong", "Loa USB"]))
+        #expect(module.status.line == .failed("AirPods: x"))
+        // The devices that work leave: nothing to tune, the engine waits (and the failure is still the news).
+        engine.emit(.devices([]))
+        #expect(module.status.phase == .waiting)
+        #expect(module.status.line == .failed("AirPods: x"))
+        #expect(engine.stopCount == 0)
+    }
+
+    @Test func everyDeviceFailingStopsTheEngine() async {
+        await startedAndOn()
+        engine.emit(.devices(["Loa trong"]))
+        engine.emit(.failed("AirPods: x"))
+        #expect(engine.isRunning)
+        // The one that worked goes and comes back, and cannot be built this time: nothing works any more.
+        engine.emit(.devices([]))
+        engine.emit(.failed("Loa trong: y"))
+        #expect(engine.stopCount == 1)
+        #expect(!engine.isRunning)
+        // The first reason still standing is the one shown.
+        #expect(module.status.phase == .failed("AirPods: x"))
+        #expect(module.status.line.actions == [.retry])
+    }
+
+    @Test func twoDevicesFailingTogetherWithNoneWorkingStopTheEngineOnce() async {
+        await startedAndOn()
+        engine.emit(.failed("Loa A: x"))
+        engine.emit(.failed("Loa B: y"))
+        #expect(module.status.phase == .failed("Loa A: x"))
+        #expect(engine.stopCount == 1)
+    }
+
+    @Test func retryRebuildsADeviceThatFailedWhileTheOthersWereRunning() async {
+        engine.playing = ["Loa trong"]
+        await startedAndOn()
+        engine.emit(.failed("AirPods: x"))
+        module.retry()
+        // A stop and a start gives the failed device a fresh set of tries.
+        #expect(engine.stopCount == 1)
+        #expect(engine.startCount == 2)
+        #expect(engine.isRunning)
+        #expect(module.status.phase == .processing(["Loa trong"]))
+        #expect(module.status.line == .processing(["Loa trong"]))
+    }
+
+    @Test func aDeviceThatIsTunedAfterAllNoLongerShowsItsFailure() async {
+        await startedAndOn()
+        engine.emit(.devices(["Loa trong"]))
+        engine.emit(.failed("AirPods: x"))
+        engine.emit(.devices(["AirPods", "Loa trong"]))
+        #expect(module.status.line == .processing(["AirPods", "Loa trong"]))
+    }
+
+    @Test func anotherDevicesFailureStays() async {
+        await startedAndOn()
+        engine.emit(.devices(["Loa trong"]))
+        engine.emit(.failed("AirPods: x"))
+        engine.emit(.devices(["Loa trong", "Loa USB"]))
+        #expect(module.status.line == .failed("AirPods: x"))
     }
 
     @Test func retryAfterAFailureRestartsTheEngine() async {
@@ -231,6 +337,7 @@ import Testing
         #expect(engine.startCount == 2)
         #expect(engine.isRunning)
         #expect(module.status.phase == .waiting)
+        #expect(module.status.failures.isEmpty)
     }
 
     @Test func aFailureDoesNotRestartWhenTheTabOpens() async {
@@ -239,14 +346,19 @@ import Testing
         module.tabAppeared()
         #expect(engine.startCount == 1)
         #expect(module.status.phase == .failed("Loa: x"))
+        engine.emit(.devices(["Loa trong"]))
+        engine.emit(.failed("AirPods: y"))
+        module.tabAppeared()
+        #expect(engine.startCount == 1)
     }
 
     @Test func aSecondFailureKeepsTheFirstReason() async {
         await startedAndOn()
+        engine.emit(.devices(["Loa trong"]))
         engine.emit(.failed("Loa A: x"))
         engine.emit(.failed("Loa B: y"))
-        #expect(module.status.phase == .failed("Loa A: x"))
-        #expect(engine.stopCount == 1)
+        #expect(module.status.line == .failed("Loa A: x"))
+        #expect(engine.stopCount == 0)
     }
 
     @Test func switchingOffAndOnClearsAFailure() async {
@@ -260,6 +372,18 @@ import Testing
         #expect(module.status.phase == .waiting)
     }
 
+    @Test func switchingOffClearsTheFailureOfADeviceThatWasLeftRunning() async {
+        await startedAndOn()
+        engine.emit(.devices(["Loa trong"]))
+        engine.emit(.failed("AirPods: x"))
+        state.isEnabled = false
+        await settle { module.status.phase == .off }
+        #expect(module.status.failures.isEmpty)
+        state.isEnabled = true
+        await settle { engine.startCount == 2 }
+        #expect(module.status.line == .waiting)
+    }
+
     @Test func aFailureOutranksTheEqMacWarning() async {
         let eqMac = EqualizerModule(state: state, engine: engine, isEqMacRunning: { true })
         let harness = RegistryHarness([eqMac])
@@ -271,6 +395,18 @@ import Testing
         #expect(eqMac.status.line == .failed("Loa: x"))
         engine.emit(.devices([]))
         #expect(eqMac.status.line == .failed("Loa: x"))
+    }
+
+    @Test func aDeviceFailureWhileOthersRunOutranksTheEqMacWarningToo() async {
+        let eqMac = EqualizerModule(state: state, engine: engine, isEqMacRunning: { true })
+        let harness = RegistryHarness([eqMac])
+        await harness.registry.bootstrap()
+        state.isEnabled = true
+        await settle { engine.startCount == 1 }
+        engine.emit(.devices(["Loa trong"]))
+        #expect(eqMac.status.line == .eqMac)
+        engine.emit(.failed("AirPods: x"))
+        #expect(eqMac.status.line == .failed("AirPods: x"))
     }
 
     // MARK: The life cycle clears it
@@ -301,7 +437,7 @@ import Testing
         #expect(Line.waiting.text == "EQ đang chờ âm thanh")
         #expect(Line.processing(["A"]).text == "Đang chỉnh: A")
         #expect(Line.processing(["A", "B"]).text == "Đang chỉnh: A, B")
-        #expect(Line.failed("lý do").text == "EQ không chạy được: lý do")
+        #expect(Line.failed("Loa: lý do").text == "Không chỉnh được Loa: lý do")
     }
 
     @Test func onlyTheLinesThatNeedTheUserOfferAButton() {

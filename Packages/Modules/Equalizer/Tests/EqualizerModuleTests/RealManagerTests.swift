@@ -37,7 +37,8 @@ nonisolated final class MiniPipeline: PipelineHandle, @unchecked Sendable {
 nonisolated final class MiniAudioSystem: AudioSystem, @unchecked Sendable {
     private struct State {
         var peak: Float = 0
-        var failing = false
+        var active: Set<String> = ["speakers"]
+        var failing: Set<String> = []
         var attempts = 0
         var live = 0
         weak var token: MiniToken?
@@ -46,13 +47,13 @@ nonisolated final class MiniAudioSystem: AudioSystem, @unchecked Sendable {
     private let state = Mutex(State())
 
     var ownProcessID: AudioObjectID? { 1 }
-    func activeOutputDeviceUIDs() -> Set<String> { ["speakers"] }
-    func deviceName(uid: String) -> String? { "Loa trong" }
+    func activeOutputDeviceUIDs() -> Set<String> { state.withLock { $0.active } }
+    func deviceName(uid: String) -> String? { uid == "speakers" ? "Loa trong" : "Loa \(uid)" }
 
     func makePipeline(deviceUID: String, chain: EQChain) throws -> any PipelineHandle {
         try state.withLock { state in
             state.attempts += 1
-            if state.failing { throw MiniFailure() }
+            if state.failing.contains(deviceUID) { throw MiniFailure() }
             state.live += 1
             return MiniPipeline(system: self)
         }
@@ -70,7 +71,12 @@ nonisolated final class MiniAudioSystem: AudioSystem, @unchecked Sendable {
     var livePipelines: Int { state.withLock { $0.live } }
     var isObserved: Bool { state.withLock { $0.token != nil } }
     func setPeak(_ peak: Float) { state.withLock { $0.peak = peak } }
-    func setFailing(_ failing: Bool) { state.withLock { $0.failing = failing } }
+    func setFailing(_ failing: Bool, device: String = "speakers") {
+        state.withLock { state in
+            if failing { state.failing.insert(device) } else { state.failing.remove(device) }
+        }
+    }
+    func play(on devices: Set<String>) { state.withLock { $0.active = devices } }
     func pipelineWasTornDown() { state.withLock { $0.live -= 1 } }
 }
 
@@ -134,15 +140,28 @@ nonisolated final class MiniAudioSystem: AudioSystem, @unchecked Sendable {
         #expect(system.livePipelines == 0)
     }
 
-    @Test func aNewTryRightAfterTheVerdictStillWatchesForSilence() async {
+    @Test func aNewTryJustAfterTheVerdictStillWatchesForSilence() async {
         await startedAndOn()
         listenForTwelveSeconds()
         // The manager still has a check scheduled that it made after reporting the verdict; it must not confuse the new run.
-        module.tabAppeared()
+        scheduler.advance(by: .milliseconds(500))
+        module.retry()
         #expect(system.livePipelines == 1)
         listenForTwelveSeconds()
         #expect(module.status.phase == .needsPermission)
         #expect(system.livePipelines == 0)
+    }
+
+    @Test func openingTheTabAfterTheVerdictLeavesTheDeviceAloneAndTheHintUp() async {
+        await startedAndOn()
+        listenForTwelveSeconds()
+        let attempts = system.attempts
+        module.tabAppeared()
+        scheduler.advance(by: .seconds(30))
+        #expect(system.attempts == attempts)
+        #expect(system.livePipelines == 0)
+        #expect(!system.isObserved)
+        #expect(module.status.line == .permission)
     }
 
     @Test func soundThatIsHeardNeverPauses() async {
@@ -168,6 +187,49 @@ nonisolated final class MiniAudioSystem: AudioSystem, @unchecked Sendable {
         #expect(state.isEnabled)
         scheduler.advance(by: .seconds(60))
         #expect(system.attempts == 3)
+    }
+
+    @Test func oneDeviceThatCannotBeBuiltLeavesTheOtherRunning() async {
+        system.setPeak(0.3)
+        system.play(on: ["speakers", "usb"])
+        system.setFailing(true, device: "usb")
+        await harness.registry.bootstrap()
+        state.isEnabled = true
+        await settle { system.livePipelines == 1 }
+        scheduler.advance(by: .seconds(1))
+        scheduler.advance(by: .seconds(3))
+        // After its tries the one is reported, and the other keeps its pipeline and the manager keeps listening.
+        #expect(module.status.phase == .processing(["Loa trong"]))
+        #expect(module.status.line == .failed("Loa usb: the tap could not be made"))
+        #expect(module.status.line.text == "Không chỉnh được Loa usb: the tap could not be made")
+        #expect(system.livePipelines == 1)
+        #expect(system.isObserved)
+        let attempts = system.attempts
+        scheduler.advance(by: .seconds(60))
+        #expect(system.attempts == attempts)
+        #expect(system.livePipelines == 1)
+        // "Thử lại" rebuilds it, and the one that works with it.
+        system.setFailing(false, device: "usb")
+        module.retry()
+        #expect(system.livePipelines == 2)
+        #expect(module.status.line == .processing(["Loa trong", "Loa usb"]))
+    }
+
+    @Test func everyDeviceThatCannotBeBuiltStopsTheRealManager() async {
+        system.play(on: ["speakers", "usb"])
+        system.setFailing(true, device: "speakers")
+        system.setFailing(true, device: "usb")
+        await harness.registry.bootstrap()
+        state.isEnabled = true
+        await settle { system.attempts == 2 }
+        scheduler.advance(by: .seconds(1))
+        scheduler.advance(by: .seconds(3))
+        #expect(module.status.phase == .failed("Loa trong: the tap could not be made"))
+        #expect(!system.isObserved)
+        #expect(system.livePipelines == 0)
+        let attempts = system.attempts
+        scheduler.advance(by: .seconds(60))
+        #expect(system.attempts == attempts)
     }
 
     @Test func retryAfterAFailedDeviceGivesItAFreshSetOfTries() async {
