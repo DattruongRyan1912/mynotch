@@ -59,6 +59,7 @@ nonisolated final class FakeAudioSystem: AudioSystem, @unchecked Sendable {
         var names: [String: String] = [:]
         var rate = 48_000.0
         var peak: Float = 0.5
+        var echoes = false
         var failures: [String: [Failure]] = [:]
         var attempts: [String] = []
         var pipelines: [FakePipeline] = []
@@ -81,7 +82,9 @@ nonisolated final class FakeAudioSystem: AudioSystem, @unchecked Sendable {
     func deviceName(uid: String) -> String? { state.withLock { $0.names[uid] } }
 
     func makePipeline(deviceUID: String, chain: EQChain) throws -> any PipelineHandle {
-        try state.withLock { state in
+        // Core Audio is stirred up by every tap, aggregate device and IO proc that is made or destroyed, whether or not it works.
+        defer { if state.withLock({ $0.echoes }) { fireChange() } }
+        return try state.withLock { state in
             state.attempts.append(deviceUID)
             let failure = state.failures[deviceUID]?.first
             if failure != nil { state.failures[deviceUID]?.removeFirst() }
@@ -111,6 +114,8 @@ nonisolated final class FakeAudioSystem: AudioSystem, @unchecked Sendable {
     func play(on devices: Set<String>) { state.withLock { $0.active = devices } }
     func name(_ uid: String, as name: String) { state.withLock { $0.names[uid] = name } }
     func setRateForNewPipelines(_ rate: Double) { state.withLock { $0.rate = rate } }
+    /// Makes every `makePipeline` call end with a change notification, as the real one does.
+    func echoOnEveryMake(_ echoes: Bool = true) { state.withLock { $0.echoes = echoes } }
     func setPeakForNewPipelines(_ peak: Float) { state.withLock { $0.peak = peak } }
     func failBuilds(of uid: String, _ failures: [Failure]) { state.withLock { $0.failures[uid] = failures } }
 

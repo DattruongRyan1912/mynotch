@@ -262,14 +262,73 @@ private final class Events {
         // B was never in the way.
         #expect(try #require(system.pipeline("B")).tearDownCount == 0)
         #expect(events.all.contains(.devices(["AirPods"])))
-        // No more tries by itself...
+        // No more tries by itself, and a change that leaves things as they are does not give it another go...
         scheduler.advance(by: .seconds(120))
+        change()
         #expect(system.attempts.filter { $0 == "A" }.count == 3)
         #expect(events.failures.count == 1)
-        // ...until the next change, which gets the whole schedule again.
+        // ...but a device that stops playing and starts again does.
+        system.play(on: ["B"])
+        change()
+        system.play(on: ["A", "B"])
         change()
         #expect(system.attempts.filter { $0 == "A" }.count == 4)
         #expect(events.all.last == .devices(["AirPods", "Loa trong"]))
+    }
+
+    @Test func theEchoOfAFailedBuildDoesNotStartTheCountAgain() throws {
+        // Making and destroying a tap stirs Core Audio up, so every attempt is followed by change notifications.
+        system.echoOnEveryMake()
+        system.play(on: ["A"])
+        system.failBuilds(of: "A", [.immediately, .immediately, .immediately])
+        manager.start()
+        #expect(system.attempts == ["A"])
+        scheduler.advance(by: .milliseconds(999))
+        #expect(system.attempts == ["A"])
+        scheduler.advance(by: .milliseconds(1))
+        #expect(system.attempts == ["A", "A"])
+        scheduler.advance(by: .milliseconds(2_999))
+        #expect(system.attempts == ["A", "A"])
+        scheduler.advance(by: .milliseconds(1))
+        #expect(system.attempts == ["A", "A", "A"])
+        #expect(events.failures.count == 1)
+        // Given up, and the echoes keep coming, and nothing more is tried.
+        scheduler.advance(by: .seconds(60))
+        #expect(system.attempts == ["A", "A", "A"])
+        #expect(events.failures.count == 1)
+
+        // The device leaves and comes back: the whole schedule again, from that moment.
+        system.failBuilds(of: "A", [.immediately, .immediately, .immediately])
+        system.play(on: [])
+        change()
+        system.play(on: ["A"])
+        change()
+        #expect(system.attempts.count == 4)
+        scheduler.advance(by: .milliseconds(1_000))
+        #expect(system.attempts.count == 5)
+        scheduler.advance(by: .milliseconds(3_000))
+        #expect(system.attempts.count == 6)
+        #expect(events.failures.count == 2)
+        scheduler.advance(by: .seconds(60))
+        #expect(system.attempts.count == 6)
+    }
+
+    @Test func aDeviceWaitingForItsRetryDoesNotHoldUpAnother() throws {
+        system.echoOnEveryMake()
+        system.play(on: ["A", "B"])
+        system.failBuilds(of: "A", [.immediately])
+        manager.start()
+        // B is built at once, A waits for its retry at 1 s.
+        #expect(system.attempts == ["A", "B"])
+        scheduler.advance(by: .milliseconds(100))
+        system.play(on: ["A", "B", "C"])
+        system.fireChange()
+        scheduler.advance(by: .milliseconds(300))
+        // C is made without waiting for A, and A is not tried before its time.
+        #expect(system.attempts == ["A", "B", "C"])
+        scheduler.advance(by: .milliseconds(600))
+        #expect(system.attempts == ["A", "B", "C", "A"])
+        #expect(system.pipeline("A") != nil)
     }
 
     @Test func partialSetupIsTornDown() throws {

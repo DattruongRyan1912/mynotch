@@ -22,7 +22,11 @@ nonisolated public enum EqualizerEngineEvent: Equatable, Sendable {
 ///
 /// Whenever Core Audio reports a change it waits for the burst to end, then compares the devices that are playing with the
 /// pipelines it has: a new device gets one, a quiet or vanished device loses its own, and a device whose sample rate moved is
-/// rebuilt (its filters are computed for the old rate). A build that fails is tried again after 1 s, then 3 s.
+/// rebuilt (its filters are computed for the old rate).
+///
+/// A build that fails is tried again after 1 s, then 3 s, and then given up on for as long as that device keeps playing. Building and
+/// destroying a pipeline stirs Core Audio up itself, so a notification must never restart that count: only the device leaving
+/// (or `stop`) does.
 @MainActor public final class PipelineManager: EqualizerEngine {
     /// Device changes arrive in bursts (a new default device often changes the sample rate too).
     static let debounce = Duration.milliseconds(300)
@@ -50,10 +54,16 @@ nonisolated public enum EqualizerEngineEvent: Equatable, Sendable {
     /// The names last sent as `.devices`.
     private var announced: [String] = []
 
+    private struct Failure {
+        var attempts = 0
+        /// Set while the device waits for its own retry; a look at the devices leaves it alone.
+        var retry: ScheduledAction?
+        var gaveUp = false
+    }
+
     private var pendingLook: ScheduledAction?
-    private var retry: ScheduledAction?
-    /// Failed passes in a row since something last changed.
-    private var failedPasses = 0
+    /// Per device that is playing but has no pipeline because its builds failed.
+    private var failing: [String: Failure] = [:]
 
     private var silenceCheck: ScheduledAction?
     private var detector = SilenceDetector()
@@ -71,7 +81,6 @@ nonisolated public enum EqualizerEngineEvent: Equatable, Sendable {
     public func start() {
         guard !isRunning else { return }
         isRunning = true
-        failedPasses = 0
         observation = system.observeChanges { [weak self] in
             // Delivered on the main thread (see `AudioSystem`).
             MainActor.assumeIsolated { self?.systemChanged() }
@@ -83,10 +92,11 @@ nonisolated public enum EqualizerEngineEvent: Equatable, Sendable {
         guard isRunning else { return }
         isRunning = false
         observation = nil
-        for action in [pendingLook, retry, silenceCheck] { action?.cancel() }
+        for action in [pendingLook, silenceCheck] { action?.cancel() }
+        for failure in failing.values { failure.retry?.cancel() }
         pendingLook = nil
-        retry = nil
         silenceCheck = nil
+        failing = [:]
         for entry in pipelines.values { entry.handle.tearDown() }
         pipelines = [:]
         detector = SilenceDetector()
@@ -105,10 +115,6 @@ nonisolated public enum EqualizerEngineEvent: Equatable, Sendable {
 
     private func systemChanged() {
         guard isRunning, pendingLook == nil else { return }
-        // A change is a new chance for a device that gave up.
-        failedPasses = 0
-        retry?.cancel()
-        retry = nil
         pendingLook = scheduler.schedule(after: Self.debounce) { [weak self] in
             self?.pendingLook = nil
             self?.reconcile()
@@ -117,15 +123,20 @@ nonisolated public enum EqualizerEngineEvent: Equatable, Sendable {
 
     private func reconcile() {
         guard isRunning else { return }
-        retry?.cancel()
-        retry = nil
         let wanted = system.activeOutputDeviceUIDs()
+        // A device that stopped playing has nothing left to retry, and a verdict that it failed no longer holds.
+        for uid in failing.keys where !wanted.contains(uid) {
+            failing[uid]?.retry?.cancel()
+            failing[uid] = nil
+        }
         for (uid, entry) in pipelines where !wanted.contains(uid) || entry.handle.sampleRate != entry.sampleRate {
             entry.handle.tearDown()
             pipelines[uid] = nil
         }
-        var failures: [String] = []
+        var gaveUp: [String] = []
         for uid in wanted.sorted() where pipelines[uid] == nil {
+            // Waiting for its own retry, or given up: not for a look to decide, whatever stirred it up.
+            if let failure = failing[uid], failure.retry != nil || failure.gaveUp { continue }
             let name = system.deviceName(uid: uid) ?? uid
             let chain = EQChain(channels: Self.maxChannels)
             do {
@@ -133,30 +144,30 @@ nonisolated public enum EqualizerEngineEvent: Equatable, Sendable {
                 let rate = handle.sampleRate
                 configure(chain, sampleRate: rate)
                 pipelines[uid] = Entry(handle: handle, chain: chain, name: name, sampleRate: rate)
+                failing[uid] = nil
             } catch {
-                failures.append("\(name): \(error.localizedDescription)")
+                if let message = buildFailed(uid, name: name, error) { gaveUp.append(message) }
             }
         }
         announceDevices()
         updateSilenceCheck()
-        scheduleRetryOrGiveUp(failures)
+        for message in gaveUp { onEvent?(.failed(message)) }
     }
 
-    private func scheduleRetryOrGiveUp(_ failures: [String]) {
-        guard !failures.isEmpty else {
-            failedPasses = 0
-            return
+    /// Schedules the device's next try, or returns what to tell the user when there are none left.
+    private func buildFailed(_ uid: String, name: String, _ error: any Error) -> String? {
+        var failure = failing[uid] ?? Failure()
+        failure.attempts += 1
+        defer { failing[uid] = failure }
+        guard failure.attempts <= Self.retryDelays.count else {
+            failure.gaveUp = true
+            return "\(name): \(error.localizedDescription)"
         }
-        if failedPasses < Self.retryDelays.count {
-            let delay = Self.retryDelays[failedPasses]
-            failedPasses += 1
-            retry = scheduler.schedule(after: delay) { [weak self] in
-                self?.retry = nil
-                self?.reconcile()
-            }
-        } else {
-            for failure in failures { onEvent?(.failed(failure)) }
+        failure.retry = scheduler.schedule(after: Self.retryDelays[failure.attempts - 1]) { [weak self] in
+            self?.failing[uid]?.retry = nil
+            self?.reconcile()
         }
+        return nil
     }
 
     private func announceDevices() {
