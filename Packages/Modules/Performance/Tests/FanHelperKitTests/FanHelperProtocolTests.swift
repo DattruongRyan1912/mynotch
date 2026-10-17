@@ -49,6 +49,29 @@ final class PartialPing: NSObject, NSSecureCoding {
         #expect(decoded == nil)
     }
 
+    @Test func aResultSurvivesSecureCoding() throws {
+        let result = FanHelperResult(ok: true, state: .forced, appliedRPM: 3200, detail: "clamped to the fan's range", leaseSeconds: 14.5)
+        let decoded = try roundTrip(result)
+        #expect(decoded.ok && decoded.state == .forced)
+        #expect(decoded.appliedRPM == 3200 && decoded.detail == "clamped to the fan's range" && decoded.leaseSeconds == 14.5)
+    }
+
+    @Test func eachStateOfAFanHasItsNumberOnTheWire() {
+        #expect(FanHelperResult.State.automatic.rawValue == 0)
+        #expect(FanHelperResult.State.floor.rawValue == 1)
+        #expect(FanHelperResult.State.forced.rawValue == 2)
+        #expect(FanHelperResult(ok: false, state: .automatic).appliedRPM == -1)
+        #expect(FanHelperResult.allFans == -1)
+    }
+
+    @Test func aResultMissingItsFieldsIsNotDecoded() {
+        let archiver = NSKeyedArchiver(requiringSecureCoding: true)
+        archiver.setClassName("MyNotchFanHelperResult", for: PartialPing.self)
+        archiver.encode(PartialPing(), forKey: NSKeyedArchiveRootObjectKey)
+        archiver.finishEncoding()
+        #expect((try? NSKeyedUnarchiver.unarchivedObject(ofClass: FanHelperResult.self, from: archiver.encodedData)) == nil)
+    }
+
     @Test func theInterfaceNamesTheClassesEachReplyMayContain() throws {
         let interface = FanHelperInterface.make()
         let ping = interface.classes(for: #selector(FanHelperProtocol.ping(reply:)), argumentIndex: 0, ofReply: true)
@@ -56,21 +79,42 @@ final class PartialPing: NSObject, NSSecureCoding {
         let fans = interface.classes(for: #selector(FanHelperProtocol.readFans(reply:)), argumentIndex: 0, ofReply: true)
         #expect(fans.contains { $0 as? AnyClass === NSArray.self })
         #expect(fans.contains { $0 as? AnyClass === FanHelperFan.self })
+        for selector in [
+            #selector(FanHelperProtocol.setFloor(fan:rpm:reply:)), #selector(FanHelperProtocol.setForced(fan:rpm:reply:)),
+            #selector(FanHelperProtocol.setAuto(fan:reply:)),
+        ] {
+            let classes = interface.classes(for: selector, argumentIndex: 0, ofReply: true)
+            #expect(classes.contains { $0 as? AnyClass === FanHelperResult.self }, "\(selector)")
+        }
     }
 
-    /// There is no write operation: the protocol has these two methods and no others, so a connection cannot ask for more.
-    @Test func theProtocolHasTheTwoSpikeOperationsAndNothingElse() throws {
+    /// The operations are these five and no others: two reads and three ways to set a fan, each taking a fan and a speed and never a key
+    /// name or a value of its own. A new one cannot be added without this test saying so.
+    @Test func theProtocolHasTheFiveOperationsAndNothingElse() throws {
         let proto = try #require(objc_getProtocol("MyNotchFanHelperProtocol"))
         var count: UInt32 = 0
         let required = protocol_copyMethodDescriptionList(proto, true, true, &count)
         defer { free(required) }
         let names = (0..<Int(count)).map { NSStringFromSelector(required![$0].name!) }.sorted()
-        #expect(names == ["pingWithReply:", "readFansWithReply:"])
+        #expect(names == [
+            "pingWithReply:", "readFansWithReply:", "setAutoWithFan:reply:", "setFloorWithFan:rpm:reply:", "setForcedWithFan:rpm:reply:",
+        ])
         var optionalCount: UInt32 = 0
         free(protocol_copyMethodDescriptionList(proto, false, true, &optionalCount))
         #expect(optionalCount == 0)
         var classMethods: UInt32 = 0
         free(protocol_copyMethodDescriptionList(proto, true, false, &classMethods))
         #expect(classMethods == 0)
+    }
+
+    @Test func noOperationTakesAKeyNameOrAFreeValue() throws {
+        let proto = try #require(objc_getProtocol("MyNotchFanHelperProtocol"))
+        var count: UInt32 = 0
+        let required = protocol_copyMethodDescriptionList(proto, true, true, &count)
+        defer { free(required) }
+        for index in 0..<Int(count) {
+            let selector = NSStringFromSelector(required![index].name!)
+            #expect(selector.lowercased().contains("key") == false && selector.lowercased().contains("write") == false, "\(selector)")
+        }
     }
 }

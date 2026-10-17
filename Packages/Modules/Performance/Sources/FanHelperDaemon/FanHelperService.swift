@@ -1,21 +1,26 @@
+import FanHelperKit
 import Foundation
 
 /// What the helper does for a connection. Everything it needs from the system is passed in, so a test can run it over a real
-/// XPC connection to an anonymous listener with a fake SMC.
+/// XPC connection to an anonymous listener with a fake SMC, and nothing here can reach the real one.
 public final class FanHelperService: NSObject, FanHelperProtocol, @unchecked Sendable {
     private let version: String
     private let buildID: String
     private let euid: @Sendable () -> Int32
     private let pid: @Sendable () -> Int32
     private let openChannel: @Sendable () -> (any SMCChannel)?
+    private let controller: FanController?
     private let onRequest: @Sendable (String) -> Void
 
+    /// `controller` is nil where fan control is not available (the writer could not be made): the three setting commands then
+    /// answer that, and the two reads work as ever.
     public init(
         version: String = FanHelperIdentity.version,
         buildID: String,
         euid: @escaping @Sendable () -> Int32 = { Int32(bitPattern: geteuid()) },
         pid: @escaping @Sendable () -> Int32 = { getpid() },
         openChannel: @escaping @Sendable () -> (any SMCChannel)? = { AppleSMCChannel() },
+        controller: FanController? = nil,
         onRequest: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.version = version
@@ -23,6 +28,7 @@ public final class FanHelperService: NSObject, FanHelperProtocol, @unchecked Sen
         self.euid = euid
         self.pid = pid
         self.openChannel = openChannel
+        self.controller = controller
         self.onRequest = onRequest
     }
 
@@ -41,5 +47,24 @@ public final class FanHelperService: NSObject, FanHelperProtocol, @unchecked Sen
             return
         }
         reply(FanSMC.readFans(on: channel), nil)
+    }
+
+    public func setFloor(fan: Int, rpm: Double, reply: @escaping @Sendable (FanHelperResult) -> Void) {
+        onRequest("setFloor")
+        reply(controller?.setFloor(fan: fan, rpm: rpm) ?? Self.unavailable)
+    }
+
+    public func setForced(fan: Int, rpm: Double, reply: @escaping @Sendable (FanHelperResult) -> Void) {
+        onRequest("setForced")
+        reply(controller?.setForced(fan: fan, rpm: rpm) ?? Self.unavailable)
+    }
+
+    public func setAuto(fan: Int, reply: @escaping @Sendable (FanHelperResult) -> Void) {
+        onRequest("setAuto")
+        reply(controller?.setAuto(fan: fan) ?? Self.unavailable)
+    }
+
+    private static var unavailable: FanHelperResult {
+        FanHelperResult(ok: false, state: .automatic, detail: "fan control is not available")
     }
 }

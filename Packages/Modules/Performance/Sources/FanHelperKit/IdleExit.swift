@@ -7,13 +7,19 @@ public final class IdleExit: @unchecked Sendable {
     private let delay: TimeInterval
     private let queue: DispatchQueue
     private let onExit: @Sendable () -> Void
+    private let isBusy: @Sendable () -> Bool
     private var open = 0
     private var pending: DispatchWorkItem?
     private var exited = false
 
-    public init(after delay: TimeInterval, queue: DispatchQueue = DispatchQueue(label: "io.lucasvu.mynotch.fanhelper.idle"), onExit: @escaping @Sendable () -> Void) {
+    /// `isBusy` says whether something besides a connection keeps the helper needed (a fan that it holds): it does not leave then.
+    public init(
+        after delay: TimeInterval, queue: DispatchQueue = DispatchQueue(label: "io.lucasvu.mynotch.fanhelper.idle"),
+        isBusy: @escaping @Sendable () -> Bool = { false }, onExit: @escaping @Sendable () -> Void
+    ) {
         self.delay = delay
         self.queue = queue
+        self.isBusy = isBusy
         self.onExit = onExit
     }
 
@@ -42,6 +48,10 @@ public final class IdleExit: @unchecked Sendable {
         pending?.cancel()
         let item = DispatchWorkItem { [self] in
             guard open == 0, !exited else { return }
+            if isBusy() {
+                armIfIdle()
+                return
+            }
             exited = true
             onExit()
         }

@@ -10,9 +10,17 @@ import Testing
         var value: Int { count.withLock { $0 } }
     }
 
-    func idle(after seconds: TimeInterval = 0.05) -> (IdleExit, Exits) {
+    func idle(after seconds: TimeInterval = 0.05, busy: Busy = Busy()) -> (IdleExit, Exits) {
         let exits = Exits()
-        return (IdleExit(after: seconds, queue: DispatchQueue(label: "test")) { exits.record() }, exits)
+        return (IdleExit(after: seconds, queue: DispatchQueue(label: "test"), isBusy: { busy.value }, onExit: { exits.record() }), exits)
+    }
+
+    final class Busy: Sendable {
+        private let flag = Mutex(false)
+        var value: Bool {
+            get { flag.withLock { $0 } }
+            set { flag.withLock { $0 = newValue } }
+        }
     }
 
     func pause(_ seconds: TimeInterval = 0.25) async { try? await Task.sleep(for: .seconds(seconds)) }
@@ -54,6 +62,18 @@ import Testing
         idle.connectionOpened()
         await pause(0.4)
         #expect(exits.value == 0)
+    }
+
+    @Test func doesNotLeaveWhileSomethingOtherThanAConnectionKeepsItNeeded() async {
+        let busy = Busy()
+        busy.value = true
+        let (idle, exits) = idle(busy: busy)
+        idle.start()
+        await pause(0.3)
+        #expect(exits.value == 0, "a held fan keeps the helper here")
+        busy.value = false
+        await pause(0.3)
+        #expect(exits.value == 1)
     }
 
     @Test func exitsOnlyOnce() async {

@@ -1,10 +1,12 @@
+import FanHelperDaemon
 import FanHelperKit
 import Foundation
 import os
 
 // The privileged helper for the fans (see Performance's FanHelperManager). launchd starts it when the app connects to its mach
-// service, as root. For now it answers two questions and does nothing else: who it is (ping) and what the SMC says about the
-// fans (readFans). It has no operation that writes. It leaves when nobody has been connected for a while.
+// service, as root. It answers who it is (ping), what the SMC says about the fans (readFans), and three ways of setting a fan
+// (setFloor, setForced, setAuto), which the FanController holds to a lease, a heat guard and the fans' own range. Every way out of
+// this process gives the fans back to Apple first.
 
 let log = Logger(subsystem: "io.lucasvu.mynotch.fanhelper", category: "xpc")
 
@@ -45,11 +47,56 @@ guard FanHelperRequirement.isValid(FanHelperRequirement.app) else {
 let buildID = CodeIdentity.runningBuildID() ?? "unknown"
 log.info("starting: version \(FanHelperIdentity.version, privacy: .public), build \(buildID, privacy: .public), euid \(geteuid(), privacy: .public)")
 
-let idle = IdleExit(after: 20) {
+// The writer exists only for a root process; the controller only if the fans and the die sensors can be read. Without it the helper
+// still answers its two reads.
+let controllerQueue = DispatchQueue(label: "io.lucasvu.mynotch.fanhelper.controller")
+let otherFanTool = OtherFanTool()
+let controller: FanController? = {
+    guard let writer = AppleSMCWriter(), let reader = AppleSMCChannel(), let dieSensors = DieSensors(channel: reader),
+          let keyWriter = try? FanKeyWriter(channel: writer, log: { log.info("\($0, privacy: .public)") })
+    else {
+        log.notice("fan control is not available: no writer, fans or die sensors")
+        return nil
+    }
+    return FanController(
+        writer: keyWriter, reader: reader, dieTemperature: { dieSensors.hottest(on: reader) },
+        otherToolRunning: { otherFanTool.isRunning() }, log: { log.info("\($0, privacy: .public)") }, queue: controllerQueue
+    )
+}()
+
+// Every way out gives the fans back: a signal, `exit()` (the idle exit included), the system going to sleep.
+restoreBeforeExit = { controller?.restoreAutoForExit() }
+installExitHandler()
+var signalSources: [DispatchSourceSignal] = []
+for signalNumber in [SIGTERM, SIGINT, SIGHUP] {
+    signal(signalNumber, SIG_IGN)
+    let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: controllerQueue)
+    source.setEventHandler {
+        log.info("signal \(signalNumber, privacy: .public), leaving")
+        controller?.restoreAutoForExit()
+        exit(EXIT_SUCCESS)
+    }
+    source.resume()
+    signalSources.append(source)
+}
+let powerEvents = PowerEvents(
+    queue: controllerQueue, onWillSleep: { controller?.systemWillSleep() }, onDidWake: { controller?.systemDidWake() }
+)
+if !powerEvents.start() { log.notice("no power notifications; the fans are not given back around sleep") }
+
+let tick = DispatchSource.makeTimerSource(queue: controllerQueue)
+tick.schedule(deadline: .now() + 1, repeating: 1)
+tick.setEventHandler { controller?.tick() }
+tick.resume()
+controller?.startUp()
+
+let idle = IdleExit(after: 20, isBusy: { controller?.isHoldingFans ?? false }, onExit: {
     log.info("idle, exiting")
     exit(EXIT_SUCCESS)
-}
-let service = FanHelperService(buildID: buildID, onRequest: { request in log.info("served \(request, privacy: .public)") })
+})
+let service = FanHelperService(
+    buildID: buildID, controller: controller, onRequest: { request in log.info("served \(request, privacy: .public)") }
+)
 let delegate = ListenerDelegate(service: service, idle: idle)
 let listener = NSXPCListener(machServiceName: FanHelperIdentity.machServiceName)
 listener.delegate = delegate

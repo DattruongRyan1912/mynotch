@@ -1,3 +1,5 @@
+import FanHelperKit
+
 /// One fan: how fast it turns and the range it turns in.
 nonisolated struct FanReading: Equatable, Identifiable, Sendable {
     let index: Int
@@ -23,15 +25,4 @@ nonisolated struct ThermalSnapshot: Equatable, Sendable {
 
     /// What the tab shows large: the hotter of the two dies.
     var soc: Double? { [cpu, gpu].compactMap { $0 }.max() }
-}
-
-nonisolated enum DieTemperature {
-    /// A running Mac's die is never colder than the room and never hotter than the chip allows; the SMC reports 0.0 for a sensor
-    /// that is not wired up and the odd low number for one that is not a die at all.
-    static let plausible = 10.0...130.0
-
-    /// The hottest of the readings that make sense, or nil when none does.
-    static func hottest(of readings: [Double]) -> Double? {
-        readings.filter(plausible.contains).max()
-    }
 }

@@ -271,7 +271,8 @@ targets:
         SKIP_INSTALL: YES
         ENABLE_HARDENED_RUNTIME: YES
   # The privileged helper for the fans, registered with SMAppService.daemon from Performance's settings (see FanHelperManager). It
-  # answers a ping and reads the fans over XPC to a connection signed by the team, and has no operation that writes.
+  # answers over XPC to a connection signed by the team, and sets a fan only through FanHelperDaemon's controller: a lease, a heat
+  # guard, the fan's own range. FanHelperDaemon is the only code that writes to the SMC, and the app does not link it.
   mynotch-fan-helper:
     type: tool
     platform: macOS
@@ -281,6 +282,8 @@ targets:
     dependencies:
       - package: PerformanceModule
         product: FanHelperKit
+      - package: PerformanceModule
+        product: FanHelperDaemon
     settings:
       groups: [signing]
       base:

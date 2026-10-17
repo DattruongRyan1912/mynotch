@@ -25,49 +25,57 @@ enum SMCCommand: UInt8, CaseIterable {
     case keyInfo = 9
 }
 
-struct SMCVersion {
-    var major: UInt8 = 0
-    var minor: UInt8 = 0
-    var build: UInt8 = 0
-    var reserved: UInt8 = 0
-    var release: UInt16 = 0
+package struct SMCVersion {
+    package var major: UInt8 = 0
+    package var minor: UInt8 = 0
+    package var build: UInt8 = 0
+    package var reserved: UInt8 = 0
+    package var release: UInt16 = 0
+
+    package init() {}
 }
 
-struct SMCPLimitData {
-    var version: UInt16 = 0
-    var length: UInt16 = 0
-    var cpuPLimit: UInt32 = 0
-    var gpuPLimit: UInt32 = 0
-    var memPLimit: UInt32 = 0
+package struct SMCPLimitData {
+    package var version: UInt16 = 0
+    package var length: UInt16 = 0
+    package var cpuPLimit: UInt32 = 0
+    package var gpuPLimit: UInt32 = 0
+    package var memPLimit: UInt32 = 0
+
+    package init() {}
 }
 
 /// Three bytes of padding make it 12 bytes like the C struct; Swift would leave it at 9 and shift every later field.
-struct SMCKeyInfoData {
-    var dataSize: UInt32 = 0
-    var dataType: UInt32 = 0
-    var dataAttributes: UInt8 = 0
-    var padding: (UInt8, UInt8, UInt8) = (0, 0, 0)
+package struct SMCKeyInfoData {
+    package var dataSize: UInt32 = 0
+    package var dataType: UInt32 = 0
+    package var dataAttributes: UInt8 = 0
+    package var padding: (UInt8, UInt8, UInt8) = (0, 0, 0)
+
+    package init() {}
 }
 
 /// The 80-byte request and reply of the SMC's user client, field for field as the kernel declares it.
-struct SMCParamStruct {
-    typealias Bytes = (
+package struct SMCParamStruct {
+    package typealias Bytes = (
         UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8,
         UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8
     )
 
-    var key: UInt32 = 0
-    var vers = SMCVersion()
-    var pLimitData = SMCPLimitData()
-    var keyInfo = SMCKeyInfoData()
-    var result: UInt8 = 0
-    var status: UInt8 = 0
-    var data8: UInt8 = 0
-    var data32: UInt32 = 0
-    var bytes: Bytes = (
+    package var key: UInt32 = 0
+    package var vers = SMCVersion()
+    package var pLimitData = SMCPLimitData()
+    package var keyInfo = SMCKeyInfoData()
+    package var result: UInt8 = 0
+    package var status: UInt8 = 0
+    package var data8: UInt8 = 0
+    package var data32: UInt32 = 0
+    package var bytes: Bytes = (
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
     )
+
+    package init() {}
 }
 
 /// The connection to the `AppleSMC` service. Opening it needs no permission outside the App Sandbox, which MyNotch is not in.
