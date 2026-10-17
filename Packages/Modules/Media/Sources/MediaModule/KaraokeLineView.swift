@@ -24,8 +24,9 @@ struct KaraokeStyle: Equatable {
 
 extension NSColor {
     /// A system colour at `alpha` that is still dynamic: `withAlphaComponent` on one gives a fixed colour, in the appearance the
-    /// app has when it is called, which would not follow glass that is light.
-    static func dynamic(_ base: NSColor, alpha: CGFloat) -> NSColor {
+    /// app has when it is called, which would not follow glass that is light. Not main-actor isolated: AppKit asks a dynamic
+    /// colour for its value on whatever thread draws with it, and the runtime traps when an isolated closure is entered from another.
+    nonisolated static func dynamic(_ base: NSColor, alpha: CGFloat) -> NSColor {
         NSColor(name: nil) { appearance in
             var resolved = base
             appearance.performAsCurrentDrawingAppearance { resolved = base.withAlphaComponent(alpha) }
