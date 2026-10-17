@@ -22,21 +22,96 @@ nonisolated struct CatBodyLayout: Equatable, Sendable {
     }
 }
 
-/// The cat in the top row of the notch, in place of the strip: on a virtual notch one lane across the body, on a hardware one two lanes,
-/// one each side of the camera, which the cat goes from one to the other of through a portal.
+/// The characters in the top row of the notch, in place of the strip: on a virtual notch one lane across the body, on a hardware one two
+/// lanes, one each side of the camera, which they go from one to the other of through a portal.
+///
+/// The activity is one for every display, so this view is on each of them, and it is for the display it finds itself on to say whether it
+/// has anything to show: a screen the user gave no character is asked for no room (the wings would cover the menu bar's items for nothing)
+/// and draws nothing. Which display it is on it finds out once it is in a window, a turn of the main loop after it is made, and until it
+/// has it asks for nothing and draws nothing: the notch is not made wider for a moment on a screen that turns out to want nothing.
 struct CatBodyView: View {
     let stages: CatStages
     let place: PlayPlace
     @Environment(\.notchGeometry) private var geometry
     @Environment(\.notchIsOnScreen) private var isOnScreen
+    @State private var display: DisplayID?
 
     var body: some View {
         let layout = CatBodyLayout(kind: geometry?.kind ?? .virtual, place: place)
-        if isOnScreen, layout.playsInBody {
-            CatBody(stages: stages, geometry: geometry)
-                .notchBodyWidth(layout.requestedWidth(cameraWidth: geometry?.notchSize.width ?? 0))
-        } else {
-            Color.clear
+        let hasPets = display.map { stages.hasCharacters(on: $0) } ?? false
+        Group {
+            if isOnScreen, layout.playsInBody, hasPets {
+                CatBody(stages: stages, geometry: geometry)
+                    .notchBodyWidth(layout.requestedWidth(cameraWidth: geometry?.notchSize.width ?? 0))
+            } else {
+                Color.clear
+            }
+        }
+        .background(DisplayProbe(stages: stages, display: $display))
+    }
+}
+
+/// Tells a view which display it is on, from the window it is in, and again whenever that changes: it is there whether or not the view it
+/// is behind has anything on show, which is how a screen that was given no character is seen to be given one.
+struct DisplayProbe: NSViewRepresentable {
+    let stages: CatStages
+    @Binding var display: DisplayID?
+
+    func makeNSView(context: Context) -> DisplayProbeView { DisplayProbeView(stages: stages) }
+
+    func updateNSView(_ view: DisplayProbeView, context: Context) {
+        let binding = $display
+        view.report = { display in if binding.wrappedValue != display { binding.wrappedValue = display } }
+        view.look()
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView view: DisplayProbeView, context: Context) -> CGSize? { .zero }
+}
+
+final class DisplayProbeView: NSView {
+    private let stages: CatStages
+    var report: (DisplayID) -> Void = { _ in }
+    private var listening: [any NSObjectProtocol] = []
+
+    init(stages: CatStages) {
+        self.stages = stages
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    isolated deinit {
+        listening.forEach(stages.notifications.removeObserver)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        listening.forEach(stages.notifications.removeObserver)
+        listening = []
+        if window != nil {
+            let names = [NSWindow.didChangeScreenNotification, NSApplication.didChangeScreenParametersNotification]
+            listening = names.map { name in
+                stages.notifications.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.look() }
+                }
+            }
+        }
+        look()
+    }
+
+    /// Whether the display has been reported at least once (for tests).
+    private(set) var hasReported = false
+
+    /// Reports the display the window is on now, to be changed in the view's state when SwiftUI is not in the middle of drawing it.
+    func look() {
+        guard let window else { return }
+        let display = stages.displayOf(window) ?? CatStages.unknownDisplay
+        RunLoop.main.perform(inModes: [.common]) { [weak self] in
+            MainActor.assumeIsolated {
+                self?.hasReported = true
+                self?.report(display)
+            }
         }
     }
 }
@@ -72,13 +147,14 @@ nonisolated enum Cutout {
     }
 }
 
-/// The view that holds the cat's views in the top row of one notch: one across the body of a virtual notch, two (left and right of the
-/// camera) on a hardware one. It takes a click only where one of them has the cat.
+/// The view that holds the characters' views in the top row of one notch: one across the body of a virtual notch, two (left and right of
+/// the camera) on a hardware one. It takes a click only where one of them has a character. Which stage shows the views is for the registry
+/// to say, by the display the window is on (`CatStages`).
 ///
 /// Where the wings are is where the camera is on the screen, which is a thing of the window and its screen and not of this view's bounds, so
 /// AppKit does not lay the view out when it changes: a window moves (the screens are plugged in, one wakes, the Space or the resolution
 /// changes), a window that had no screen when the wings were first laid out gets one. The container is laid out again for every one of these
-/// that can be heard of (`placeChanged`), and the stage's own look, a few times a second, finds the ones that cannot (`wingsAreStale`).
+/// that can be heard of (`placeChanged`), and the stage's own look, a few times a second, finds the ones that cannot (`isStale`).
 final class CatBodyContainer: NSView {
     private let stages: CatStages
     private var geometry: NotchGeometry?
@@ -114,9 +190,6 @@ final class CatBodyContainer: NSView {
 
     private var kind: NotchKind { geometry?.kind ?? .virtual }
 
-    /// The cat of this kind of notch: the views it holds are shown by it and by no other (they are made again when the kind changes).
-    private var stage: CatStage { stages.stage(for: kind) }
-
     func configure(geometry: NotchGeometry?) {
         self.geometry = geometry
         arrange()
@@ -130,15 +203,14 @@ final class CatBodyContainer: NSView {
         guard wantsWings ? lane != nil || leftWing == nil : leftWing != nil || lane == nil else { return }
         catViews.forEach { $0.removeFromSuperview() }
         (lane, leftWing, rightWing) = (nil, nil, nil)
-        let stage = stage
         if wantsWings {
-            let (left, right) = (CatSpriteView(stage: stage, role: .leftWing), CatSpriteView(stage: stage, role: .rightWing))
+            let (left, right) = (CatSpriteView(stages: stages, role: .leftWing), CatSpriteView(stages: stages, role: .rightWing))
             left.partner = right
             right.partner = left
             (leftWing, rightWing) = (left, right)
             [left, right].forEach(addSubview)
         } else {
-            let view = CatSpriteView(stage: stage, role: .lane)
+            let view = CatSpriteView(stages: stages, role: .lane)
             lane = view
             addSubview(view)
         }
@@ -189,6 +261,12 @@ final class CatBodyContainer: NSView {
         leftWing != nil && cutout() != laidOutCutout
     }
 
+    /// Whether the views are arranged for what is not so any more: the camera is elsewhere, or the window is on another display, whose
+    /// stage is the one that should show them.
+    var isStale: Bool {
+        wingsAreStale || catViews.contains(where: stages.isRoutedElsewhere)
+    }
+
     override func layout() {
         super.layout()
         laidOutCutout = nil
@@ -200,7 +278,10 @@ final class CatBodyContainer: NSView {
             leftWing.frame = CGRect(x: 0, y: 0, width: camera.lowerBound.rounded(), height: bounds.height)
             rightWing.frame = CGRect(x: camera.upperBound.rounded(), y: 0, width: max(bounds.width - camera.upperBound.rounded(), 0), height: bounds.height)
         }
-        for view in catViews { stage.hostDidMove(view) }
+        for view in catViews {
+            stages.reroute(view)
+            view.stage?.hostDidMove(view)
+        }
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {

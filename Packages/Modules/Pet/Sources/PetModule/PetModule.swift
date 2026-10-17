@@ -3,20 +3,21 @@ import MyNotchCore
 import Observation
 import SwiftUI
 
-/// A pixel cat that lives on a strip under the collapsed notch when nothing else is going on.
+/// Pixel pets that live on the collapsed notch when nothing else is going on: a cat now, and each screen has the ones the user chose.
 ///
-/// It is a live activity at the lowest priority, with one rule on top: it is published only while no other module has an activity of
+/// They are a live activity at the lowest priority, with one rule on top: it is published only while no other module has an activity of
 /// its own, and taken back as soon as one appears, a moment before the notch would have made it a bubble. Priority alone cannot do that:
 /// there is no priority below `.low`, and among activities of one priority the one that came first keeps the notch, which would be the
-/// cat, ahead of the to-do count, an agent at work or the performance strip. The module is given the activity center to look at, and
-/// the app wires it in (`ModuleList.make(activities:)`).
+/// pets, ahead of the to-do count, an agent at work or the performance strip. The module is given the activity center to look at, and
+/// the app wires it in (`ModuleList.make(activities:)`). It is not published at all while no connected screen has a pet to show.
 ///
-/// The module has no tab, and the cat costs nothing while it is not seen: see `CatStage`.
+/// The module has no tab, and the pets cost nothing while they are not seen: see `CatStage`. Each screen has a stage of its own
+/// (`CatStages`) and the pets the user chose for it (`PetScreens`).
 public final class PetModule: FeatureModule {
     public let descriptor = ModuleDescriptor(
         id: "pet",
-        displayName: "Mèo",
-        systemImage: "cat",
+        displayName: "Thú cưng",
+        systemImage: "pawprint",
         defaultEnabled: true,
         order: 960
     )
@@ -28,6 +29,8 @@ public final class PetModule: FeatureModule {
 
     private let activities: ActivityCenter
     private let makeStages: (any Scheduler) -> CatStages
+    private let displays: Displays
+    private var screenObserver: (any NSObjectProtocol)?
     private var context: ModuleContext?
     private var stages: CatStages?
     private var pendingShow: ScheduledAction?
@@ -39,9 +42,10 @@ public final class PetModule: FeatureModule {
         self.init(activities: activities, makeStages: { CatStages(scheduler: $0) })
     }
 
-    init(activities: ActivityCenter, makeStages: @escaping (any Scheduler) -> CatStages) {
+    init(activities: ActivityCenter, makeStages: @escaping (any Scheduler) -> CatStages, displays: Displays = .system) {
         self.activities = activities
         self.makeStages = makeStages
+        self.displays = displays
     }
 
     /// Whether the cat's activity is on the notch's list (for tests).
@@ -50,6 +54,14 @@ public final class PetModule: FeatureModule {
     /// Whether another module has an activity right now.
     private var othersAreLive: Bool {
         activities.entries.contains { $0.module != descriptor.id }
+    }
+
+    /// Whether some screen that is connected has a pet to show: with none, an activity would only make the notch wider for nothing.
+    private var someScreenHasAPet: Bool {
+        guard let context else { return true }
+        let screens = context.settings.value(PetSettingsKeys(context.settings).screens)
+        let connected = displays.current()
+        return connected.isEmpty || connected.contains { !screens.kinds(for: $0.id).isEmpty }
     }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
@@ -64,7 +76,7 @@ public final class PetModule: FeatureModule {
             for await _ in Observations({
                 (
                     settings.value(keys.show), settings.value(keys.coat), settings.value(keys.meow), settings.value(keys.sleepMinutes),
-                    settings.value(keys.busyReaction), settings.value(keys.playPlace)
+                    settings.value(keys.busyReaction), settings.value(keys.playPlace), settings.value(keys.screens)
                 )
             }) {
                 self?.applySettings()
@@ -76,10 +88,18 @@ public final class PetModule: FeatureModule {
                 self?.reconcile()
             }
         }
+        // A screen that is plugged in or taken out is one that may have a pet to show, or none.
+        screenObserver = displays.notifications.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: nil
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reconcile() }
+        }
         reconcile()
     }
 
     public func stop() async {
+        screenObserver.map(displays.notifications.removeObserver)
+        screenObserver = nil
         pendingShow?.cancel()
         pendingShow = nil
         stages?.shutDown()
@@ -93,7 +113,7 @@ public final class PetModule: FeatureModule {
 
     public func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? {
         AnyView(PetSettingsView(
-            keys: PetSettingsKeys(environment.settings), settings: environment.settings
+            keys: PetSettingsKeys(environment.settings), settings: environment.settings, displays: displays
         ))
     }
 
@@ -102,12 +122,11 @@ public final class PetModule: FeatureModule {
     private func applySettings() {
         guard let context, let stages else { return }
         let keys = PetSettingsKeys(context.settings)
-        // What the user chose is for every cat there is.
-        for stage in stages.all {
-            stage.tuning = keys.tuning(context.settings)
-            stage.coat = context.settings.value(keys.coat)
-            stage.playsMeow = context.settings.value(keys.meow)
-        }
+        // What the user chose is for every pet there is, on every screen, and the screens' own choices are for the screens.
+        stages.tuning = keys.tuning(context.settings)
+        stages.coat = context.settings.value(keys.coat)
+        stages.playsMeow = context.settings.value(keys.meow)
+        stages.apply(screens: context.settings.value(keys.screens))
     }
 
     private func place(in context: ModuleContext) -> PlayPlace {
@@ -120,7 +139,7 @@ public final class PetModule: FeatureModule {
     /// before putting it back. Idempotent: it looks at what is, not at what changed.
     private func reconcile() {
         guard let context else { return }
-        let wanted = context.settings.value(PetSettingsKeys(context.settings).show) && !othersAreLive
+        let wanted = context.settings.value(PetSettingsKeys(context.settings).show) && !othersAreLive && someScreenHasAPet
         guard wanted else {
             pendingShow?.cancel()
             pendingShow = nil
@@ -144,7 +163,7 @@ public final class PetModule: FeatureModule {
     }
 
     private func publishIfFree() {
-        guard let context, let stages, !isPublished, !othersAreLive,
+        guard let context, let stages, !isPublished, !othersAreLive, someScreenHasAPet,
               context.settings.value(PetSettingsKeys(context.settings).show) else { return }
         let place = place(in: context)
         context.activities.set(CatActivity.make(stages: stages, place: place))

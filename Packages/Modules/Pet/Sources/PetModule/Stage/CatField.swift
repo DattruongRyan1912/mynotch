@@ -79,6 +79,35 @@ nonisolated struct CatField: Equatable, Sendable {
         return CatField(scale: scale, lane: lane, origin: side == .left ? 0 : seam, crossing: lower < upper ? lower...upper : nil)
     }
 
+    /// How far apart, in points, two characters' left feet must be for them not to stand on each other: a picture and a little air.
+    static let apart: CGFloat = 4
+
+    /// The same as a share of the lane: where a character stands, no other stops within this of it.
+    var separation: Double {
+        lane.travel > 0 ? Double((spriteWidth + Self.apart * CGFloat(scale)) / lane.travel) : 0
+    }
+
+    /// Where `count` characters sit when none of them moves, along the field's line: one, in the middle of the first stretch it may stand
+    /// in, and several evenly along all of the line it may stand in, which is the lane less the crossing.
+    func restingPlaces(count: Int) -> [CGFloat] {
+        guard count > 1 else { return [lane.restingX] }
+        var stretches = [lane.minX...lane.maxX]
+        if let free = stopFree {
+            stretches = [lane.minX...max(free.lowerBound, lane.minX), min(free.upperBound, lane.maxX)...lane.maxX]
+        }
+        let total = stretches.reduce(0) { $0 + ($1.upperBound - $1.lowerBound) }
+        guard total > 0 else { return Array(repeating: lane.restingX, count: count) }
+        return (0..<count).map { index in
+            var along = total * (CGFloat(index) + 0.5) / CGFloat(count)
+            for stretch in stretches {
+                let length = stretch.upperBound - stretch.lowerBound
+                if along <= length { return stretch.lowerBound + along }
+                along -= length
+            }
+            return stretches.last?.upperBound ?? lane.restingX
+        }
+    }
+
     /// Where the cat's left foot is at `share` of the lane, in this view's own coordinates, on a whole point.
     func local(share: Double) -> CGFloat { lane.x(at: share).rounded() - origin }
 

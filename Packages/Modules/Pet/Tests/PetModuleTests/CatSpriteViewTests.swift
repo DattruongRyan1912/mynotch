@@ -449,13 +449,13 @@ import Testing
 
     /// The strip as the collapsed notch lays it out, under a tap that opens the notch.
     struct Strip: View {
-        let stage: CatStage
+        let stages: CatStages
         let counter: Counter
         var onScreen = true
 
         var body: some View {
             let _ = counter.bodies += 1
-            CatStripView(stage: stage)
+            CatStripView(stages: stages)
                 .frame(width: 300, height: CatActivity.stripHeight)
                 .environment(\.notchIsOnScreen, onScreen)
                 .onNotchStripWidth { counter.stripWidths.append($0) }
@@ -465,7 +465,12 @@ import Testing
     }
 
     func hosted(_ rig: StageRig, counter: Counter, onScreen: Bool = true) -> (CountingHostingView<Strip>, NSWindow) {
-        let hosting = CountingHostingView(rootView: Strip(stage: rig.stage, counter: counter, onScreen: onScreen))
+        // The registry of one display, whose stage is the rig's.
+        let stages = CatStages(makeStage: { [stage = rig.stage] _ in stage }, displayOf: { _ in "STRIP" })
+        stages.tuning = rig.stage.tuning
+        stages.coat = rig.stage.coat
+        stages.playsMeow = rig.stage.playsMeow
+        let hosting = CountingHostingView(rootView: Strip(stages: stages, counter: counter, onScreen: onScreen))
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 300, height: 26), styleMask: .borderless, backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
         window.contentView = hosting
@@ -481,11 +486,11 @@ import Testing
         #expect(rig.stage.attachedHosts.count == 1)
         #expect(rig.scheduler.pendingCount == 1)
 
-        hosting.rootView = Strip(stage: rig.stage, counter: counter, onScreen: false)
+        hosting.rootView = Strip(stages: hosting.rootView.stages, counter: counter, onScreen: false)
         #expect(runLoop(until: { !rig.stage.isAlive }, seconds: 10))
         #expect(rig.scheduler.pendingCount == 0)
 
-        hosting.rootView = Strip(stage: rig.stage, counter: counter, onScreen: true)
+        hosting.rootView = Strip(stages: hosting.rootView.stages, counter: counter, onScreen: true)
         #expect(runLoop(until: { rig.stage.isAlive }, seconds: 10))
         window.contentView = nil
         #expect(!rig.stage.isAlive)

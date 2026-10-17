@@ -29,3 +29,22 @@ func runLoopUntilQuiet<Value: Equatable>(_ value: () -> Value, turns: Int = 5, s
         }
     }
 }
+
+#if canImport(AppKit)
+import AppKit
+@testable import PetModule
+
+/// Every view under `view`, itself included.
+@MainActor func descendants(of view: NSView) -> [NSView] {
+    [view] + view.subviews.flatMap(descendants(of:))
+}
+
+/// Lets a notch that was just put in a window find which display it is on, which a view of the pets does a turn of the main loop after it
+/// is in one, and show or not show what the user chose for that display.
+@MainActor func settleDisplays(in window: NSWindow) {
+    guard let root = window.contentView else { return }
+    let probes = descendants(of: root).compactMap { $0 as? DisplayProbeView }
+    runLoop(until: { probes.allSatisfy { $0.hasReported } }, seconds: 10)
+    runLoopUntilQuiet({ descendants(of: root).count }, turns: 5, seconds: 10)
+}
+#endif

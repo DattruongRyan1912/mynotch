@@ -85,8 +85,10 @@ import Testing
             defer: true
         )
         window.isReleasedWhenClosed = false
+        rig.displays.put(window, on: rig.displayID)
         window.contentView = hosting
         hosting.layoutSubtreeIfNeeded()
+        settleDisplays(in: window)
         keep.append((rig, window))
         return (rig.stage, window, asked.values)
     }
@@ -254,20 +256,21 @@ import Testing
         for host in rig.hosts { #expect(!host.isAnimating && !host.isShowingCat) }
     }
 
-    @Test func aNotchThatBecomesAnotherKindOfNotchGetsTheViewsThatKindNeedsAndTheCatOfThatKind() throws {
+    @Test func aNotchThatBecomesAnotherKindOfNotchGetsTheViewsThatKindNeedsAndStaysOnTheStageOfItsDisplay() throws {
         let rig = BodyRig(geometry: Screens.hardware)
         rig.show()
-        let stages = rig.stages
-        #expect(stages.hardware.attachedHosts.count == 2 && !stages.virtual.isAlive)
+        let stage = rig.stage
+        #expect(stage.attachedHosts.count == 2 && !stage.crossingShares().isEmpty)
         rig.container.configure(geometry: Screens.pill)
         rig.container.layoutSubtreeIfNeeded()
         #expect(rig.container.lane != nil && rig.container.leftWing == nil && rig.container.rightWing == nil)
-        #expect(stages.virtual.attachedHosts.count == 1 && stages.virtual.attachedHosts.first?.role == .lane, "the wings left and the lane came")
-        #expect(stages.hardware.attachedHosts.isEmpty && !stages.hardware.isAlive && !stages.hardware.isTicking, "the Mac's cat has no view left to be seen by")
+        #expect(stage.attachedHosts.count == 1 && stage.attachedHosts.first?.role == .lane, "the wings left and the lane came")
+        #expect(stage.isAlive && stage.isTicking && stage.crossingShares().isEmpty, "the same display, the same stage, and no camera to cross")
+        #expect(rig.stages.stage(for: rig.displayID) === stage)
         rig.container.configure(geometry: Screens.hardware)
         rig.container.layoutSubtreeIfNeeded()
-        #expect(rig.container.lane == nil && stages.hardware.attachedHosts.count == 2)
-        #expect(!stages.virtual.isAlive && !stages.virtual.isTicking)
+        #expect(rig.container.lane == nil && stage.attachedHosts.count == 2 && !stage.crossingShares().isEmpty)
+        #expect(rig.stages.all.count == 1)
     }
 
     @Test func aNotchThatGrowsMovesTheCatWithItAndTheCatIsShownAgainOnlyWhenItsPlaceInItChanges() throws {

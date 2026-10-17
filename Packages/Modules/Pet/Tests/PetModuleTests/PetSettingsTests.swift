@@ -59,9 +59,9 @@ import Testing
 
     @Test func theChoicesAreKeptUnderTheModulesOwnNames() throws {
         let keys = PetSettingsKeys(try environment())
-        #expect([keys.show.name, keys.coat.name, keys.meow.name, keys.sleepMinutes.name, keys.busyReaction.name, keys.playPlace.name] == [
+        #expect([keys.show.name, keys.coat.name, keys.meow.name, keys.sleepMinutes.name, keys.busyReaction.name, keys.playPlace.name, keys.screens.name] == [
             "module.pet.show", "module.pet.coat", "module.pet.meow", "module.pet.sleepMinutes", "module.pet.busyReaction",
-            "module.pet.playPlace",
+            "module.pet.playPlace", "module.pet.screens",
         ])
     }
 
@@ -83,7 +83,8 @@ import Testing
 
     @Test func theRowsBuildAndTakeTheSpaceTheFormGivesThem() throws {
         let settings = try environment()
-        let view = Form { PetSettingsView(keys: PetSettingsKeys(settings), settings: settings) }.frame(width: 480, height: 400)
+        let displays = Displays(current: { [] }, notifications: NotificationCenter())
+        let view = Form { PetSettingsView(keys: PetSettingsKeys(settings), settings: settings, displays: displays) }.frame(width: 480, height: 400)
         let hosting = NSHostingView(rootView: view)
         hosting.frame = CGRect(x: 0, y: 0, width: 480, height: 400)
         hosting.layoutSubtreeIfNeeded()

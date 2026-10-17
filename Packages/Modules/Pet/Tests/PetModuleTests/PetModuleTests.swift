@@ -14,6 +14,13 @@ import Testing
     let registry: ModuleRegistry
     let module: PetModule
     let rig: StageRig
+    /// Which display each window the test puts a notch in is on, and where the module hears of the screens changing.
+    let displayMap = DisplayMap()
+    let screenNotifications = NotificationCenter()
+    /// The displays that are connected, as the settings and the module are told; none unless a test says.
+    let connected = ConnectedBox()
+
+    final class ConnectedBox { var displays: [ConnectedDisplay] = [] }
 
     static let someone: ModuleID = "media"
     static let someoneElse: ModuleID = "todo"
@@ -24,15 +31,16 @@ import Testing
         let rig = StageRig()
         self.rig = rig
         let box = StageBox()
+        let (displayMap, screenNotifications, connected) = (displayMap, screenNotifications, connected)
         module = PetModule(activities: activities, makeStages: { moduleScheduler in
-            // A stage for each kind of notch, reading what the rig holds.
+            // A stage for each display, reading what the rig holds.
             let stages = CatStages(
-                hardware: CatStage(scheduler: moduleScheduler, sources: rig.sources),
-                virtual: CatStage(scheduler: moduleScheduler, sources: rig.sources)
+                makeStage: { _ in CatStage(scheduler: moduleScheduler, sources: rig.sources) },
+                displayOf: { displayMap.displayOf($0) }, notifications: screenNotifications
             )
             box.stages = stages
             return stages
-        })
+        }, displays: Displays(current: { connected.displays }, notifications: screenNotifications))
         registry = ModuleRegistry(
             modules: [module], settings: settings, activities: activities, lockScreen: LockScreenContentCenter(),
             permissions: FakePermissionCenter(), hotkeys: HotkeyRegistry(backend: FakeHotkeyBackend()), presenter: FakePresenter(),
@@ -50,8 +58,22 @@ import Testing
 
     final class StageBox { var stages: CatStages? }
 
-    /// The cats the module made, one for each kind of notch.
+    /// The stages the module made.
     var madeStages: CatStages? { box?.stages }
+
+    /// A notch on `display`, in a window that is never shown, with the pets of the module's stages in it.
+    func notch(_ geometry: NotchGeometry, on display: DisplayID) throws -> (window: NSWindow, container: CatBodyContainer) {
+        let stages = try #require(madeStages)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 420, height: 38), styleMask: .borderless, backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        displayMap.put(window, on: display)
+        let container = CatBodyContainer(stages: stages)
+        container.frame = window.contentLayoutRect
+        window.contentView?.addSubview(container)
+        container.configure(geometry: geometry)
+        container.layoutSubtreeIfNeeded()
+        return (window, container)
+    }
 
     func start() async { await registry.bootstrap() }
 
@@ -83,8 +105,8 @@ import Testing
     @Test func describesItself() {
         let descriptor = PetModule(activities: ActivityCenter(scheduler: ManualScheduler())).descriptor
         #expect(descriptor.id == "pet")
-        #expect(descriptor.displayName == "Mèo")
-        #expect(descriptor.systemImage == "cat")
+        #expect(descriptor.displayName == "Thú cưng")
+        #expect(descriptor.systemImage == "pawprint")
         #expect(descriptor.defaultEnabled)
         #expect(descriptor.order == 960)
         #expect(descriptor.permissions.isEmpty && descriptor.optionalPermissions.isEmpty)
@@ -250,11 +272,12 @@ import Testing
         #expect(harness.cat != nil)
     }
 
-    @Test func theChoicesReachTheCatOfEveryKindOfNotch() async throws {
+    @Test func theChoicesReachThePetsOnEveryScreenWhetherItIsThereYetOrComesLater() async throws {
         let harness = PetHarness()
         await harness.start()
         let stages = try #require(harness.madeStages)
-        #expect(stages.all.count == 2 && stages.hardware !== stages.virtual)
+        let mac = try harness.notch(Screens.hardware, on: Screens.macID)
+        #expect(stages.all.count == 1)
         for stage in stages.all {
             #expect(stage.tuning.sleepAfter == 300)
             #expect(stage.coat == .tabby)
@@ -264,6 +287,10 @@ import Testing
         harness.setting("coat", CatCoat.tuxedo)
         harness.setting("meow", true)
         await harness.settle(until: { stages.all.allSatisfy(\.playsMeow) })
+        #expect(stages.tuning.sleepAfter == 600 && stages.coat == .tuxedo && stages.playsMeow)
+        // A screen that comes later has them too.
+        let pill = try harness.notch(Screens.pill, on: Screens.externalID)
+        #expect(stages.all.count == 2)
         for stage in stages.all {
             #expect(stage.tuning.sleepAfter == 600)
             #expect(stage.coat == .tuxedo)
@@ -272,6 +299,7 @@ import Testing
         harness.setting("sleepMinutes", 2)
         await harness.settle(until: { stages.all.allSatisfy { $0.tuning.sleepAfter == 120 } })
         for stage in stages.all { #expect(stage.tuning.sleepAfter == 120) }
+        withExtendedLifetime((mac, pill)) {}
     }
 
     @Test func changingWhereTheCatPlaysPutsItThereAtOnceWithoutTakingItOffTheNotch() async throws {
@@ -292,10 +320,12 @@ import Testing
         #expect(harness.module.isShowing)
     }
 
-    @Test func theBusyReactionReachesEveryCatTheMomentItIsChanged() async throws {
+    @Test func theBusyReactionReachesEveryPetTheMomentItIsChanged() async throws {
         let harness = PetHarness()
         await harness.start()
         let stages = try #require(harness.madeStages)
+        let notches = [try harness.notch(Screens.hardware, on: Screens.macID), try harness.notch(Screens.pill, on: Screens.externalID)]
+        #expect(stages.all.count == 2)
         for stage in stages.all { #expect(stage.tuning.reactsToBusyMachine, "Thỉnh thoảng") }
         harness.setting("busyReaction", BusyReaction.off)
         await harness.settle(until: { stages.all.allSatisfy { !$0.tuning.reactsToBusyMachine } })
@@ -303,6 +333,7 @@ import Testing
         harness.setting("busyReaction", BusyReaction.occasionally)
         await harness.settle(until: { stages.all.allSatisfy(\.tuning.reactsToBusyMachine) })
         for stage in stages.all { #expect(stage.tuning.reactsToBusyMachine) }
+        withExtendedLifetime(notches) {}
     }
 
     // MARK: Stopping
@@ -325,28 +356,22 @@ import Testing
         #expect(harness.scheduler.pendingCount == 0)
     }
 
-    @Test func aStoppedModuleLeavesNoLifeInEitherCatsStage() async throws {
+    @Test func aStoppedModuleLeavesNoLifeInAnyScreensStage() async throws {
         let harness = PetHarness()
         await harness.start()
         harness.advance(2)
         let stages = try #require(harness.madeStages)
-        // A cat of each kind is on a notch, as it is with a Mac and a pill on the desk.
-        let notches = [Screens.hardware, Screens.pill].map { geometry in
-            let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 420, height: 38), styleMask: .borderless, backing: .buffered, defer: true)
-            window.isReleasedWhenClosed = false
-            let container = CatBodyContainer(stages: stages)
-            container.frame = window.contentLayoutRect
-            window.contentView?.addSubview(container)
-            container.configure(geometry: geometry)
-            container.layoutSubtreeIfNeeded()
-            return (window, container)
-        }
-        for stage in stages.all { #expect(stage.isAlive && stage.isTicking) }
+        // A pet is on a notch of each display, as it is with a Mac and a pill on the desk.
+        let notches = [try harness.notch(Screens.hardware, on: Screens.macID), try harness.notch(Screens.pill, on: Screens.externalID)]
+        let live = stages.all
+        #expect(live.count == 2)
+        for stage in live { #expect(stage.isAlive && stage.isTicking) }
         await harness.registry.setEnabled(false, for: "pet")
-        for stage in stages.all {
+        for stage in live {
             #expect(!stage.isAlive)
             #expect(!stage.isTicking)
         }
+        #expect(stages.all.isEmpty && harness.scheduler.pendingCount == 0)
         withExtendedLifetime(notches) {}
     }
 
@@ -367,7 +392,7 @@ import Testing
         await harness.start()
         harness.advance(2)
         let activity = try #require(harness.cat).activity
-        let stage = try #require(harness.madeStages).hardware
+        let stages = try #require(harness.madeStages)
         let counter = CatSpriteViewTests.Counter()
         // As the notch lays the activity out: the wings, and the strip under them as wide as the notch.
         let view = VStack(spacing: 0) {
@@ -386,7 +411,8 @@ import Testing
         window.isReleasedWhenClosed = false
         window.contentView = hosting
         hosting.layoutSubtreeIfNeeded()
-        #expect(stage.attachedHosts.count == 1, "one cat view, in the strip")
+        let stage = try #require(stages.all.first)
+        #expect(stages.all.count == 1 && stage.attachedHosts.count == 1, "one cat view, in the strip")
         #expect(counter.stripWidths.allSatisfy { $0 == 0 })
         #expect(hosting.fittingSize == CGSize(width: 300, height: 58))
         let cat = try #require(stage.attachedHosts.first)

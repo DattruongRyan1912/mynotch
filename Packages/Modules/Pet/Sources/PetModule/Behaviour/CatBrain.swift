@@ -16,14 +16,7 @@ import Foundation
 /// - the pointer is within sight and it is sitting: it looks at it.
 nonisolated struct CatBrain: Sendable {
     /// What an update did to the cat's plan.
-    enum Outcome: Equatable {
-        /// Nothing came due.
-        case unchanged
-        /// A new plan that looks like the one before it (a cat that goes on sleeping): a host has nothing to redraw.
-        case extended
-        /// A different picture: a host starts the new animation.
-        case changed
-    }
+    typealias Outcome = BrainOutcome
 
     static let reactionCooldown: TimeInterval = 8
     /// The chance that a pointer coming close makes a cat that is awake pounce, and not jump.
@@ -69,9 +62,9 @@ nonisolated struct CatBrain: Sendable {
     private var ball: Double?
     private var rolling = 1.0
     private var travel = 0.0
-    /// The stretches of the lane, as shares of it, where the cat is part in one view and part in another (see `CatField.crossing`): it goes
-    /// through them and never stops in one.
-    private var gaps: [ClosedRange<Double>] = []
+    /// What the lane it shares asks of it: the crossing it goes through and never stops in, the places others stand, the stretch it may not
+    /// go into (see `LaneKeeper`).
+    private var keeper = LaneKeeper()
     /// How much the Mac's load bothers the cat, 0 to 1, as of the last update: 0 when the user has turned the reaction off.
     private var busyness = 0.0
     private var generator: SplitMix64
@@ -111,9 +104,14 @@ nonisolated struct CatBrain: Sendable {
     mutating func update(
         now: TimeInterval, senses: CatSenses, tuning: CatTuning, travel: Double, gaps: [ClosedRange<Double>] = []
     ) -> Outcome {
+        update(now: now, senses: senses, tuning: tuning, travel: travel, lane: LaneContext(crossing: gaps))
+    }
+
+    /// The same, in a lane that other characters share (see `LaneContext`).
+    mutating func update(now: TimeInterval, senses: CatSenses, tuning: CatTuning, travel: Double, lane: LaneContext) -> Outcome {
         let before = plan
         self.travel = travel
-        settle(gaps: gaps)
+        settle(lane: lane)
         busyness = tuning.reactsToBusyMachine ? min(max((senses.cpuLoad - Self.busyFrom) / (1 - Self.busyFrom), 0), 1) : 0
         pointer = senses.pointer
         let arrived = senses.pointerNear && !pointerWasNear
@@ -137,9 +135,15 @@ nonisolated struct CatBrain: Sendable {
     /// Takes the stretches of the lane the cat must not stop in. A cat that stands in one when they are taken (the views it plays in have
     /// changed under it) is put at the nearer end of it, which is a jump, and made only then.
     mutating func settle(gaps: [ClosedRange<Double>]) {
-        self.gaps = gaps
-        guard plan.from == plan.to, !gaps.isEmpty else { return }
-        let here = settled(plan.to)
+        settle(lane: LaneContext(crossing: gaps))
+    }
+
+    /// The same, for a lane that other characters share: where they stand is a place it does not stop in either, and it may be told not to
+    /// go into a stretch at all.
+    mutating func settle(lane: LaneContext) {
+        keeper = LaneKeeper(lane)
+        guard plan.from == plan.to, !(lane.crossing.isEmpty && lane.zones.isEmpty) else { return }
+        let here = keeper.settled(plan.to)
         guard here != plan.to else { return }
         plan.from = here
         plan.to = here
@@ -147,15 +151,8 @@ nonisolated struct CatBrain: Sendable {
 
     /// Whether the cat is in the middle of a walk through a stretch it must not stop in.
     private func isCrossing(at now: TimeInterval) -> Bool {
-        guard plan.from != plan.to, !gaps.isEmpty else { return false }
-        let place = plan.position(at: now)
-        return gaps.contains { place > $0.lowerBound && place < $0.upperBound }
-    }
-
-    /// `share` if the cat may stop there, else the end of the stretch it must not stop in that is nearer.
-    private func settled(_ share: Double) -> Double {
-        guard let gap = gaps.first(where: { share > $0.lowerBound && share < $0.upperBound }) else { return share }
-        return share - gap.lowerBound < gap.upperBound - share ? gap.lowerBound : gap.upperBound
+        guard plan.from != plan.to else { return false }
+        return keeper.isInCrossing(plan.position(at: now))
     }
 
     /// Whether the cat is to run: the Mac is in a burst and the user wants the cat to mind.
@@ -363,7 +360,7 @@ nonisolated struct CatBrain: Sendable {
 
     /// The cat doing `move` where it is.
     private func made(_ move: CatMove, now: TimeInterval, duration: TimeInterval) -> CatPlan {
-        let here = settled(plan.position(at: now))
+        let here = keeper.settled(plan.position(at: now))
         return CatPlan(move: move, facing: plan.facing, from: here, to: here, began: now, duration: duration)
     }
 
@@ -400,7 +397,7 @@ nonisolated struct CatBrain: Sendable {
             guard let ball else { return nil }
             target = min(max(ball - rolling * Self.playGap, 0), 1)
         }
-        target = settled(target)
+        target = keeper.destination(target, from: here)
         let covered = abs(target - here) * travel
         guard covered >= 1 else { return nil }
         // A busy Mac quickens a walk a little: the frames and the pace together.
@@ -416,7 +413,7 @@ nonisolated struct CatBrain: Sendable {
         guard travel >= 1 else { return nil }
         let here = plan.position(at: now)
         let right = here < 0.5
-        let catEnd = right ? 1 - Self.edgeInset : Self.edgeInset
+        let catEnd = keeper.endOfLane(right ? 1 - Self.edgeInset : Self.edgeInset, from: here)
         let covered = max(abs(catEnd - here) * travel, 1)
         let lead = right ? Self.mothLead : -Self.mothLead
         var chasing = CatPlan(
@@ -432,13 +429,13 @@ nonisolated struct CatBrain: Sendable {
         rolling = here < 0.5 ? 1 : -1
         let distance = Double.random(in: 0.18...0.3, using: &generator)
         let room = 3 * Self.rollLength + 0.06
-        ball = settled(rolling > 0 ? min(max(here + distance, 0.15), 1 - room) : min(max(here - distance, room), 0.85))
+        ball = keeper.destination(rolling > 0 ? min(max(here + distance, 0.15), 1 - room) : min(max(here - distance, room), 0.85), from: here)
     }
 
     /// A bat at the ball, and it rolls on a way.
     private mutating func batBall(now: TimeInterval) -> CatPlan? {
         guard let resting = ball else { return nil }
-        let rolled = settled(min(max(resting + rolling * Self.rollLength, 0.06), 0.94))
+        let rolled = keeper.settled(min(max(resting + rolling * Self.rollLength, 0.06), 0.94))
         ball = rolled
         var batting = made(.yarn, now: now, duration: 1.6)
         batting.facing = rolling > 0 ? .right : .left
@@ -452,7 +449,7 @@ nonisolated struct CatBrain: Sendable {
         var target = here
         if let pointer, travel >= 1 {
             let leap = min(max((pointer.share - here) * travel, -Self.longestPounce), Self.longestPounce) / travel
-            target = settled(min(max(here + leap, 0), 1))
+            target = keeper.destination(min(max(here + leap, 0), 1), from: here)
         }
         var pouncing = made(.pounce, now: now, duration: CatMove.pounce.passDuration)
         pouncing.to = target
@@ -466,7 +463,7 @@ nonisolated struct CatBrain: Sendable {
         let here = plan.position(at: now)
         let strength = min(max((load - BusyWatch.floor) / (1 - BusyWatch.floor), 0), 1)
         let scale = 1 + Self.runFrameBoost * strength
-        let target = here < 0.5 ? 1.0 : 0.0
+        let target = keeper.endOfLane(here < 0.5 ? 1.0 : 0.0, from: here)
         let covered = abs(target - here) * max(travel, 0)
         let moves = covered >= 1
         return CatPlan(

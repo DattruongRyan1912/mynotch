@@ -30,10 +30,24 @@ enum Screens {
 
     /// What the Mac's screen reports of its camera, on a screen whose frame is `frame`: the widths of the areas of the menu bar either side.
     static func macAreas(frame: CGRect = mac.frame) -> (frame: CGRect, left: CGFloat?, right: CGFloat?) { (frame, 790, 790) }
+
+    /// The displays' identities, as a UUID would name them: the Mac's own and the one beside it.
+    static let macID: DisplayID = "MAC-0000-0000-0000"
+    static let externalID: DisplayID = "EXTERNAL-0000-0000"
+}
+
+/// Which display each window of a test is on: a window that is never shown has no screen to ask.
+@MainActor final class DisplayMap {
+    private var byWindow: [ObjectIdentifier: DisplayID] = [:]
+
+    func put(_ window: NSWindow, on display: DisplayID) { byWindow[ObjectIdentifier(window)] = display }
+
+    func displayOf(_ window: NSWindow) -> DisplayID? { byWindow[ObjectIdentifier(window)] }
 }
 
 /// The cat in the top row of one notch, everything it reads held by the test, in a window that is never shown. A second rig made to share
-/// the first's (`sharing`) is a second notch of the same cats: one scheduler, one set of things read, one pair of stages.
+/// the first's (`sharing`) is a second notch on the same Mac: one scheduler, one set of things read, one registry of stages, on a display
+/// of its own (the Mac's own or the one beside it, by the geometry, unless it is told which).
 @MainActor final class BodyRig {
     let scheduler: ManualScheduler
     let idle: FakeIdle
@@ -45,8 +59,14 @@ enum Screens {
     let knobs: Knobs
     /// Where the container hears of its window moving and changing screen, which the test posts to.
     let windowNotifications = NotificationCenter()
-    /// The cats of the two kinds of notch; the one for this notch's kind is `stage`.
+    /// The stages, one for each display that has pets; the one for this notch's display is `stage`.
     let stages: CatStages
+    /// Which display each rig's window is on.
+    let displays: DisplayMap
+    /// Where the registry hears of a window changing screen, which the test posts to.
+    let screenNotifications: NotificationCenter
+    /// The display this notch is on.
+    let displayID: DisplayID
     let window: NSWindow
     let container: CatBodyContainer
     let geometry: NotchGeometry
@@ -55,13 +75,17 @@ enum Screens {
     /// Where the Mac's screen is in the arrangement of displays: its left edge. The external display to its left puts it elsewhere than 0.
     let screenFrame: CGRect
 
-    var stage: CatStage { stages.stage(for: geometry.kind) }
+    var stage: CatStage { stages.stage(for: displayID)! }
 
     init(
         geometry: NotchGeometry, place: PlayPlace = .portal, seed: UInt64 = 7, hour: Int = 12, reducesMotion: Bool = false, width: CGFloat? = nil,
-        screenOrigin: CGFloat = 0, sharing other: BodyRig? = nil
+        screenOrigin: CGFloat = 0, sharing other: BodyRig? = nil, display: DisplayID? = nil,
+        species: ((CharacterKind) -> any Species)? = nil
     ) {
         self.geometry = geometry
+        displayID = display ?? (geometry.kind == .hardware ? Screens.macID : Screens.externalID)
+        displays = other?.displays ?? DisplayMap()
+        screenNotifications = other?.screenNotifications ?? NotificationCenter()
         scheduler = other?.scheduler ?? ManualScheduler()
         idle = other?.idle ?? FakeIdle()
         cpu = other?.cpu ?? FakeCPU()
@@ -80,14 +104,26 @@ enum Screens {
             let knobs = knobs
             let scheduler = scheduler
             let (idle, cpu, pointer, audio, meow, notifications) = (self.idle, self.cpu, self.pointer, self.audio, self.meow, self.notifications)
-            // The same things are read for both, and each has a seed of its own, as it has when it reads the real Mac.
-            func stage(seed: UInt64) -> CatStage {
-                CatStage(scheduler: scheduler, sources: CatStage.Sources(
+            let displays = displays
+            var others: UInt64 = 2
+            // The same things are read on every display, and each has a seed of its own, as it has when it reads the real Mac.
+            func stage(display: DisplayID) -> CatStage {
+                let own: UInt64
+                switch display {
+                case Screens.macID: own = seed
+                case Screens.externalID: own = seed &+ 1
+                default:
+                    own = seed &+ others
+                    others += 1
+                }
+                var sources = CatStage.Sources(
                     idle: idle, cpu: cpu, pointer: pointer, audio: audio, meow: meow, hour: { knobs.hour },
-                    reducesMotion: { knobs.reducesMotion }, notifications: notifications, clock: { scheduler.seconds }, seed: seed
-                ))
+                    reducesMotion: { knobs.reducesMotion }, notifications: notifications, clock: { scheduler.seconds }, seed: own
+                )
+                if let species { sources.species = species }
+                return CatStage(scheduler: scheduler, sources: sources)
             }
-            stages = CatStages(hardware: stage(seed: seed), virtual: stage(seed: seed &+ 1))
+            stages = CatStages(makeStage: stage(display:), displayOf: { displays.displayOf($0) }, notifications: screenNotifications)
         }
         rowWidth = width ?? Screens.row(of: geometry, place: place)
         // The row is in the middle of the screen's top, as the notch is.
@@ -100,6 +136,7 @@ enum Screens {
             styleMask: .borderless, backing: .buffered, defer: true
         )
         window.isReleasedWhenClosed = false
+        displays.put(window, on: displayID)
         container = CatBodyContainer(stages: stages)
         container.frame = CGRect(x: 0, y: 0, width: rowWidth, height: geometry.notchSize.height)
         container.screenAreas = { _ in geometry.kind == .hardware ? Screens.macAreas(frame: frame) : nil }

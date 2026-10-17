@@ -23,6 +23,9 @@ nonisolated enum PropArt {
 
     static let mothSize = CGSize(width: moth.frames[0].width, height: moth.frames[0].height)
 
+    /// How far above the cat's feet a moth flutters, in points of the picture.
+    static let mothRise = 11.0
+
     /// A ball of yarn: a round with windings that move round it as it rolls.
     static func yarn(turn: Int) -> PixelFrame {
         let size = 8

@@ -1,11 +1,11 @@
 import MyNotchCore
 import SwiftUI
 
-/// The cat as a live activity: at the lowest priority there is, playing in the top row of the collapsed notch (its `body`: beside the
+/// The pets as a live activity: at the lowest priority there is, playing in the top row of the collapsed notch (its `body`: beside the
 /// camera of a hardware notch, through a portal from one side to the other, and across a virtual notch), or, if the user chose it, on a
 /// strip under a hardware notch, as wide as the notch and its two wings (the notch's own mechanism, the one the lyrics use). A virtual
-/// notch has room in its body, so it never gets the strip. Each kind of notch has a cat of its own (`CatStages`), and the strip, which is
-/// for a hardware notch only, has that one.
+/// notch has room in its body, so it never gets the strip. Each display has a stage of its own (`CatStages`), with the pets the user chose
+/// for it, and the strip, which is for a hardware notch only, is shown by the stage of the display it is under.
 ///
 /// It is only ever published while nothing else is on the notch (see `PetModule`), so it is never the bubble beside another activity. The
 /// `minimal` view and the summary are for the moment between another activity coming and the cat stepping aside.
@@ -19,17 +19,17 @@ enum CatActivity {
             priority: .low,
             leading: AnyView(Color.clear),
             trailing: AnyView(Color.clear),
-            bottom: place == .strip ? AnyView(CatStripView(stage: stages.hardware).accessibilityHidden(true)) : nil,
+            bottom: place == .strip ? AnyView(CatStripView(stages: stages).accessibilityHidden(true)) : nil,
             bottomHeight: place == .strip ? stripHeight : 0,
             bottomScope: .hardwareNotchOnly,
             body: AnyView(CatBodyView(stages: stages, place: place).accessibilityHidden(true)),
             minimal: AnyView(
-                Image(systemName: "cat.fill")
+                Image(systemName: "pawprint.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color(red: 0xF0 / 255, green: 0xA1 / 255, blue: 0x4E / 255))
                     .accessibilityHidden(true)
             ),
-            summary: "Mèo trên notch"
+            summary: "Thú cưng trên notch"
         )
     }
 }

@@ -2,12 +2,13 @@ import AppKit
 import NotchUI
 import SwiftUI
 
-/// The strip under the notch, as a view: it owns two layers, one with the cat's picture on it and one with what it plays with, and hands
-/// everything that moves to Core Animation. The cat's frames are one keyframe animation of the layer's `contentsRect` along a strip of
-/// pictures, its walk is another of its position, and nothing is redrawn or laid out by SwiftUI while either runs. The view takes both
-/// away the moment it leaves its window.
+/// A lane the characters play in, as a view: the strip under the notch, the body of a virtual notch, or one side of a hardware notch's
+/// camera. It owns three layers for each character (`CharacterLayers`: its picture, what it plays with and its portal), in the order the
+/// stage draws them in, and hands everything that moves to Core Animation. A character's frames are one keyframe animation of the layer's
+/// `contentsRect` along a strip of pictures, its walk is another of its position, and nothing is redrawn or laid out by SwiftUI while
+/// either runs. The view takes them all away the moment it leaves its window.
 ///
-/// The cat is drawn at one pixel of its picture to the point, which is two device pixels on a Retina display and three on a bigger
+/// A character is drawn at one pixel of its picture to the point, which is two device pixels on a Retina display and three on a bigger
 /// scale, with nearest-neighbour filtering, so it is sharp on all of them.
 final class CatSpriteView: NSView {
     /// What the view is: the strip under the notch (today's), one view across the body of a virtual notch, or one of the two views of a
@@ -32,48 +33,47 @@ final class CatSpriteView: NSView {
     /// What the cat's picture measures, in points.
     static let spriteSize = CGSize(width: CatArt.width, height: CatArt.height)
     /// How high a moth flutters, from the bottom of the strip, and how far it bobs.
-    static let mothHeight: CGFloat = 12
+    static let mothHeight: CGFloat = CatField.stripFloor + CGFloat(PropArt.mothRise)
     static let mothBob: [CGFloat] = [0, 3, 5, 4, 1, -1, 2, 4, 3, 0]
 
-    private(set) weak var stage: CatStage?
+    /// The stage that shows this view, which is its display's: set by the registry, nil while the display has no characters. A view that
+    /// is handed a stage (a test's, with no registry) keeps it.
+    weak var stage: CatStage?
+    /// The registry that puts this view on the stage of the display it is in; nil for a view made for one stage.
+    private(set) weak var home: CatStages?
     let role: Role
     /// The view on the other side of the camera, for a view that is one of two.
     weak var partner: CatSpriteView?
-    /// Which leg of its walk the cat is on, and the prop on: a leg that says it is over when another has taken its place is not heard.
-    private var spriteLeg = 0
-    private var propLeg = 0
-    /// Where the cat will stand when its leg is over, and the prop: what the next leg goes on from. Not the layer's own value, which is where
-    /// the leg began until it says it is over.
-    private var spriteStands: CGFloat?
-    private var propStands: CGFloat?
-    /// The field the last leg was shown in: where a leg ended is a place in that field and means another in a field that is not the same
-    /// (the notch grew, or the other view of the pair has come), so a leg goes on from where the last one ended only in the same one.
-    private var shownField: CatField?
-    /// The cat. Anchored at its bottom left corner, so its position is the place of its left foot.
-    let sprite: CALayer
-    /// The moth or the ball of yarn.
-    let prop: CALayer
-    /// The portal at the inner edge of a view that is one of two, which opens before the cat crosses and closes after.
-    let portal = CALayer()
+    /// What each character on the stage is drawn with, in the order they are drawn in: there is always one, for the first.
+    private(set) var characters: [CharacterLayers]
 
-    /// The layers can be handed in, which is what a test does to see in what order they are told things.
+    /// The first character's layers, which is the cat's when there is only the cat: the picture, what it plays with, and its portal.
+    var sprite: CALayer { characters[0].sprite }
+    var prop: CALayer { characters[0].prop }
+    var portal: CALayer { characters[0].portal }
+
+    /// The layers of the first character can be handed in, which is what a test does to see in what order they are told things.
     init(stage: CatStage, role: Role = .strip, sprite: CALayer = CALayer(), prop: CALayer = CALayer()) {
         self.stage = stage
         self.role = role
-        self.sprite = sprite
-        self.prop = prop
+        characters = [CharacterLayers(sprite: sprite, prop: prop)]
         super.init(frame: .zero)
+        configureLayers()
+    }
+
+    /// A view that is shown by the stage of the display it is in, whichever that is.
+    init(stages: CatStages, role: Role = .strip) {
+        home = stages
+        self.role = role
+        characters = [CharacterLayers()]
+        super.init(frame: .zero)
+        configureLayers()
+    }
+
+    private func configureLayers() {
         wantsLayer = true
         layer?.masksToBounds = true
-        for layer in [sprite, prop, portal] {
-            layer.anchorPoint = .zero
-            layer.contentsGravity = .resize
-            // Nearest neighbour both ways: any other filter smears the pixels.
-            layer.magnificationFilter = .nearest
-            layer.minificationFilter = .nearest
-            layer.isHidden = true
-            self.layer?.addSublayer(layer)
-        }
+        characters[0].all.forEach { layer?.addSublayer($0) }
     }
 
     @available(*, unavailable)
@@ -81,12 +81,18 @@ final class CatSpriteView: NSView {
 
     // MARK: Geometry
 
-    /// Whether the view that holds this one in the top row of a notch has its wings laid out for a camera that is not where it is now.
-    var isInStaleLayout: Bool { (superview as? CatBodyContainer)?.wingsAreStale ?? false }
+    /// Whether the view that holds this one in the top row of a notch has its wings laid out for a camera that is not where it is now, or
+    /// this one is shown by the stage of a display it has left.
+    var isInStaleLayout: Bool {
+        if let container = superview as? CatBodyContainer { return container.isStale }
+        return home?.isRoutedElsewhere(self) ?? false
+    }
 
-    /// Asks the view that holds this one to lay its views out again: it is laid out only when AppKit has a reason to, which a window that
-    /// moved is not.
-    func askForLayout() { (superview as? CatBodyContainer)?.needsLayout = true }
+    /// Asks for the view that holds this one to be laid out again, or this one if none does: it is laid out only when AppKit has a reason
+    /// to, which a window that moved is not.
+    func askForLayout() {
+        if let container = superview as? CatBodyContainer { container.needsLayout = true } else { needsLayout = true }
+    }
 
     /// The strip's frame on the screen; nil outside a window.
     var screenFrame: CGRect? { window.map { $0.convertToScreen(convert(bounds, to: nil)) } }
@@ -108,9 +114,7 @@ final class CatSpriteView: NSView {
     var lane: WalkLane { field.lane }
 
     /// Whether anything is animating on the layers.
-    var isAnimating: Bool {
-        [sprite, prop, portal].contains { !($0.animationKeys() ?? []).isEmpty }
-    }
+    var isAnimating: Bool { characters.contains { $0.isAnimating } }
 
     /// Whether the cat is drawn: false when it has been taken away.
     var isShowingCat: Bool { !sprite.isHidden }
@@ -119,6 +123,7 @@ final class CatSpriteView: NSView {
 
     override func layout() {
         super.layout()
+        home?.reroute(self)
         stage?.hostDidMove(self)
     }
 
@@ -131,10 +136,11 @@ final class CatSpriteView: NSView {
     /// its animations.
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil {
-            stage?.detach(self)
-        } else {
-            stage?.attach(self)
+        switch (window, home) {
+        case (nil, let home?): home.detach(self)
+        case (nil, nil): stage?.detach(self)
+        case (_?, let home?): home.attach(self)
+        case (_?, nil): stage?.attach(self)
         }
     }
 
@@ -143,11 +149,19 @@ final class CatSpriteView: NSView {
     /// Only the cat takes clicks, so the rest of the strip opens the notch as it always did. It is hit where the cat is drawn at this
     /// moment, which on a walk is not where the layer's value says.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard !sprite.isHidden, let superview else { return nil }
+        guard let superview else { return nil }
         let local = convert(point, from: superview)
-        guard bounds.contains(local) else { return nil }
-        let drawn = (sprite.presentation() ?? sprite).frame.insetBy(dx: -2, dy: -2)
-        return drawn.contains(local) ? self : nil
+        guard bounds.contains(local), drawnCharacter(at: local) != nil else { return nil }
+        return self
+    }
+
+    /// The character drawn at `point` (in this view's coordinates), the topmost when several are: its number on the stage.
+    private func drawnCharacter(at point: CGPoint) -> Int? {
+        characters.indices.reversed().first { index in
+            let sprite = characters[index].sprite
+            guard !sprite.isHidden else { return false }
+            return (sprite.presentation() ?? sprite).frame.insetBy(dx: -2, dy: -2).contains(point)
+        }
     }
 
     /// The panel never becomes active, so the first click has to be taken for what it is.
@@ -155,9 +169,10 @@ final class CatSpriteView: NSView {
 
     override var mouseDownCanMoveWindow: Bool { false }
 
-    /// A click on the cat is a stroke, and goes no further: it does not reach the notch's own tap, which would open it.
+    /// A click on the cat is a stroke, and goes no further: it does not reach the notch's own tap, which would open it. It is for the one
+    /// that was clicked, and for the first when none is where the click is.
     override func mouseDown(with event: NSEvent) {
-        stage?.catWasClicked()
+        stage?.catWasClicked(character: drawnCharacter(at: convert(event.locationInWindow, from: nil)) ?? 0)
     }
 
     // MARK: Showing
@@ -174,51 +189,93 @@ final class CatSpriteView: NSView {
         return current
     }
 
-    /// Plays `plan` along the lane from `elapsed` seconds into it, in the coat given.
+    /// Plays `plan` along the lane from `elapsed` seconds into it, in the coat given: the cat alone.
+    func show(plan: CatPlan, elapsed: TimeInterval, coat: CatCoat, at mediaTime: CFTimeInterval = CACurrentMediaTime()) {
+        show(
+            characters: [CharacterDrawing(species: CatSpecies.shared, pose: plan.pose, elapsed: elapsed, appearance: Appearance(coat: coat))],
+            at: mediaTime
+        )
+    }
+
+    /// Plays every character's pose along the lane, each on layers of its own, in the order given: the first at the bottom. All of them are
+    /// shown the one moment, `mediaTime`, which is what keeps the two views of a notch's top row in step.
+    func show(characters drawings: [CharacterDrawing], at mediaTime: CFTimeInterval = CACurrentMediaTime()) {
+        fit(to: drawings)
+        for (drawing, layers) in zip(drawings, characters) { show(drawing, on: layers, at: mediaTime) }
+    }
+
+    /// One set of layers for each character, whom they are for the same each time so that none is drawn over by another's picture: a
+    /// character that is not who the layers had is begun again on them.
+    private func fit(to drawings: [CharacterDrawing]) {
+        fit(to: drawings.map(\.species))
+    }
+
+    private func fit(to species: [any Species]) {
+        let wanted = max(species.count, 1)
+        if characters.count != wanted {
+            characters.dropFirst(wanted).forEach { layers in
+                layers.stopShowing()
+                layers.all.forEach { $0.removeFromSuperlayer() }
+            }
+            characters = Array(characters.prefix(wanted))
+            while characters.count < wanted { characters.append(CharacterLayers()) }
+            // The order of the layers is the order of the characters.
+            for layers in characters where layers.sprite.superlayer !== layer { layers.all.forEach { layer?.addSublayer($0) } }
+        }
+        for (one, layers) in zip(species, characters) where layers.species != ObjectIdentifier(one) {
+            if layers.species != nil { layers.stopShowing() }
+            layers.species = ObjectIdentifier(one)
+        }
+        characters.dropFirst(species.count).forEach { $0.stopShowing() }
+    }
+
+    /// Plays one pose.
     ///
-    /// **The layer itself is where the cat stands, never where it is going.** A leg is an animation of the layer's position, and until the
-    /// render server is drawing that animation the layer's own value is what is on the screen. So the layer is set to where the leg begins,
-    /// together with the animation that takes it away, and is moved to where the leg ends only when the animation says it is over
+    /// **The layer itself is where the character stands, never where it is going.** A leg is an animation of the layer's position, and until
+    /// the render server is drawing that animation the layer's own value is what is on the screen. So the layer is set to where the leg
+    /// begins, together with the animation that takes it away, and is moved to where the leg ends only when the animation says it is over
     /// (`LegEnd`); the animation, which holds its last place (`.forwards`) and its first until it begins (`.backwards`), shows the rest.
     ///
     /// When a leg takes the place of another, in the one transaction: the layer is set to where the new leg begins, and only then is the
     /// old animation taken away, so that the layer never shows a place it has been left at by the old leg (where that began), and then the
     /// new animations go on. Nothing here waits for the old leg to say it is over.
-    ///
-    /// `mediaTime` is the moment it is shown at, on the animation clock: the two views of a notch's top row are shown the same one, so that
-    /// everything they play begins together.
-    func show(plan: CatPlan, elapsed: TimeInterval, coat: CatCoat, at mediaTime: CFTimeInterval = CACurrentMediaTime()) {
+    private func show(_ drawing: CharacterDrawing, on layers: CharacterLayers, at mediaTime: CFTimeInterval) {
+        let (pose, elapsed) = (drawing.pose, drawing.elapsed)
+        let (sprite, portal) = (layers.sprite, layers.portal)
         let field = field
         let scale = CGFloat(field.scale)
-        let strip = CatSheets.shared.strip(for: plan.move, facing: plan.facing, coat: coat)
-        let rate = max(plan.fpsScale, 0.1)
-        let effectiveFPS = plan.move.fps * rate
-        let sameField = shownField == field
-        shownField = field
+        let strip = drawing.species.strip(for: pose.motion, facing: pose.facing, appearance: drawing.appearance)
+        let rate = max(pose.fpsScale, 0.1)
+        let effectiveFPS = pose.motion.fps * rate
+        let sameField = layers.shownField == field
+        layers.shownField = field
         let from = Self.continued(
-            from: sprite.isHidden || !sameField ? nil : spriteStands, near: field.local(share: plan.from), scale: field.scale
+            from: sprite.isHidden || !sameField ? nil : layers.spriteStands, near: field.local(share: pose.from), scale: field.scale
         )
-        // A cat that stays where it is stays where it is, on whatever whole step the last leg ended.
-        let to = plan.to == plan.from ? from : field.local(share: plan.to)
+        // A character that stays where it is stays where it is, on whatever whole step the last leg ended.
+        let to = pose.to == pose.from ? from : field.local(share: pose.to)
         let floor = field.baseY(height: bounds.height, isStrip: role.isStrip)
         // A head that peeks comes up from below the edge: the strip's, or the bottom of the notch's body.
-        let base = plan.move == .peek ? (role.isStrip ? floor : 0) - Self.peekSink * scale : floor
+        let base = pose.motion.sinks ? (role.isStrip ? floor : 0) - Self.peekSink * scale : floor
         let begin = sprite.convertTime(mediaTime, from: nil)
-        spriteLeg += 1
-        let leg = spriteLeg
+        layers.spriteLeg += 1
+        let leg = layers.spriteLeg
         var walk: CAKeyframeAnimation?
         if from != to {
-            let moving = max(plan.duration * (1 - plan.delay), 0.05)
+            let moving = max(pose.duration * (1 - pose.delay), 0.05)
             let step = max((abs(to - from) / (moving * effectiveFPS)).rounded(), 1)
             let animation = Self.walkAnimation(
-                from: from, to: to, step: step, duration: plan.duration, delay: plan.delay, elapsed: elapsed, begin: begin, rate: effectiveFPS
+                from: from, to: to, step: step, duration: pose.duration, delay: pose.delay, elapsed: elapsed, begin: begin, rate: effectiveFPS
             )
             let ends = Self.lastValue(of: animation)
-            animation.delegate = LegEnd { [weak self] in self?.arrived(at: ends, leg: leg, onTheCat: true) }
+            animation.delegate = LegEnd { [weak self, weak layers] in
+                guard let layers else { return }
+                self?.arrived(at: ends, leg: leg, onTheCat: true, in: layers)
+            }
             walk = animation
         }
-        spriteStands = walk.map(Self.lastValue(of:)) ?? from
-        let frames = Self.framesAnimation(strip: strip, fps: effectiveFPS, loops: plan.move.loops, elapsed: elapsed, begin: begin)
+        layers.spriteStands = walk.map(Self.lastValue(of:)) ?? from
+        let frames = Self.framesAnimation(strip: strip, fps: effectiveFPS, loops: pose.motion.loops, elapsed: elapsed, begin: begin)
         let size = CGSize(width: Self.spriteSize.width * scale, height: Self.spriteSize.height * scale)
         let portals = walk.flatMap { portalAnimation(for: $0, field: field, begin: begin, elapsed: elapsed) }
 
@@ -229,59 +286,58 @@ final class CatSpriteView: NSView {
         sprite.removeAllAnimations()
         sprite.add(frames, forKey: Self.framesKey)
         if let walk { sprite.add(walk, forKey: Self.walkKey) }
-        showPortal(portals, field: field, y: floor)
-        showProp(of: plan, field: field, floor: floor, sameField: sameField, elapsed: elapsed, begin: begin)
+        showPortal(portals, on: portal, field: field, y: floor)
+        showProp(of: drawing, on: layers, field: field, floor: floor, sameField: sameField, begin: begin)
         CATransaction.commit()
     }
 
-    /// What the cat plays with: a moth that flutters along a path of its own, or a ball of yarn that lies or rolls. Like the cat, it is
-    /// where it begins until its path says it is going, and it is set there before its old animations go.
+    /// What the character plays with: a moth that flutters along a path of its own, or a ball of yarn that lies or rolls. Like the
+    /// character, it is where it begins until its path says it is going, and it is set there before its old animations go.
     private func showProp(
-        of plan: CatPlan, field: CatField, floor: CGFloat, sameField: Bool, elapsed: TimeInterval, begin: CFTimeInterval
+        of drawing: CharacterDrawing, on layers: CharacterLayers, field: CatField, floor: CGFloat, sameField: Bool, begin: CFTimeInterval
     ) {
-        let current = prop.isHidden || !sameField ? nil : propStands
-        propLeg += 1
-        guard let item = plan.prop else {
+        let (pose, elapsed, prop) = (drawing.pose, drawing.elapsed, layers.prop)
+        let current = prop.isHidden || !sameField ? nil : layers.propStands
+        layers.propLeg += 1
+        guard let item = pose.prop else {
             prop.removeAllAnimations()
             prop.isHidden = true
-            propStands = nil
+            layers.propStands = nil
             return
         }
-        let leg = propLeg
+        let leg = layers.propLeg
         let scale = CGFloat(field.scale)
-        let strip = CatSheets.shared.propStrip(item.kind)
+        let strip = drawing.species.propStrip(item.look)
         let size = CGSize(width: CGFloat(strip.frameWidth) * scale, height: CGFloat(strip.frameHeight) * scale)
         let from = Self.continued(from: current, near: field.local(unbounded: item.from), scale: field.scale)
         let to = item.to == item.from ? from : field.local(unbounded: item.to)
-        // A moth flutters as high above the cat's feet as it does in the strip.
-        let height = item.kind == .moth ? floor + (Self.mothHeight - Self.floor) * scale : floor
+        // A moth flutters as high above the character's feet as it does in the strip.
+        let height = floor + CGFloat(item.look.rise) * scale
         var path: CAKeyframeAnimation?
         if from != to {
-            let step = max((abs(to - from) / (plan.duration * 12)).rounded(), 1)
+            let step = max((abs(to - from) / (pose.duration * 12)).rounded(), 1)
             let animation = Self.walkAnimation(
-                from: from, to: to, step: step, duration: plan.duration, delay: 0, elapsed: elapsed, begin: begin, rate: 12
+                from: from, to: to, step: step, duration: pose.duration, delay: 0, elapsed: elapsed, begin: begin, rate: 12
             )
             let ends = Self.lastValue(of: animation)
-            animation.delegate = LegEnd { [weak self] in self?.arrived(at: ends, leg: leg, onTheCat: false) }
+            animation.delegate = LegEnd { [weak self, weak layers] in
+                guard let layers else { return }
+                self?.arrived(at: ends, leg: leg, onTheCat: false, in: layers)
+            }
             path = animation
         }
-        propStands = path.map(Self.lastValue(of:)) ?? from
+        layers.propStands = path.map(Self.lastValue(of:)) ?? from
         prepare(prop, strip: strip, size: size)
         prop.position = CGPoint(x: from, y: height)
         prop.removeAllAnimations()
-        switch item.kind {
-        case .moth:
-            prop.add(
-                Self.framesAnimation(strip: strip, fps: PropArt.moth.fps, loops: true, elapsed: elapsed, begin: begin), forKey: Self.framesKey
-            )
-            if let path { prop.add(path, forKey: Self.walkKey) }
+        // What does not move is still while it lies (a ball of yarn); what flies goes on with its wings (a moth).
+        guard item.look.animatesInPlace || path != nil else { return }
+        prop.add(
+            Self.framesAnimation(strip: strip, fps: item.look.fps, loops: true, elapsed: elapsed, begin: begin), forKey: Self.framesKey
+        )
+        if let path { prop.add(path, forKey: Self.walkKey) }
+        if item.look.flutters {
             prop.add(Self.bobAnimation(base: height, elapsed: elapsed, begin: begin, scale: scale), forKey: Self.bobKey)
-        case .yarn:
-            guard let path else { return }
-            prop.add(
-                Self.framesAnimation(strip: strip, fps: PropArt.yarn.fps, loops: true, elapsed: elapsed, begin: begin), forKey: Self.framesKey
-            )
-            prop.add(path, forKey: Self.walkKey)
         }
     }
 
@@ -338,7 +394,7 @@ final class CatSpriteView: NSView {
     }
 
     /// Sets the portal at the inner edge of this view, clear, with the animation that opens it (nil: none, and it stays clear).
-    private func showPortal(_ animation: CAKeyframeAnimation?, field: CatField, y: CGFloat) {
+    private func showPortal(_ animation: CAKeyframeAnimation?, on portal: CALayer, field: CatField, y: CGFloat) {
         portal.removeAllAnimations()
         guard role == .leftWing || role == .rightWing else {
             portal.isHidden = true
@@ -357,9 +413,10 @@ final class CatSpriteView: NSView {
     /// The cat's leg (or the prop's) is over, and the animation is holding its last place: the layer is moved there too, so that whatever
     /// shows the layer without the animation shows where the cat stands, and the next leg begins there. A leg that has been replaced by
     /// another is not the one to say so.
-    func arrived(at x: CGFloat, leg: Int, onTheCat: Bool) {
-        let layer = onTheCat ? sprite : prop
-        guard leg == (onTheCat ? spriteLeg : propLeg), !layer.isHidden else { return }
+    func arrived(at x: CGFloat, leg: Int, onTheCat: Bool, in layers: CharacterLayers? = nil) {
+        let layers = layers ?? characters[0]
+        let layer = onTheCat ? layers.sprite : layers.prop
+        guard leg == (onTheCat ? layers.spriteLeg : layers.propLeg), !layer.isHidden else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer.position = CGPoint(x: x, y: layer.position.y)
@@ -380,45 +437,46 @@ final class CatSpriteView: NSView {
 
     /// The cat sitting in the middle of the strip, its eyes shutting slowly now and then and nothing else moving: what Reduce Motion asks for.
     func showResting(coat: CatCoat) {
-        let field = field
-        let strip = CatSheets.shared.restingStrip(coat: coat)
-        let size = CGSize(width: Self.spriteSize.width * CGFloat(field.scale), height: Self.spriteSize.height * CGFloat(field.scale))
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        spriteLeg += 1
-        propLeg += 1
-        spriteStands = nil
-        propStands = nil
-        shownField = nil
-        prepare(sprite, strip: strip, size: size)
-        sprite.position = CGPoint(
-            x: field.local(field.lane.restingX.rounded()), y: field.baseY(height: bounds.height, isStrip: role.isStrip)
-        )
-        sprite.removeAllAnimations()
-        sprite.add(Self.restingBlink(strip: strip), forKey: Self.framesKey)
-        prop.removeAllAnimations()
-        prop.isHidden = true
-        portal.removeAllAnimations()
-        portal.isHidden = true
-        CATransaction.commit()
+        showResting([CatSpecies.shared], appearance: Appearance(coat: coat))
     }
 
-    /// Takes the cat and every animation away: what a view does when it has nobody to show the cat to.
+    /// Every character sitting still, at a place of its own, its eyes shutting now and then: what Reduce Motion asks for.
+    func showResting(_ species: [any Species], appearance: Appearance) {
+        guard !species.isEmpty else {
+            stopShowing()
+            return
+        }
+        fit(to: species)
+        let field = field
+        let places = field.restingPlaces(count: species.count)
+        let size = CGSize(width: Self.spriteSize.width * CGFloat(field.scale), height: Self.spriteSize.height * CGFloat(field.scale))
+        for (index, one) in species.enumerated() {
+            let layers = characters[index]
+            let strip = one.restingStrip(appearance: appearance)
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layers.spriteLeg += 1
+            layers.propLeg += 1
+            layers.spriteStands = nil
+            layers.propStands = nil
+            layers.shownField = nil
+            prepare(layers.sprite, strip: strip, size: size)
+            layers.sprite.position = CGPoint(
+                x: field.local(places[index].rounded()), y: field.baseY(height: bounds.height, isStrip: role.isStrip)
+            )
+            layers.sprite.removeAllAnimations()
+            layers.sprite.add(Self.restingBlink(strip: strip), forKey: Self.framesKey)
+            layers.prop.removeAllAnimations()
+            layers.prop.isHidden = true
+            layers.portal.removeAllAnimations()
+            layers.portal.isHidden = true
+            CATransaction.commit()
+        }
+    }
+
+    /// Takes every character and every animation away: what a view does when it has nobody to show.
     func stopShowing() {
-        spriteLeg += 1
-        propLeg += 1
-        spriteStands = nil
-        propStands = nil
-        shownField = nil
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        sprite.removeAllAnimations()
-        prop.removeAllAnimations()
-        portal.removeAllAnimations()
-        sprite.isHidden = true
-        prop.isHidden = true
-        portal.isHidden = true
-        CATransaction.commit()
+        characters.forEach { $0.stopShowing() }
     }
 
     private func prepare(_ layer: CALayer, strip: PixelStrip, size: CGSize) {
@@ -533,12 +591,12 @@ final class CatSpriteView: NSView {
 /// The cat on the strip under the collapsed notch. The view is in the tree only while the notch can be seen: a notch that is hidden
 /// (fullscreen, a locked screen, a display asleep) takes it out, and with it the animations and everything that ran for them.
 struct CatStripView: View {
-    let stage: CatStage
+    let stages: CatStages
     @Environment(\.notchIsOnScreen) private var isOnScreen
 
     var body: some View {
         if isOnScreen {
-            CatSprite(stage: stage)
+            CatSprite(stages: stages)
         } else {
             Color.clear
         }
@@ -549,10 +607,10 @@ struct CatSprite: NSViewRepresentable {
     /// How tall the strip is, and how wide when the notch does not say.
     static let defaultSize = CGSize(width: 300, height: CatActivity.stripHeight)
 
-    let stage: CatStage
+    let stages: CatStages
 
     func makeNSView(context: Context) -> CatSpriteView {
-        CatSpriteView(stage: stage)
+        CatSpriteView(stages: stages)
     }
 
     /// Nothing to update: the cat is driven by its stage, not by SwiftUI.

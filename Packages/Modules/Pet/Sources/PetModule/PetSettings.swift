@@ -49,6 +49,8 @@ struct PetSettingsKeys {
     let busyReaction: SettingKey<BusyReaction>
     /// Where the cat plays on a screen with a notch cut into it.
     let playPlace: SettingKey<PlayPlace>
+    /// Which pets each screen has, by the screen's UUID: a screen that is not in it has a cat.
+    let screens: SettingKey<PetScreens>
 
     init(_ settings: ModuleSettings) {
         show = settings.key("show", default: true)
@@ -57,6 +59,7 @@ struct PetSettingsKeys {
         sleepMinutes = settings.key("sleepMinutes", default: 5)
         busyReaction = settings.key("busyReaction", default: BusyReaction.occasionally)
         playPlace = settings.key("playPlace", default: PlayPlace.portal)
+        screens = settings.key("screens", default: PetScreens())
     }
 
     /// The sleep time as the cat has it: the option nearest to what is stored, so a value that is not one of the three still means one.
@@ -76,13 +79,15 @@ struct PetSettingsKeys {
 struct PetSettingsView: View {
     let keys: PetSettingsKeys
     let settings: ModuleSettings
+    var displays = Displays.system
 
     var body: some View {
         Group {
             Toggle(isOn: settings.binding(keys.show)) {
-                Text("Hiện mèo trên notch")
-                Text("Mèo chơi trên một dải dưới notch khi không có hoạt động nào khác, và nhường chỗ ngay khi có.")
+                Text("Hiện thú cưng trên notch")
+                Text("Thú cưng chơi trên notch khi không có hoạt động nào khác, và nhường chỗ ngay khi có.")
             }
+            PetScreensView(screens: settings.binding(keys.screens), displays: displays)
             Picker("Màu mèo", selection: settings.binding(keys.coat)) {
                 ForEach(CatCoat.allCases, id: \.self) { Text($0.displayName).tag($0) }
             }
@@ -113,5 +118,65 @@ struct PetSettingsView: View {
             get: { PetSettingsKeys.snapped(sleepMinutes: settings.value(keys.sleepMinutes)) },
             set: { settings.set($0, for: keys.sleepMinutes) }
         )
+    }
+}
+
+/// One row for each screen that is connected, with the pets it has: a menu with the characters to tick, as many as the screen has room
+/// for, and "Không có" for none. What is ticked is kept at once, under the screen's UUID; the other screens' choices, and those of screens
+/// that are not connected, are not touched.
+struct PetScreensView: View {
+    @Binding var screens: PetScreens
+    let displays: Displays
+    @State private var connected: [ConnectedDisplay] = []
+
+    var body: some View {
+        Group {
+            Text("Chọn thú cưng cho từng màn, tối đa \(CharacterKind.maxPerScreen) con mỗi màn. Màn cắm vào lần đầu có một con mèo.")
+                .foregroundStyle(.secondary)
+            ForEach(connected) { display in
+                PetScreenRow(display: display, screens: $screens)
+            }
+        }
+        .onAppear { connected = displays.current() }
+        .onReceive(displays.notifications.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+            connected = displays.current()
+        }
+    }
+}
+
+struct PetScreenRow: View {
+    let display: ConnectedDisplay
+    @Binding var screens: PetScreens
+
+    private var kinds: [CharacterKind] { screens.kinds(for: display.id) }
+
+    /// What the menu says: the names of the ones that are ticked.
+    static func summary(of kinds: [CharacterKind]) -> String {
+        kinds.isEmpty ? "Không có" : kinds.map(\.displayName).joined(separator: ", ")
+    }
+
+    var body: some View {
+        LabeledContent {
+            Menu {
+                ForEach(CharacterKind.allCases, id: \.self) { kind in
+                    Toggle(kind.displayName, isOn: Binding(
+                        get: { kinds.contains(kind) },
+                        set: { _ in screens = screens.toggling(kind, on: display.id) }
+                    ))
+                    .disabled(!kinds.contains(kind) && !screens.canAdd(to: display.id))
+                }
+                Divider()
+                Toggle("Không có", isOn: Binding(
+                    get: { kinds.isEmpty },
+                    set: { if $0 { screens = screens.setting([], for: display.id) } }
+                ))
+            } label: {
+                Text(Self.summary(of: kinds))
+            }
+            .fixedSize()
+        } label: {
+            Text(display.name)
+            Text(display.kindName)
+        }
     }
 }

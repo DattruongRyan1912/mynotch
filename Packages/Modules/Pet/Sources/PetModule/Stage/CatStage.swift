@@ -2,16 +2,19 @@ import AppKit
 import MyNotchCore
 import NotchUI
 
-/// Where the cat lives: the views of the notches that show it, the brain that decides what it does, and the few things it reads from the
-/// Mac to decide. There is one for each kind of notch (`CatStages`), so what is of a screen is of the stage of its kind: the pointer that
-/// is near, the cooldown of its reactions, the places the cat must not stop, a click.
+/// Where the characters live: the views of the notches that show them, a brain for each that decides what it does, and the few things they
+/// read from the Mac to decide. There is one for each display that has characters (`CatStages`), so what is of a screen is of its stage: the
+/// pointer that is near, the cooldown of its reactions, the places a character must not stop, a click.
 ///
-/// The cat is alive only while some view of it can be seen, which is to say that when the last view leaves its window the timer, the reads
-/// and the animations all stop, and nothing is left running for a cat nobody is looking at.
+/// The characters are alive only while some view of them can be seen, which is to say that when the last view leaves its window the timer,
+/// the reads and the animations all stop, and nothing is left running for a character nobody is looking at. They share one lane and one
+/// clock: each has a brain of its own and is told, at every tick, where the others stand and whether one is in the camera's crossing
+/// (`LaneRules`), so that they walk past each other and never stop on each other, and one at a time goes through the portal.
 ///
 /// While it is alive it wakes a few times a second, and only to read: the pointer four times a second, the processors, the idle time and
-/// the sound once a second. What the processors do is judged against what this Mac usually does (`BusyWatch`): the cat runs for its life only
-/// when the Mac is much busier than it usually is, and then only now and then. What it draws it hands to Core Animation, which plays it on its own.
+/// the sound once a second. What the processors do is judged against what this Mac usually does (`BusyWatch`): a character runs for its life
+/// only when the Mac is much busier than it usually is, and then only now and then. What it draws it hands to Core Animation, which plays
+/// it on its own.
 final class CatStage {
     /// What the stage reads and calls, all of it replaceable so that a test touches none of the real things.
     struct Sources {
@@ -27,6 +30,15 @@ final class CatStage {
         /// Seconds on a clock that only goes forward.
         var clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
         var seed: UInt64 = .random(in: .min ... .max)
+        /// Which species a kind of character is: the real one, unless a test puts another in.
+        var species: (CharacterKind) -> any Species = { $0.species }
+    }
+
+    /// A character on the stage: who, and what decides what it does, made when the stage wakes.
+    private struct Slot {
+        var kind: CharacterKind
+        var species: any Species
+        var brain: (any CharacterBrain)?
     }
 
     /// Between two wakings: the pointer is read at every one, the rest at every `slowEvery`-th.
@@ -45,7 +57,7 @@ final class CatStage {
     private let scheduler: any Scheduler
     private var sources: Sources
     private var hosts: [CatSpriteView] = []
-    private var brain: CatBrain?
+    private var slots: [Slot] = []
     private var nextTick: ScheduledAction?
     private var motionObserver: (any NSObjectProtocol)?
     private var isShutDown = false
@@ -65,9 +77,10 @@ final class CatStage {
     private(set) var presentations = 0
     private(set) var strokes = 0
 
-    init(scheduler: any Scheduler, sources: Sources = Sources()) {
+    init(scheduler: any Scheduler, sources: Sources = Sources(), characters: [CharacterKind] = [.cat]) {
         self.scheduler = scheduler
         self.sources = sources
+        self.characters = characters
     }
 
     isolated deinit {
@@ -81,10 +94,20 @@ final class CatStage {
     /// Whether the stage is waking up to read and move the cat. A cat that is resting (Reduce Motion) wakes for nothing.
     var isTicking: Bool { nextTick != nil }
 
-    /// The picture the cat is in now, for tests.
-    var plan: CatPlan? { brain?.plan }
+    /// Who is on the stage, in the order they are drawn in (the first at the bottom), at most `CharacterKind.maxPerScreen`. A change
+    /// takes effect at once: a character that stays keeps its brain, one that comes is made, one that goes is gone.
+    var characters: [CharacterKind] {
+        get { slots.map(\.kind) }
+        set { setCharacters(newValue) }
+    }
 
-    var scene: CatScene? { brain?.scene }
+    /// The picture the first cat is in now, for tests.
+    var plan: CatPlan? { (slots.first?.brain as? CatBrain)?.plan }
+
+    var scene: CatScene? { (slots.first?.brain as? CatBrain)?.scene }
+
+    /// What every character is doing now, in the order they are drawn in.
+    var poses: [Pose] { slots.compactMap { $0.brain?.pose } }
 
     var attachedHosts: [CatSpriteView] { hosts }
 
@@ -98,7 +121,7 @@ final class CatStage {
         if hosts.count == 1 {
             wake()
         } else if isResting {
-            host.showResting(coat: coat)
+            showResting(on: host)
         } else if host.role.isStrip {
             show(on: host)
         } else {
@@ -147,14 +170,18 @@ final class CatStage {
         isResting = sources.reducesMotion()
         observeMotionPreference()
         refreshFrames()
-        if brain == nil { brain = CatBrain(seed: sources.seed, now: now) }
-        brain?.settle(gaps: crossingShares())
-        brain?.resume(now: now)
+        makeBrains(now: now)
+        for index in slots.indices {
+            let lane = laneContext(for: index, now: now)
+            slots[index].brain?.settle(lane: lane)
+            slots[index].brain?.resume(now: now)
+        }
         dwell.reset()
         if isResting {
-            hosts.forEach { $0.showResting(coat: coat) }
+            hosts.forEach(showResting(on:))
             return
         }
+        guard !slots.isEmpty else { return }
         // A baseline for the load, which is what the processors did since the last read: not the whole time the cat was away.
         _ = sources.cpu.load()
         load = 0
@@ -181,7 +208,7 @@ final class CatStage {
 
     private func tickFired() {
         nextTick = nil
-        guard isAlive, !isResting, var brain else { return }
+        guard isAlive, !isResting, !slots.isEmpty else { return }
         ticks += 1
         let now = sources.clock()
         if tickIndex % Self.slowEvery == 0 { readSlowSenses(at: now) }
@@ -191,16 +218,21 @@ final class CatStage {
             hour: sources.hour()
         )
         let field = referenceField()
-        // In the menu bar's row the pointer is all the time on its way somewhere: it startles the cat less often.
+        // In the menu bar's row the pointer is all the time on its way somewhere: it startles a character less often.
         var effective = tuning
         if inBand { effective.reactionCooldown = max(effective.reactionCooldown, Self.bandReactionCooldown) }
-        // The brain thinks in pixels of the cat's picture, so a bigger cat takes bigger steps in the time of the same ones.
-        let outcome = brain.update(
-            now: now, senses: senses, tuning: effective, travel: Double(field?.lane.travel ?? 0) / Double(field?.scale ?? 1),
-            gaps: crossingShares()
-        )
-        self.brain = brain
-        // The notch can move under the cat (a wider pill, another display) without telling it.
+        // The brain thinks in pixels of the picture, so a bigger character takes bigger steps in the time of the same ones.
+        let travel = Double(field?.lane.travel ?? 0) / Double(field?.scale ?? 1)
+        // One at a time, each told where the others stand after the one before it chose: two never pick the same stop, or both the portal.
+        var outcome = BrainOutcome.unchanged
+        for index in slots.indices {
+            guard slots[index].brain != nil else { continue }
+            let lane = laneContext(for: index, now: now)
+            if let result = slots[index].brain?.update(now: now, senses: senses, tuning: effective, travel: travel, lane: lane), result == .changed {
+                outcome = .changed
+            }
+        }
+        // The notch can move under them (a wider pill, another display) without telling it.
         let moved = lookAtViews()
         if moved { refreshFrames() }
         if outcome == .changed || moved { showAll() }
@@ -250,15 +282,28 @@ final class CatStage {
 
     // MARK: Showing
 
-    /// Shows the cat on one view, from `media` (a reading of the animation clock) and `clock` (one of the cat's own).
+    /// Shows the characters on one view, from `media` (a reading of the animation clock) and `clock` (one of their own).
     private func show(on host: CatSpriteView, media: CFTimeInterval = CACurrentMediaTime(), clock: TimeInterval? = nil) {
-        guard let brain else {
+        let now = clock ?? sources.clock()
+        let drawings = slots.compactMap { slot -> CharacterDrawing? in
+            guard let pose = slot.brain?.pose else { return nil }
+            return CharacterDrawing(species: slot.species, pose: pose, elapsed: max(now - pose.began, 0), appearance: appearance)
+        }
+        guard !drawings.isEmpty else {
             host.stopShowing()
             return
         }
         presentations += 1
-        host.show(plan: brain.plan, elapsed: max((clock ?? sources.clock()) - brain.plan.began, 0), coat: coat, at: media)
+        host.show(characters: drawings, at: media)
     }
+
+    /// Shows every character on one view sitting still, which is what Reduce Motion asks for.
+    private func showResting(on host: CatSpriteView) {
+        host.showResting(slots.map(\.species), appearance: appearance)
+    }
+
+    /// What the user chose that changes how a character looks.
+    private var appearance: Appearance { Appearance(coat: coat) }
 
     /// Shows the cat on every view, all of them from the same moment: one reading of each clock for them all. That is what keeps the two
     /// views of a notch's top row in step, whatever the machine is doing between one and the next, with the cat going out of one into the
@@ -271,9 +316,13 @@ final class CatStage {
     private func hostsDidMove() {
         guard isAlive else { return }
         refreshFrames()
-        // The views the cat plays in are not what they were: where it must not stop is not either.
-        brain?.settle(gaps: crossingShares())
-        if isResting { hosts.forEach { $0.showResting(coat: coat) } } else { showAll() }
+        // The views they play in are not what they were: where a character must not stop is not either.
+        let now = sources.clock()
+        for index in slots.indices {
+            let lane = laneContext(for: index, now: now)
+            slots[index].brain?.settle(lane: lane)
+        }
+        if isResting { hosts.forEach(showResting(on:)) } else { showAll() }
     }
 
     private func refreshFrames() {
@@ -310,17 +359,74 @@ final class CatStage {
         return shares
     }
 
+    /// What character `index` has to keep to in the lane: the crossing, where the others stand, and whether the crossing is closed to it.
+    private func laneContext(for index: Int, now: TimeInterval) -> LaneContext {
+        let crossing = crossingShares()
+        guard slots.count > 1 else { return LaneContext(crossing: crossing) }
+        return LaneRules.context(
+            for: index, poses: slots.map { $0.brain?.pose }, crossing: crossing, separation: referenceField()?.separation ?? 0, now: now
+        )
+    }
+
+    // MARK: Who is on the stage
+
+    private func setCharacters(_ kinds: [CharacterKind]) {
+        let wanted = Array(kinds.prefix(CharacterKind.maxPerScreen))
+        guard wanted != characters else { return }
+        // A character that stays keeps what it was doing, and one that is not there before comes with nothing.
+        var kept = slots
+        slots = wanted.map { kind in
+            if let index = kept.firstIndex(where: { $0.kind == kind }) { return kept.remove(at: index) }
+            return Slot(kind: kind, species: sources.species(kind), brain: nil)
+        }
+        guard isAlive, !isShutDown else { return }
+        if slots.isEmpty {
+            nextTick?.cancel()
+            nextTick = nil
+            hosts.forEach { $0.stopShowing() }
+            return
+        }
+        // One that comes sits down where it is made, and none is startled by a pointer that was already there.
+        let now = sources.clock()
+        for index in makeBrains(now: now) { slots[index].brain?.resume(now: now) }
+        hostsDidMove()
+        if !isResting, nextTick == nil {
+            _ = sources.cpu.load()
+            load = 0
+            hasLoad = false
+            busy.resume()
+            tickIndex = 0
+            scheduleTick()
+        }
+    }
+
+    /// A brain for every character that has none, each with a stream of its own (the first place's is the stage's own, so a character alone
+    /// is as it was, and one that joins it changes nothing of what it does) and standing where it leaves room for the others. Which
+    /// characters got one.
+    @discardableResult
+    private func makeBrains(now: TimeInterval) -> [Int] {
+        let made = slots.indices.filter { slots[$0].brain == nil }
+        for index in made {
+            let seed = sources.seed &+ UInt64(index) &* 0xD1B5_4A32_D192_ED03
+            slots[index].brain = slots[index].species.makeBrain(
+                seed: seed, now: now, position: LaneRules.startingPlace(index, of: slots.count)
+            )
+        }
+        return made
+    }
+
     // MARK: Petting
 
-    /// The cat was clicked: it purrs, and mews if the user wants it to. A cat that does not move purrs without moving, and still mews.
-    func catWasClicked() {
+    /// A character was clicked: it purrs, and the cat mews if the user wants it to. One that does not move purrs without moving, and still
+    /// mews.
+    func catWasClicked(character index: Int = 0) {
         strokes += 1
-        if var brain, !isResting {
+        if slots.indices.contains(index), !isResting, var brain = slots[index].brain {
             let outcome = brain.pet(now: sources.clock())
-            self.brain = brain
+            slots[index].brain = brain
             if outcome == .changed { showAll() }
         }
-        if playsMeow { sources.meow.play() }
+        if playsMeow, slots.indices.contains(index) ? slots[index].species.meowsWhenPetted : true { sources.meow.play() }
     }
 
     // MARK: Reduce Motion
@@ -342,9 +448,10 @@ final class CatStage {
         if reduces {
             nextTick?.cancel()
             nextTick = nil
-            hosts.forEach { $0.showResting(coat: coat) }
+            hosts.forEach(showResting(on:))
         } else {
-            brain?.resume(now: sources.clock())
+            let now = sources.clock()
+            for index in slots.indices { slots[index].brain?.resume(now: now) }
             _ = sources.cpu.load()
             load = 0
             hasLoad = false
