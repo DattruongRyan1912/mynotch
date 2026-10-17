@@ -153,7 +153,12 @@ import Testing
             #expect(abs(one.beginTime - walk.beginTime) < 1e-9 && abs(two.beginTime - otherWalk.beginTime) < 1e-9, "each begun as its own view's leg is")
             #expect(abs(one.beginTime - two.beginTime) < 0.005, "and the two together")
             #expect(one.fillMode == .both && !one.isRemovedOnCompletion, "held on its last picture, which is clear")
-            #expect(portalPicture(one, at: 0) == PortalArt.clear, "clear until it opens")
+            // Clear until it opens, unless the cat begins its leg at the crossing: then it is open from the first moment of the leg.
+            let startsAt = place(of: walk, at: 0, origin: left.field.origin)
+            let startRising = place(of: walk, at: walk.duration, origin: left.field.origin) > startsAt
+            let startApproach = startRising ? crossing.lowerBound - startsAt : startsAt - crossing.upperBound
+            let startPace = [CatMove.walk, .trot, .chase, .frantic, .pounce].contains(plan.move) ? plan.move.speed : 24
+            if startApproach > startPace * 0.3 { #expect(portalPicture(one, at: 0) == PortalArt.clear, "clear until it opens: the cat is \(startApproach) points away") }
             #expect(portalPicture(one, at: one.duration + 5) == PortalArt.clear, "and clear when it is over")
             let origin = left.field.origin
             var time = 0.0
@@ -164,11 +169,11 @@ import Testing
                 if crossing.contains(cat) {
                     #expect(picture != PortalArt.clear, "the cat is at \(cat) in the crossing and the portal is shut at \(time) of \(walk.duration)")
                 }
-                // Just before it: open already, and a tenth of a second after the leg began is the earliest it can have been.
+                // Just before it: open already, even for a leg that begins there.
                 let rising = place(of: walk, at: walk.duration, origin: origin) > place(of: walk, at: 0, origin: origin)
                 let approaching = rising ? crossing.lowerBound - cat : cat - crossing.upperBound
                 let pace = [CatMove.walk, .trot, .chase, .frantic, .pounce].contains(plan.move) ? plan.move.speed : 24
-                if approaching > 0, approaching <= pace * 0.1, time >= 0.15 {
+                if approaching > 0, approaching <= pace * 0.1 {
                     #expect(picture != PortalArt.clear, "the cat is \(approaching) points from the crossing and the portal is not open yet at \(time)")
                 }
                 // Well away from it, a second either side (a cat goes at 24 points a second and more): shut.

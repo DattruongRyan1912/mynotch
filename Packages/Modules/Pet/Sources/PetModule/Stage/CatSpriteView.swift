@@ -305,11 +305,12 @@ final class CatSpriteView: NSView {
         let closes = Double(outside) * slot + Self.portalLag
         let period = 1 / Self.portalFPS
         func count(_ seconds: Double) -> Int { max(Int((seconds / period).rounded()), 1) }
+        // A leg that begins at the crossing has the portal open from its first moment: the animation begins when the leg does, never before.
+        let waiting = Int((opens / period).rounded())
         let strip = CatSheets.shared.portalStrip()
         func rect(_ picture: Int) -> NSValue { NSValue(rect: strip.contentsRect(of: picture)) }
-        // Clear until it opens (never fewer than one picture, so it is clear before it begins), opening, swirling while the cat goes through,
-        // closing, clear.
-        var sequence = Array(repeating: rect(PortalArt.clear), count: count(opens))
+        // Clear until it opens, opening, swirling while the cat goes through, closing, clear.
+        var sequence = Array(repeating: rect(PortalArt.clear), count: waiting)
         sequence += [rect(PortalArt.opening), rect(PortalArt.opening)]
         for index in 0..<max(count(closes - opens - Self.portalLead - Self.portalLag), 2) {
             sequence.append(rect(index % 2 == 0 ? PortalArt.swirlA : PortalArt.swirlB))

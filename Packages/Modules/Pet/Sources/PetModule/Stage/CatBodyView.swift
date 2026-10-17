@@ -62,11 +62,13 @@ nonisolated enum Cutout {
         return low...max(low + cameraWidth, low)
     }
 
-    /// From the screen's own: between the right edge of the area of the menu bar left of the camera and the left edge of the one right of
-    /// it, in screen coordinates. Nil for a screen with no camera.
-    static func measured(auxiliaryLeft: CGRect?, auxiliaryRight: CGRect?) -> ClosedRange<CGFloat>? {
-        guard let auxiliaryLeft, let auxiliaryRight, auxiliaryRight.minX > auxiliaryLeft.maxX else { return nil }
-        return auxiliaryLeft.maxX...auxiliaryRight.minX
+    /// From the screen's own: the areas of the menu bar either side of the camera run from the screen's edges to it, so the camera is from
+    /// the left edge and the width of the one on the left to the right edge less the width of the one on the right, in screen coordinates.
+    /// (Only the widths are used, as `ScreenDescriptor` does: whatever space the areas' own origins are in, these are right for a screen
+    /// anywhere in the arrangement of displays.) Nil for a screen with no camera.
+    static func measured(screenFrame: CGRect, leftWidth: CGFloat?, rightWidth: CGFloat?) -> ClosedRange<CGFloat>? {
+        guard let leftWidth, let rightWidth, screenFrame.width - leftWidth - rightWidth > 0 else { return nil }
+        return (screenFrame.minX + leftWidth)...(screenFrame.maxX - rightWidth)
     }
 }
 
@@ -78,10 +80,10 @@ final class CatBodyContainer: NSView {
     private(set) var lane: CatSpriteView?
     private(set) var leftWing: CatSpriteView?
     private(set) var rightWing: CatSpriteView?
-    /// The areas of the menu bar either side of the camera, in screen coordinates, on the screen `window` is on: the screen's own. A test
-    /// says where they are.
-    var screenAreas: (NSWindow) -> (left: CGRect?, right: CGRect?)? = { window in
-        window.screen.map { ($0.auxiliaryTopLeftArea, $0.auxiliaryTopRightArea) }
+    /// The screen `window` is on, as far as the camera is concerned: its frame and the widths of the areas of the menu bar either side of
+    /// the camera (nil for a screen with none). A test says what they are.
+    var screenAreas: (NSWindow) -> (frame: CGRect, left: CGFloat?, right: CGFloat?)? = { window in
+        window.screen.map { ($0.frame, $0.auxiliaryTopLeftArea?.width, $0.auxiliaryTopRightArea?.width) }
     }
 
     init(stage: CatStage) {
@@ -130,7 +132,7 @@ final class CatBodyContainer: NSView {
     /// geometry says.
     func cutout() -> ClosedRange<CGFloat> {
         if let window, let areas = screenAreas(window),
-           let range = Cutout.measured(auxiliaryLeft: areas.left, auxiliaryRight: areas.right) {
+           let range = Cutout.measured(screenFrame: areas.frame, leftWidth: areas.left, rightWidth: areas.right) {
             let onScreen = CGRect(x: range.lowerBound, y: window.frame.minY, width: range.upperBound - range.lowerBound, height: 1)
             let local = convert(window.convertFromScreen(onScreen), from: nil)
             let low = min(max(local.minX, 0), bounds.width)

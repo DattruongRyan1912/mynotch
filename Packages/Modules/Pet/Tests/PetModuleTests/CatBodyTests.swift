@@ -16,7 +16,8 @@ import Testing
         #expect(geometry.notchSize == CGSize(width: 220, height: 38))
         #expect(geometry.centerOffset == 0)
         // What the screen reports: the menu bar's areas left and right of the camera, which end and begin at its edges.
-        let measured = try #require(Cutout.measured(auxiliaryLeft: Screens.macAreas.left, auxiliaryRight: Screens.macAreas.right))
+        let areas = Screens.macAreas()
+        let measured = try #require(Cutout.measured(screenFrame: areas.frame, leftWidth: areas.left, rightWidth: areas.right))
         #expect(measured == 790...1010)
         // What the geometry says, in the row the notch makes for the cat: the same two edges.
         let row = Screens.row(of: geometry)
@@ -27,10 +28,29 @@ import Testing
         #expect(rowLeft + geometric.lowerBound == measured.lowerBound && rowLeft + geometric.upperBound == measured.upperBound)
     }
 
-    @Test func aScreenWithNoCameraHasNoCutoutToMeasureAndAMisplacedPairOfAreasIsNone() {
-        #expect(Cutout.measured(auxiliaryLeft: nil, auxiliaryRight: nil) == nil)
-        #expect(Cutout.measured(auxiliaryLeft: CGRect(x: 0, y: 0, width: 800, height: 30), auxiliaryRight: nil) == nil)
-        #expect(Cutout.measured(auxiliaryLeft: CGRect(x: 0, y: 0, width: 800, height: 30), auxiliaryRight: CGRect(x: 790, y: 0, width: 800, height: 30)) == nil)
+    @Test func aScreenWithNoCameraHasNoCutoutToMeasureAndWidthsThatLeaveNoRoomForOneAreNone() {
+        let frame = Screens.mac.frame
+        #expect(Cutout.measured(screenFrame: frame, leftWidth: nil, rightWidth: nil) == nil)
+        #expect(Cutout.measured(screenFrame: frame, leftWidth: 800, rightWidth: nil) == nil)
+        #expect(Cutout.measured(screenFrame: frame, leftWidth: 900, rightWidth: 900) == nil)
+    }
+
+    @Test func theCameraIsWhereItIsOnAScreenWhereverTheArrangementOfDisplaysPutsIt() throws {
+        // An external display to its left puts the Mac's screen at 1920: the camera is at 2710 to 2930, which is 790 and 1010 into it.
+        for origin in [0, 1920, -1512, 3000] as [CGFloat] {
+            let frame = Screens.mac.frame.offsetBy(dx: origin, dy: 0)
+            let measured = try #require(Cutout.measured(screenFrame: frame, leftWidth: 790, rightWidth: 790))
+            #expect(measured == (origin + 790)...(origin + 1010), "at \(origin)")
+            let rig = BodyRig(geometry: Screens.hardware, screenOrigin: origin)
+            rig.show()
+            let left = try #require(rig.container.leftWing)
+            let right = try #require(rig.container.rightWing)
+            #expect(left.frame == CGRect(x: 0, y: 0, width: 100, height: 38) && right.frame == CGRect(x: 320, y: 0, width: 100, height: 38), "at \(origin)")
+            let leftOnScreen = try #require(left.screenFrame)
+            let rightOnScreen = try #require(right.screenFrame)
+            #expect(leftOnScreen.maxX == origin + 790 && rightOnScreen.minX == origin + 1010, "they end and begin at the camera's edges, at \(origin)")
+            #expect(rig.stage.attachedHosts.count == 2)
+        }
     }
 
     // MARK: What the cat asks of the notch
@@ -124,8 +144,8 @@ import Testing
 
     @Test func theCameraIsReadFromTheScreenAndNotFromTheWidthOfTheRowWhenTheScreenSaysWhereItIs() throws {
         let rig = BodyRig(geometry: Screens.hardware)
-        // The areas of this screen are not the middle of the row: the camera is where the screen says.
-        rig.container.screenAreas = { _ in (CGRect(x: 0, y: 0, width: 760, height: 38), CGRect(x: 990, y: 0, width: 800, height: 38)) }
+        // The areas of this screen are not the middle of the row: the camera is where the screen says (from 760 to 990 of 1800).
+        rig.container.screenAreas = { _ in (Screens.mac.frame, 760, 810) }
         rig.show()
         let left = try #require(rig.container.leftWing)
         let right = try #require(rig.container.rightWing)

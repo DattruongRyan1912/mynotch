@@ -28,10 +28,8 @@ enum Screens {
         return geometry.compactWidth(stripWidth: asked - 2 * NotchTokens.stripPadding) - 2 * geometry.cornerRadii(for: .compact).top
     }
 
-    /// Where the areas of the menu bar either side of the camera are, on the Mac, in screen coordinates.
-    static let macAreas: (left: CGRect?, right: CGRect?) = (
-        CGRect(x: 0, y: 1169 - 38, width: 790, height: 38), CGRect(x: 1010, y: 1169 - 38, width: 790, height: 38)
-    )
+    /// What the Mac's screen reports of its camera, on a screen whose frame is `frame`: the widths of the areas of the menu bar either side.
+    static func macAreas(frame: CGRect = mac.frame) -> (frame: CGRect, left: CGFloat?, right: CGFloat?) { (frame, 790, 790) }
 }
 
 /// The cat in the top row of one notch, everything it reads held by the test, in a window that is never shown.
@@ -50,7 +48,13 @@ enum Screens {
     let geometry: NotchGeometry
     let rowWidth: CGFloat
 
-    init(geometry: NotchGeometry, place: PlayPlace = .portal, seed: UInt64 = 7, hour: Int = 12, reducesMotion: Bool = false, width: CGFloat? = nil) {
+    /// Where the Mac's screen is in the arrangement of displays: its left edge. The external display to its left puts it elsewhere than 0.
+    let screenFrame: CGRect
+
+    init(
+        geometry: NotchGeometry, place: PlayPlace = .portal, seed: UInt64 = 7, hour: Int = 12, reducesMotion: Bool = false, width: CGFloat? = nil,
+        screenOrigin: CGFloat = 0
+    ) {
         self.geometry = geometry
         knobs.hour = hour
         knobs.reducesMotion = reducesMotion
@@ -64,15 +68,17 @@ enum Screens {
         rowWidth = width ?? Screens.row(of: geometry, place: place)
         // The row is in the middle of the screen's top, as the notch is.
         let screen = geometry.kind == .hardware ? Screens.mac : Screens.external
-        let left = screen.frame.midX + geometry.centerOffset - rowWidth / 2
+        let frame = screen.frame.offsetBy(dx: screenOrigin, dy: 0)
+        screenFrame = frame
+        let left = frame.midX + geometry.centerOffset - rowWidth / 2
         window = NSWindow(
-            contentRect: CGRect(x: left, y: screen.frame.maxY - geometry.notchSize.height, width: rowWidth, height: geometry.notchSize.height),
+            contentRect: CGRect(x: left, y: frame.maxY - geometry.notchSize.height, width: rowWidth, height: geometry.notchSize.height),
             styleMask: .borderless, backing: .buffered, defer: true
         )
         window.isReleasedWhenClosed = false
         container = CatBodyContainer(stage: stage)
         container.frame = CGRect(x: 0, y: 0, width: rowWidth, height: geometry.notchSize.height)
-        container.screenAreas = { _ in geometry.kind == .hardware ? Screens.macAreas : nil }
+        container.screenAreas = { _ in geometry.kind == .hardware ? Screens.macAreas(frame: frame) : nil }
     }
 
     /// The notch is on screen: the cat's views are in it.
