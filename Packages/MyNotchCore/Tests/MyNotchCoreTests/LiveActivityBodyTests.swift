@@ -49,4 +49,20 @@ import MyNotchTestSupport
         center.clear(id: "t", from: "timer")
         #expect(center.current?.activity.hasBody == true)
     }
+
+    @Test func aStripIsForEveryScreenUnlessItIsForScreensWithAHardwareNotchOnly() {
+        let everywhere = make(bottom: AnyView(Color.white), bottomHeight: 26)
+        #expect(everywhere.bottomScope == .allScreens)
+        #expect(everywhere.bottomHeight(onHardwareNotch: true) == 26 && everywhere.bottomHeight(onHardwareNotch: false) == 26)
+        let hardware = LiveActivity(
+            id: "a", leading: AnyView(Color.clear), trailing: AnyView(Color.clear), bottom: AnyView(Color.white), bottomHeight: 26,
+            bottomScope: .hardwareNotchOnly, body: AnyView(Color.blue)
+        )
+        #expect(hardware.bottomScope == .hardwareNotchOnly && hardware.hasBottom && hardware.bottomHeight == 26)
+        #expect(hardware.bottomHeight(onHardwareNotch: true) == 26)
+        #expect(hardware.bottomHeight(onHardwareNotch: false) == 0, "a screen it is not for shows it with no strip")
+        // No strip is no height on any screen.
+        #expect(make().bottomHeight(onHardwareNotch: true) == 0 && make().bottomHeight(onHardwareNotch: false) == 0)
+        #expect(LiveActivity(id: "a", leading: AnyView(Color.clear), trailing: AnyView(Color.clear)).bottomScope == .allScreens)
+    }
 }

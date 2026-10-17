@@ -369,6 +369,70 @@ private struct BodyView: View {
     }
 }
 
+// MARK: a strip for screens with a hardware notch only
+
+@Suite struct NotchStripScopeTests {
+    let macBook = NotchGeometry(screen: NotchGeometryTests.macBook14, config: NotchLayoutConfig())
+    let external = NotchGeometry(screen: NotchGeometryTests.external, config: NotchLayoutConfig())
+
+    func activity(scope: BottomScope) -> LiveActivity {
+        LiveActivity(
+            id: "a", leading: AnyView(Color.clear), trailing: AnyView(Color.clear), bottom: AnyView(Color.white), bottomHeight: 26,
+            bottomScope: scope, body: AnyView(Color.clear), summary: "a"
+        )
+    }
+
+    @Test func theCenterReportsTheStripOnlyToTheScreensItIsFor() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        center.set(activity(scope: .allScreens), from: "m")
+        #expect(center.stripHeight(on: .hardware) == 26 && center.stripHeight(on: .virtual) == 26 && center.stripHeight == 26)
+        center.set(activity(scope: .hardwareNotchOnly), from: "m")
+        #expect(center.stripHeight(on: .hardware) == 26)
+        #expect(center.stripHeight(on: .virtual) == 0)
+        center.clear(id: "a", from: "m")
+        #expect(center.stripHeight(on: .hardware) == 0 && center.stripHeight(on: .virtual) == 0)
+    }
+
+    @Test func aStripThatIsNotForAScreenAsksForNoWidthThereButItsBodyStillDoes() {
+        let harness = RegistryHarness([])
+        let model = NotchViewModel(scheduler: harness.scheduler, availableTabs: { [] }, delays: { (.zero, .zero) })
+        harness.activities.set(activity(scope: .hardwareNotchOnly), from: "m")
+        model.reportStripWidth(300, for: "m/a")
+        #expect(model.stripWidth(of: harness.activities, on: .hardware) == 300)
+        #expect(model.stripWidth(of: harness.activities, on: .virtual) == 300, "its body is there and asks")
+        harness.activities.set(
+            LiveActivity(
+                id: "a", leading: AnyView(Color.clear), trailing: AnyView(Color.clear), bottom: AnyView(Color.white), bottomHeight: 26,
+                bottomScope: .hardwareNotchOnly, summary: "a"
+            ),
+            from: "m"
+        )
+        #expect(model.stripWidth(of: harness.activities, on: .hardware) == 300)
+        #expect(model.stripWidth(of: harness.activities, on: .virtual) == 0, "no body, and a strip that is not for it: nothing asked")
+    }
+
+    @Test func theNotchGrowsForTheStripOnAHardwareNotchAndNotOnAVirtualOne() throws {
+        func render(_ geometry: NotchGeometry) throws -> NSBitmapImageRep {
+            let harness = RegistryHarness([])
+            let model = NotchViewModel(scheduler: harness.scheduler, availableTabs: { [] }, delays: { (.zero, .zero) })
+            model.hasActivity = true
+            harness.activities.set(activity(scope: .hardwareNotchOnly), from: "m")
+            let root = NotchRootView(model: model, activities: harness.activities, registry: harness.registry, geometry: geometry)
+                .frame(width: geometry.panelSize.width, height: geometry.panelSize.height)
+            let renderer = ImageRenderer(content: root)
+            renderer.scale = 1
+            return NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
+        }
+        func whites(_ bitmap: NSBitmapImageRep) -> Int {
+            (0..<bitmap.pixelsHigh).reduce(0) { total, y in
+                total + (0..<bitmap.pixelsWide).filter { x in bitmap.colorAt(x: x, y: y).map { $0.redComponent > 0.9 && $0.greenComponent > 0.9 && $0.alphaComponent > 0.9 } ?? false }.count
+            }
+        }
+        #expect(whites(try render(macBook)) > 1000, "the strip is under the hardware notch")
+        #expect(whites(try render(external)) == 0, "and not under a virtual one")
+    }
+}
+
 // MARK: no body: the notch as it always was
 
 @Suite struct NotchNoBodyTests {

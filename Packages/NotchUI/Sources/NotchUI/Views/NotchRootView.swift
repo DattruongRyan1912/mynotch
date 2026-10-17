@@ -63,7 +63,7 @@ struct NotchRootView: View {
 
     /// The width the current activity's strip asked for (`View.notchStripWidth`), which the collapsed notch is as wide as, also while the
     /// list is open under it; 0 when it has no strip or has not asked.
-    private var stripWidth: CGFloat { model.stripWidth(of: activities) }
+    private var stripWidth: CGFloat { model.stripWidth(of: activities, on: geometry.kind) }
 
     /// A strip tells the notch the width it wants: kept for its activity, while the strip is the one on show. The strip leaving (the
     /// notch opening, the activity ending, the list opening) reports 0 on its way out, which is not a request.
@@ -77,7 +77,7 @@ struct NotchRootView: View {
     /// How far the collapsed notch grows: for the open list, which takes the strip's place, else for the current
     /// activity's strip; 0 in every other state.
     private func bottomHeight(_ accessories: CompactAccessories) -> CGFloat {
-        geometry.bottomHeight(for: state, strip: activities.stripHeight, listRows: accessories.listRows)
+        geometry.bottomHeight(for: state, strip: activities.stripHeight(on: geometry.kind), listRows: accessories.listRows)
     }
 
     /// Everything that moves the shape. The notch animates all of it with the one spring, so a strip or the list
@@ -150,7 +150,7 @@ struct NotchRootView: View {
         let radii = geometry.cornerRadii(for: state)
         let _ = NotchPerf.count(.bodies)
         let _ = NotchLog.record(
-            "body display=\(state.logDescription) size=\(size.width)x\(size.height) strip=\(activities.stripHeight) "
+            "body display=\(state.logDescription) size=\(size.width)x\(size.height) strip=\(activities.stripHeight(on: geometry.kind)) "
                 + "bottom=\(bottom) bubbles=\(accessories.bubbles) list=\(accessories.listRows) shownTab=\(shownTab?.id.rawValue ?? "-")"
         )
         let shape = geometry.shape(for: state)

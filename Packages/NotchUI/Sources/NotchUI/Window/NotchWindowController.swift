@@ -321,8 +321,9 @@ final class NotchWindowController {
         let accessories = CompactAccessories(activities: activities, geometry: geometry, isListOpen: model.isListOpen, state: state)
         return geometry.pointerZone(
             at: point, state: state, contentHeight: registry.contentHeight(for: state, tabUnderToast: model.tabUnderToast),
-            strip: activities.stripHeight, bubbles: accessories.bubbles, listRows: accessories.listRows, dragging: dragging,
-            tabCount: registry.tabs.count, stripWidth: model.stripWidth(of: activities), hasBody: activities.currentHasBody, in: screenFrame
+            strip: activities.stripHeight(on: geometry.kind), bubbles: accessories.bubbles, listRows: accessories.listRows, dragging: dragging,
+            tabCount: registry.tabs.count, stripWidth: model.stripWidth(of: activities, on: geometry.kind),
+            hasBody: activities.currentHasBody, in: screenFrame
         )
     }
 
@@ -389,7 +390,7 @@ final class NotchWindowController {
                 return Observed(
                     hasActivity: activities.current != nil,
                     activityIDs: "primary=\(activities.current?.id ?? "-") others=\(activities.others.map(\.id)) hidden=\(activities.hiddenCount)",
-                    stripHeight: activities.stripHeight,
+                    stripHeight: geometry.map { activities.stripHeight(on: $0.kind) } ?? activities.stripHeight,
                     bubbles: bubbles,
                     listRows: geometry.map {
                         CompactAccessories(activities: activities, geometry: $0, isListOpen: model.isListOpen, state: state).listRows
@@ -397,7 +398,7 @@ final class NotchWindowController {
                     state: state,
                     contentHeight: registry.contentHeight(for: state, tabUnderToast: covered),
                     tabCount: registry.tabs.count,
-                    stripWidth: model.stripWidth(of: activities),
+                    stripWidth: model.stripWidth(of: activities, on: geometry?.kind ?? .hardware),
                     wantsKeyboard: NotchKeyboardPolicy.wantsKeyboard(state: state, tabUnderToast: covered, tabs: registry.tabs),
                     focusesKeyboard: NotchKeyboardPolicy.focusesKeyboard(
                         state: state, tabUnderToast: covered, tabs: registry.tabs, onPurpose: model.isOpenedOnPurpose

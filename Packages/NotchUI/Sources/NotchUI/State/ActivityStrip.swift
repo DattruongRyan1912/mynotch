@@ -6,8 +6,8 @@ extension NotchViewModel {
     /// width (the view, the window controller's hit area) reads it here, so the drawn shape and the hit area cannot disagree. It does not
     /// depend on the list: the notch stays as wide as its strip while the list of activities is open under it, so the bubbles, which are
     /// what the pointer hovers to open it, stay where they are.
-    func stripWidth(of activities: ActivityCenter) -> CGFloat {
-        activities.stripHeight > 0 || activities.currentHasBody ? stripWidth(for: activities.current?.id) : 0
+    func stripWidth(of activities: ActivityCenter, on kind: NotchKind = .hardware) -> CGFloat {
+        activities.stripHeight(on: kind) > 0 || activities.currentHasBody ? stripWidth(for: activities.current?.id) : 0
     }
 }
 
@@ -21,5 +21,10 @@ extension ActivityCenter {
     var stripHeight: CGFloat {
         guard let activity = current?.activity, activity.hasBottom else { return 0 }
         return activity.bottomHeight
+    }
+
+    /// The same on a screen of the given kind: a strip that is for screens with a hardware notch only has none on a virtual one.
+    func stripHeight(on kind: NotchKind) -> CGFloat {
+        current?.activity.bottomHeight(onHardwareNotch: kind == .hardware) ?? 0
     }
 }
