@@ -1,0 +1,79 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MyNotch — Nhiều nhân vật theo màn hình</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-ý-định">1. Ý định</a><a class="h2" href="#2-nhân-vật">2. Nhân vật</a><a class="h2" href="#3-chọn-theo-màn-hình">3. Chọn theo màn hình</a><a class="h2" href="#4-không-làm">4. Không làm</a><a class="h2" href="#5-không-được-xảy-ra">5. Không được xảy ra</a><a class="h2" href="#6-thứ-tự-làm">6. Thứ tự làm</a></nav><main><h1 id="mynotch-nhiều-nhân-vật-chọn-riêng-cho-từng-màn-hình">MyNotch: nhiều nhân vật, chọn riêng cho từng màn hình</h1>
+<ul><li><strong>Ngày:</strong> 2026-10-18
+</li><li><strong>Trạng thái:</strong> Đã duyệt. Người dùng nói "làm hết đi", nên các lựa chọn không được hỏi đều là của người viết và có đánh dấu.
+</li><li><strong>Nền:</strong> module Pet hiện có, gồm mèo pixel, cổng dịch chuyển qua camera, mèo trong viên thuốc, và mỗi loại notch một stage (PET4).
+</li></ul>
+<h2 id="1-ý-định">1. Ý định</h2>
+<p>Người dùng thích con mèo nhưng muốn <strong>nhiều nhân vật hơn</strong>. Họ muốn <strong>chọn riêng cho từng màn hình</strong>: mỗi màn một con, hoặc nhiều con chung một màn, cả hai cách đều phải có. Nhân vật tiếp theo là <strong>capybara</strong>: ngâm mình trong nước, ăn cam, ngủ gật.</p>
+<p>Người dùng đồng ý làm cả bốn con người viết đề xuất: hamster, chim cánh cụt, corgi, ếch.</p>
+<h2 id="2-nhân-vật">2. Nhân vật</h2>
+<p>Tất cả là pixel art vẽ bằng code như con mèo, cùng tỉ lệ, đọc rõ trên nền sáng và nền tối. Con nào cũng đi qua cổng dịch chuyển ở màn có tai thỏ và chơi được trong viên thuốc.</p>
+<table><thead><tr><th>Nhân vật</th><th>Tính cách</th><th>Hoạt động riêng (tối thiểu)</th></tr></thead><tbody><tr><td>Mèo (đã có)</td><td>Hiếu động</td><td>Giữ nguyên</td></tr><tr><td><strong>Capybara</strong></td><td>Thư thái, chậm</td><td>Ngâm mình trong chậu hoặc suối nước nóng, đôi khi có quả cam trên đầu; ăn cam (bóc, nhai); ngủ gật (gật gù, bong bóng ngủ); đi chậm. <strong>Không bao giờ hoảng</strong> khi máy bận: chỉ đổ mồ hôi hoặc ngâm nước lâu hơn (lựa chọn của người viết).</td></tr><tr><td><strong>Hamster</strong></td><td>Chăm chỉ</td><td>Chạy bánh xe, <strong>máy càng bận thì bánh xe càng quay nhanh</strong> (theo tải CPU đã đo sẵn); nhét hạt đầy má; cuộn tròn ngủ; đi lon ton.</td></tr><tr><td><strong>Chim cánh cụt</strong></td><td>Vụng về</td><td>Lạch bạch đi; <strong>nằm sấp trượt</strong> một mạch, kể cả qua cổng; câu cá; trượt ngã rồi đứng dậy.</td></tr><tr><td><strong>Corgi</strong></td><td>Tăng động</td><td>Đuổi bóng; chạy vòng vòng như điên; vẫy mông; ngồi xin ăn khi con trỏ lại gần.</td></tr><tr><td><strong>Ếch</strong></td><td>Lười, thích rình</td><td>Nhảy cóc; nằm trên lá sen; <strong>thè lưỡi bắt bướm đêm</strong> (bướm đêm đã có sẵn).</td></tr></tbody></table>
+<p><strong>Chơi chung với capybara</strong> (khi capybara ở chung màn với con khác; tần suất do người làm chọn, vừa phải):</p>
+<ul><li>mèo leo lên ngồi trên lưng capybara;
+</li><li>ếch ngồi trên đầu capybara khi nó ngâm nước;
+</li><li>hamster trốn sau lưng capybara;
+</li><li>chim cánh cụt trượt tới đứng cạnh;
+</li><li>corgi nằm xuống bên cạnh.
+</li></ul>
+<h2 id="3-chọn-theo-màn-hình">3. Chọn theo màn hình</h2>
+<ul><li>Cài đặt có danh sách <strong>các màn hình đang cắm</strong> (tên màn hình, kèm "màn có tai thỏ" hoặc "màn rời"). Mỗi màn chọn <strong>một hoặc nhiều</strong> nhân vật, hoặc <strong>không con nào</strong>.
+</li><li>Mặc định: mỗi màn có một con mèo, giữ đúng hành vi hiện tại. Màn cắm vào lần đầu cũng nhận mặc định này.
+</li><li>Lựa chọn được nhớ theo <strong>mã ổn định của màn hình</strong> (UUID của display), nên rút ra cắm lại vẫn giữ.
+</li><li><strong>Tối đa 3 nhân vật mỗi màn</strong> (lựa chọn của người viết), vì chỗ chơi hẹp: hai cánh 100 pt bên camera, viên thuốc 280 pt.
+</li><li>Nhiều nhân vật chung một làn:
+<ul><li>mỗi con có bộ não riêng;
+</li><li>được đi ngang qua nhau, nhưng <strong>không dừng lại chồng lên nhau</strong>;
+</li><li>không cùng lúc đứng trong vùng cổng.
+</li></ul>
+</li><li>Mỗi màn hình một stage (đổi từ "mỗi loại notch một stage" của PET4), vì lựa chọn giờ là theo màn. Hai cánh của một notch vẫn chung một stage và một đồng hồ.
+</li><li>Tên module hiển thị đổi từ "Mèo" thành <strong>"Thú cưng"</strong> (lựa chọn của người viết). Id vẫn là <code>pet</code>, nên cài đặt cũ giữ nguyên.
+</li></ul>
+<h2 id="4-không-làm">4. Không làm</h2>
+<ul><li>Nhân vật do người dùng tự vẽ hoặc tải về.
+</li><li>Âm thanh riêng cho từng con. Riêng tiếng meo của mèo giữ như cũ.
+</li><li>Đồng bộ một con chạy từ màn này sang màn khác.
+</li></ul>
+<h2 id="5-không-được-xảy-ra">5. Không được xảy ra</h2>
+<ul><li>Nhân vật nằm dưới camera, hoặc nháy hình khi quay đầu. Đây là các lỗi đã sửa ở PET3 và PET4.
+</li><li>Nặng máy: thêm nhân vật không được làm CPU khi rảnh tăng đáng kể. Màn không có nhân vật nào thì không chạy gì.
+</li><li>Mất lựa chọn của người dùng khi cắm hoặc rút màn hình.
+</li></ul>
+<h2 id="6-thứ-tự-làm">6. Thứ tự làm</h2>
+<ul><li><strong>PET5 (khung):</strong>
+<ul><li>tách "loài" ra khỏi con mèo: bộ não, cảnh và bộ hình riêng cho từng loài;
+</li><li>mỗi màn một stage;
+</li><li>cài đặt theo từng màn hình, chọn nhiều con;
+</li><li>làn chung cho nhiều con;
+</li><li>đổi tên module.
+<p>Chỉ có mèo, chưa thêm loài mới. Hành vi của mèo không đổi.</p>
+</li></ul>
+</li><li><strong>PET6:</strong> capybara, kèm nước, cam và các kiểu chơi chung (khung cho các kiểu chơi chung với loài khác).
+</li><li><strong>PET7:</strong> hamster. <strong>PET8:</strong> chim cánh cụt. <strong>PET9:</strong> corgi. <strong>PET10:</strong> ếch.
+</li><li><strong>PET11:</strong> đủ các kiểu chơi chung giữa capybara và từng loài.
+</li></ul>
+<p>Mỗi bước có test đầy đủ, chạy kiểm tra toàn bộ, cài lên máy, rồi quay màn hình kiểm tra.</p></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>
