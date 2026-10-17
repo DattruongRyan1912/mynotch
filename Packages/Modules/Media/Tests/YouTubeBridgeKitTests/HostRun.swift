@@ -75,7 +75,7 @@ final class HostRun: Sendable {
 
     init(
         socketPath: String, reconnectInterval: TimeInterval = 0.05,
-        clock: TestClock = TestClock(), expectedOwner: uid_t = geteuid(),
+        clock: TestClock = TestClock(), expectedOwner: uid_t = geteuid(), peerUser: uid_t? = nil,
         readDelay: TimeInterval = 0,
         log: YouTubeBridgeLog = .silent,
         launch: YouTubeHostLaunch = YouTubeHostLaunch(argumentCount: 2, parentName: "Parent"),
@@ -94,8 +94,9 @@ final class HostRun: Sendable {
         Thread.detachNewThread {
             let code = YouTubeHostCLI.run(
                 stdin: LateReader(base: FileDescriptorReader(fileDescriptor: readEnd), delay: readDelay), socketPath: socketPath,
-                reconnectInterval: reconnectInterval, now: { clock.now }, expectedOwner: expectedOwner, log: both, launch: launch,
-                commandOutput: output, didHandle: { progress.handled.withLock { $0 += 1 } },
+                reconnectInterval: reconnectInterval, now: { clock.now }, expectedOwner: expectedOwner,
+                peerUser: peerUser ?? expectedOwner, log: both, launch: launch, commandOutput: output,
+                didHandle: { progress.handled.withLock { $0 += 1 } },
                 didRound: { progress.rounds.withLock { $0 += 1 } }
             )
             close(readEnd)

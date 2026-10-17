@@ -23,8 +23,8 @@ import Testing
     /// a message in the pipe is not yet a message the host has dealt with.
     static let readDelays: [TimeInterval] = [0, 0.15]
 
-    func start(on path: String? = nil, expectedOwner: uid_t = geteuid(), readDelay: TimeInterval = 0) -> HostRun {
-        HostRun(socketPath: path ?? server.path, clock: clock, expectedOwner: expectedOwner, readDelay: readDelay)
+    func start(on path: String? = nil, expectedOwner: uid_t = geteuid(), peerUser: uid_t? = nil, readDelay: TimeInterval = 0) -> HostRun {
+        HostRun(socketPath: path ?? server.path, clock: clock, expectedOwner: expectedOwner, peerUser: peerUser, readDelay: readDelay)
     }
 
     // MARK: forwarding
@@ -128,10 +128,11 @@ import Testing
         #expect(await host.finish() == 0)
     }
 
-    @Test(arguments: readDelays) func aSocketOfAnotherUserGetsNothingNotEvenTheReplay(readDelay: TimeInterval) async throws {
+    @Test(arguments: readDelays) func aProcessOfAnotherUserBehindTheSocketGetsNothingNotEvenTheReplay(readDelay: TimeInterval) async throws {
         defer { server.remove() }
         try server.start()
-        let host = start(expectedOwner: geteuid() &+ 1, readDelay: readDelay)
+        // The folder and the socket file are the user's, so the host connects; the process that answers is not.
+        let host = start(peerUser: geteuid() &+ 1, readDelay: readDelay)
         // Captions are what a connection would replay at once, and a clear what a live one would carry.
         host.sendJSON(Self.captions("aaaaaaaaaaa"))
         host.sendJSON(Self.clear("bbbbbbbbbbb"))

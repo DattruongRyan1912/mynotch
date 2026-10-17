@@ -17,7 +17,7 @@ public enum YouTubeHostCLI {
     /// (re)connects, so an app that was started or restarted after the page loaded its captions still gets them.
     /// - Parameters:
     ///   - now: a monotonic clock in seconds, for the age of the playback to replay and for the pace of the log.
-    ///   - expectedOwner: the user the socket file must belong to.
+    ///   - expectedOwner: the user the socket's folder and file, and the process that listens, must belong to (see `UnixStreamSocket.open`).
     ///   - log: where the host reports itself and the extension's diagnostics.
     ///   - launch: how the host was started, for the first line of the log.
     ///   - commandOutput: where the commands of the app go, as native messages: Chrome's channel back to the extension.
@@ -33,7 +33,7 @@ public enum YouTubeHostCLI {
     ) -> Int32 {
         run(
             stdin: stdin, socketPath: socketPath, reconnectInterval: reconnectInterval, now: now, expectedOwner: expectedOwner,
-            log: log, launch: launch, commandOutput: commandOutput, didHandle: nil, didRound: nil
+            peerUser: expectedOwner, log: log, launch: launch, commandOutput: commandOutput, didHandle: nil, didRound: nil
         )
     }
 
@@ -47,6 +47,7 @@ public enum YouTubeHostCLI {
         reconnectInterval: TimeInterval,
         now: @escaping @Sendable () -> TimeInterval,
         expectedOwner: uid_t,
+        peerUser: uid_t,
         log: YouTubeBridgeLog,
         launch: YouTubeHostLaunch,
         commandOutput: any ByteWriting,
@@ -55,8 +56,8 @@ public enum YouTubeHostCLI {
     ) -> Int32 {
         log("host start argc=\(launch.argumentCount) parent=\(launch.parentName ?? "unknown")")
         let relay = HostRelay(
-            socketPath: socketPath, expectedOwner: expectedOwner, retryInterval: reconnectInterval, now: now, log: log,
-            commandOutput: commandOutput, didRound: didRound
+            socketPath: socketPath, expectedOwner: expectedOwner, peerUser: peerUser, retryInterval: reconnectInterval, now: now,
+            log: log, commandOutput: commandOutput, didRound: didRound
         )
         relay.start(reconnectingEvery: reconnectInterval)
         var reader = NativeMessageReader(source: stdin)
@@ -114,6 +115,7 @@ final class HostRelay: Sendable {
 
     private let socketPath: String
     private let expectedOwner: uid_t
+    private let peerUser: uid_t
     private let retryInterval: TimeInterval
     private let now: @Sendable () -> TimeInterval
     private let log: YouTubeBridgeLog
@@ -128,12 +130,13 @@ final class HostRelay: Sendable {
     private let readers = DispatchGroup()
 
     init(
-        socketPath: String, expectedOwner: uid_t, retryInterval: TimeInterval,
+        socketPath: String, expectedOwner: uid_t, peerUser: uid_t, retryInterval: TimeInterval,
         now: @escaping @Sendable () -> TimeInterval, log: YouTubeBridgeLog, commandOutput: any ByteWriting,
         didRound: (@Sendable () -> Void)? = nil
     ) {
         self.socketPath = socketPath
         self.expectedOwner = expectedOwner
+        self.peerUser = peerUser
         self.retryInterval = retryInterval
         self.now = now
         self.log = log
@@ -228,7 +231,7 @@ final class HostRelay: Sendable {
     private func keepConnected() {
         state.withLock { state in
             guard state.socket == nil else { return }
-            switch UnixStreamSocket.open(to: socketPath, expectedOwner: expectedOwner) {
+            switch UnixStreamSocket.open(to: socketPath, fileOwner: expectedOwner, peerUser: peerUser) {
             case .failure(let failure):
                 noteFailedAttempt(&state, reason: failure.reason)
             case .success(let socket):

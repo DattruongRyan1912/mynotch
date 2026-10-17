@@ -21,11 +21,16 @@ final class FrameServer: Sendable {
     private let closesClientsAtOnce: Bool
     private let state = Mutex(State())
 
-    /// A private folder with a path short enough for a socket (`directory` to reuse one); the socket file is made by `start`.
+    /// A folder with a path short enough for a socket (`directory` to reuse one), private to the user as the app makes it
+    /// (the host does not connect to any other); the socket file is made by `start`.
     init(directory: URL? = nil, closesClientsAtOnce: Bool = false) {
         self.closesClientsAtOnce = closesClientsAtOnce
         self.directory = directory ?? ScratchFolders.shared.reserveShort()
-        try? FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            at: self.directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
+        )
+        // A reused folder is not made again, so its mode is set here too.
+        chmod(self.directory.path, 0o700)
     }
 
     var frames: [Data] { state.withLock { $0.frames } }

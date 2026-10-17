@@ -9,7 +9,10 @@ enum UnixStreamSocket {
     /// Why no connection was made; the words go to the log.
     enum ConnectFailure: Error, Equatable {
         case pathTooLong
-        /// The one that listens belongs to someone other than the expected user.
+        /// The folder, or what is at the socket's place, is not what the app makes: a link, a folder that others can open,
+        /// a file that is not a socket, something that is not the user's. Nothing was connected to.
+        case untrusted
+        /// The process that listens runs as someone other than the expected user.
         case otherUser
         /// No socket file: the app is not running, or not listening.
         case noSocket
@@ -21,6 +24,7 @@ enum UnixStreamSocket {
         var reason: String {
             switch self {
             case .pathTooLong: "path-too-long"
+            case .untrusted: "untrusted"
             case .otherUser: "other-user"
             case .noSocket: "no-socket"
             case .refused: "refused"
@@ -35,12 +39,25 @@ enum UnixStreamSocket {
         try? open(to: path, expectedOwner: expectedOwner).get()
     }
 
-    /// A connected socket, or why there is none: nothing listens, the path does not fit, or the one that listens belongs
-    /// to someone other than `expectedOwner`. A folder in `/tmp` can be made by anyone, and captions are not sent to
-    /// another user's socket. The owner is asked of the connection itself, so a socket file swapped in after the path
-    /// was looked at makes no difference; nothing is sent before that.
+    /// A connected socket, or why there is none: nothing listens, the path does not fit, or what is there is not the
+    /// user's own app. A folder in `/tmp` can be made by anyone, and captions are not sent to another user's socket, so
+    /// the folder and the socket file are looked at first, without following links (`SocketTrust.inspect`: a real folder
+    /// of `expectedOwner` that nobody else can open, and a socket file of `expectedOwner` in it); a folder or file that is
+    /// not there is a `noSocket`, as a connect would say, and anything else there is `untrusted`, and nothing is connected to.
+    /// After the connection the owner is asked of the connection itself, so a socket file swapped in after the path was
+    /// looked at makes no difference; nothing is sent before that.
     static func open(to path: String, expectedOwner: uid_t) -> Result<Int32, ConnectFailure> {
+        open(to: path, fileOwner: expectedOwner, peerUser: expectedOwner)
+    }
+
+    /// With the user of the process on the other end apart from the owner of the files, which a test cannot otherwise tell.
+    static func open(to path: String, fileOwner: uid_t, peerUser: uid_t) -> Result<Int32, ConnectFailure> {
         guard var address = SocketAddress(path: path)?.value else { return .failure(.pathTooLong) }
+        switch SocketTrust.inspect(socketPath: path, user: fileOwner) {
+        case .absent: return .failure(.noSocket)
+        case .untrusted: return .failure(.untrusted)
+        case .trusted: break
+        }
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return .failure(.failed(errno: errno)) }
         var yes: Int32 = 1
@@ -68,7 +85,7 @@ enum UnixStreamSocket {
             default: return .failure(.failed(errno: code))
             }
         }
-        guard SocketTrust.isPeer(fd, user: expectedOwner) else {
+        guard SocketTrust.isPeer(fd, user: peerUser) else {
             close(fd)
             return .failure(.otherUser)
         }
