@@ -18,6 +18,12 @@ public struct LiveActivity: Identifiable {
     public let bottom: AnyView?
     /// How tall the strip is, in points. 0 whenever there is no `bottom`, so the two can never disagree.
     public let bottomHeight: CGFloat
+    /// A view drawn over the whole top row of the collapsed notch while this is the current activity: as wide as the notch is (which it asks
+    /// for with `View.notchBodyWidth`, if it wants the notch wider) and as tall as the notch's body, from edge to edge of it between the
+    /// ears, over what `leading` and `trailing` draw. It is not scaled with them (the notch draws them bigger on a tall pill), and it takes a
+    /// click only where it says so: a view that answers nil to a hit test leaves the notch's own tap and hover as they were. Nil, which is
+    /// what every activity has but one that draws across the notch, changes nothing.
+    public let body: AnyView?
     /// The small icon of the bubble this activity gets beside the notch when another one is the primary. Nil lets
     /// the notch use `leading`, clipped to a circle.
     public let minimal: AnyView?
@@ -29,6 +35,9 @@ public struct LiveActivity: Identifiable {
     /// Whether the notch has a strip to make room for: there is a view and it has a height.
     public var hasBottom: Bool { bottom != nil && bottomHeight > 0 }
 
+    /// Whether the activity draws across the top row of the collapsed notch.
+    public var hasBody: Bool { body != nil }
+
     public init(
         id: String,
         priority: ActivityPriority = .normal,
@@ -37,6 +46,7 @@ public struct LiveActivity: Identifiable {
         trailing: AnyView,
         bottom: AnyView? = nil,
         bottomHeight: CGFloat = 0,
+        body: AnyView? = nil,
         minimal: AnyView? = nil,
         summary: String? = nil
     ) {
@@ -47,6 +57,7 @@ public struct LiveActivity: Identifiable {
         self.trailing = trailing
         self.bottom = bottom
         self.bottomHeight = bottom == nil ? 0 : max(bottomHeight, 0)
+        self.body = body
         self.minimal = minimal
         self.summary = summary?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true ? nil : summary
     }

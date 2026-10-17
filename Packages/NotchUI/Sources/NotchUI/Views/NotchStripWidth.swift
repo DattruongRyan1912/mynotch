@@ -20,6 +20,16 @@ extension View {
 }
 
 extension View {
+    /// Tells the notch how wide the row this view fills wants to be, in points: for the `body` of a live activity, which is drawn across the
+    /// whole top row of the collapsed notch, between the ears. The notch is as wide as that row and its ears, between what it is without a
+    /// body and `NotchGeometry.maximumStripWidth`, with the notch's spring and about its centre, while the activity is the current one; it
+    /// goes the way a strip's width goes (`notchStripWidth`), hysteresis and all. A body that asks for nothing keeps the notch's width.
+    public func notchBodyWidth(_ width: CGFloat) -> some View {
+        notchStripWidth(max(width - 2 * NotchTokens.stripPadding, 0))
+    }
+}
+
+extension View {
     /// Calls `action` with the width a strip inside this view asks for (`notchStripWidth`), for whatever hosts a strip outside the notch
     /// and for a test; the notch itself listens in its own way.
     public func onNotchStripWidth(perform action: @escaping (CGFloat) -> Void) -> some View {

@@ -322,7 +322,7 @@ final class NotchWindowController {
         return geometry.pointerZone(
             at: point, state: state, contentHeight: registry.contentHeight(for: state, tabUnderToast: model.tabUnderToast),
             strip: activities.stripHeight, bubbles: accessories.bubbles, listRows: accessories.listRows, dragging: dragging,
-            tabCount: registry.tabs.count, stripWidth: model.stripWidth(of: activities), in: screenFrame
+            tabCount: registry.tabs.count, stripWidth: model.stripWidth(of: activities), hasBody: activities.currentHasBody, in: screenFrame
         )
     }
 

@@ -75,11 +75,13 @@ nonisolated extension NotchGeometry {
     /// first bubble, so the pill keeps its edge. While a drag with data is over the notch only its drag area counts.
     public func pointerZone(
         at point: CGPoint, state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, strip: CGFloat = 0,
-        bubbles: Int = 0, listRows: Int = 0, dragging: Bool = false, tabCount: Int = 1, stripWidth: CGFloat = 0, in screenFrame: CGRect
+        bubbles: Int = 0, listRows: Int = 0, dragging: Bool = false, tabCount: Int = 1, stripWidth: CGFloat = 0, hasBody: Bool = false,
+        in screenFrame: CGRect
     ) -> PointerZone {
         let bottom = bottomHeight(for: state, strip: strip, listRows: listRows)
-        // The notch is as wide as its strip wants, and the open list under it does not change that: the bubbles stay where they are.
-        let ask = strip > 0 ? stripWidth : 0
+        // The notch is as wide as its strip (or its body) wants, and the open list under it does not change that: the bubbles stay where
+        // they are.
+        let ask = strip > 0 || hasBody ? stripWidth : 0
         if dragging {
             return dragHitRect(
                 for: state, contentHeight: contentHeight, bottomHeight: bottom, tabCount: tabCount, stripWidth: ask, in: screenFrame

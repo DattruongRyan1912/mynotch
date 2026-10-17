@@ -33,4 +33,9 @@ public struct NotchHandle: Equatable {
 extension EnvironmentValues {
     /// The notch the view is shown in; the default handle does nothing.
     @Entry public var notch: NotchHandle = NotchHandle()
+
+    /// The geometry of the notch a collapsed activity is drawn in: which kind it is (`kind`, a hardware notch or a virtual one), how big its
+    /// body is and where it is on the screen. Set for the views of the collapsed notch (`leading`, `trailing`, `bottom` and `body` of the
+    /// current activity); nil anywhere else, such as a view outside a notch.
+    @Entry public var notchGeometry: NotchGeometry?
 }

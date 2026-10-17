@@ -68,7 +68,9 @@ struct NotchRootView: View {
     /// A strip tells the notch the width it wants: kept for its activity, while the strip is the one on show. The strip leaving (the
     /// notch opening, the activity ending, the list opening) reports 0 on its way out, which is not a request.
     private func strip(reportsWidth width: CGFloat, _ accessories: CompactAccessories, bottom: CGFloat) {
-        guard state == .compact, bottom > 0, accessories.listRows == 0, let id = activities.current?.id else { return }
+        // A strip is under the notch while it is not the list's turn; a body is over its top row all the time.
+        guard state == .compact, bottom > 0 || activities.currentHasBody, accessories.listRows == 0 || activities.currentHasBody,
+              let id = activities.current?.id else { return }
         model.reportStripWidth(width, for: id)
     }
 
@@ -388,6 +390,17 @@ struct NotchRootView: View {
                             .notchLogLifecycle("strip")
                     }
                 }
+                // An overlay, so that an activity without a body lays the notch out exactly as it was. Not scaled with the sides: the notch
+                // draws them bigger on a tall pill, and a body is made of pixels.
+                .overlay(alignment: .top) {
+                    if let body = entry.activity.body {
+                        body
+                            .frame(maxWidth: .infinity)
+                            .frame(height: geometry.notchSize.height)
+                            .notchLogLifecycle("body")
+                    }
+                }
+                .environment(\.notchGeometry, geometry)
                 .transition(.asymmetric(insertion: .opacity.animation(NotchTokens.enter), removal: .opacity.animation(NotchTokens.leave)))
                 .notchLogLifecycle("compact")
             }
