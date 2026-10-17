@@ -187,6 +187,31 @@ import Testing
         #expect(setup.rig.client.commands.count == before)
     }
 
+    // MARK: The probe
+
+    @Test func theCurveTellsTheManagerWhetherItIsTheMode() async {
+        let setup = await Setup()
+        #expect(setup.rig.manager.curveIsMode == false)
+        await setup.runner.configure(mode: .curve, curve: .standard, mechanism: .forced)
+        #expect(setup.rig.manager.curveIsMode)
+        await setup.runner.configure(mode: .apple, curve: .standard, mechanism: .forced)
+        #expect(setup.rig.manager.curveIsMode == false)
+    }
+
+    @Test func whileAProbeRunsTheCurveKeepsItsHandsOffTheFans() async {
+        let setup = await Setup()
+        await setup.runner.configure(mode: .curve, curve: .standard, mechanism: .forced)
+        setup.rig.manager.probeStep = "Thử đặt sàn tốc độ"
+        for _ in 0..<5 {
+            await setup.runner.step(snapshot(95))
+            setup.clock.tick()
+        }
+        #expect(setup.rig.client.commands.isEmpty, "no curve command landed during the probe")
+        setup.rig.manager.probeStep = nil
+        await setup.runner.step(snapshot(95))
+        #expect(setup.rig.client.commands.isEmpty == false, "and it carries on afterwards")
+    }
+
     // MARK: Failing
 
     @Test func aHelperThatRefusesStopsTheCurveWithItsReasonAndGivesTheFansBack() async {

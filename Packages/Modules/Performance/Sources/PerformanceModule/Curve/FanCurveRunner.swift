@@ -81,6 +81,7 @@ final class FanCurveRunner {
         mode = newMode
         curve = newCurve
         mechanism = newMechanism
+        helper.curveIsMode = newMode == .curve
         if changedMode { engine.reset() }
         switch newMode {
         case .apple:
@@ -111,6 +112,8 @@ final class FanCurveRunner {
 
     func step(_ snapshot: ThermalSnapshot) async {
         guard mode == .curve else { return }
+        // A probe is trying the fans: the curve keeps its hands off them until it is done.
+        guard helper.probeStep == nil else { return }
         helper.refreshMacsFanControl()
         guard case .running = helper.phase else { return await pause(.waitingForHelper) }
         guard let mechanism else { return await pause(.needsProbe) }

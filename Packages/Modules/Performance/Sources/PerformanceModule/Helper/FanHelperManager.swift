@@ -19,8 +19,10 @@ final class FanHelperManager {
     private(set) var phase: FanHelperPhase = .unknown
     private(set) var macsFanControlRunning = false
     private(set) var comparison: FanComparison?
-    /// What the probe is doing, nil when it is not running.
-    private(set) var probeStep: String?
+    /// What the probe is doing, nil when it is not running. Settable so that a test can stand for a probe in progress.
+    var probeStep: String?
+    /// Whether the user's curve is the fan mode, told by the curve's runner: the probe and the curve would fight over the same fan.
+    var curveIsMode = false
 
     @ObservationIgnored private let registration: any FanHelperRegistering
     @ObservationIgnored private let client: any FanHelperClient
@@ -52,10 +54,11 @@ final class FanHelperManager {
         return false
     }
 
-    /// Whether the probe may be started: the helper runs, Macs Fan Control does not, and nothing else is going on.
+    /// Whether the probe may be started: the helper runs, Macs Fan Control does not, the fans are Apple's (the curve is off), and
+    /// nothing else is going on.
     var canProbe: Bool {
         guard case .running = phase else { return false }
-        return !macsFanControlRunning && probeStep == nil
+        return !macsFanControlRunning && !curveIsMode && probeStep == nil
     }
 
     var presentation: FanHelperPresentation {

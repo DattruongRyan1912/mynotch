@@ -21,14 +21,17 @@ nonisolated struct MechanismTrial: Codable, Equatable, Sendable {
     let peakRPM: Double
     /// Whether the actual speed went most of the way to the speed asked for.
     let changed: Bool
+    /// Whether the SMC kept what was asked for the whole time it was held: the target reading back as written (and for the manual
+    /// speed the mode reading 1). A firmware that rewrites the target by itself is fighting the request, not honouring it.
+    let heldAsAsked: Bool
     let modeAfter: Double?
     let targetAfter: Double?
     let rpmAfter: Double?
     /// Whether giving the fan back worked: the mode reads automatic and the speed is on its way down, or the target was taken back.
     let restored: Bool
 
-    /// Only a way that changed the speed and was given back cleanly is a way to use.
-    var usable: Bool { accepted && changed && restored }
+    /// Only a way that changed the speed, kept what was asked for while it was held, and was given back cleanly is a way to use.
+    var usable: Bool { accepted && changed && heldAsAsked && restored }
 }
 
 /// What the probe found, kept to choose the way the curve sets the fans.
@@ -67,6 +70,8 @@ nonisolated enum FanProbeJudge {
     static let minimumRise = 800.0
     /// How far towards the requested speed the fan must get to count as changed.
     static let changedFraction = 0.4
+    /// How far the target may read back from what was written: the SMC's floats are not exact.
+    static let targetTolerance = 100.0
 
     /// What to ask for: 1500 rpm above the baseline or 60 % of the fan's maximum, whichever is more, never above the maximum. Nil when
     /// that is less than `minimumRise` above the baseline (a fan already near its maximum shows nothing).
@@ -148,10 +153,17 @@ struct FanControlProbe {
         return FanProbeOutcome(verdict: verdict, trials: trials, note: trials.count == 2 ? "" : "Đã dừng giữa chừng.", at: now())
     }
 
+    /// A reading taken while a command is held shows what was asked for: the target as written, and for the manual speed the mode 1.
+    static func holds(_ sample: FanHelperFanInfo, mechanism: FanMechanism, requested: Double) -> Bool {
+        guard abs(sample.target - requested) <= FanProbeJudge.targetTolerance else { return false }
+        return mechanism == .floor || sample.mode == 1
+    }
+
     private func trial(_ mechanism: FanMechanism, baseline: FanHelperFanInfo, requested: Double) async -> MechanismTrial {
         var accepted = true
         var detail = ""
         var peak = baseline.rpm
+        var heldAsAsked = true
         for _ in 0..<Self.holdSeconds {
             do {
                 let result = mechanism == .floor
@@ -166,7 +178,12 @@ struct FanControlProbe {
                 detail = FanHelperManager.describe(error)
             }
             await pause(.seconds(1))
-            if let sample = try? await client.readFans().first(where: { $0.index == fan }) { peak = max(peak, sample.rpm) }
+            if let sample = try? await client.readFans().first(where: { $0.index == fan }) {
+                peak = max(peak, sample.rpm)
+                if !Self.holds(sample, mechanism: mechanism, requested: requested) { heldAsAsked = false }
+            } else {
+                heldAsAsked = false
+            }
             if !accepted { break }
         }
         _ = try? await client.setAuto(fan: fan)
@@ -177,7 +194,7 @@ struct FanControlProbe {
         let rpmAfter = after.map(\.rpm)
         return MechanismTrial(
             mechanism: mechanism, accepted: accepted, detail: detail, baselineRPM: baseline.rpm, requestedRPM: requested, peakRPM: peak,
-            changed: FanProbeJudge.changed(baseline: baseline.rpm, requested: requested, peak: peak),
+            changed: FanProbeJudge.changed(baseline: baseline.rpm, requested: requested, peak: peak), heldAsAsked: heldAsAsked,
             modeAfter: modeAfter, targetAfter: targetAfter, rpmAfter: rpmAfter,
             restored: FanProbeJudge.restored(
                 modeAfter: modeAfter, targetAfter: targetAfter, rpmAfter: rpmAfter, requested: requested, peak: peak, baseline: baseline.rpm

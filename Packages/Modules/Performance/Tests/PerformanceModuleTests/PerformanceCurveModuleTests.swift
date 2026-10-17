@@ -52,6 +52,23 @@ import Testing
         #expect(f.module.state.curve?.status == .needsProbe)
     }
 
+    @Test func withTheCurveOnTheProbeCannotBeStartedAndNoProbeCommandCanFightTheCurve() async {
+        let f = await curveFixture(verdict: .forced)
+        await settle { f.rig.manager.curveIsMode }
+        #expect(f.rig.manager.canProbe == false)
+        let commands = f.rig.client.commands.count
+        #expect(await f.rig.manager.runProbe() == nil)
+        #expect(f.rig.client.commands.count == commands, "the refused probe sent nothing")
+    }
+
+    @Test func afterSwitchingBackToAppleTheProbeIsAllowedAgain() async {
+        let f = await curveFixture(verdict: .forced)
+        await settle { f.rig.manager.curveIsMode }
+        f.harness.settings.set(FanMode.apple, for: Self.modeKey)
+        await settle { !f.rig.manager.curveIsMode }
+        #expect(f.rig.manager.canProbe)
+    }
+
     @Test func theAppIsKeptAwakeWhileTheCurveIsTheMode() async {
         let f = await curveFixture()
         await settle { f.activity.isHeld }

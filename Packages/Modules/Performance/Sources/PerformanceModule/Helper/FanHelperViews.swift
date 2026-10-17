@@ -254,6 +254,7 @@ struct FanProbeRows: View {
 
     private var unavailableReason: String {
         if helper.macsFanControlRunning { return FanHelperPresentation.macsFanControlWarning + "." }
+        if helper.curveIsMode { return "Chuyển \"Chế độ quạt\" về Tự động của Apple trước khi thử." }
         return "Cần cài và cho phép helper trước."
     }
 }

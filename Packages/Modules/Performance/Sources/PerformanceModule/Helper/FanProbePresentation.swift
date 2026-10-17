@@ -36,7 +36,7 @@ nonisolated enum FanProbePresentation {
             }
             let change = trial.changed
                 ? "tốc độ lên \(Int(trial.peakRPM)) từ \(Int(trial.baselineRPM))" : "tốc độ không đổi (\(Int(trial.peakRPM)) từ \(Int(trial.baselineRPM)))"
-            return "\(name): yêu cầu \(Int(trial.requestedRPM)), \(change); trả về tự động: \(trial.restored ? "được" : "không rõ")."
+            return "\(name): yêu cầu \(Int(trial.requestedRPM)), \(change); giữ đúng mức đã đặt: \(trial.heldAsAsked ? "có" : "không"); trả về tự động: \(trial.restored ? "được" : "không rõ")."
         }
     }
 }

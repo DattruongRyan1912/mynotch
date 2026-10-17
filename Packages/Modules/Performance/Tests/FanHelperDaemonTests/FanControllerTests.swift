@@ -169,6 +169,25 @@ import Testing
         #expect(rig.writes.isEmpty, "nothing is held, so the helper takes no manual control of its own")
     }
 
+    @Test func aGuardedReplySaysTheSpeedTheFanWasActuallyGiven() {
+        let rig = Rig(actual: 2000, temperature: 97)
+        let result = rig.controller.setForced(fan: 0, rpm: 2800)
+        #expect(result.appliedRPM == 5779, "the maximum, not the 2800 that was asked")
+        let other = rig.controller.setForced(fan: 1, rpm: 2800)
+        #expect(other.appliedRPM == 6241)
+    }
+
+    @Test func aRequestHoveringAtAppleDoesNotSwitchTheFanBetweenAutomaticAndManualAtEveryStep() {
+        let rig = Rig(actual: 2000)
+        var states: [FanHelperResult.State?] = []
+        for (request, wobble) in [(1990.0, 25.0), (2010, -30), (1980, 10), (1995, -20), (1990, 30), (2005, 0)] {
+            rig.smc.setActual(2000 + wobble, fan: 0)
+            states.append(rig.controller.setForced(fan: 0, rpm: request).state)
+            rig.clock.advance(2)
+        }
+        #expect(states == Array(repeating: FanHelperResult.State.forced, count: 6), "held from the first step to the last")
+    }
+
     @Test func aGuardedCommandStillCannotLowerTheFanAndGivesTheFanBackWhenTheLeaseRunsOut() {
         let rig = Rig(actual: 2000, temperature: 97)
         let result = rig.controller.setForced(fan: 0, rpm: 3000)

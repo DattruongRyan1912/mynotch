@@ -7,6 +7,11 @@ public enum FanSafety {
         Swift.min(Swift.max(rpm, low), high)
     }
 
+    /// How far below Apple's speed a request may be before the fan is taken back to automatic. Apple's own speed moves by tens of rpm
+    /// from one reading to the next; within this margin the fan is held at Apple's speed instead, so a request that hovers around it
+    /// does not switch the fan between automatic and manual at every step.
+    public static let takeBackMargin = 150.0
+
     public enum ForcedDecision: Equatable, Sendable {
         case force(Double)
         /// Do not force: the fan stays (or goes back to) automatic, for this reason.
@@ -24,8 +29,8 @@ public enum FanSafety {
         if let dieTemperature, let baselineTemperature, dieTemperature > baselineTemperature + drift {
             return .automatic("hotter than when Apple's speed was read")
         }
-        if requested < baseline { return .automatic("Apple's own speed is higher") }
-        return .force(requested)
+        if requested < baseline - takeBackMargin { return .automatic("Apple's own speed is higher") }
+        return .force(max(requested, baseline))
     }
 
     /// The heat guard's state: on from `trip` degrees, off again below `release`, so it does not flicker around one value.

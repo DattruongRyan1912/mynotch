@@ -20,8 +20,15 @@ import Testing
         #expect(decide(3500) == .force(3500))
     }
 
-    @Test func aSpeedBelowAppleStaysAutomatic() {
-        #expect(decide(1999) == .automatic("Apple's own speed is higher"))
+    @Test func aSpeedFarBelowAppleStaysAutomatic() {
+        #expect(decide(1849) == .automatic("Apple's own speed is higher"))
+        #expect(decide(500) == .automatic("Apple's own speed is higher"))
+    }
+
+    @Test func aSpeedJustBelowAppleIsHeldAtApplesSpeedSoItDoesNotFlapBetweenTheTwo() {
+        #expect(decide(1999) == .force(2000), "never below Apple's speed, but not given up for 1 rpm")
+        #expect(decide(1850) == .force(2000), "exactly the margin is still held")
+        #expect(FanSafety.takeBackMargin == 150)
     }
 
     @Test func withoutApplesSpeedNothingIsForced() {

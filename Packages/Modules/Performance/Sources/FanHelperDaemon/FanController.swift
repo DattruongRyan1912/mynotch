@@ -154,7 +154,8 @@ public final class FanController: @unchecked Sendable {
         if guardActive {
             notes.append("heat guard")
             holdAtMaximum(fan)
-            return result(ok: fans[fan].mode != .automatic, fan: fan, detail: notes.joined(separator: ", "))
+            let held = fans[fan].mode != .automatic
+            return result(ok: held, fan: fan, applied: held ? limits.maxRPM : -1, detail: notes.joined(separator: ", "))
         }
         switch kind {
         case .forced: return forced(fan, target, temperature, notes)

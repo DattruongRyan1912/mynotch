@@ -14,6 +14,8 @@ nonisolated final class SimulatedFanClient: FanHelperClient, Sendable {
         var forcedRefused = false
         var forcedSticky = false
         var failReading = false
+        /// The firmware reports its own target instead of the one written while a floor is held, as if it were rewriting it.
+        var floorTargetNotKept = false
     }
 
     private struct State {
@@ -44,8 +46,9 @@ nonisolated final class SimulatedFanClient: FanHelperClient, Sendable {
             if state.behaviour.failReading { throw FanHelperError.timeout }
             let heldAt = state.mode == 1 || state.floorActive ? state.target : state.apple
             state.rpm += 0.6 * (heldAt - state.rpm)
+            let reported = state.floorActive && state.behaviour.floorTargetNotKept ? state.apple : state.target
             return [
-                FanHelperFanInfo(index: 0, rpm: state.rpm, minRPM: 1200, maxRPM: state.maximum, mode: state.mode, target: state.target),
+                FanHelperFanInfo(index: 0, rpm: state.rpm, minRPM: 1200, maxRPM: state.maximum, mode: state.mode, target: reported),
                 FanHelperFanInfo(index: 1, rpm: state.apple, minRPM: 1200, maxRPM: state.maximum, mode: 0, target: state.apple),
             ]
         }
@@ -143,7 +146,7 @@ nonisolated final class SimulatedFanClient: FanHelperClient, Sendable {
         func trial(_ mechanism: FanMechanism, usable: Bool) -> MechanismTrial {
             MechanismTrial(
                 mechanism: mechanism, accepted: true, detail: "", baselineRPM: 2000, requestedRPM: 3500, peakRPM: usable ? 3400 : 2000,
-                changed: usable, modeAfter: 0, targetAfter: 2000, rpmAfter: 2000, restored: true
+                changed: usable, heldAsAsked: true, modeAfter: 0, targetAfter: 2000, rpmAfter: 2000, restored: true
             )
         }
         #expect(FanProbeJudge.verdict(for: [trial(.floor, usable: true), trial(.forced, usable: true)]) == .floor)
@@ -153,7 +156,7 @@ nonisolated final class SimulatedFanClient: FanHelperClient, Sendable {
 
     @Test func aWayThatDidNotRestoreIsNotUsableEvenIfItChangedTheSpeed() {
         let trial = MechanismTrial(
-            mechanism: .floor, accepted: true, detail: "", baselineRPM: 2000, requestedRPM: 3500, peakRPM: 3400, changed: true,
+            mechanism: .floor, accepted: true, detail: "", baselineRPM: 2000, requestedRPM: 3500, peakRPM: 3400, changed: true, heldAsAsked: true,
             modeAfter: 0, targetAfter: 3500, rpmAfter: 3400, restored: false
         )
         #expect(trial.usable == false)
@@ -204,6 +207,32 @@ nonisolated final class SimulatedFanClient: FanHelperClient, Sendable {
         #expect(floor.changed && floor.restored == false)
         #expect(outcome.mechanism != .floor, "it changed the speed but was not given back cleanly")
         #expect(outcome.verdict == .none, "and a floor that stays spoils what is measured after it, so the probe does not guess")
+    }
+
+    @MainActor @Test func aFloorWhoseTargetTheFirmwareRewritesIsNotHonouredAndIsNeverChosen() async {
+        let client = SimulatedFanClient(behaviour: .init(floorTargetNotKept: true))
+        let outcome = await probe(client).run()
+        let floor = outcome.trials[0]
+        #expect(floor.changed && floor.heldAsAsked == false && floor.usable == false)
+        #expect(outcome.verdict == .forced, "the speed rose, but the firmware did not keep what was written: it is fighting the request")
+    }
+
+    @MainActor @Test func aFloorThatTheFirmwareKeepsWhileHeldAndTakesBackAfterTheModeWriteIsTheOneConsistentFloor() async {
+        let outcome = await probe(SimulatedFanClient()).run()
+        let floor = outcome.trials[0]
+        #expect(floor.heldAsAsked && floor.changed && floor.restored && floor.usable)
+        #expect(outcome.verdict == .floor)
+    }
+
+    @MainActor @Test func aManualSpeedThatDoesNotReadBackAsManualIsNotHeldAsAsked() {
+        let manual = FanHelperFanInfo(index: 0, rpm: 3000, minRPM: 1200, maxRPM: 5779, mode: 1, target: 3600)
+        let automatic = FanHelperFanInfo(index: 0, rpm: 3000, minRPM: 1200, maxRPM: 5779, mode: 0, target: 3600)
+        let moved = FanHelperFanInfo(index: 0, rpm: 3000, minRPM: 1200, maxRPM: 5779, mode: 1, target: 3300)
+        #expect(FanControlProbe.holds(manual, mechanism: .forced, requested: 3600))
+        #expect(FanControlProbe.holds(automatic, mechanism: .forced, requested: 3600) == false)
+        #expect(FanControlProbe.holds(automatic, mechanism: .floor, requested: 3600), "a floor is held with the mode automatic")
+        #expect(FanControlProbe.holds(moved, mechanism: .floor, requested: 3600) == false, "300 away is not what was written")
+        #expect(FanControlProbe.holds(FanHelperFanInfo(index: 0, rpm: 0, minRPM: 0, maxRPM: 0, mode: 1, target: 3550), mechanism: .forced, requested: 3600))
     }
 
     @MainActor @Test func aManualSpeedTheHelperRefusesIsReportedWithItsReasonAndTheFloorStillWins() async {
@@ -285,15 +314,15 @@ nonisolated final class SimulatedFanClient: FanHelperClient, Sendable {
 
     @Test func eachTrialHasALineWithTheNumbers() {
         let ok = MechanismTrial(
-            mechanism: .floor, accepted: true, detail: "", baselineRPM: 2100, requestedRPM: 3600, peakRPM: 3550, changed: true,
+            mechanism: .floor, accepted: true, detail: "", baselineRPM: 2100, requestedRPM: 3600, peakRPM: 3550, changed: true, heldAsAsked: true,
             modeAfter: 0, targetAfter: 2100, rpmAfter: 2300, restored: true
         )
         let refused = MechanismTrial(
             mechanism: .forced, accepted: false, detail: "the SMC refused F0Md (0x82)", baselineRPM: 2100, requestedRPM: 3600, peakRPM: 2100,
-            changed: false, modeAfter: 0, targetAfter: 2100, rpmAfter: 2100, restored: true
+            changed: false, heldAsAsked: true, modeAfter: 0, targetAfter: 2100, rpmAfter: 2100, restored: true
         )
         let lines = FanProbePresentation.lines(FanProbeOutcome(verdict: .none, trials: [ok, refused], note: "", at: nil))
-        #expect(lines[0] == "Sàn tốc độ: yêu cầu 3600, tốc độ lên 3550 từ 2100; trả về tự động: được.")
+        #expect(lines[0] == "Sàn tốc độ: yêu cầu 3600, tốc độ lên 3550 từ 2100; giữ đúng mức đã đặt: có; trả về tự động: được.")
         #expect(lines[1] == "Tốc độ thủ công: helper không nhận lệnh (the SMC refused F0Md (0x82)).")
     }
 
@@ -301,7 +330,7 @@ nonisolated final class SimulatedFanClient: FanHelperClient, Sendable {
         let outcome = FanProbeOutcome(
             verdict: .forced,
             trials: [MechanismTrial(
-                mechanism: .forced, accepted: true, detail: "", baselineRPM: 2100, requestedRPM: 3600, peakRPM: 3500, changed: true,
+                mechanism: .forced, accepted: true, detail: "", baselineRPM: 2100, requestedRPM: 3600, peakRPM: 3500, changed: true, heldAsAsked: true,
                 modeAfter: 0, targetAfter: 2100, rpmAfter: nil, restored: true
             )],
             note: "x", at: Date(timeIntervalSinceReferenceDate: 99)

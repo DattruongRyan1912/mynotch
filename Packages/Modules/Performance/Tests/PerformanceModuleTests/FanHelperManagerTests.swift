@@ -489,6 +489,17 @@ import Testing
         #expect(unreachable.manager.canProbe == false)
     }
 
+    @Test func theProbeIsNotAllowedWhileTheCurveIsTheMode() async {
+        let rig = HelperRig(status: .enabled)
+        await rig.manager.refresh()
+        rig.manager.curveIsMode = true
+        #expect(rig.manager.canProbe == false)
+        #expect(await rig.manager.runProbe() == nil)
+        #expect(rig.client.commands.isEmpty && rig.client.readCount == 0)
+        rig.manager.curveIsMode = false
+        #expect(rig.manager.canProbe)
+    }
+
     @Test func aProbeThatIsNotAllowedSendsNothing() async {
         let rig = HelperRig(status: .enabled, runningApps: [FanHelperManager.macsFanControlBundleID])
         await rig.manager.refresh()
