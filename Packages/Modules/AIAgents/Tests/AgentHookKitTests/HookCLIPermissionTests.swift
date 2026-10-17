@@ -1,4 +1,5 @@
 import Foundation
+import MyNotchTestSupport
 import Testing
 @testable import AgentHookKit
 
@@ -77,7 +78,7 @@ import Testing
     }
 
     @Test func noAppPrintsNothingAndStillTellsTheDatagramSocketWhichIsAllTheOldHelperDid() throws {
-        let directory = "/tmp/mn-\(UUID().uuidString.prefix(8))"
+        let directory = SocketFolder.reservedPath()
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(atPath: directory) }
         let receiver = try TestDatagramReceiver(path: directory + "/agent.sock")
@@ -96,7 +97,7 @@ import Testing
     @Test func noAppAndNoSocketAtAllPrintsNothing() {
         var output: [Data] = []
         let status = HookCLI.run(
-            arguments: ["--source", "claude"], stdin: hookJSON(), socketPath: "/tmp/mn-\(UUID().uuidString.prefix(8))/agent.sock", now: now,
+            arguments: ["--source", "claude"], stdin: hookJSON(), socketPath: SocketFolder.reservedPath() + "/agent.sock", now: now,
             permissionTimeout: 30, output: { output.append($0) }
         )
         #expect(status == 0)
@@ -202,7 +203,7 @@ import Testing
     }
 
     @Test func theStatusDatagramIsNotSentToAFolderOthersCanOpenEither() throws {
-        let directory = "/tmp/mn-\(UUID().uuidString.prefix(8))"
+        let directory = SocketFolder.reservedPath()
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
         chmod(directory, 0o755)
         defer { try? FileManager.default.removeItem(atPath: directory) }

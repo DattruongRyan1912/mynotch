@@ -1,4 +1,5 @@
 import Foundation
+import MyNotchTestSupport
 import Synchronization
 import Testing
 @testable import MediaModule
@@ -114,7 +115,7 @@ final class Finished: Sendable {
 
 @Suite final class YouTubeBridgeServerTests {
     /// Unix socket paths are limited to 104 bytes, so the folder is short and outside the sandboxed temp dir.
-    let directory = URL(filePath: "/tmp/mn-\(UUID().uuidString.prefix(8))", directoryHint: .isDirectory)
+    let directory = ScratchFolders.shared.reserveShort()
     var path: String { directory.appending(path: "youtube.sock").path }
     var received: [YouTubeMessage] = []
 

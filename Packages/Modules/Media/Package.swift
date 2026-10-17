@@ -20,7 +20,10 @@ let package = Package(
             dependencies: ["YouTubeBridgeKit", "MyNotchCore", "NotchUI", .product(name: "LocalSocketKit", package: "MyNotchCore")],
             swiftSettings: [.defaultIsolation(MainActor.self)]
         ),
-        .testTarget(name: "YouTubeBridgeKitTests", dependencies: ["YouTubeBridgeKit", .product(name: "LocalSocketKit", package: "MyNotchCore")]),
+        .testTarget(
+            name: "YouTubeBridgeKitTests",
+            dependencies: ["YouTubeBridgeKit", .product(name: "LocalSocketKit", package: "MyNotchCore"), .product(name: "MyNotchTestSupport", package: "MyNotchCore")]
+        ),
         .testTarget(
             name: "MediaModuleTests",
             dependencies: [

@@ -1,11 +1,12 @@
 import Foundation
+import MyNotchTestSupport
 import Testing
 @testable import MediaModule
 @testable import YouTubeBridgeKit
 
 /// What the receiver writes to the log (through an injected sink), and that it holds nothing private.
 @Suite final class YouTubeBridgeServerLogTests {
-    let directory = URL(filePath: "/tmp/mn-\(UUID().uuidString.prefix(8))", directoryHint: .isDirectory)
+    let directory = ScratchFolders.shared.reserveShort()
     var path: String { directory.appending(path: "youtube.sock").path }
     let recorder = LogRecorder()
     let clock = TestClock()

@@ -1,4 +1,5 @@
 import Foundation
+import MyNotchTestSupport
 import Testing
 @testable import ClipboardMCPKit
 
@@ -123,7 +124,7 @@ import Testing
     }
 
     @Test func withNoAppTheSessionStillAnswersWithAClearError() throws {
-        let session = session(socketPath: "/tmp/mn-\(UUID().uuidString.prefix(8))/mcp.sock")
+        let session = session(socketPath: SocketFolder.reservedPath() + "/mcp.sock")
         let answer = try #require(session.handle(Data(#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_clipboard","arguments":{"query":"x"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#.utf8)))
         let json = try JSON(decoding: answer)
         #expect(json["result"]?["isError"] == .bool(true))

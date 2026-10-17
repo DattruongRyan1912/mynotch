@@ -82,7 +82,7 @@ import Testing
     }
 
     @Test func noAppMeansUnreachableAtOnce() {
-        let path = "/tmp/mn-\(UUID().uuidString.prefix(8))/perm.sock"
+        let path = SocketFolder.reservedPath() + "/perm.sock"
         var outcome: PermissionClient.Outcome?
         let seconds = elapsed { outcome = PermissionClient.ask(request, socketPath: path, timeout: 30) }
         #expect(outcome == .unreachable)

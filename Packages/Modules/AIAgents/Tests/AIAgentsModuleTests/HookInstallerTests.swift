@@ -1,5 +1,6 @@
 import AgentHookKit
 import Foundation
+import MyNotchTestSupport
 import Testing
 @testable import AIAgentsModule
 
@@ -10,7 +11,7 @@ import Testing
     let installer = HookInstaller(now: { utc("2026-10-14T05:07:09Z") }, calendar: hoChiMinhCalendar())
 
     init() throws {
-        directory = FileManager.default.temporaryDirectory.appending(path: "HookInstallerTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        directory = ScratchFolders.shared.reserve("HookInstallerTests")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 

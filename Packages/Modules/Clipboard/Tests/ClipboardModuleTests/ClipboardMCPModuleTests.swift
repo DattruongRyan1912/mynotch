@@ -25,7 +25,7 @@ import Testing
     let harness: RegistryHarness
     /// The harness's temporary storage root, removed when the test ends.
     let temporaryRoot: URL
-    let socketFolder = "/tmp/mn-\(UUID().uuidString.prefix(8))"
+    let socketFolder = SocketFolder.reservedPath()
     var socketPath: String { socketFolder + "/mcp.sock" }
 
     init() {

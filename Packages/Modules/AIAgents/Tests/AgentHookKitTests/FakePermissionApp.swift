@@ -1,4 +1,5 @@
 import Foundation
+import MyNotchTestSupport
 import Synchronization
 
 /// A listening stream socket that stands in for the app: it accepts connections, reads each request line and answers
@@ -39,7 +40,7 @@ final class FakePermissionApp: Sendable {
         // A helper that leaves before the fake answers must not end the test process: on macOS the no-SIGPIPE option
         // cannot be set on a socket whose peer is already gone, so it is the signal that is ignored, as the real helper does.
         signal(SIGPIPE, SIG_IGN)
-        directory = "/tmp/mn-\(UUID().uuidString.prefix(8))"
+        directory = SocketFolder.reservedPath()
         try FileManager.default.createDirectory(
             atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: folderMode]
         )

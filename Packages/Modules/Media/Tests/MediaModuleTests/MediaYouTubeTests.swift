@@ -11,7 +11,7 @@ import Testing
     let module: MediaModule
     let harness: RegistryHarness
     /// Unix socket paths are limited to 104 bytes, so the folder is short and outside the sandboxed temp dir.
-    let socketDirectory = URL(filePath: "/tmp/mn-\(UUID().uuidString.prefix(8))", directoryHint: .isDirectory)
+    let socketDirectory = ScratchFolders.shared.reserveShort()
     let storageBase: URL
     let now = Date()
     let recorder = LogRecorder()

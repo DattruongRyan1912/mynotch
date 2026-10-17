@@ -1,11 +1,12 @@
 import Foundation
+import MyNotchTestSupport
 import Testing
 @testable import MediaModule
 @testable import YouTubeBridgeKit
 
 /// The connection a message came in on, the end of a connection, and the commands the app writes to one tab's host.
 @Suite final class YouTubeBridgeServerTabTests {
-    let directory = URL(filePath: "/tmp/mn-\(UUID().uuidString.prefix(8))", directoryHint: .isDirectory)
+    let directory = ScratchFolders.shared.reserveShort()
     var path: String { directory.appending(path: "youtube.sock").path }
     var received: [(message: YouTubeMessage, connection: Int)] = []
     var ended: [Int] = []

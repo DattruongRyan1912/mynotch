@@ -1,6 +1,7 @@
 import ClipboardMCPKit
 import Foundation
 import LocalSocketKit
+import MyNotchTestSupport
 import Synchronization
 import Testing
 @testable import ClipboardModule
@@ -9,7 +10,7 @@ import Testing
 @Suite struct ClipboardMCPServerTests {
     /// A folder under /tmp, short so the socket path fits, that is removed with the test.
     final class Folder {
-        let directory = URL(filePath: "/tmp/mn-\(UUID().uuidString.prefix(8))", directoryHint: .isDirectory)
+        let directory = ScratchFolders.shared.reserveShort()
         var socketPath: String { directory.appending(path: "mcp.sock").path }
 
         deinit { try? FileManager.default.removeItem(at: directory) }

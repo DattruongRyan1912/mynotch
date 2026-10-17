@@ -1,4 +1,5 @@
 import Foundation
+import MyNotchTestSupport
 import Synchronization
 
 /// A listening stream socket that stands in for the app: it accepts connections, reads each request line and answers as
@@ -32,7 +33,7 @@ final class FakeMCPApp: Sendable {
     init(behavior: Behavior, folderMode: Int = 0o700) throws {
         // A helper that leaves before the fake answers must not end the test process.
         signal(SIGPIPE, SIG_IGN)
-        directory = "/tmp/mn-\(UUID().uuidString.prefix(8))"
+        directory = SocketFolder.reservedPath()
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: folderMode])
         chmod(directory, mode_t(folderMode))
         let listener = socket(AF_UNIX, SOCK_STREAM, 0)

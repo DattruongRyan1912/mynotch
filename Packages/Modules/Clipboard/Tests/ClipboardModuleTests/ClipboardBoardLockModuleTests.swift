@@ -33,7 +33,7 @@ import Testing
     let module: ClipboardModule
     let harness: RegistryHarness
     let temporaryRoot: URL
-    let socketFolder = "/tmp/mn-\(UUID().uuidString.prefix(8))"
+    let socketFolder = SocketFolder.reservedPath()
 
     init() {
         let system = system

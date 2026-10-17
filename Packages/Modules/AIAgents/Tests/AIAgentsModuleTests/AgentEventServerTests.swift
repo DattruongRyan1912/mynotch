@@ -1,5 +1,6 @@
 import AgentHookKit
 import Foundation
+import MyNotchTestSupport
 import Testing
 @testable import AIAgentsModule
 
@@ -9,7 +10,7 @@ import Testing
 
     init() {
         // Unix socket paths are limited to 104 bytes, so the directory is short and outside the sandboxed temp dir.
-        directory = URL(filePath: "/tmp/mn-\(UUID().uuidString.prefix(8))", directoryHint: .isDirectory)
+        directory = ScratchFolders.shared.reserveShort()
     }
 
     func payload(_ event: String = "Stop") -> HookPayload {

@@ -89,7 +89,7 @@ import Testing
     @Test func noAppMeansUnreachableAtOnce() {
         var outcome: ClipboardMCPClient.Outcome?
         let seconds = elapsed {
-            outcome = ClipboardMCPClient.send(request, socketPath: "/tmp/mn-\(UUID().uuidString.prefix(8))/mcp.sock", timeout: 30)
+            outcome = ClipboardMCPClient.send(request, socketPath: SocketFolder.reservedPath() + "/mcp.sock", timeout: 30)
         }
         #expect(outcome == .unreachable)
         #expect(seconds < 8)

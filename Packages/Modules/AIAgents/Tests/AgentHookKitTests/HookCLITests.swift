@@ -1,4 +1,5 @@
 import Foundation
+import MyNotchTestSupport
 import Testing
 @testable import AgentHookKit
 
@@ -6,7 +7,7 @@ import Testing
     let now = Date(timeIntervalSince1970: 1_800_000_000)
     let stopJSON = Data(#"{"hook_event_name":"Stop","session_id":"s1"}"#.utf8)
 
-    func missingSocketPath() -> String { "/tmp/mn-\(UUID().uuidString.prefix(8))/agent.sock" }
+    func missingSocketPath() -> String { SocketFolder.reservedPath() + "/agent.sock" }
 
     @Test func badArgumentsBadJSONAndAMissingSocketAllExitZero() {
         let path = missingSocketPath()
@@ -19,7 +20,7 @@ import Testing
     }
 
     @Test func aValidInvocationSendsTheFilteredPayload() throws {
-        let directory = "/tmp/mn-\(UUID().uuidString.prefix(8))"
+        let directory = SocketFolder.reservedPath()
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(atPath: directory) }
         let path = directory + "/agent.sock"
@@ -34,7 +35,7 @@ import Testing
 
 extension HookCLITests {
     func receiver() throws -> (path: String, receiver: TestDatagramReceiver, cleanUp: () -> Void) {
-        let directory = "/tmp/mn-\(UUID().uuidString.prefix(8))"
+        let directory = SocketFolder.reservedPath()
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let path = directory + "/agent.sock"
         return (path, try TestDatagramReceiver(path: path), { try? FileManager.default.removeItem(atPath: directory) })

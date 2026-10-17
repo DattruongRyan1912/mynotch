@@ -1,5 +1,6 @@
 import Foundation
 import LocalSocketKit
+import MyNotchTestSupport
 import Synchronization
 @testable import YouTubeBridgeKit
 
@@ -23,7 +24,7 @@ final class FrameServer: Sendable {
     /// A private folder with a path short enough for a socket (`directory` to reuse one); the socket file is made by `start`.
     init(directory: URL? = nil, closesClientsAtOnce: Bool = false) {
         self.closesClientsAtOnce = closesClientsAtOnce
-        self.directory = directory ?? URL(filePath: "/tmp/mn-\(UUID().uuidString.prefix(8))", directoryHint: .isDirectory)
+        self.directory = directory ?? ScratchFolders.shared.reserveShort()
         try? FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
     }
 

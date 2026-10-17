@@ -38,7 +38,7 @@ final class FakeOpener {
     let module: AIAgentsModule
     let harness: RegistryHarness
     /// Unix socket paths are short, so this is outside the sandboxed temporary directory.
-    let socketDirectory = URL(filePath: "/tmp/mn-\(UUID().uuidString.prefix(8))", directoryHint: .isDirectory)
+    let socketDirectory = ScratchFolders.shared.reserveShort()
     var socketPath: String { socketDirectory.appending(path: "agent.sock").path }
     let session = "11111111-2222-4333-8444-555555555555"
     let codexID = "0199aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee"
