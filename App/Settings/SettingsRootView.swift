@@ -3,7 +3,7 @@ import Observation
 import SwiftUI
 
 enum SettingsPage: Hashable {
-    case permissions, general, interface, tabs, module(ModuleID), about
+    case permissions, general, interface, storage, tabs, module(ModuleID), about
 }
 
 /// The page the Settings window shows. Held outside the view so the app can open a particular page (the nudge opens
@@ -30,6 +30,7 @@ struct SettingsRootView: View {
                     .badge(overview.missingRequiredCount)
                 Label("Chung", systemImage: "gearshape").tag(SettingsPage.general)
                 Label("Giao diện", systemImage: "rectangle.topthird.inset.filled").tag(SettingsPage.interface)
+                Label("Dung lượng", systemImage: "internaldrive").tag(SettingsPage.storage)
                 Label("Trang trên notch", systemImage: "rectangle.3.group").tag(SettingsPage.tabs)
                 Section("Mô-đun") {
                     ForEach(registry.modules, id: \.descriptor.id) { module in
@@ -47,6 +48,7 @@ struct SettingsRootView: View {
             case .permissions: PermissionsPage(overview: overview)
             case .general: GeneralSettingsPage(settings: settings, hotkeys: hotkeys)
             case .interface: InterfaceSettingsPage(settings: settings)
+            case .storage: StoragePage(settings: settings, registry: registry, openModule: { navigation.selection = .module($0) })
             case .tabs: TabOrderSettingsPage(settings: settings, registry: registry)
             case .module(let id): ModuleSettingsPage(id: id, registry: registry, permissions: permissions).id(id)
             case .about: AboutPage()

@@ -19,6 +19,9 @@ public final class ModuleRegistry {
     @ObservationIgnored private let scheduler: any Scheduler
     @ObservationIgnored private let storageRoot: StorageRoot
     @ObservationIgnored private let services: ServiceRegistry
+    /// What the modules keep on disk, measured and cleaned whether or not they run. It schedules nothing until the app calls
+    /// `startAutoClean()`, so harnesses and tests that advance a scheduler never trigger a clean.
+    @ObservationIgnored public let storageCenter: StorageCenter
     @ObservationIgnored private let onOversizedTab: ((_ module: ModuleID, _ asked: CGFloat) -> Void)?
     /// One per module for the registry's lifetime, shared by its context and its Settings rows.
     @ObservationIgnored private let moduleSettings: [ModuleID: ModuleSettings]
@@ -54,6 +57,7 @@ public final class ModuleRegistry {
         self.scheduler = scheduler
         self.storageRoot = storageRoot
         self.services = services
+        storageCenter = StorageCenter(modules: sorted, settings: settings, scheduler: scheduler, storageRoot: storageRoot)
         self.onOversizedTab = onOversizedTab
         moduleSettings = Dictionary(uniqueKeysWithValues: sorted.map {
             ($0.descriptor.id, ModuleSettings(store: settings, module: $0.descriptor.id))

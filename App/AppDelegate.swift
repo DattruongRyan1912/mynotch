@@ -68,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         debugActivities?.start()
         #endif
         Task { await registry.bootstrap(); services.finishStartup() }
+        registry.storageCenter.startAutoClean()
         observePermissionPolling()
         observePermissionFreshness()
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
