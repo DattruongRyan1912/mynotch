@@ -44,6 +44,66 @@ import Testing
         #expect(project.id == id && project.fps == 60 && !project.hasMicrophone && !project.hasSystemAudio)
         #expect(project.segments == [.init(fileName: "segment-001.mov", captureStart: nil, duration: 2.5)])
         #expect(project.version == 1)
+        // None of what editing adds was in the file: nothing is cut, the zooms are still to be planned, the rings are on.
+        #expect(project.cuts.isEmpty && project.zoomRules == .standard && project.zoomSegments == nil && project.clickEffect)
+    }
+
+    @Test func everyEditIsWrittenAndReadBackWithValuesThatAreNotTheDefaults() throws {
+        let folder = try TestFolder("project")
+        var original = project()
+        original.cuts = [CutRange(start: 1.5, end: 2.25), CutRange(start: 5, end: 6.5)]
+        original.zoomRules = ZoomRules()
+        original.zoomRules.scale = 2.75
+        original.zoomRules.zoomInDuration = 0.8
+        original.zoomRules.zoomOutDuration = 0.9
+        original.zoomRules.idleTimeout = 2.25
+        original.zoomRules.mergeGap = 4
+        original.zoomRules.minimumMovement = 11
+        original.zoomSegments = [
+            ZoomSegment(start: 1, end: 4, scale: 1.5, focus: [.init(t: 1, x: 10.5, y: 20.25), .init(t: 2.5, x: 300, y: 40)], manual: true),
+            ZoomSegment(start: 5, end: 6, scale: 3),
+        ]
+        original.clickEffect = false
+
+        try original.write(to: folder.url)
+        let loaded = try RecordingProject.load(from: folder.url)
+
+        #expect(loaded == original)
+        #expect(loaded.cuts == [CutRange(start: 1.5, end: 2.25), CutRange(start: 5, end: 6.5)])
+        #expect(loaded.zoomRules.scale == 2.75 && loaded.zoomRules.zoomInDuration == 0.8 && loaded.zoomRules.zoomOutDuration == 0.9)
+        #expect(loaded.zoomRules.idleTimeout == 2.25 && loaded.zoomRules.mergeGap == 4 && loaded.zoomRules.minimumMovement == 11)
+        #expect(loaded.zoomSegments?.count == 2 && loaded.zoomSegments?[0].manual == true && loaded.zoomSegments?[0].focus.count == 2)
+        #expect(loaded.clickEffect == false)
+    }
+
+    @Test func zoomsNotYetEditedAndZoomsAllRemovedAreNotTheSameThing() throws {
+        let folder = try TestFolder("project")
+        var project = project()
+
+        project.zoomSegments = nil
+        try project.write(to: folder.url)
+        #expect(try RecordingProject.load(from: folder.url).zoomSegments == nil)
+
+        project.zoomSegments = []
+        try project.write(to: folder.url)
+        #expect(try RecordingProject.load(from: folder.url).zoomSegments == [])
+    }
+
+    @Test func zoomFieldsAFileLacksAreFilledInWithTheirDefaults() throws {
+        let folder = try TestFolder("project")
+        let region = try JSONEncoder().encode(Self.region)
+        let json = """
+        {"id":"\(UUID().uuidString)","createdAt":"2026-10-18T08:00:00Z","status":"finished","region":\(String(decoding: region, as: UTF8.self)),
+         "zoomRules":{"scale":3},"zoomSegments":[{"start":1,"end":2,"scale":2}],"cuts":[{"start":0,"end":1}],"segments":[]}
+        """
+        try Data(json.utf8).write(to: folder.file("project.json"))
+
+        let project = try RecordingProject.load(from: folder.url)
+
+        #expect(project.zoomRules.scale == 3 && project.zoomRules.zoomInDuration == 0.5 && project.zoomRules.mergeGap == 2.5)
+        #expect(project.zoomSegments == [ZoomSegment(start: 1, end: 2, scale: 2)])
+        #expect(project.zoomSegments?[0].manual == false && project.zoomSegments?[0].focus.isEmpty == true)
+        #expect(project.cuts == [CutRange(start: 0, end: 1)])
     }
 
     @Test func aFileWithoutItsIdentityDoesNotOpen() throws {

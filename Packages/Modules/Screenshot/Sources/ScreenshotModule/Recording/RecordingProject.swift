@@ -35,6 +35,15 @@ nonisolated struct RecordingProject: Codable, Equatable, Sendable, Identifiable 
     var hasMicrophone: Bool
     var hasSystemAudio: Bool
     var segments: [Segment]
+    /// Stretches the person cut out, in recording time (the segments' time, pauses left out). The files are not touched.
+    var cuts: [CutRange] = []
+    /// How a zoom is planned from the activity, and how fast the camera moves.
+    var zoomRules = ZoomRules.standard
+    /// The zooms as the person left them. Nil until they edit the zooms: then the plan comes from the activity and the rules,
+    /// so changing the rules changes the zooms. An empty list means every zoom was removed.
+    var zoomSegments: [ZoomSegment]?
+    /// A ring at every click.
+    var clickEffect = true
 
     var duration: TimeInterval { segments.reduce(0) { $0 + $1.duration } }
     /// A recording that stopped before the person stopped it, and was rescued.
@@ -81,6 +90,10 @@ nonisolated extension RecordingProject {
         hasMicrophone = try container.decodeIfPresent(Bool.self, forKey: .hasMicrophone) ?? false
         hasSystemAudio = try container.decodeIfPresent(Bool.self, forKey: .hasSystemAudio) ?? false
         segments = try container.decodeIfPresent([Segment].self, forKey: .segments) ?? []
+        cuts = try container.decodeIfPresent([CutRange].self, forKey: .cuts) ?? []
+        zoomRules = try container.decodeIfPresent(ZoomRules.self, forKey: .zoomRules) ?? .standard
+        zoomSegments = try container.decodeIfPresent([ZoomSegment].self, forKey: .zoomSegments)
+        clickEffect = try container.decodeIfPresent(Bool.self, forKey: .clickEffect) ?? true
     }
 }
 
