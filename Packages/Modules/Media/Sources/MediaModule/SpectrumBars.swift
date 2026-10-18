@@ -60,7 +60,7 @@ final class SpectrumBarsView: NSView {
     }
 
     /// What the notch the view is in is drawn on, from the SwiftUI environment: the collapsed notch's bars and the open tab's are
-    /// told alike. The bars' colours are adjusted to show on it and glass gives them an edge, so a new surface is painted at once; a
+    /// told alike. The bars' colours are lifted to show on it and glass gives them an edge, so a new surface is painted at once; a
     /// tint of the glass is no new surface for the bars.
     var surface: NotchSurface {
         didSet {
@@ -143,17 +143,16 @@ final class SpectrumBarsView: NSView {
 
     /// The colour of each bar, or the accent colour where the store has none, and the edge glass gives them. Set on the layers once
     /// per change, with no animation: a track changes the colours at most once, an accent or a surface change likewise, and nothing
-    /// here is SwiftUI state. The store's colours are the choice itself: they are adjusted here, for this view's surface, unless the
-    /// choice is white. The accent is the user's own pick and is drawn as it is.
+    /// here is SwiftUI state. The store's colours are the choice itself: they are lifted here, for this view's surface (white and any
+    /// colour that is light enough already are left as they are). The accent is the user's own pick and is drawn as it is.
     private func paint(_ colors: [SRGBColor]?) {
         paintCount += 1
         let backdrop = SpectrumBackdrop(surface)
-        let adjusts = store.spectrumAdjustsColors
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (index, bar) in bars.enumerated() {
             if let colors, colors.indices.contains(index) {
-                let color = adjusts ? colors[index].visible(on: backdrop) : colors[index]
+                let color = colors[index].visible(on: backdrop)
                 bar.backgroundColor = CGColor(srgbRed: color.red, green: color.green, blue: color.blue, alpha: 1)
             } else {
                 bar.backgroundColor = accent

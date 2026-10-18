@@ -48,7 +48,7 @@ private func hueDistance(_ a: Double, _ b: Double) -> Double {
     }
 }
 
-/// What the bars' colours must reach on each surface, and that they reach it with the hue they had.
+/// What the bars' colours must reach on each surface, and that they reach it with the hue they had, by being lifted and never darkened.
 @Suite struct SpectrumContrastTests {
     static let darkCovers: [(name: String, color: SRGBColor)] = [
         ("dark red", hex(0x5A1010)), ("navy", hex(0x0B1E3F)), ("dark green", hex(0x0F3D1E)), ("near black", hex(0x202020)),
@@ -63,39 +63,17 @@ private func hueDistance(_ a: Double, _ b: Double) -> Double {
 
     func contrast(_ color: SRGBColor, _ other: SRGBColor) -> Double { color.contrast(with: other) }
 
-    /// The most the worse of the two glass contrasts can be: what the luminance that does equally well on both has on either.
-    var bestOnGlass: Double {
-        (SpectrumBackdrop.glass.minimumLuminance + 0.05) / (SpectrumBackdrop.darkGlass.luminance + 0.05)
-    }
-
     // MARK: the targets
 
-    @Test func nothingCanBeSeenAtThreeToOneOnBothGlassesAtOnce() {
-        let (dark, light) = (SpectrumBackdrop.darkGlass.luminance, SpectrumBackdrop.lightGlass.luminance)
-        let darkest = 3 * (dark + 0.05) - 0.05
-        let lightest = (light + 0.05) / 3 - 0.05
-        #expect(darkest > lightest, "a colour that beats the dark glass is too light to beat the light one: \(darkest) > \(lightest)")
-    }
-
-    @Test func theGlassRangeIsTheOneLuminanceThatDoesBestOnBothGlasses() {
-        let range = SpectrumBackdrop.glass.luminanceRange
-        #expect(range.lowerBound == range.upperBound, "no room: one luminance, which is the best of the two")
-        let atBest = SRGBColor.black.lifted(toLuminance: range.lowerBound)
-        let (onDark, onLight) = (contrast(atBest, SpectrumBackdrop.darkGlass), contrast(atBest, SpectrumBackdrop.lightGlass))
-        #expect(abs(onDark - onLight) < 0.01, "equal on both, which is the most the worse of the two can be: \(onDark) \(onLight)")
-        #expect(onDark > 2.5 && onDark < 3, "\(onDark)")
-        #expect(abs(range.lowerBound - 0.205) < 0.005, "\(range.lowerBound)")
-        for other in [range.lowerBound - 0.03, range.lowerBound + 0.03] {
-            let moved = SRGBColor.black.lifted(toLuminance: other)
-            #expect(min(contrast(moved, SpectrumBackdrop.darkGlass), contrast(moved, SpectrumBackdrop.lightGlass)) < min(onDark, onLight))
-        }
-    }
-
-    @Test func blackAndTheVeilNeedFourAndAHalfToOneAndHaveNoCeiling() {
+    @Test func theTargetsAreFourAndAHalfOnBlackAndTheVeilAndThreeOnDarkGlass() {
         #expect(abs(SpectrumBackdrop.black.minimumLuminance - 0.175) < 1e-9)
-        let atFloor = SRGBColor.black.lifted(toLuminance: SpectrumBackdrop.veil.minimumLuminance)
-        #expect(abs(contrast(atFloor, SpectrumBackdrop.veilGrey) - 4.5) < 1e-3)
-        #expect(SpectrumBackdrop.black.maximumLuminance == 1 && SpectrumBackdrop.veil.maximumLuminance == 1)
+        for backdrop in SpectrumBackdrop.allCases {
+            let atFloor = SRGBColor.black.lifted(toLuminance: backdrop.minimumLuminance)
+            #expect(abs(contrast(atFloor, backdrop.reference) - backdrop.target) < 1e-3, "\(backdrop)")
+        }
+        #expect(SpectrumBackdrop.black.target == 4.5 && SpectrumBackdrop.veil.target == 4.5 && SpectrumBackdrop.glass.target == 3)
+        #expect(SpectrumBackdrop.glass.reference == SRGBColor(hex: 0x3A3F46))
+        #expect(abs(SpectrumBackdrop.glass.minimumLuminance - 0.247) < 0.002, "\(SpectrumBackdrop.glass.minimumLuminance)")
     }
 
     @Test func everySurfaceMapsToItsBackdropAndATintDoesNotChangeIt() {
@@ -110,65 +88,58 @@ private func hueDistance(_ a: Double, _ b: Double) -> Double {
 
     @Test func everyCoverReachesTheTargetOnEverySurface() {
         for (name, cover) in Self.allCovers {
-            let onBlack = cover.visible(on: .solid)
-            #expect(onBlack.contrastOnBlack >= 4.5 - 1e-6, "\(name) on black: \(onBlack.contrastOnBlack)")
-            let onVeil = cover.visible(on: .material)
-            #expect(contrast(onVeil, SpectrumBackdrop.veilGrey) >= 4.5 - 1e-6, "\(name) on the veil")
-            for surface in [NotchSurface.liquidGlass(tinted: false), .liquidGlass(tinted: true)] {
-                let onGlass = cover.visible(on: surface)
-                let (onDark, onLight) = (contrast(onGlass, SpectrumBackdrop.darkGlass), contrast(onGlass, SpectrumBackdrop.lightGlass))
-                #expect(onDark >= bestOnGlass - 1e-4 && onLight >= bestOnGlass - 1e-4, "\(name) on glass: \(onDark) and \(onLight), the best being \(bestOnGlass)")
-            }
-        }
-    }
-
-    @Test func aBrightCoverThatAlreadyShowsOnBlackAndOnTheVeilIsLeftAlone() {
-        for (name, cover) in Self.brightCovers {
-            #expect(cover.visible(on: .solid) == cover, "\(name) on solid")
-            #expect(cover.visible(on: .material) == cover, "\(name) on material")
-        }
-    }
-
-    @Test func aBrightCoverIsDarkenedOnGlassToWhereBothGlassesSeeItEqually() {
-        for (name, cover) in Self.brightCovers {
-            for surface in [NotchSurface.liquidGlass(tinted: false), .liquidGlass(tinted: true)] {
+            for (surfaceName, surface) in Self.surfaces {
+                let backdrop = SpectrumBackdrop(surface)
                 let shown = cover.visible(on: surface)
-                #expect(abs(shown.luminance - SpectrumBackdrop.glass.minimumLuminance) < 1e-5, "\(name): \(shown.luminance)")
-                #expect(OKLCH(shown).lightness < OKLCH(cover).lightness, "\(name) is darker, not lighter")
-                #expect(hueDistance(OKLCH(shown).hue, OKLCH(cover).hue) <= 10, "\(name): \(OKLCH(cover).hue) became \(OKLCH(shown).hue)")
+                #expect(contrast(shown, backdrop.reference) >= backdrop.target - 1e-6, "\(name) on \(surfaceName): \(contrast(shown, backdrop.reference))")
             }
         }
     }
 
-    @Test func aColourIsMovedNoFurtherThanTheTargetNeeds() {
+    @Test func aColourThatAlreadyShowsIsExactlyAsItWas() {
+        for (name, cover) in Self.brightCovers {
+            for (surfaceName, surface) in Self.surfaces {
+                #expect(cover.visible(on: surface) == cover, "\(name) on \(surfaceName)")
+            }
+        }
+        #expect(SRGBColor.white.visible(on: Self.glass) == .white)
+    }
+
+    @Test func aColourIsNeverMadeDarker() {
+        for (name, cover) in Self.allCovers + [("white", .white), ("black", .black)] {
+            for (surfaceName, surface) in Self.surfaces {
+                #expect(cover.visible(on: surface).luminance >= cover.luminance, "\(name) on \(surfaceName)")
+            }
+        }
+    }
+
+    @Test func aColourIsLiftedNoFurtherThanTheTargetNeeds() {
         for (name, cover) in Self.allCovers {
             for (surfaceName, surface) in Self.surfaces {
-                let range = SpectrumBackdrop(surface).luminanceRange
-                let shown = cover.visible(on: surface)
-                if cover.luminance < range.lowerBound {
-                    #expect(shown.luminance >= range.lowerBound - 1e-9 && shown.luminance < range.lowerBound + 1e-5, "\(name) on \(surfaceName): lifted to \(shown.luminance), the floor being \(range.lowerBound)")
-                } else if cover.luminance > range.upperBound {
-                    #expect(shown.luminance <= range.upperBound + 1e-9 && shown.luminance > range.upperBound - 1e-5, "\(name) on \(surfaceName): lowered to \(shown.luminance), the ceiling being \(range.upperBound)")
-                } else {
-                    #expect(shown == cover, "\(name) on \(surfaceName) is in range")
-                }
+                let floor = SpectrumBackdrop(surface).minimumLuminance
+                guard cover.luminance < floor else { continue }
+                let lifted = cover.visible(on: surface)
+                #expect(lifted.luminance >= floor, "\(name) on \(surfaceName)")
+                #expect(lifted.luminance < floor + 1e-5, "\(name) on \(surfaceName): \(lifted.luminance) for a floor of \(floor)")
             }
         }
     }
 
-    @Test func theHueSurvivesTheMove() {
+    @Test func theHueSurvivesTheLift() {
         for (name, cover) in Self.allCovers where OKLCH(cover).chroma > 0.03 {
             for (surfaceName, surface) in Self.surfaces {
-                let shown = OKLCH(cover.visible(on: surface))
-                #expect(hueDistance(shown.hue, OKLCH(cover).hue) <= 10, "\(name) on \(surfaceName): \(OKLCH(cover).hue) became \(shown.hue)")
+                let lifted = OKLCH(cover.visible(on: surface))
+                #expect(hueDistance(lifted.hue, OKLCH(cover).hue) <= 10, "\(name) on \(surfaceName): \(OKLCH(cover).hue) became \(lifted.hue)")
             }
         }
     }
 
     @Test func aLiftedColourIsNotWashedOut() {
         for (name, cover) in Self.darkCovers where OKLCH(cover).chroma > 0.03 {
-            let lifted = OKLCH(cover.visible(on: .solid))
-            #expect(lifted.chroma >= OKLCH(cover).chroma, "\(name) gains lightness, not grey: \(OKLCH(cover).chroma) became \(lifted.chroma)")
+            for (surfaceName, surface) in Self.surfaces {
+                let lifted = OKLCH(cover.visible(on: surface))
+                #expect(lifted.chroma >= OKLCH(cover).chroma, "\(name) on \(surfaceName) gains lightness, not grey: \(OKLCH(cover).chroma) became \(lifted.chroma)")
+            }
         }
     }
 
@@ -178,10 +149,9 @@ private func hueDistance(_ a: Double, _ b: Double) -> Double {
             let lifted = grey.visible(on: surface)
             #expect(OKLCH(lifted).chroma < 0.005 && lifted.luminance > grey.luminance)
         }
-        #expect(OKLCH(SRGBColor.white.visible(on: Self.glass)).chroma < 0.005, "a grey made darker too")
     }
 
-    @Test func movingAgainChangesNothing() {
+    @Test func liftingAgainChangesNothing() {
         for (_, cover) in Self.allCovers {
             for (_, surface) in Self.surfaces {
                 let once = cover.visible(on: surface)
@@ -198,7 +168,7 @@ private func hueDistance(_ a: Double, _ b: Double) -> Double {
 
     // MARK: from a cover to a bar
 
-    /// The whole way a cover takes: read from an image, tinted, spread along the bars, adjusted for the surface.
+    /// The whole way a cover takes: read from an image, tinted, spread along the bars, lifted for the surface.
     func bars(ofCover cover: SRGBColor, on surface: NotchSurface) throws -> [SRGBColor] {
         let palette = try #require(ArtworkColorExtractor.palette(of: SyntheticImage.solid(cover)))
         let colors = try #require(SpectrumColorMode.artwork.colors(count: 4, tint: palette, start: SpectrumColorMode.defaultStart, end: SpectrumColorMode.defaultEnd))
@@ -218,19 +188,19 @@ private func hueDistance(_ a: Double, _ b: Double) -> Double {
     @Test func aCoversBarsReachTheTargetOnEverySurface() throws {
         for (name, cover) in Self.allCovers {
             for (surfaceName, surface) in Self.surfaces {
-                let range = SpectrumBackdrop(surface).luminanceRange
+                let backdrop = SpectrumBackdrop(surface)
                 for bar in try bars(ofCover: cover, on: surface) {
-                    #expect(bar.luminance >= range.lowerBound - 1e-5 && bar.luminance <= range.upperBound + 1e-5, "\(name) on \(surfaceName): \(bar.luminance) outside \(range)")
+                    #expect(contrast(bar, backdrop.reference) >= backdrop.target - 1e-4, "\(name) on \(surfaceName): \(contrast(bar, backdrop.reference))")
                 }
             }
         }
     }
 
-    @Test func aBrightCoversBarsAreTheCoversColourOnBlackAndTheVeil() throws {
+    @Test func aBrightCoversBarsAreTheCoversColourOnEverySurface() throws {
         for (name, cover) in Self.brightCovers {
-            for surface in [NotchSurface.solid, .material] {
+            for (surfaceName, surface) in Self.surfaces {
                 for bar in try bars(ofCover: cover, on: surface) {
-                    #expect(bar.isClose(to: cover, tolerance: 0.005), "\(name)")
+                    #expect(bar.isClose(to: cover, tolerance: 0.005), "\(name) on \(surfaceName)")
                 }
             }
         }
@@ -258,33 +228,29 @@ private func hueDistance(_ a: Double, _ b: Double) -> Double {
         #expect(OKLCH(ramp[0].visible(on: .solid)).lightness > first, "lighter than it was")
     }
 
-    @Test func aGradientThatShowsOnBlackAndTheVeilIsTheUsersColoursExactly() {
+    @Test func aGradientThatAlreadyShowsIsTheUsersColoursExactlyOnEverySurface() {
         let ramp = SpectrumColorMode.gradient.colors(count: 4, tint: nil, start: hex(0xFFB347), end: hex(0x66CCFF)) ?? []
-        for surface in [NotchSurface.solid, .material] {
+        for (_, surface) in Self.surfaces {
             #expect(ramp.map { $0.visible(on: surface) } == ramp)
         }
     }
 
-    @Test func onGlassALightGradientIsMadeDarkerBarByBar() {
+    @Test func theDefaultGradientKeepsItsCyanOnGlassAndOnlyItsDarkPurpleEndIsLifted() {
         let ramp = SpectrumColorMode.gradient.colors(count: 4, tint: nil, start: SpectrumColorMode.defaultStart, end: SpectrumColorMode.defaultEnd) ?? []
-        let best = SpectrumBackdrop.glass.minimumLuminance
-        #expect(ramp.last?.luminance ?? 0 > best, "the default cyan end is lighter than glass can take")
-        for color in ramp {
-            let shown = color.visible(on: Self.glass)
-            #expect(abs(shown.luminance - best) < 1e-5, "\(color) became \(shown.luminance)")
-            #expect(hueDistance(OKLCH(shown).hue, OKLCH(color).hue) <= 10)
-        }
+        let shown = ramp.map { $0.visible(on: Self.glass) }
+        #expect(shown.last == SpectrumColorMode.defaultEnd, "the cyan end is as the user has it")
+        #expect(shown.first != ramp.first, "the purple end is a little too dark for dark glass")
+        #expect(shown.first?.luminance ?? 0 >= SpectrumBackdrop.glass.minimumLuminance)
+        #expect(zip(shown, ramp).allSatisfy { $0.luminance >= $1.luminance })
     }
 
     // MARK: white
 
-    @Test func whiteIsTheOneModeThatIsNotAdjusted() {
-        #expect(SpectrumColorMode.artwork.adjustsForSurface)
-        #expect(SpectrumColorMode.gradient.adjustsForSurface)
-        #expect(!SpectrumColorMode.white.adjustsForSurface)
-        // That is what the exemption is for: white is lighter than glass can take, and the rule would make it grey.
-        #expect(SRGBColor.white.visible(on: Self.glass) != .white)
-        #expect(SRGBColor.white.visible(on: .solid) == .white && SRGBColor.white.visible(on: .material) == .white)
+    @Test func whiteStaysWhiteOnEverySurface() {
+        let white = SpectrumColorMode.white.colors(count: 4, tint: nil, start: SpectrumColorMode.defaultStart, end: SpectrumColorMode.defaultEnd) ?? []
+        for (name, surface) in Self.surfaces {
+            #expect(white.map { $0.visible(on: surface) } == white, "\(name)")
+        }
     }
 
     // MARK: the footnote

@@ -82,35 +82,23 @@ nonisolated struct OKLCH: Equatable, Sendable {
 }
 
 extension SRGBColor {
-    /// The colour moved into `range` of relative luminance, by as little as it takes, with its hue kept: lighter if it is under the range,
-    /// darker if it is over. A colour in the range is returned as it is. The lightness changes in OKLCH, and the colour keeps the
-    /// same share of the chroma sRGB can show at each lightness, so a deep red becomes a clear red rather than a pale one and a
-    /// light yellow a deep yellow rather than a grey one; a grey stays grey.
-    func keepingHue(inLuminance range: ClosedRange<Double>) -> SRGBColor {
-        // A hair of slack, so a colour that was moved to the edge of a range is in it when it is asked again.
-        let slack = 1e-6
-        guard luminance < range.lowerBound - slack || luminance > range.upperBound + slack else { return self }
+    /// The colour made lighter, and no lighter than it takes to reach `minimum` luminance, with its hue kept. A colour that is light
+    /// enough is returned as it is, and one is never made darker. The lightness grows in OKLCH, and the colour keeps the same share
+    /// of the chroma sRGB can show at each lightness, so a deep red becomes a clear red rather than a pale one; a grey stays grey.
+    func liftedKeepingHue(toLuminance minimum: Double) -> SRGBColor {
+        guard luminance < minimum, minimum <= 1 else { return self }
         let origin = OKLCH(self)
         let room = OKLCH.maxChroma(lightness: origin.lightness, hue: origin.hue)
         let share = room > 1e-6 ? min(origin.chroma / room, 1) : 0
         func at(_ lightness: Double) -> SRGBColor {
             OKLCH(lightness: lightness, chroma: share * OKLCH.maxChroma(lightness: lightness, hue: origin.hue), hue: origin.hue).srgb
         }
-        // Luminance only grows with lightness here, white is the lightest and black the darkest, so a bisection finds the least
-        // lightness that is light enough, or the most that is dark enough.
-        if luminance < range.lowerBound {
-            var (low, high) = (origin.lightness, 1.0)
-            for _ in 0..<40 {
-                let middle = (low + high) / 2
-                if at(middle).luminance >= range.lowerBound { high = middle } else { low = middle }
-            }
-            return at(high)
-        }
-        var (low, high) = (0.0, origin.lightness)
+        // Luminance only grows with lightness here, and white is light enough, so a bisection finds the smallest lightness that is.
+        var (low, high) = (origin.lightness, 1.0)
         for _ in 0..<40 {
             let middle = (low + high) / 2
-            if at(middle).luminance <= range.upperBound { low = middle } else { high = middle }
+            if at(middle).luminance >= minimum { high = middle } else { low = middle }
         }
-        return at(low)
+        return at(high)
     }
 }

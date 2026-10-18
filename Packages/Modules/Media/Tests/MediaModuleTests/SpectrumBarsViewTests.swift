@@ -115,12 +115,12 @@ import Testing
 
     func colours(_ view: SpectrumBarsView) -> [CGColor?] { view.layer?.sublayers?.map(\.backgroundColor) ?? [] }
 
-    /// What the bars show for `mode` on `surface`: the colours of the choice, adjusted to show there unless the choice is white.
+    /// What the bars show for `mode` on `surface`: the colours of the choice, lifted to show there.
     func expectedColours(
         _ mode: SpectrumColorMode, tint: ArtworkPalette? = nil, start: SRGBColor = SpectrumColorMode.defaultStart,
         end: SRGBColor = SpectrumColorMode.defaultEnd, surface: NotchSurface = .solid
     ) -> [CGColor?] {
-        (mode.colors(count: 4, tint: tint, start: start, end: end) ?? []).map { srgb(mode.adjustsForSurface ? $0.visible(on: surface) : $0) }
+        (mode.colors(count: 4, tint: tint, start: start, end: end) ?? []).map { srgb($0.visible(on: surface)) }
     }
 
     var accent: [CGColor?] { Array(repeating: notchAccent, count: 4) }
@@ -308,26 +308,14 @@ import Testing
         window.contentView = nil
     }
 
-    @Test func aBrightCoverIsLeftAloneOnBlackAndDarkenedOnGlass() {
-        let yellow = SRGBColor(hex: 0xFFE066)
-        store.showTint(ArtworkPalette(primary: yellow, secondary: nil))
-        #expect(srgbColors(makeView(on: .solid)).allSatisfy { $0.isClose(to: yellow, tolerance: 1e-6) })
-        #expect(srgbColors(makeView(on: .material)).allSatisfy { $0.isClose(to: yellow, tolerance: 1e-6) })
-        let onGlass = srgbColors(makeView(on: glass))
-        #expect(onGlass.allSatisfy { abs($0.luminance - SpectrumBackdrop.glass.minimumLuminance) < 1e-5 }, "\(onGlass.map(\.luminance))")
-        #expect(colours(makeView(on: glass)) == expectedColours(.artwork, tint: ArtworkPalette(primary: yellow, secondary: nil), surface: glass))
-    }
-
-    @Test func aCoverThatIsWhiteAndWhiteItselfAreNotDrawnTheSameOnGlass() {
-        // The two make the same colours; only the cover's is adjusted.
-        store.showTint(ArtworkPalette(primary: .white, secondary: nil))
-        let view = makeView(on: glass)
-        let window = attach(view)
-        #expect(srgbColors(view).allSatisfy { $0 != .white }, "the cover's white is darkened like any other colour on glass")
-        store.setSpectrumColors(mode: .white, start: SpectrumColorMode.defaultStart, end: SpectrumColorMode.defaultEnd)
-        #expect(srgbColors(view).allSatisfy { $0 == .white }, "the user asked for white")
-        #expect(edge(view) == [0.35, 0.35, 0.35, 0.35])
-        window.contentView = nil
+    @Test func aBrightCoverIsExactlyTheCoversColourOnEverySurfaceGlassIncluded() {
+        for hex in [0xFFE066, 0x66CCFF] as [UInt32] {
+            let cover = SRGBColor(hex: hex)
+            store.showTint(ArtworkPalette(primary: cover, secondary: nil))
+            for surface in [NotchSurface.solid, .material, glass, .liquidGlass(tinted: true)] {
+                #expect(srgbColors(makeView(on: surface)).allSatisfy { $0.isClose(to: cover, tolerance: 1e-6) }, "\(hex) on \(surface)")
+            }
+        }
     }
 
     // MARK: - On screen
