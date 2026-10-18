@@ -459,6 +459,26 @@ func corgiPropProblems(_ trail: [(move: CorgiMove, prop: CorgiProp?)]) -> [Strin
         #expect(none.every.allSatisfy { $0.prop == nil && $0.from == $0.to }, "no lane at all: nothing to walk or play on")
     }
 
+    @Test func inALaneSoCrowdedThatNothingIsFreeItHasNoBallAndTheDayGoesOnAllTheSame() {
+        // Two characters' zones that touch and so are joined, and cover the whole lane: `LaneKeeper.settled` has nowhere to send a place and gives
+        // it back, which is no place for a ball, so it asks whether a place is free and not whether it was given back.
+        var balls = 0, scenes = 0
+        for seed in 1...6 as ClosedRange<UInt64> {
+            var drive = CorDrive(seed: seed, position: 0.3, senses: CatSenses(idleSeconds: 5, hour: 14), travel: 237)
+            drive.lane = LaneContext(zones: [-0.01...0.61, 0.6...1.2])
+            drive.run(3 * 3600)
+            balls += drive.every.filter { $0.prop != nil }.count
+            scenes += drive.scenes.count
+            #expect(drive.brain.strayProps == 0)
+        }
+        #expect(balls == 0 && scenes > 300, "\(balls) poses with a ball in \(scenes) scenes")
+        // And with a stretch that is free, there is a ball.
+        var free = CorDrive(seed: 3, position: 0.3, senses: CatSenses(idleSeconds: 5, hour: 14), travel: 237)
+        free.lane = LaneContext(zones: [0.8...1.2])
+        free.run(3 * 3600)
+        #expect(free.every.contains { $0.prop != nil })
+    }
+
     @Test func itNeverHasTheBallWhereAnotherCharacterStandsOrWillStandAndTheNotStoppingZonesAreKept() {
         var checked = 0
         for seed in 1...8 as ClosedRange<UInt64> {
