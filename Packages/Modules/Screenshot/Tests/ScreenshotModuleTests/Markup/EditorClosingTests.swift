@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Testing
 @testable import ScreenshotModule
@@ -35,5 +36,22 @@ import Testing
         // The saved document is what the save wrote, not what the editor shows now.
         #expect(EditorClosing.needsConfirmation(current: edited, saved: saved, closesWithoutAsking: false))
         #expect(!EditorClosing.needsConfirmation(current: edited, saved: edited, closesWithoutAsking: false))
+    }
+
+    @Test func theAlertOffersSaveDiscardAndKeepEditingInThatOrder() {
+        #expect(EditorClosing.alertButtons == ["Lưu", "Bỏ thay đổi", "Tiếp tục sửa"])
+    }
+
+    @Test func eachButtonOfTheAlertIsItsChoice() {
+        #expect(EditorClosing.choice(for: .alertFirstButtonReturn) == .save)
+        #expect(EditorClosing.choice(for: .alertSecondButtonReturn) == .discard)
+        #expect(EditorClosing.choice(for: .alertThirdButtonReturn) == .keepEditing)
+    }
+
+    @Test func anythingElseKeepsTheEditorOpen() {
+        // The sheet dismissed some other way must never lose the work.
+        #expect(EditorClosing.choice(for: .cancel) == .keepEditing)
+        #expect(EditorClosing.choice(for: .stop) == .keepEditing)
+        #expect(EditorClosing.choice(for: NSApplication.ModalResponse(rawValue: 1099)) == .keepEditing)
     }
 }

@@ -7,7 +7,7 @@ import SwiftUI
 /// one, because an accessory app's window cannot take typing.
 final class MarkupEditorWindowController: NSObject {
     /// One open editor.
-    private final class Session {
+    final class Session {
         let record: CaptureRecord
         let source: MarkupEditorSource
         let model: MarkupEditorModel
@@ -41,7 +41,7 @@ final class MarkupEditorWindowController: NSObject {
             window.makeKeyAndOrderFront(nil)
             return
         }
-        let session = Session(record: record, source: source)
+        let session = makeSession(record, source: source)
         let id = record.id
         let view = MarkupEditorView(
             model: session.model,
@@ -57,11 +57,33 @@ final class MarkupEditorWindowController: NSObject {
         window.delegate = self
         window.center()
         session.window = window
-        sessions[id] = session
         // Switch the policy first, so the app comes forward as a regular app with its menu bar.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// The editor of `record`, registered with its model and no window yet: the first thing `open` does, split out so the
+    /// answers of the close alert can be tested without a window.
+    func makeSession(_ record: CaptureRecord, source: MarkupEditorSource) -> Session {
+        let session = Session(record: record, source: source)
+        sessions[record.id] = session
+        return session
+    }
+
+    /// What the close alert's button does for the editor of `id`. Lưu is the Lưu button: it saves, copies when Settings
+    /// says so, and closes the window once the save is done; a save that fails leaves the editor open.
+    func answerClose(_ choice: EditorClosing.Choice, for id: UUID) {
+        guard let session = sessions[id] else { return }
+        switch choice {
+        case .save:
+            save(id, session.model.finishedDocument())
+        case .discard:
+            session.closesWithoutAsking = true
+            session.window?.close()
+        case .keepEditing:
+            break
+        }
     }
 
     /// Closes every editor without asking, e.g. when the module stops. Annotations not saved by then are lost: there
@@ -109,14 +131,15 @@ extension MarkupEditorWindowController: NSWindowDelegate {
             closesWithoutAsking: session.closesWithoutAsking
         ) else { return true }
         let alert = NSAlert()
-        alert.messageText = "Bỏ các thay đổi chưa lưu?"
-        alert.informativeText = "Các chú thích vừa thêm sẽ mất nếu đóng cửa sổ này."
-        alert.addButton(withTitle: "Tiếp tục sửa")
-        alert.addButton(withTitle: "Bỏ thay đổi")
-        alert.beginSheetModal(for: sender) { response in
-            guard response == .alertSecondButtonReturn else { return }
-            session.closesWithoutAsking = true
-            sender.close()
+        alert.messageText = "Lưu các thay đổi chưa lưu?"
+        alert.informativeText = "Nếu không lưu, những gì vừa sửa sẽ mất khi đóng cửa sổ này."
+        let buttons = EditorClosing.alertButtons.map { alert.addButton(withTitle: $0) }
+        buttons[1].hasDestructiveAction = true
+        // The last button is the way out: Esc keeps editing.
+        buttons[2].keyEquivalent = "\u{1b}"
+        let id = session.record.id
+        alert.beginSheetModal(for: sender) { [weak self] response in
+            self?.answerClose(EditorClosing.choice(for: response), for: id)
         }
         return false
     }

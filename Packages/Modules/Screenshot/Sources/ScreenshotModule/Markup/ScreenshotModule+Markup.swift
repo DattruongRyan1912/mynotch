@@ -66,9 +66,9 @@ extension ScreenshotModule {
     }
 
     /// Lưu, which is also "Xong": keeps the untouched PNG and the edits next to the capture the first time, then
-    /// replaces the visible image with the flattened one. When Settings says so, the saved picture is also copied, marked
-    /// as MyNotch's own write, so it can be pasted at once. One toast tells how it went. A capture that was never edited
-    /// and has nothing to save stays as it is, and nothing is copied.
+    /// replaces the visible image with the flattened one. When Settings says so, the saved picture is also copied, as an
+    /// ordinary copy that Clipboard history records like the capture's own, so it can be pasted at once. One toast tells
+    /// how it went. A capture that was never edited and has nothing to save stays as it is, and nothing is copied.
     func saveMarkup(_ document: MarkupDocument, of source: MarkupEditorSource, for record: CaptureRecord) async -> Bool {
         switch await persistMarkup(document, of: source, for: record) {
         case .failed:
@@ -81,7 +81,7 @@ extension ScreenshotModule {
                 showToast("Đã lưu ảnh đã sửa", systemImage: "checkmark.circle.fill")
                 return true
             }
-            if await pasteboard.write(flattened, scale: source.scale, markedAsOwn: true) {
+            if await pasteboard.write(flattened, scale: source.scale) {
                 showToast("Đã chép ảnh", systemImage: "doc.on.clipboard.fill")
             } else {
                 showToast("Không chép được ảnh", systemImage: "exclamationmark.triangle.fill")

@@ -108,7 +108,7 @@ extension ScreenshotModuleTests {
         #expect(settings.value(keys.copyWhenDone))
     }
 
-    @Test func doneCopiesTheSavedPictureAsMyNotchsOwnWriteAndSaysSo() async throws {
+    @Test func doneCopiesTheSavedPictureAsAnOrdinaryCopyAndSaysSo() async throws {
         let record = try await capturedRecord()
         let source = try #require(await module.editorSource(for: record))
         let copies = pasteboard.images.count
@@ -118,7 +118,8 @@ extension ScreenshotModuleTests {
 
         #expect(pasteboard.images.count == copies + 1)
         let copied = try #require(pasteboard.images.last)
-        #expect(copied.markedAsOwn)
+        // No marker, like the capture's own copy and the Chép buttons: Clipboard history records the edited picture too.
+        #expect(!copied.markedAsOwn)
         #expect(copied.scale == 2)
         #expect((copied.image.width, copied.image.height) == (20, 30))
         #expect(try Bitmap(copied.image).pixel(0, 0) == visibleBitmap(of: record).pixel(0, 0))
