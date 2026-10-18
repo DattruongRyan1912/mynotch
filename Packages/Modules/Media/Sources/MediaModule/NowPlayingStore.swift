@@ -131,6 +131,9 @@ final class NowPlayingStore {
     /// evaluates a representable's `makeNSView` with its reads tracked, so an observable value read there would make the whole
     /// notch lay out again at every new cover.
     @ObservationIgnored private(set) var spectrumColors: [SRGBColor]?
+    /// Whether the bars adjust `spectrumColors` to show on their surface (`SpectrumColorMode.adjustsForSurface`): the colours here are
+    /// the choice itself, and each bars view adjusts them for the surface it is on. Not observable either, for the same reason.
+    @ObservationIgnored private(set) var spectrumAdjustsColors = SpectrumColorMode.artwork.adjustsForSurface
     @ObservationIgnored private var spectrumColorObservers: [Int: @MainActor ([SRGBColor]?) -> Void] = [:]
 
     func showTint(_ palette: ArtworkPalette?) {
@@ -162,8 +165,11 @@ final class NowPlayingStore {
 
     private func refreshSpectrumColors() {
         let colors = spectrumMode.colors(count: NowPlayingBars.barCount, tint: activeTint, start: spectrumGradientStart, end: spectrumGradientEnd)
-        guard colors != spectrumColors else { return }
+        let adjusts = spectrumMode.adjustsForSurface
+        // Equal colours can still be drawn differently: a cover that is white, and white itself.
+        guard colors != spectrumColors || adjusts != spectrumAdjustsColors else { return }
         spectrumColors = colors
+        spectrumAdjustsColors = adjusts
         for observer in spectrumColorObservers.values { observer(colors) }
     }
 

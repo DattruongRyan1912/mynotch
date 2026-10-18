@@ -17,6 +17,13 @@ nonisolated struct SRGBColor: Hashable, Codable, Sendable {
         self.blue = Self.unit(blue)
     }
 
+    /// A colour as it is written in hex, `0xRRGGBB`.
+    init(hex: UInt32) {
+        self.init(
+            red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255, blue: Double(hex & 0xFF) / 255
+        )
+    }
+
     private enum CodingKeys: String, CodingKey { case red, green, blue }
 
     /// A stored value is read back kept inside 0...1, so a hand-edited setting cannot make a colour that does not exist.
@@ -42,7 +49,13 @@ nonisolated struct SRGBColor: Hashable, Codable, Sendable {
     }
 
     /// The contrast ratio against black, 1 (invisible) to 21 (white).
-    var contrastOnBlack: Double { (luminance + 0.05) / 0.05 }
+    var contrastOnBlack: Double { contrast(with: .init(red: 0, green: 0, blue: 0)) }
+
+    /// The contrast ratio against `other` as the WCAG defines it, 1 (the same) to 21 (black on white), whichever is lighter.
+    func contrast(with other: SRGBColor) -> Double {
+        let (lighter, darker) = (max(luminance, other.luminance), min(luminance, other.luminance))
+        return (lighter + 0.05) / (darker + 0.05)
+    }
 
     /// 0 for greys, 1 for a colour with no grey in it.
     var saturation: Double {

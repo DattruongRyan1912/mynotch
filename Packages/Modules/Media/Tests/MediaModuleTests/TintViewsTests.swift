@@ -78,7 +78,7 @@ import Testing
         #expect(SpectrumColorRows.note(for: .artwork, tintIsOn: false) == SpectrumColorRows.tintOffNote)
         #expect(SpectrumColorRows.note(for: .artwork, tintIsOn: true) == nil)
         #expect(SpectrumColorRows.note(for: .white, tintIsOn: false) == nil)
-        #expect(SpectrumColorRows.note(for: .gradient, tintIsOn: false) == nil)
+        #expect(SpectrumColorRows.note(for: .gradient, tintIsOn: false) == SpectrumColorRows.brightenedNote, "the user's own colours: what is done to them is said")
         #expect(SpectrumColorRows.tintOffNote.contains(MediaSettingsView.tintTitle))
     }
 

@@ -6,6 +6,8 @@ struct SpectrumColorRows: View {
     static let startTitle = "Màu đầu"
     static let endTitle = "Màu cuối"
     static let tintOffNote = "Đang tắt “\(MediaSettingsView.tintTitle)”, nên cột sóng giữ màu mặc định."
+    /// The gradient is the user's own two colours, so what is done to them is said: a dark one would vanish into the notch.
+    static let brightenedNote = "Màu rất tối được làm sáng lên để cột sóng vẫn nhìn thấy."
 
     @Binding var mode: SpectrumColorMode
     @Binding var start: SRGBColor
@@ -15,9 +17,14 @@ struct SpectrumColorRows: View {
 
     static func showsGradientPickers(for mode: SpectrumColorMode) -> Bool { mode == .gradient }
 
-    /// Why a choice has no effect, nil when it does.
+    /// What the footnote of a choice says: why it has no effect, or what is done to the colours the user picked. nil when there is
+    /// nothing to say.
     static func note(for mode: SpectrumColorMode, tintIsOn: Bool) -> String? {
-        mode == .artwork && !tintIsOn ? tintOffNote : nil
+        switch mode {
+        case .artwork: tintIsOn ? nil : tintOffNote
+        case .white: nil
+        case .gradient: brightenedNote
+        }
     }
 
     var body: some View {

@@ -10,7 +10,7 @@ struct SpectrumBars: NSViewRepresentable {
     let store: NowPlayingStore
 
     func makeNSView(context: Context) -> SpectrumBarsView {
-        let view = SpectrumBarsView(store: store, accent: Self.accent(in: context.environment))
+        let view = SpectrumBarsView(store: store, accent: Self.accent(in: context.environment), surface: context.environment.notchSurface)
         view.isNotchOnScreen = context.environment.notchIsOnScreen
         return view
     }
@@ -18,6 +18,7 @@ struct SpectrumBars: NSViewRepresentable {
     func updateNSView(_ view: SpectrumBarsView, context: Context) {
         // Handed over on every update, which is as often as the environment changes: the view paints only a colour that is new.
         view.accent = Self.accent(in: context.environment)
+        view.surface = context.environment.notchSurface
         view.isNotchOnScreen = context.environment.notchIsOnScreen
     }
 
@@ -58,18 +59,34 @@ final class SpectrumBarsView: NSView {
         }
     }
 
+    /// What the notch the view is in is drawn on, from the SwiftUI environment: the collapsed notch's bars and the open tab's are
+    /// told alike. The bars' colours are adjusted to show on it and glass gives them an edge, so a new surface is painted at once; a
+    /// tint of the glass is no new surface for the bars.
+    var surface: NotchSurface {
+        didSet {
+            guard SpectrumBackdrop(surface) != SpectrumBackdrop(oldValue) else { return }
+            paint(store.spectrumColors)
+        }
+    }
+
     /// Whether the notch the view is in can be seen, from the SwiftUI environment.
     var isNotchOnScreen = true {
         didSet { follow(window != nil && isNotchOnScreen) }
     }
 
-    init(store: NowPlayingStore, accent: CGColor) {
+    init(store: NowPlayingStore, accent: CGColor, surface: NotchSurface = .solid) {
         self.store = store
         self.accent = accent
+        self.surface = surface
         bars = (0..<NowPlayingBars.barCount).map { _ in
             let bar = CALayer()
             bar.cornerRadius = NowPlayingBars.barWidth / 2
             bar.cornerCurve = .continuous
+            // The edge on glass: only its strength changes (`paint`), and it is not a shadow with an offset or a path, which would
+            // not follow the height the bar animates through.
+            bar.shadowColor = CGColor(gray: 0, alpha: 1)
+            bar.shadowOffset = .zero
+            bar.shadowRadius = Self.edgeRadius
             return bar
         }
         super.init(frame: CGRect(origin: .zero, size: NowPlayingBars.size))
@@ -119,18 +136,29 @@ final class SpectrumBarsView: NSView {
         }
     }
 
-    /// The colour of each bar, or the accent colour where the store has none. Set on the layers once per change, with no
-    /// animation: a track changes the colours at most once, an accent change likewise, and nothing here is SwiftUI state.
+    /// How strong the edge of a bar is on glass, and how far it reaches: a 1 pt shadow of black at 35 %, which is what lets a bar read
+    /// over a light or a busy backdrop. A layer shadow follows the bar's own shape, as tall as it is at each moment.
+    static let edgeOpacity: Float = 0.35
+    static let edgeRadius: CGFloat = 1
+
+    /// The colour of each bar, or the accent colour where the store has none, and the edge glass gives them. Set on the layers once
+    /// per change, with no animation: a track changes the colours at most once, an accent or a surface change likewise, and nothing
+    /// here is SwiftUI state. The store's colours are the choice itself: they are adjusted here, for this view's surface, unless the
+    /// choice is white. The accent is the user's own pick and is drawn as it is.
     private func paint(_ colors: [SRGBColor]?) {
         paintCount += 1
+        let backdrop = SpectrumBackdrop(surface)
+        let adjusts = store.spectrumAdjustsColors
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (index, bar) in bars.enumerated() {
             if let colors, colors.indices.contains(index) {
-                bar.backgroundColor = CGColor(srgbRed: colors[index].red, green: colors[index].green, blue: colors[index].blue, alpha: 1)
+                let color = adjusts ? colors[index].visible(on: backdrop) : colors[index]
+                bar.backgroundColor = CGColor(srgbRed: color.red, green: color.green, blue: color.blue, alpha: 1)
             } else {
                 bar.backgroundColor = accent
             }
+            bar.shadowOpacity = backdrop.hasEdge ? Self.edgeOpacity : 0
         }
         CATransaction.commit()
     }
