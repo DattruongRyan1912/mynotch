@@ -99,7 +99,7 @@ import UniformTypeIdentifiers
         return ids
     }
 
-    /// Three unpinned pictures (1,000 and 4,000 bytes, and a secret of 3,000), one pinned to a board (2,000), a text, a link and a copied file.
+    /// Three unpinned pictures (1,000 and 4,000 bytes, and a secret of 3,000), one pinned to a board (2,000), a text, a link and a copied file (a path, which stores nothing).
     struct World {
         let a: Picture
         let b: Picture
@@ -199,9 +199,9 @@ import UniformTypeIdentifiers
         let freed = await module.clean(categoryID: Self.mediaID, storage: storage)
 
         #expect(freed == 5_000)
-        // Pinned, in a board and secret stay; so do the text and the link. The copied file is only a path, so it goes with the pictures.
+        // Pinned, in a board and secret stay; so do the text, the link and the copied file, which stores nothing a clean could free.
         let kept = try await savedIDs(running: running)
-        #expect(kept == [world.b.item.id, world.c.item.id, world.text.id, world.link.id])
+        #expect(kept == [world.b.item.id, world.c.item.id, world.text.id, world.link.id, world.files.id])
         #expect(!exists(imageFile(world.a.name)))
         #expect(!exists(imageFile(world.d.name)))
         #expect(exists(imageFile(world.b.name)))
@@ -237,7 +237,7 @@ import UniformTypeIdentifiers
         #expect(try await saved().items.count == world.history.items.count)
     }
 
-    @Test func onlyLooseNonSecretPicturesAndFilesCanBeCleaned() {
+    @Test func onlyLooseNonSecretStoredPicturesCanBeCleaned() {
         let world = makeWorld()
         var history = world.history
         let open = history.createBoard(name: "Mở")
@@ -252,9 +252,9 @@ import UniformTypeIdentifiers
         history.boards[1].lock = ClipboardBoardLock(method: .password, itemCount: 1, isUnlocked: true)
         history.boards[2].lock = ClipboardBoardLock(method: .touchID, itemCount: 1, isUnlocked: true)
 
-        // The two unpinned pictures, the copied file and the loose picture; not the pinned, the secret, the two of boards with a lock,
-        // and no text or link.
-        #expect(history.releasableMediaItems.map(\.id) == [world.a.item.id, world.d.item.id, world.files.id, loose.id])
+        // The two unpinned pictures and the loose one; not the pinned, the secret, the two of boards with a lock, and nothing that stores
+        // nothing (text, link, copied file).
+        #expect(history.releasableMediaItems.map(\.id) == [world.a.item.id, world.d.item.id, loose.id])
     }
 
     @Test func aLockedBoardsPicturesAreNeitherCleanedNorLost() async throws {
@@ -312,6 +312,26 @@ import UniformTypeIdentifiers
         let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))
         CGImageDestinationAddImage(destination, image, nil)
         #expect(CGImageDestinationFinalize(destination))
+    }
+
+    @Test(arguments: [false, true]) func anEntryThatStoresNothingSurvivesEveryCleanAndAgesOutWithTheRetentionRule(running: Bool) async throws {
+        let world = makeWorld()
+        try await arrange(world, running: running)
+        let pathOnly = world.files.id
+
+        // The category's own clean, then the page's "clean everything" with its confirmation total.
+        #expect(await module.clean(categoryID: Self.mediaID, storage: storage) == 5_000)
+        #expect(try await savedIDs(running: running).contains(pathOnly))
+        let center = fixture.harness.registry.storageCenter
+        await center.refresh()
+        #expect(center.cleanableBytes == 0)
+        #expect(await center.cleanAll() == 0)
+        #expect(try await savedIDs(running: running) == [world.b.item.id, world.c.item.id, world.text.id, world.link.id, pathOnly])
+
+        // No clean reached it, but its age does: the daily rule (a month by default) takes it with the text, the link and the secret
+        // picture, which retention does not protect, while the pinned picture stays.
+        #expect(await module.autoClean(now: now.addingTimeInterval(40 * Self.day), storage: storage) == 3_000)
+        #expect(try await savedIDs(running: running) == [world.b.item.id])
     }
 
     // MARK: Things that stop a clean
@@ -408,7 +428,7 @@ import UniformTypeIdentifiers
         await starting.value
 
         #expect(await cleaning.value == 5_000)
-        #expect(module.state.history.items.map(\.id) == [world.b.item.id, world.c.item.id, world.text.id, world.link.id])
+        #expect(module.state.history.items.map(\.id) == [world.b.item.id, world.c.item.id, world.text.id, world.link.id, world.files.id])
         #expect(!exists(imageFile(world.a.name)))
         #expect(exists(imageFile(world.b.name)))
     }
@@ -672,7 +692,7 @@ import UniformTypeIdentifiers
 
         #expect(await center.clean(Self.mediaID) == 5_000)
 
-        #expect(try await saved().items.map(\.id) == [world.b.item.id, world.c.item.id, world.text.id, world.link.id])
+        #expect(try await saved().items.map(\.id) == [world.b.item.id, world.c.item.id, world.text.id, world.link.id, world.files.id])
         #expect(center.groups.first { $0.id == "clipboard" }?.categories.first?.bytes == 0)
     }
 

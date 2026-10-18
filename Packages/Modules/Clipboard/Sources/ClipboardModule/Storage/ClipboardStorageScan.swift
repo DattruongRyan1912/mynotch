@@ -93,12 +93,13 @@ nonisolated extension ClipboardItem {
 }
 
 nonisolated extension ClipboardHistory {
-    /// What "Ảnh và file" may remove: pictures and copied files that are in no board (so neither pinned nor in a board that has a lock,
-    /// whether it is open or not) and that the app which copied them did not mark as a secret.
+    /// What "Ảnh và file" may remove: the items whose picture the module stored, when they are in no board (so neither pinned nor in a board
+    /// that has a lock, whether it is open or not) and the app which copied them did not mark them as a secret. An entry that stores
+    /// nothing (a copied file is only a path) is never listed: removing it would free no room, and it ages out with the retention rule.
     var releasableMediaItems: [ClipboardItem] {
         let inBoards = Set(boards.flatMap(\.itemIDs))
         return items.filter { item in
-            (item.content.kind == .image || item.content.kind == .file) && !inBoards.contains(item.id) && !item.isSensitive
+            item.storedImageFileName != nil && !inBoards.contains(item.id) && !item.isSensitive
         }
     }
 
