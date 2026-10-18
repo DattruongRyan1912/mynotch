@@ -27,6 +27,8 @@ import Testing
 
     static let now = Date(timeIntervalSince1970: 1_800_000_000)
     static let day: TimeInterval = 24 * 60 * 60
+    /// A recent export: exported at all is what the page looks at, not how long ago.
+    static let exportedRecently = now.addingTimeInterval(-1 * day)
 
     let fakes = FakeRecordingSystem()
     let rig: ModuleRig
@@ -119,31 +121,61 @@ import Testing
     // MARK: What is measured
 
     @Test(arguments: Mode.allCases)
-    func theCategoriesAreTheCapturesAndTheRecordingsWithTheirSizes(mode: Mode) async throws {
+    func theCategoriesAreTheCapturesAndTheRecordingsThatWereExportedAndThatWereNot(mode: Mode) async throws {
         try await makeCaptures(2)
-        try rig.makeRecording(bytes: 4_000)
-        try rig.makeRecording(bytes: 6_000)
+        let exportedA = try rig.makeRecording(bytes: 4_000, exportedAt: Self.exportedRecently)
+        let exportedB = try rig.makeRecording(status: .interrupted, bytes: 6_000, exportedAt: Self.exportedRecently)
+        let neverA = try rig.makeRecording(bytes: 2_000)
+        let neverB = try rig.makeRecording(bytes: 5_000)
+        // Not a recording, with something in it: it counts with the ones that were not exported, so it is never offered to a clean.
+        let stranger = rig.recordingsRoot.appending(path: "notes", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: stranger, withIntermediateDirectories: true)
+        try Data(count: 50).write(to: stranger.appending(path: "keep.txt"))
         // The caches hold things of their own, which the module's generic category counts and these do not.
         let thumbnails = rig.storage.cachesDirectory.appending(path: "thumbnails", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: thumbnails, withIntermediateDirectories: true)
         try Data(count: 777).write(to: thumbnails.appending(path: "x.png"))
         await prepare(mode)
+        let exportedBytes = diskBytes(rig.recordingStore.folder(for: exportedA.id)) + diskBytes(rig.recordingStore.folder(for: exportedB.id))
+        let neverBytes = diskBytes(rig.recordingStore.folder(for: neverA.id)) + diskBytes(rig.recordingStore.folder(for: neverB.id)) + 50
 
         let categories = await module.storageCategories(storage: rig.storage)
 
-        #expect(categories.map(\.id) == ["screenshot.captures", "screenshot.recordings"])
-        #expect(categories.map(\.title) == ["Ảnh chụp", "Bản quay"])
-        #expect(categories[0].keeps == nil)
-        #expect(categories[1].keeps == "File đã xuất ở ~/Movies/MyNotch không bị xoá")
-        #expect(categories.allSatisfy { $0.canClean })
+        #expect(categories.map(\.id) == ["screenshot.captures", "screenshot.recordings.exported", "screenshot.recordings.unexported"])
+        #expect(categories.map(\.title) == ["Ảnh chụp", "Bản quay đã xuất", "Bản quay chưa xuất"])
+        #expect(categories.map(\.keeps) == [
+            nil, "File đã xuất ở ~/Movies/MyNotch không bị xoá", "Xoá từng bản trong tab Chụp màn hình (chưa có bản xuất nào)",
+        ])
+        // The page offers the first two to "Dọn tất cả" and only shows the third.
+        #expect(categories.map(\.canClean) == [true, true, false])
         #expect(categories[0].bytes == diskBytes(capturesFolder) && categories[0].bytes > 0)
-        #expect(categories[1].bytes == diskBytes(rig.recordingsRoot) && categories[1].bytes >= 10_000)
+        #expect(categories[1].bytes == exportedBytes && exportedBytes >= 10_000)
+        #expect(categories[2].bytes == neverBytes && neverBytes >= 7_000)
+        // Together they are what is on disk.
+        #expect(categories[1].bytes + categories[2].bytes == diskBytes(rig.recordingsRoot))
+    }
+
+    @Test(arguments: Mode.allCases)
+    func aRecordingThatCannotBeToldToBeExportedCountsAsNotExported(mode: Mode) async throws {
+        await prepare(mode)
+        // Made after the start, which would have rescued the one marked as being recorded.
+        let marked = try rig.makeRecording(status: .recording, bytes: 3_000, exportedAt: Self.exportedRecently)
+        let unreadable = try rig.makeRecording(bytes: 2_000, exportedAt: Self.exportedRecently)
+        try Data("not json".utf8).write(to: rig.recordingStore.folder(for: unreadable.id).appending(path: "project.json"))
+        let noProject = try rig.makeRecording(bytes: 1_000, exportedAt: Self.exportedRecently)
+        try FileManager.default.removeItem(at: rig.recordingStore.folder(for: noProject.id).appending(path: "project.json"))
+
+        let categories = await module.storageCategories(storage: rig.storage)
+
+        #expect(categories[1].bytes == 0 && categories[2].bytes == diskBytes(rig.recordingsRoot) && categories[2].bytes >= 6_000)
+        #expect(await module.clean(categoryID: ScreenshotModule.exportedRecordingsCategoryID, storage: rig.storage) == 0)
+        #expect(exists(marked) && exists(unreadable) && exists(noProject))
     }
 
     @Test func aModuleThatNeverRanMeasuresNothingAndCreatesNothing() async {
         let categories = await module.storageCategories(storage: rig.storage)
 
-        #expect(categories.map(\.bytes) == [0, 0])
+        #expect(categories.map(\.bytes) == [0, 0, 0])
         #expect(!FileManager.default.fileExists(atPath: rig.storage.directory.path(percentEncoded: false)))
         #expect(!FileManager.default.fileExists(atPath: rig.storage.cachesDirectory.path(percentEncoded: false)))
     }
@@ -187,12 +219,13 @@ import Testing
         #expect(module.store?.records.count == 1)
     }
 
-    // MARK: "Bản quay"
+    // MARK: "Bản quay đã xuất"
 
     @Test(arguments: Mode.allCases)
-    func cleaningTheRecordingsRemovesTheirFoldersAndNothingTheyExported(mode: Mode) async throws {
-        let first = try rig.makeRecording(bytes: 4_000)
-        let second = try rig.makeRecording(bytes: 6_000)
+    func cleaningTheExportedRecordingsRemovesTheirFoldersAndNothingElse(mode: Mode) async throws {
+        let first = try rig.makeRecording(bytes: 4_000, exportedAt: Self.exportedRecently)
+        let second = try rig.makeRecording(status: .interrupted, bytes: 6_000, exportedAt: Self.exportedRecently)
+        let never = try rig.makeRecording(createdAt: Self.now.addingTimeInterval(-900 * Self.day), bytes: 7_000)
         let exportedFolder = rig.temporaryRoot.appending(path: "Movies/MyNotch", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: exportedFolder, withIntermediateDirectories: true)
         let video = exportedFolder.appending(path: "Bản quay MyNotch.mp4")
@@ -205,33 +238,67 @@ import Testing
         try FileManager.default.createDirectory(at: cacheFile.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(count: 33).write(to: cacheFile)
         await prepare(mode)
+        // Made after the start, which would have rescued it: still marked as being recorded, and said to be exported.
+        let marked = try rig.makeRecording(status: .recording, exportedAt: Self.exportedRecently)
         let expected = diskBytes(rig.recordingStore.folder(for: first.id)) + diskBytes(rig.recordingStore.folder(for: second.id))
 
-        let freed = await module.clean(categoryID: ScreenshotModule.recordingsCategoryID, storage: rig.storage)
+        let freed = await module.clean(categoryID: ScreenshotModule.exportedRecordingsCategoryID, storage: rig.storage)
 
         #expect(freed == expected && freed >= 10_000)
         #expect(!exists(first) && !exists(second))
+        // Never exported, however old: the original is the only copy.
+        #expect(exists(never) && exists(marked))
         #expect(FileManager.default.fileExists(atPath: video.path(percentEncoded: false)))
         #expect(FileManager.default.fileExists(atPath: stranger.appending(path: "keep.txt").path(percentEncoded: false)))
         #expect(FileManager.default.fileExists(atPath: cacheFile.path(percentEncoded: false)))
-        if mode == .running { #expect(module.state.recordings.isEmpty) }
+        if mode == .running { #expect(module.state.recordings.map(\.id).contains(never.id) && !module.state.recordings.map(\.id).contains(first.id)) }
+    }
+
+    // MARK: "Bản quay chưa xuất"
+
+    @Test(arguments: Mode.allCases)
+    func theRecordingsThatWereNotExportedCannotBeCleanedByThePage(mode: Mode) async throws {
+        let never = try rig.makeRecording(createdAt: Self.now.addingTimeInterval(-900 * Self.day), bytes: 3_000)
+        let alsoNever = try rig.makeRecording(bytes: 2_000)
+        await prepare(mode)
+        let before = diskBytes(rig.recordingsRoot)
+
+        let freed = await module.clean(categoryID: ScreenshotModule.unexportedRecordingsCategoryID, storage: rig.storage)
+        // The id the first version of this page used for all recordings does nothing either.
+        let old = await module.clean(categoryID: "screenshot.recordings", storage: rig.storage)
+
+        #expect(freed == 0 && old == 0 && exists(never) && exists(alsoNever) && diskBytes(rig.recordingsRoot) == before)
+    }
+
+    @Test func theRecordingsThatWereNotExportedStayWhenTheExportedOnesGo() async throws {
+        let exported = try rig.makeRecording(bytes: 3_000, exportedAt: Self.exportedRecently)
+        let never = try rig.makeRecording(bytes: 2_000)
+        await rig.start()
+
+        _ = await module.clean(categoryID: ScreenshotModule.exportedRecordingsCategoryID, storage: rig.storage)
+        _ = await module.clean(categoryID: ScreenshotModule.exportedRecordingsCategoryID, storage: rig.storage)
+
+        #expect(!exists(exported) && exists(never))
     }
 
     @Test func aCleanLeavesTheRecordingBeingMade() async throws {
-        let old = try rig.makeRecording(bytes: 3_000)
+        let old = try rig.makeRecording(bytes: 3_000, exportedAt: Self.exportedRecently)
         await rig.start()
         try await record()
         let live = try #require(fakes.recorder.currentRecordingID)
 
-        let freed = await module.clean(categoryID: ScreenshotModule.recordingsCategoryID, storage: rig.storage)
+        let freed = await module.clean(categoryID: ScreenshotModule.exportedRecordingsCategoryID, storage: rig.storage)
 
         #expect(!exists(old) && freed >= 3_000)
         #expect(FileManager.default.fileExists(atPath: rig.recordingStore.folder(for: live).appending(path: "project.json").path(percentEncoded: false)))
         #expect(try RecordingProject.load(from: rig.recordingStore.folder(for: live)).status == .recording)
+        // And the one being made is shown with the ones that were not exported.
+        let categories = await module.storageCategories(storage: rig.storage)
+        #expect(categories[2].bytes == diskBytes(rig.recordingStore.folder(for: live)) && categories[1].bytes == 0)
     }
 
     @Test func aCleanRemovesNothingWhileTheStreamStarts() async throws {
-        let old = try rig.makeRecording(bytes: 3_000)
+        let old = try rig.makeRecording(bytes: 3_000, exportedAt: Self.exportedRecently)
         await rig.start()
         fakes.recorder.isStartGated = true
         let (settings, keys) = try rig.settings()
@@ -239,7 +306,7 @@ import Testing
         module.beginRecording(.region)
         await rig.waitUntil { rig.phase == .starting }
 
-        let freed = await module.clean(categoryID: ScreenshotModule.recordingsCategoryID, storage: rig.storage)
+        let freed = await module.clean(categoryID: ScreenshotModule.exportedRecordingsCategoryID, storage: rig.storage)
 
         #expect(freed == 0 && exists(old))
         fakes.recorder.releaseStart()
@@ -247,17 +314,17 @@ import Testing
     }
 
     @Test func aCleanLeavesARecordingAnEditorHasOpenUntilItIsClosed() async throws {
-        let open = try rig.makeRecording(bytes: 3_000)
-        let other = try rig.makeRecording(bytes: 2_000)
+        let open = try rig.makeRecording(bytes: 3_000, exportedAt: Self.exportedRecently)
+        let other = try rig.makeRecording(bytes: 2_000, exportedAt: Self.exportedRecently)
         await rig.start()
         let summary = try #require(await listedRecordings().isEmpty ? nil : module.state.recordings.first { $0.id == open.id })
         module.openRecording(summary)
 
-        _ = await module.clean(categoryID: ScreenshotModule.recordingsCategoryID, storage: rig.storage)
+        _ = await module.clean(categoryID: ScreenshotModule.exportedRecordingsCategoryID, storage: rig.storage)
         #expect(exists(open) && !exists(other))
 
         editors.close(folder: summary.folder)
-        _ = await module.clean(categoryID: ScreenshotModule.recordingsCategoryID, storage: rig.storage)
+        _ = await module.clean(categoryID: ScreenshotModule.exportedRecordingsCategoryID, storage: rig.storage)
         #expect(!exists(open))
     }
 
@@ -419,7 +486,7 @@ import Testing
         try setRules(.running, keepCount: 5, exportedDays: 7)
 
         _ = await module.autoClean(now: Self.now, storage: rig.storage)
-        _ = await module.clean(categoryID: ScreenshotModule.recordingsCategoryID, storage: rig.storage)
+        _ = await module.clean(categoryID: ScreenshotModule.exportedRecordingsCategoryID, storage: rig.storage)
         _ = await module.clean(categoryID: ScreenshotModule.capturesCategoryID, storage: rig.storage)
 
         #expect(!FileManager.default.fileExists(atPath: rig.storage.cachesDirectory.appending(path: "Recordings").path(percentEncoded: false)))
@@ -488,7 +555,7 @@ import Testing
         try setRules(.running, keepCount: 5, exportedDays: 7)
 
         _ = await module.autoClean(now: Self.now, storage: rig.storage)
-        _ = await module.clean(categoryID: ScreenshotModule.recordingsCategoryID, storage: rig.storage)
+        _ = await module.clean(categoryID: ScreenshotModule.exportedRecordingsCategoryID, storage: rig.storage)
         _ = await module.clean(categoryID: ScreenshotModule.capturesCategoryID, storage: rig.storage)
 
         #expect(reports.lines.count == 3)
@@ -502,9 +569,10 @@ import Testing
 
     // MARK: The page
 
-    @Test func theStoragePageSeesAndCleansBothCategoriesWhileTheModuleIsOff() async throws {
+    @Test func theStoragePageSeesAllThreeCategoriesWhileTheModuleIsOffAndCleansOnlyWhatMayGo() async throws {
         try await makeCaptures(3)
-        try rig.makeRecording(bytes: 8_000)
+        let exported = try rig.makeRecording(bytes: 8_000, exportedAt: Self.exportedRecently)
+        let never = try rig.makeRecording(createdAt: Self.now.addingTimeInterval(-900 * Self.day), bytes: 5_000)
         await rig.start()
         await harness.registry.setEnabled(false, for: "screenshot")
         let center = harness.registry.storageCenter
@@ -512,19 +580,28 @@ import Testing
         await center.refresh()
 
         let group = try #require(center.groups.first { $0.id == "screenshot" })
-        #expect(group.categories.map(\.id) == ["screenshot.captures", "screenshot.recordings", "screenshot.cache"])
-        #expect(group.categories[0].bytes > 0 && group.categories[1].bytes >= 8_000)
+        #expect(group.categories.map(\.id) == [
+            "screenshot.captures", "screenshot.recordings.exported", "screenshot.recordings.unexported", "screenshot.cache",
+        ])
+        #expect(group.categories[0].bytes > 0 && group.categories[1].bytes >= 8_000 && group.categories[2].bytes >= 5_000)
         #expect(group.autoCleanSummary == "Giữ 30 ảnh chụp gần nhất, không tự xoá bản quay")
+        // What "Dọn tất cả" would free leaves out the recordings that were not exported.
+        #expect(center.cleanableBytes == group.categories[0].bytes + group.categories[1].bytes + group.categories[3].bytes)
 
-        let freed = await center.clean("screenshot.recordings")
-        #expect(freed >= 8_000)
+        let freed = await center.clean("screenshot.recordings.exported")
+        #expect(freed >= 8_000 && !exists(exported) && exists(never))
+        // Cleaning the other one by its id does nothing.
+        #expect(await center.clean("screenshot.recordings.unexported") == 0)
+        #expect(exists(never))
+
+        // "Dọn tất cả" takes the captures and, if there were any left, the exported ones, and never the other.
+        let second = try rig.makeRecording(bytes: 4_000, exportedAt: Self.exportedRecently)
         await center.refresh()
-        #expect(center.groups.first { $0.id == "screenshot" }?.categories[1].bytes == 0)
-
-        // "Dọn tất cả" calls both: the captures go too.
         _ = await center.cleanAll()
         await center.refresh()
-        #expect(center.groups.first { $0.id == "screenshot" }?.categories[0].bytes == 0)
+        let after = try #require(center.groups.first { $0.id == "screenshot" })
+        #expect(after.categories[0].bytes == 0 && after.categories[1].bytes == 0)
+        #expect(!exists(second) && exists(never) && after.categories[2].bytes >= 5_000)
     }
 
     @Test func theDailyRunOfThePageAppliesTheRuleToAModuleThatIsOff() async throws {

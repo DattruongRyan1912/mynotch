@@ -1,14 +1,18 @@
 import Foundation
 import MyNotchCore
 
-/// The module's part of the Storage page: its captures and its recordings, the two cleans the page offers, and the daily rule. All of it
+/// The module's part of the Storage page: its captures, the recordings that were exported and the ones that were not, the two cleans the
+/// page offers, and the daily rule. A recording that was never exported is the only copy of what was recorded, so the page only shows it
+/// (`canClean` is false): "Dọn tất cả" cannot reach it, and only the recordings list's own "Xoá", which asks first, removes it. All of it
 /// works whether or not the module runs, from `ModuleStorage` and the files; when it runs, the captures change through its own store
 /// and the tray follows. Recordings live in `ModuleStorage.directory`, never in the caches, because the generic cache clean may take
 /// anything from `cachesDirectory`, a recording being made included.
 extension ScreenshotModule: StorageCleaning {
     static let capturesCategoryID = "screenshot.captures"
-    static let recordingsCategoryID = "screenshot.recordings"
-    static let recordingsKeepNote = "File đã xuất ở ~/Movies/MyNotch không bị xoá"
+    static let exportedRecordingsCategoryID = "screenshot.recordings.exported"
+    static let unexportedRecordingsCategoryID = "screenshot.recordings.unexported"
+    static let exportedRecordingsKeepNote = "File đã xuất ở ~/Movies/MyNotch không bị xoá"
+    static let unexportedRecordingsKeepNote = "Xoá từng bản trong tab Chụp màn hình (chưa có bản xuất nào)"
 
     static func recordingsFolder(in directory: URL) -> URL {
         directory.appending(path: "Recordings", directoryHint: .isDirectory)
@@ -16,17 +20,36 @@ extension ScreenshotModule: StorageCleaning {
 
     public func storageCategories(storage: ModuleStorage) async -> [StorageCategory] {
         let captures = await StorageFolder.bytes(in: CaptureStore.capturesFolder(in: storage.directory))
-        let recordings = await StorageFolder.bytes(in: Self.recordingsFolder(in: storage.directory))
+        let sizes = await Self.recordingSizes(in: Self.recordingsFolder(in: storage.directory))
         return [
             StorageCategory(id: Self.capturesCategoryID, title: "Ảnh chụp", bytes: captures, keeps: nil, canClean: true),
-            StorageCategory(id: Self.recordingsCategoryID, title: "Bản quay", bytes: recordings, keeps: Self.recordingsKeepNote, canClean: true),
+            StorageCategory(
+                id: Self.exportedRecordingsCategoryID, title: "Bản quay đã xuất", bytes: sizes.exported,
+                keeps: Self.exportedRecordingsKeepNote, canClean: true
+            ),
+            StorageCategory(
+                id: Self.unexportedRecordingsCategoryID, title: "Bản quay chưa xuất", bytes: sizes.unexported,
+                keeps: Self.unexportedRecordingsKeepNote, canClean: false
+            ),
         ]
+    }
+
+    /// What `Recordings/` holds, split in two: the recordings that were exported, and everything else. A recording whose project cannot
+    /// be read, one still marked as being recorded, and a stray file all count as not exported, so nothing but a recording that says
+    /// it was exported is ever offered to a clean. Read as it is: nothing is rescued or written.
+    @concurrent private nonisolated static func recordingSizes(in folder: URL) async -> (exported: Int64, unexported: Int64) {
+        let store = RecordingStore(root: folder)
+        var exported: Int64 = 0
+        for id in await store.exported(before: .distantFuture) { exported += await StorageFolder.bytes(in: store.folder(for: id)) }
+        let total = await StorageFolder.bytes(in: folder)
+        return (exported, max(total - exported, 0))
     }
 
     public func clean(categoryID: String, storage: ModuleStorage) async -> Int64 {
         switch categoryID {
         case Self.capturesCategoryID: await cleanCaptures(storage: storage)
-        case Self.recordingsCategoryID: await cleanRecordings(storage: storage)
+        case Self.exportedRecordingsCategoryID: await cleanExportedRecordings(storage: storage)
+        // Not cleanable by the page, whatever calls: only the list's own "Xoá" removes a recording that was never exported.
         default: 0
         }
     }
@@ -87,13 +110,14 @@ extension ScreenshotModule: StorageCleaning {
 
     // MARK: Recordings
 
-    /// Removes every recording but the one being made and the ones an editor has open; what was exported is the person's own file,
-    /// somewhere else, and stays. Not while the stream starts or the files close, when the folder in the making has no ID to go by.
-    private func cleanRecordings(storage: ModuleStorage) async -> Int64 {
+    /// Removes the originals of the recordings that were exported, except the ones an editor has open; what was exported is the
+    /// person's own file, somewhere else, and stays. A recording that was never exported is not among them, however old. Not while
+    /// the stream starts or the files close, when the folder in the making has no ID to go by.
+    private func cleanExportedRecordings(storage: ModuleStorage) async -> Int64 {
         guard recording?.canRemoveRecordings ?? true else { return 0 }
         let store = RecordingStore(root: Self.recordingsFolder(in: storage.directory))
-        let removed = await removeRecordings(store.folderIDs(), from: store)
-        storageReport("storage: recordings clean removed \(removed.count) recordings, freed \(removed.bytes) bytes")
+        let removed = await removeRecordings(await store.exported(before: .distantFuture), from: store)
+        storageReport("storage: exported recordings clean removed \(removed.count) recordings, freed \(removed.bytes) bytes")
         return removed.bytes
     }
 
