@@ -40,6 +40,7 @@ extension CharacterKind {
         case .hamster: HamsterSpecies.shared
         case .penguin: PenguinSpecies.shared
         case .corgi: CorgiSpecies.shared
+        case .frog: FrogSpecies.shared
         }
     }
 }

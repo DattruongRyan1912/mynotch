@@ -8,6 +8,7 @@ nonisolated enum CharacterKind: String, CaseIterable, Codable, Sendable {
     case hamster
     case penguin
     case corgi
+    case frog
 
     /// The most characters one screen has: the room to play in is two wings of 100 points, or a pill of 280.
     static let maxPerScreen = 3
@@ -20,6 +21,7 @@ nonisolated enum CharacterKind: String, CaseIterable, Codable, Sendable {
         case .hamster: "Hamster"
         case .penguin: "Chim cánh cụt"
         case .corgi: "Corgi"
+        case .frog: "Ếch"
         }
     }
 }

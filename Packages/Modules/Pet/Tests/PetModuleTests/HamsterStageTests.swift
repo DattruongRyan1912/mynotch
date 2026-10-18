@@ -20,7 +20,7 @@ import Testing
     // MARK: Registered, and in the menu
 
     @Test func theHamsterIsAKindWithItsOwnSpeciesAndBrainAndIsNamedInTheMenuAfterTheOthers() {
-        #expect(CharacterKind.allCases == [.cat, .capybara, .hamster, .penguin, .corgi], "declared after them: the draw order and the order in the menu")
+        #expect(CharacterKind.allCases == [.cat, .capybara, .hamster, .penguin, .corgi, .frog], "declared after them: the draw order and the order in the menu")
         #expect(CharacterKind.hamster.displayName == "Hamster" && CharacterKind(rawValue: "hamster") == .hamster)
         #expect(CharacterKind.hamster.species is HamsterSpecies && CharacterKind.cat.species is CatSpecies)
         #expect(CharacterKind.hamster.species !== CharacterKind.capybara.species)
