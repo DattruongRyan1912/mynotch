@@ -80,9 +80,15 @@ final class FakePasteboard: PasteboardWriting {
     var succeeds = true
     private(set) var images: [(image: CGImage, scale: CGFloat, markedAsOwn: Bool)] = []
     private(set) var texts: [String] = []
+    private(set) var files: [(url: URL, markedAsOwn: Bool)] = []
 
     func write(_ image: CGImage, scale: CGFloat, markedAsOwn: Bool) async -> Bool {
         images.append((image, scale, markedAsOwn))
+        return succeeds
+    }
+
+    func write(fileURL: URL, markedAsOwn: Bool) -> Bool {
+        files.append((fileURL, markedAsOwn))
         return succeeds
     }
 

@@ -64,6 +64,7 @@ import Testing
             ZoomSegment(start: 5, end: 6, scale: 3),
         ]
         original.clickEffect = false
+        original.exportLevel = .high
 
         try original.write(to: folder.url)
         let loaded = try RecordingProject.load(from: folder.url)
@@ -74,6 +75,17 @@ import Testing
         #expect(loaded.zoomRules.idleTimeout == 2.25 && loaded.zoomRules.mergeGap == 4 && loaded.zoomRules.minimumMovement == 11)
         #expect(loaded.zoomSegments?.count == 2 && loaded.zoomSegments?.first?.manual == true && loaded.zoomSegments?.first?.focus.count == 2)
         #expect(loaded.clickEffect == false)
+        #expect(loaded.exportLevel == .high)
+    }
+
+    @Test func theExportLevelDefaultsToChatWhenMissingOrUnknown() throws {
+        let folder = try TestFolder("project")
+        let region = String(decoding: try JSONEncoder().encode(Self.region), as: UTF8.self)
+        for extra in ["", #","exportLevel":"somethingFromTheFuture""#, #","exportLevel":7"#] {
+            let json = #"{"id":"\#(UUID().uuidString)","createdAt":"2026-10-18T08:00:00Z","status":"finished","region":\#(region),"segments":[]\#(extra)}"#
+            try Data(json.utf8).write(to: folder.file("project.json"))
+            #expect(try RecordingProject.load(from: folder.url).exportLevel == .chat, "with \(extra)")
+        }
     }
 
     @Test func zoomsNotYetEditedAndZoomsAllRemovedAreNotTheSameThing() throws {

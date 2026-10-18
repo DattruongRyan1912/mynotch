@@ -70,11 +70,15 @@ struct MediaProbe {
     var duration: TimeInterval
     var videoSize: CGSize?
     var videoCodec: FourCharCode?
+    /// What the file's picture costs, in bits per second, as the system estimates it.
+    var videoDataRate: Float = 0
     var videoFrames: Int
-    /// The stamp of each video sample, in order.
+    /// The stamp of each video sample, earliest first.
     var videoTimes: [TimeInterval]
     var audioDurations: [TimeInterval]
     var audioStarts: [TimeInterval]
+    var audioCodecs: [FourCharCode] = []
+    var audioChannels: [Int] = []
 
     static func read(_ url: URL) async throws -> MediaProbe {
         let asset = AVURLAsset(url: url)
@@ -86,9 +90,14 @@ struct MediaProbe {
             let range = try await track.load(.timeRange)
             probe.audioDurations.append(range.duration.seconds)
             probe.audioStarts.append(range.start.seconds)
+            if let description = try await track.load(.formatDescriptions).first {
+                probe.audioCodecs.append(CMFormatDescriptionGetMediaSubType(description))
+                probe.audioChannels.append(Int(CMAudioFormatDescriptionGetStreamBasicDescription(description)?.pointee.mChannelsPerFrame ?? 0))
+            }
         }
         if let video = tracks.first(where: { $0.mediaType == .video }) {
             probe.videoSize = try await video.load(.naturalSize)
+            probe.videoDataRate = try await video.load(.estimatedDataRate)
             if let description = try await video.load(.formatDescriptions).first {
                 probe.videoCodec = CMFormatDescriptionGetMediaSubType(description)
             }
@@ -99,8 +108,17 @@ struct MediaProbe {
             while let sample = output.copyNextSampleBuffer() {
                 let count = CMSampleBufferGetNumSamples(sample)
                 probe.videoFrames += count
-                if count > 0 { probe.videoTimes.append(sample.presentationTimeStamp.seconds) }
+                // A buffer may hold many samples (an MP4 groups them), each with a stamp of its own.
+                var timings = [CMSampleTimingInfo](repeating: CMSampleTimingInfo(), count: count)
+                var filled = 0
+                if count > 0, CMSampleBufferGetSampleTimingInfoArray(sample, entryCount: count, arrayToFill: &timings, entriesNeededOut: &filled) == noErr {
+                    probe.videoTimes += timings.prefix(filled).map { $0.presentationTimeStamp.seconds }
+                } else if count > 0 {
+                    probe.videoTimes.append(sample.presentationTimeStamp.seconds)
+                }
             }
+            // The order the frames are shown in, which a file with reordered frames does not store them in.
+            probe.videoTimes.sort()
         }
         return probe
     }

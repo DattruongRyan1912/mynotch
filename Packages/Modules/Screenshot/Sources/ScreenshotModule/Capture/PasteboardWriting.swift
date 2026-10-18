@@ -11,6 +11,10 @@ protocol PasteboardWriting: AnyObject {
     /// recording it. False when the pasteboard refused the data.
     func write(_ image: CGImage, scale: CGFloat, markedAsOwn: Bool) async -> Bool
 
+    /// Replaces the pasteboard's contents with the file at `fileURL`, as a file URL: pasting into Finder, Zalo or Messenger
+    /// pastes the file. `markedAsOwn` is as for an image. False when the pasteboard refused it.
+    func write(fileURL: URL, markedAsOwn: Bool) -> Bool
+
     /// Replaces the pasteboard's contents with `text`.
     func write(_ text: String) -> Bool
 }
@@ -36,6 +40,15 @@ final class SystemPasteboard: PasteboardWriting {
               let tiff = await Self.tiffData(image, scale: scale) else { return false }
         let item = NSPasteboardItem()
         guard item.setData(png, forType: .png), item.setData(tiff, forType: .tiff) else { return false }
+        if markedAsOwn { guard item.setData(Data(), forType: OwnPasteboardWrite.pasteboardType) else { return false } }
+        pasteboard.clearContents()
+        return pasteboard.writeObjects([item])
+    }
+
+    func write(fileURL: URL, markedAsOwn: Bool) -> Bool {
+        // The same `public.file-url` item `NSURL` writes, built here so it can carry the marker.
+        let item = NSPasteboardItem()
+        guard item.setString(fileURL.absoluteString, forType: .fileURL) else { return false }
         if markedAsOwn { guard item.setData(Data(), forType: OwnPasteboardWrite.pasteboardType) else { return false } }
         pasteboard.clearContents()
         return pasteboard.writeObjects([item])

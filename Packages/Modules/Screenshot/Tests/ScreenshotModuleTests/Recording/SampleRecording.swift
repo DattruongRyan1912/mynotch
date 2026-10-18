@@ -22,28 +22,39 @@ struct SampleRecording {
     /// `picture` is the frame for a moment of the recording (recording time: pauses left out) and `amplitude`, when there is
     /// sound, how loud the tone is then. Each part is its own segment, as each pause makes one.
     static func make(
-        parts: [Part], width: Int = 160, height: Int = 90, clicks: [ActivityTrack.Click] = [],
-        picture: (Double) -> CVPixelBuffer, amplitude: ((Double) -> Float)? = nil
+        parts: [Part], width: Int = 160, height: Int = 90, fps: Int = 30, clicks: [ActivityTrack.Click] = [],
+        picture: (Double) -> CVPixelBuffer, amplitude: ((Double) -> Float)? = nil, systemAmplitude: ((Double) -> Float)? = nil
     ) async throws -> SampleRecording {
         let folder = try TestFolder("composition")
         let display = DisplayInfo(id: 1, frame: CGRect(x: 0, y: 0, width: Double(width) / 2, height: Double(height) / 2), scale: 2)
         var project = RecordingProject(
             id: UUID(), createdAt: Date(timeIntervalSince1970: 1_000), status: .finished,
-            region: RecordingRegion(fullScreen: display)!, fps: 30, hasMicrophone: amplitude != nil, hasSystemAudio: false
+            region: RecordingRegion(fullScreen: display)!, fps: fps, hasMicrophone: amplitude != nil, hasSystemAudio: systemAmplitude != nil
         )
         var offset = 0.0
         for (index, part) in parts.enumerated() {
             let name = "segment-\(String(format: "%03d", index + 1)).mov"
             let start = 1_000 + Double(index) * 100
             let writer = try SegmentWriter(
-                url: folder.file(name), width: width, height: height, fps: 30, audio: amplitude == nil ? [] : [.microphone],
-                backpressure: .wait
+                url: folder.file(name), width: width, height: height, fps: fps, audio: (amplitude == nil ? [] : [.microphone]) + (systemAmplitude == nil ? [] : [.system]),
+                // The system prefers the hardware encoder all the same, but a sample is not worth failing for when many tests
+                // (and the exports) hold the few hardware sessions there are: it then takes the software one.
+                requireHardwareEncoder: false, backpressure: .wait
             )
             var soundFrames = 0
             func feedSound(upTo seconds: Double) {
-                guard let amplitude else { return }
+                guard amplitude != nil || systemAmplitude != nil else { return }
                 while Double(soundFrames) / 48_000 < seconds {
-                    writer.appendAudio(tone(start: start, firstFrame: soundFrames, frames: 1_024, recordingOffset: offset, amplitude: amplitude), kind: .microphone)
+                    // The voice is a 440 Hz tone and the system's sound an 880 Hz one, so they can be told apart in a mix.
+                    if let amplitude {
+                        writer.appendAudio(tone(start: start, firstFrame: soundFrames, frames: 1_024, recordingOffset: offset, amplitude: amplitude), kind: .microphone)
+                    }
+                    if let systemAmplitude {
+                        writer.appendAudio(
+                            tone(start: start, firstFrame: soundFrames, frames: 1_024, recordingOffset: offset, amplitude: systemAmplitude, frequency: 880),
+                            kind: .system
+                        )
+                    }
                     soundFrames += 1_024
                 }
             }
@@ -65,14 +76,14 @@ struct SampleRecording {
 
     /// A 440 Hz tone whose loudness follows `amplitude` of the recording time, so each second can sound different.
     private static func tone(
-        start: Double, firstFrame: Int, frames: Int, recordingOffset: Double, amplitude: (Double) -> Float
+        start: Double, firstFrame: Int, frames: Int, recordingOffset: Double, amplitude: (Double) -> Float, frequency: Double = 440
     ) -> CMSampleBuffer {
         let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 1, interleaved: false)!
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames))!
         buffer.frameLength = AVAudioFrameCount(frames)
         for frame in 0..<frames {
             let local = Double(firstFrame + frame) / 48_000
-            buffer.floatChannelData![0][frame] = amplitude(recordingOffset + local) * Float(sin(local * 2 * .pi * 440))
+            buffer.floatChannelData![0][frame] = amplitude(recordingOffset + local) * Float(sin(local * 2 * .pi * frequency))
         }
         return AudioNormalizer.sampleBuffer(from: buffer, at: RecordingMediaFactory.time(start + Double(firstFrame) / 48_000))!
     }

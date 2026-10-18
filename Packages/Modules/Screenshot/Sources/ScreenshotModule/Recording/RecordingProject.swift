@@ -44,6 +44,8 @@ nonisolated struct RecordingProject: Codable, Equatable, Sendable, Identifiable 
     var zoomSegments: [ZoomSegment]?
     /// A ring at every click.
     var clickEffect = true
+    /// What the export is made at, the last one the person chose.
+    var exportLevel = ExportLevel.chat
 
     var duration: TimeInterval { segments.reduce(0) { $0 + $1.duration } }
     /// A recording that stopped before the person stopped it, and was rescued.
@@ -94,6 +96,8 @@ nonisolated extension RecordingProject {
         zoomRules = try container.decodeIfPresent(ZoomRules.self, forKey: .zoomRules) ?? .standard
         zoomSegments = try container.decodeIfPresent([ZoomSegment].self, forKey: .zoomSegments)
         clickEffect = try container.decodeIfPresent(Bool.self, forKey: .clickEffect) ?? true
+        // A level a later version added, which this one does not know, is the default and not a file that cannot be opened.
+        exportLevel = (try? container.decodeIfPresent(ExportLevel.self, forKey: .exportLevel)) ?? .chat
     }
 }
 

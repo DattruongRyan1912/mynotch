@@ -54,6 +54,32 @@ import Testing
         #expect(!(board.types ?? []).contains(OwnPasteboardWrite.pasteboardType))
     }
 
+    @Test func aFileGoesOnTheBoardAsAFileURLThatAFileTargetCanRead() throws {
+        let url = URL(filePath: "/Users/someone/Movies/MyNotch/Bản quay MyNotch 2026-10-18 14.30.00.mp4")
+        #expect(writer.write(fileURL: url, markedAsOwn: false))
+        let read = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
+        #expect(read == [url])
+        #expect(board.string(forType: .fileURL) == url.absoluteString)
+        #expect(!(board.types ?? []).contains(OwnPasteboardWrite.pasteboardType))
+    }
+
+    @Test func aMarkedFileCarriesMyNotchsOwnWriteTypeOnTheSameItem() throws {
+        let url = URL(filePath: "/Users/someone/Movies/MyNotch/demo.mp4")
+        #expect(writer.write(fileURL: url, markedAsOwn: true))
+        #expect(board.pasteboardItems?.count == 1)
+        let types = (board.pasteboardItems?.first?.types ?? []).map(\.rawValue)
+        #expect(types.contains(OwnPasteboardWrite.typeIdentifier))
+        #expect(types.contains("public.file-url"))
+        #expect(board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] == [url])
+    }
+
+    @Test func aFileReplacesWhatWasThere() throws {
+        board.clearContents()
+        board.setString("old", forType: .string)
+        #expect(writer.write(fileURL: URL(filePath: "/tmp/a.mp4"), markedAsOwn: true))
+        #expect(board.string(forType: .string) == nil)
+    }
+
     @Test func replacesWhatWasThere() async throws {
         board.clearContents()
         board.setString("old", forType: .string)
