@@ -135,6 +135,49 @@ import Testing
         #expect(track.clicks[0].x == 30 && track.clicks[0].y == 32)
     }
 
+    /// The first frame of a movie, decoded: the value of its first byte (a flat grey picture has the same value everywhere).
+    func firstByte(of url: URL) async throws -> UInt8 {
+        let asset = AVURLAsset(url: url)
+        let track = try #require(try await asset.loadTracks(withMediaType: .video).first)
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+        reader.add(output)
+        reader.startReading()
+        let sample = try #require(output.copyNextSampleBuffer())
+        let buffer = try #require(CMSampleBufferGetImageBuffer(sample))
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        return CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: UInt8.self).pointee
+    }
+
+    @Test func aScreenThatChangedDuringThePauseResumesWithWhatIsOnScreenThenNotWhatWasThereBefore() async throws {
+        try await session.start(region: fixture.region)
+        // Flat greys, 90 and 140, far enough apart to tell after compression.
+        let before = RecordingMediaFactory.frame(width: 128, height: 72, index: 0, detailed: false)
+        let during = RecordingMediaFactory.frame(width: 128, height: 72, index: 50, detailed: false)
+        fixture.source.deliver(before, at: fixture.clock.now)
+        await fixture.settle()
+        fixture.clock.advance(by: 0.5)
+        await session.pause()
+        // The person switches windows while paused, then resumes and the screen stays as it is.
+        fixture.clock.advance(by: 1)
+        fixture.source.deliver(during, at: fixture.clock.now)
+        await fixture.settle()
+        fixture.clock.advance(by: 1)
+        try await session.resume()
+        for _ in 0..<3 {
+            fixture.clock.advance(by: 0.5)
+            fixture.scheduler.advance(by: .milliseconds(500))
+            await fixture.settle()
+        }
+        let project = try await session.stop()
+
+        let first = try await firstByte(of: segmentURL(project, 0))
+        let second = try await firstByte(of: segmentURL(project, 1))
+        #expect(abs(Int(first) - 90) < 12)
+        #expect(abs(Int(second) - 140) < 12)
+    }
+
     @Test func stoppingWhilePausedKeepsWhatWasRecordedBeforeThePause() async throws {
         try await session.start(region: fixture.region)
         await fixture.play(1)

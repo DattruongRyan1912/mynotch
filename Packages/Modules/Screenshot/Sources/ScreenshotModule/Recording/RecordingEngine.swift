@@ -140,11 +140,18 @@ actor RecordingEngine: RecordingSampleSink {
     }
 
     private func handle(_ frame: VideoFrame) {
-        guard case .running(let writer) = phase else { return }
-        if writer.appendVideo(frame.pixelBuffer, at: frame.time) {
-            publishStart(of: writer)
-        } else {
-            checkFailure(of: writer)
+        switch phase {
+        case .running(let writer):
+            if writer.appendVideo(frame.pixelBuffer, at: frame.time) {
+                publishStart(of: writer)
+            } else {
+                checkFailure(of: writer)
+            }
+        case .closing, .paused:
+            // Not written, but it is what is on screen when the recording goes on, and the next segment starts with it.
+            lastFrame = frame.pixelBuffer
+        case .idle, .failed, .ended:
+            break
         }
     }
 
