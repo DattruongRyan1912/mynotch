@@ -1,0 +1,154 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MyNotch — Quay màn hình để gửi demo</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-ý-định">1. Ý định</a><a class="h2" href="#2-mục-tiêu">2. Mục tiêu</a><a class="h2" href="#3-không-làm-đợt-này">3. Không làm (đợt này)</a><a class="h2" href="#4-không-được-xảy-ra-lựa-chọn-của-người-viết">4. Không được xảy ra (lựa chọn của người viết)</a><a class="h2" href="#5-ràng-buộc">5. Ràng buộc</a><a class="h2" href="#6-cách-làm-đã-chọn">6. Cách làm (đã chọn)</a><a class="h2" href="#7-để-người-làm-tự-quyết">7. Để người làm tự quyết</a><a class="h2" href="#8-kiểm-chứng">8. Kiểm chứng</a></nav><main><h1 id="mynotch-quay-màn-hình-để-gửi-demo">MyNotch: quay màn hình để gửi demo</h1>
+<ul><li><strong>Ngày:</strong> 2026-10-18
+</li><li><strong>Trạng thái:</strong> Thiết kế, chờ duyệt
+</li><li><strong>Tham khảo tính năng:</strong> OpenScreen (getopenscreen.com, giấy phép MIT). Chỉ tham khảo tính năng. Tự viết, không chép mã, giống mọi module của MyNotch.
+</li></ul>
+<h2 id="1-ý-định">1. Ý định</h2>
+<p>Người dùng quay demo tính năng để gửi đồng nghiệp qua Messenger, Zalo, Tanka và các kênh khác. Họ nói qua micro khi quay, không cần webcam. Quay xong họ cắt bớt, rồi <strong>zoom theo con trỏ chuột</strong> để người xem dễ theo dõi.</p>
+<p>OneNotch có tính năng quay màn hình, và người dùng muốn MyNotch có tính năng tương đương. Họ muốn gọn hơn một ứng dụng riêng, nhưng vẫn có cắt và zoom.</p>
+<p>Thành công nghĩa là quay một đoạn demo, cắt, có zoom tự động, xuất ra và dán vào Zalo, tất cả trong vài phút, không cần app khác.</p>
+<h2 id="2-mục-tiêu">2. Mục tiêu</h2>
+<ul><li><strong>Bắt đầu quay:</strong> từ tab Chụp màn hình trên notch, hoặc bằng phím tắt.
+<ul><li>Chọn <strong>cả màn hình</strong>, <strong>một cửa sổ</strong>, hoặc <strong>một vùng</strong>, dùng lại lớp chọn vùng và cửa sổ mà module Chụp màn hình đã có.
+</li><li>Có đếm ngược 3 giây (tắt được).
+</li></ul>
+</li><li><strong>Đang quay:</strong>
+<ul><li>Notch hiện chấm đỏ, thời gian đã quay, nút <strong>Dừng</strong> và nút <strong>Tạm dừng</strong> (tạm dừng thì video không có đoạn đó).
+</li><li>Phím tắt dừng.
+</li><li>Cửa sổ của MyNotch, kể cả notch, không lọt vào video.
+</li></ul>
+</li><li><strong>Âm thanh:</strong>
+<ul><li>Micro <strong>mặc định bật</strong>, chọn được micro nào.
+</li><li>Âm thanh hệ thống là tuỳ chọn, <strong>mặc định tắt</strong>.
+</li><li>Hình và tiếng không bị lệch.
+</li></ul>
+</li><li><strong>Con trỏ và cú bấm:</strong>
+<ul><li>Con trỏ có trong video.
+</li><li>Vị trí con trỏ và các cú bấm được ghi riêng thành dữ liệu kèm theo, để làm zoom và hiệu ứng bấm khi xuất.
+</li></ul>
+</li><li><strong>Cửa sổ chỉnh sửa</strong> mở ra khi dừng quay:
+<ul><li>xem lại, phát và tua;
+</li><li><strong>cắt</strong> đầu và cuối, cắt bỏ đoạn giữa;
+</li><li><strong>zoom tự động theo cú bấm</strong>: một quy tắc cố định, không dùng AI. Phóng to quanh chỗ bấm, đi theo con trỏ khi đang phóng to, thu về khi con trỏ ngừng hoạt động;
+</li><li>mỗi đoạn zoom hiện trên timeline. <strong>Bỏ</strong> được, chỉnh <strong>mức phóng to</strong> và <strong>thời gian</strong> của từng đoạn, và <strong>thêm</strong> một đoạn zoom bằng tay;
+</li><li>hiệu ứng vòng tròn nhỏ khi bấm chuột, bật hoặc tắt được;
+</li><li>xem trước có zoom ngay khi phát.
+</li></ul>
+</li><li><strong>Xuất MP4</strong> (H.264 kèm AAC), mở được ở mọi nơi.
+<ul><li>Hai mức: <strong>"Gửi chat"</strong>, mặc định, tối đa 1080p, 30 fps, dung lượng vừa phải; và <strong>"Chất lượng cao"</strong>, độ phân giải gốc, 60 fps nếu quay ở 60 fps.
+</li><li>Xuất xong: file được <strong>chép vào clipboard</strong>, dán thẳng vào Zalo hay Messenger được. Có thể kéo file từ cửa sổ chỉnh sửa, và có nút "Hiện trong Finder".
+</li></ul>
+</li><li><strong>Danh sách bản quay gần đây</strong> trong tab Chụp màn hình: mở lại để chỉnh, hoặc xoá.
+</li></ul>
+<h2 id="3-không-làm-đợt-này">3. Không làm (đợt này)</h2>
+<ul><li>Webcam và xoá phông webcam.
+</li><li>Làm mờ vùng nhạy cảm, phụ đề hoặc chép lời, dịch.
+</li><li>Khung nền, viền thiết bị, bo góc.
+</li><li>Zoom 3D.
+</li><li>Bộ con trỏ thay thế, đổi kiểu con trỏ sau khi quay.
+</li><li>Chỉnh tốc độ (speed ramp), chỉnh sửa theo lời nói, AI agent, MCP.
+</li><li>Xuất GIF. Dễ thêm sau nếu cần.
+</li></ul>
+<h2 id="4-không-được-xảy-ra-lựa-chọn-của-người-viết">4. Không được xảy ra (lựa chọn của người viết)</h2>
+<ul><li><strong>Giật, rơi khung hoặc lệch tiếng</strong> khi quay một đoạn dài vài phút.
+</li><li><strong>Notch hay cửa sổ MyNotch lọt vào video.</strong>
+</li><li><strong>Nặng máy khi quay:</strong> dùng bộ mã hoá phần cứng, không xử lý hiệu ứng trong lúc quay. Hiệu ứng chỉ áp khi xuất.
+</li><li><strong>Mất bản quay</strong> nếu MyNotch thoát hoặc crash giữa chừng: phần đã quay phải cứu được.
+</li><li><strong>File quá nặng để gửi chat:</strong> mức "Gửi chat" nhắm khoảng 4–6 Mbit/s ở 1080p30.
+</li><li><strong>Zoom gây chóng mặt:</strong> chuyển động phải mượt, không giật theo từng cú bấm liên tiếp.
+</li></ul>
+<h2 id="5-ràng-buộc">5. Ràng buộc</h2>
+<ul><li>macOS 26.5, Swift 6, SwiftUI kết hợp AppKit, một gói SwiftPM cho mỗi module. Module không import nhau.
+</li><li>Quyền "Ghi màn hình" đã có cho module Chụp màn hình. Quyền Trợ năng đã có (dùng để biết lúc có phím được nhấn khi zoom). Quyền <strong>Micro</strong> là mới:
+<ul><li>thêm <code>NSMicrophoneUsageDescription</code> trong <code>project.yml</code>;
+</li><li>entitlement <code>device.audio-input</code> đã có.
+</li></ul>
+</li><li>Không cài gì cần quyền admin.
+</li><li>Giao diện tiếng Việt, viết hoa đầu câu.
+</li><li><code>CaptureHiding</code> của NotchUI đã có, dùng để giấu cửa sổ MyNotch khỏi bản quay.
+</li></ul>
+<h2 id="6-cách-làm-đã-chọn">6. Cách làm (đã chọn)</h2>
+<ul><li><strong>Chỗ đặt:</strong> nằm trong <strong>module Chụp màn hình</strong> (gói <code>Screenshot</code>), để dùng chung lớp chọn vùng và cửa sổ, quyền ghi màn hình và chỗ lưu. Tab Chụp màn hình có thêm nút "Quay" và danh sách bản quay gần đây.
+</li><li><strong>Ghi hình:</strong> ScreenCaptureKit (<code>SCStream</code>) ghi hình, micro (<code>captureMicrophone</code>) và, nếu bật, âm thanh hệ thống ra file bằng bộ mã hoá phần cứng.
+<ul><li>Ghi ở độ phân giải gốc của vùng chọn, 60 fps.
+</li><li>Ghi kèm một file dữ liệu: vị trí con trỏ khoảng 60 lần mỗi giây, các cú bấm và thời điểm, theo cùng đồng hồ với video.
+</li></ul>
+</li><li><strong>Zoom và hiệu ứng bấm chỉ áp khi xem trước và khi xuất</strong>, bằng một video composition. File gốc không bị đổi, nên chỉnh lại bao nhiêu lần cũng được.
+</li><li><strong>Quy tắc zoom tự động mặc định</strong> (lựa chọn của người viết, chỉnh được trong cài đặt):
+<ul><li>Bấm thì phóng to <strong>2×</strong> quanh chỗ bấm, chuyển trong 0,5 s.
+</li><li><strong>Hoạt động</strong> gồm cú bấm, di chuyển con trỏ và <strong>gõ phím</strong>. Chỉ ghi lúc có phím được nhấn, không bao giờ ghi phím nào.
+<ul><li>Lý do tính gõ phím: mẫu demo hay gặp nhất là bấm vào ô rồi gõ, và nếu không tính thì zoom sẽ thu về giữa câu.
+</li><li>Bắt sự kiện bằng global monitor sự kiện phím của AppKit, dựa trên quyền Trợ năng mà MyNotch đã có cho "Bôi đen là hiểu".
+</li><li>Chưa có quyền Trợ năng thì chỉ tính chuột.
+</li></ul>
+</li><li>Một đoạn zoom kết thúc khi đã <strong>1,5 s không có hoạt động nào</strong>, đếm từ hoạt động cuối cùng. Sau đó thu về trong 0,6 s.
+</li><li>Đang phóng to thì khung đi theo con trỏ một cách mượt.
+</li><li>Một cú bấm đến lúc đang thu về thì phóng to lại <strong>từ mức hiện tại</strong>, không thu hết rồi mới phóng.
+</li><li>Hai đoạn cách nhau dưới 2,5 s thì nối thành một.
+</li><li>Không giới hạn độ dài một đoạn.
+</li></ul>
+</li><li><strong>"Một cửa sổ"</strong> là <strong>vùng màn hình đúng bằng khung cửa sổ lúc bắt đầu quay</strong> (lựa chọn của người viết), không phải quay riêng cửa sổ đó.
+<ul><li>Như vậy menu, popover và danh sách thả xuống vẫn hiện, mà demo tính năng thì cần những thứ này.
+</li><li>Vùng giữ cố định trong suốt bản quay, kéo cửa sổ đi chỗ khác thì vùng không đi theo.
+</li><li>Ảnh chụp màn hình vẫn giữ kiểu chụp riêng cửa sổ như cũ.
+</li></ul>
+</li><li><strong>Lưu giữ</strong> (lựa chọn của người viết):
+<ul><li><strong>Không bao giờ tự xoá bản quay.</strong> Bản gốc giữ cho tới khi người dùng xoá trong "Bản quay gần đây".
+</li><li>Danh sách hiện dung lượng từng bản và tổng cộng.
+</li><li>File xuất lưu ở <code>~/Movies/MyNotch/</code> và là file của người dùng. Xoá bản quay không xoá file đã xuất.
+</li></ul>
+</li><li><strong>Khi notch bị ẩn</strong> (ví dụ app toàn màn hình), lúc đang quay có thêm một mục trên menu bar: chấm đỏ, thời gian, Dừng, Tạm dừng. Có phím tắt cho cả <strong>Dừng</strong> và <strong>Tạm dừng</strong>. Không đổi cách notch ẩn.
+</li><li><strong>Mức "Chất lượng cao"</strong> dùng H.264 ở độ phân giải gốc, tối đa chiều rộng 4096 px. Màn rộng hơn thì thu nhỏ về 4096, vẫn là H.264 để mở được ở mọi nơi.
+</li></ul>
+<h2 id="7-để-người-làm-tự-quyết">7. Để người làm tự quyết</h2>
+<ul><li>Định dạng file gốc (MOV hay MP4, fragmented hay không) và cách cứu bản quay dở.
+</li><li>Cách đồng bộ dữ liệu con trỏ với khung hình.
+</li><li>Kiến trúc cửa sổ chỉnh sửa, dạng timeline, thao tác kéo.
+</li><li>Thuật toán làm mượt chuyển động zoom.
+</li><li>Phím tắt mặc định (có thể đặt lại).
+</li><li>Thư mục lưu (mặc định cạnh ảnh chụp, hoặc <code>~/Movies/MyNotch</code>).
+</li><li>Cách chia việc.
+</li></ul>
+<h2 id="8-kiểm-chứng">8. Kiểm chứng</h2>
+<ul><li><strong>Test:</strong>
+<ul><li>quy tắc zoom: các cú bấm cho ra đoạn zoom, gộp và thu về đúng thời điểm;
+</li><li>cắt: các đoạn bị bỏ không có trong bản xuất, và tiếng khớp hình sau khi cắt;
+</li><li>dữ liệu con trỏ khớp thời gian video;
+</li><li>mức xuất: độ phân giải, fps, bitrate;
+</li><li>clipboard nhận file;
+</li><li>danh sách bản quay;
+</li><li>bản quay dở được cứu.
+<p>Test không quay màn hình thật. Dùng nguồn khung hình giả và video mẫu tạo ra trong test.</p>
+</li></ul>
+</li><li><strong>Trên máy thật</strong> (người điều phối làm, và người dùng xem):
+<ul><li>quay 3 phút có nói;
+</li><li>cắt và zoom;
+</li><li>xuất "Gửi chat" rồi dán vào Zalo;
+</li><li>kiểm tra notch không lọt vào hình;
+</li><li>đo CPU khi quay.
+</li></ul>
+</li></ul></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>
