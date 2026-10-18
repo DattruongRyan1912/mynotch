@@ -530,8 +530,8 @@ nonisolated struct PenguinBrain: Sendable {
     }
 
     private func fits(from start: Double, to end: Double, startingAt here: Double) -> Bool {
-        guard (0.0...1.0).contains(start), (0.0...1.0).contains(end), walkKeeper.destination(start, from: here) == start,
-              keeper.settled(end) == end else { return false }
+        guard (0.0...1.0).contains(start), (0.0...1.0).contains(end), keeper.isFree(start), keeper.isFree(end),
+              walkKeeper.destination(start, from: here) == start else { return false }
         let (low, high) = (min(start, end), max(start, end))
         if keeper.lane.crossing.contains(where: { high > $0.lowerBound && low < $0.upperBound }) { return false }
         return walkKeeper.reach(from: start).contains(end)

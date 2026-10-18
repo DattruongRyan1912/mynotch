@@ -509,8 +509,8 @@ nonisolated struct HamsterBrain: Sendable {
     }
 
     private func fits(from start: Double, to end: Double, startingAt here: Double) -> Bool {
-        guard (0.0...1.0).contains(start), (0.0...1.0).contains(end), keeper.destination(start, from: here) == start,
-              keeper.settled(end) == end else { return false }
+        guard (0.0...1.0).contains(start), (0.0...1.0).contains(end), keeper.isFree(start), keeper.isFree(end),
+              keeper.destination(start, from: here) == start else { return false }
         let (low, high) = (min(start, end), max(start, end))
         if keeper.lane.crossing.contains(where: { high > $0.lowerBound && low < $0.upperBound }) { return false }
         return keeper.reach(from: start).contains(end)
@@ -577,7 +577,7 @@ nonisolated struct HamsterBrain: Sendable {
         for way in [direction, -direction] {
             let reach = way > 0 ? HamsterMove.seedReach.right : HamsterMove.seedReach.left
             let place = here + reach / travel
-            guard (0.0...1.0).contains(place), keeper.settled(place) == place else { continue }
+            guard (0.0...1.0).contains(place), keeper.isFree(place) else { continue }
             seeds = Seeds(place: place, count: 3)
             return made(.sit, now: now, duration: Double.random(in: 1.0...1.8, using: &generator), facing: facing(way))
         }

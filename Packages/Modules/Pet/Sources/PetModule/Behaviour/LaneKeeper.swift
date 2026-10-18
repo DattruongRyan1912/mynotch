@@ -27,6 +27,13 @@ nonisolated struct LaneKeeper: Sendable {
         return ends.min { abs($0 - share) < abs($1 - share) || (abs($0 - share) == abs($1 - share) && $0 > $1) } ?? share
     }
 
+    /// Whether a character may stop at `place`, which is to say that it is in neither the crossing nor a place another stands. A lane so
+    /// crowded that nothing is left to stand in gives `settled` back the place it was asked for, which is no place for a prop: a tub, a
+    /// wheel or a ball that is to take up room asks for a place that is really free and not whether `settled` returned it.
+    func isFree(_ place: Double) -> Bool {
+        !(lane.crossing + lane.zones).contains { place > $0.lowerBound && place < $0.upperBound }
+    }
+
     /// The crossing and the places others stand, with the ones that overlap made one, from the lowest.
     private var noStopping: [ClosedRange<Double>] {
         guard !lane.zones.isEmpty else { return lane.crossing }

@@ -606,16 +606,9 @@ nonisolated struct FrogBrain: Sendable {
         let direction = end > here ? 1.0 : -1.0
         for count in [hops, hops - 1, hops + 1] where count >= 1 {
             let candidate = here + direction * count * length / travel
-            if (0.0...1.0).contains(candidate), keeper.destination(candidate, from: here) == candidate, isFree(candidate) { return candidate }
+            if (0.0...1.0).contains(candidate), keeper.destination(candidate, from: here) == candidate, keeper.isFree(candidate) { return candidate }
         }
         return end
-    }
-
-    /// Whether a character may stop at `place` (and so a pad may float or a moth hunt be from there): it is in none of the stretches the lane
-    /// keeps clear. A lane so crowded that there is nowhere free to go leaves a character where it is, which is no place for a pad, so this
-    /// asks for a free one and not whether `settled` gave the place back.
-    private func isFree(_ place: Double) -> Bool {
-        !(keeper.lane.crossing + keeper.lane.zones).contains { place > $0.lowerBound && place < $0.upperBound }
     }
 
     /// The places a hop can end at from `here`, nearest first: a whole number of hops either way.
@@ -645,7 +638,7 @@ nonisolated struct FrogBrain: Sendable {
     }
 
     private func fits(from start: Double, to end: Double, startingAt here: Double) -> Bool {
-        guard (0.0...1.0).contains(start), (0.0...1.0).contains(end), isFree(start), isFree(end),
+        guard (0.0...1.0).contains(start), (0.0...1.0).contains(end), keeper.isFree(start), keeper.isFree(end),
               keeper.destination(start, from: here) == start else { return false }
         let (low, high) = (min(start, end), max(start, end))
         if keeper.lane.crossing.contains(where: { high > $0.lowerBound && low < $0.upperBound }) { return false }
@@ -706,7 +699,7 @@ nonisolated struct FrogBrain: Sendable {
     private func mothRun(start: Double, way: Double) -> (place: Double, entry: Double)? {
         let place = start + (way > 0 ? FrogMove.mothReach.right : FrogMove.mothReach.left) / travel
         let entry = way > 0 ? 1 + Self.mothOutside.right / travel : -Self.mothOutside.left / travel
-        guard (0.0...1.0).contains(start), (0.0...1.0).contains(place), isFree(start) else { return nil }
+        guard (0.0...1.0).contains(start), (0.0...1.0).contains(place), keeper.isFree(start) else { return nil }
         let (low, high) = (min(entry, place), max(entry, place))
         if keeper.lane.crossing.contains(where: { high > $0.lowerBound && low < $0.upperBound }) { return nil }
         return (place, entry)

@@ -545,16 +545,10 @@ nonisolated struct CorgiBrain: Sendable {
         let places = [home, start, place, chaseTo, setDown]
         guard places.allSatisfy({ (0.0...1.0).contains($0) }) else { return nil }
         // The corgi can stand where it is going to stand, and run to the ball, and none of the places is where another stands or will.
-        guard walkKeeper.destination(home, from: here) == home, walkKeeper.reach(from: home).contains(chaseTo), places.allSatisfy(isFree) else { return nil }
+        guard walkKeeper.destination(home, from: here) == home, walkKeeper.reach(from: home).contains(chaseTo), places.allSatisfy(keeper.isFree) else { return nil }
         let (low, high) = (places.min() ?? home, places.max() ?? home)
         if keeper.lane.crossing.contains(where: { high > $0.lowerBound && low < $0.upperBound }) { return nil }
         return (start, place, chaseTo, setDown)
-    }
-
-    /// Whether a character may stop at `place` (and so a ball may lie there): it is in none of the stretches the lane keeps clear. A lane so
-    /// crowded that there is nowhere free to go leaves a character where it is, which is no place for a ball, so this asks for a free one.
-    private func isFree(_ place: Double) -> Bool {
-        !(keeper.lane.crossing + keeper.lane.zones).contains { place > $0.lowerBound && place < $0.upperBound }
     }
 
     /// The place nearest to `here` where the ball can be fetched from: the corgi stands there, and the ball falls and rolls to one side.
