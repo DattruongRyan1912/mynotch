@@ -19,7 +19,7 @@ import Testing
     // MARK: Registered, and in the menu
 
     @Test func theCapybaraIsAKindWithItsOwnSpeciesAndBrainAndIsNamedInTheMenuAfterTheCat() {
-        #expect(CharacterKind.allCases == [.cat, .capybara, .hamster, .penguin], "declared after the cat: the draw order and the order in the menu")
+        #expect(CharacterKind.allCases == [.cat, .capybara, .hamster, .penguin, .corgi], "declared after the cat: the draw order and the order in the menu")
         #expect(CharacterKind.capybara.displayName == "Capybara" && CharacterKind(rawValue: "capybara") == .capybara)
         #expect(CharacterKind.capybara.species is CapybaraSpecies && CharacterKind.cat.species is CatSpecies)
         #expect(CharacterKind.capybara.species !== CharacterKind.cat.species)

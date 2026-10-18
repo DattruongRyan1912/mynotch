@@ -39,6 +39,7 @@ extension CharacterKind {
         case .capybara: CapybaraSpecies.shared
         case .hamster: HamsterSpecies.shared
         case .penguin: PenguinSpecies.shared
+        case .corgi: CorgiSpecies.shared
         }
     }
 }
