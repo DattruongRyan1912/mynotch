@@ -106,6 +106,17 @@ public final class ClipboardModule: FeatureModule {
     /// The last flush or file edit. Starts, flushes and edits wait for it, so two of them never touch the files at once.
     /// Not private so tests can queue work they control.
     var diskWork: Task<Void, Never>?
+    /// The settings of the module as `start` or the Settings page last handed them over, kept after a stop: the Storage page's daily clean-up
+    /// applies the retention rule to a module that is off. See `ClipboardModule+StorageCleaning`.
+    var storageSettings: ModuleSettings?
+    /// Where the rule is read from when `storageSettings` is nil (Clipboard off since launch, no Settings page shown yet): the app's own
+    /// store, which holds the same keys. A test passes its own.
+    lazy var storageFallbackSettings = SettingsStore(defaults: .standard)
+    /// Told one line per clean of the Storage page: numbers only, never what was copied. A test reads them.
+    var storageReport: (String) -> Void = { Log.logger(category: "clipboard").info("\($0, privacy: .public)") }
+    /// Backups being written or restored. The Storage page's cleans do nothing while there are any: a backup reads the pictures of the history,
+    /// and a restore stores pictures before it adds their items.
+    var backupsInFlight = 0
 
     public convenience init() {
         self.init(
@@ -194,6 +205,7 @@ public final class ClipboardModule: FeatureModule {
         }
         let store = ClipboardStore(directory: context.storage.directory, scheduler: context.scheduler, logger: context.logger, now: now)
         let keys = ClipboardSettingKeys(context.settings)
+        storageSettings = context.settings
         self.context = context
         self.keys = keys
         self.store = store
@@ -340,6 +352,7 @@ public final class ClipboardModule: FeatureModule {
 
     public func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? {
         let directory = environment.storage.directory
+        storageSettings = environment.settings
         return AnyView(ClipboardSettingsView(
             settings: environment.settings,
             keys: ClipboardSettingKeys(environment.settings),

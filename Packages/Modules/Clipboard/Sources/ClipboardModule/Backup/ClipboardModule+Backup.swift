@@ -9,6 +9,8 @@ extension ClipboardModule {
         _ options: ClipboardBackupOptions, to destination: URL, progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> ClipboardBackupExportSummary {
         guard let store else { throw ClipboardBackupError.moduleStopped }
+        backupsInFlight += 1
+        defer { backupsInFlight -= 1 }
         // An open board may have changed since its vault file was written, which only matters when that file goes in the backup.
         if options.includeLockedBoards { sealOpenBoards() }
         let history = backupHistory
@@ -79,6 +81,8 @@ extension ClipboardModule {
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> ClipboardBackupRestoreSummary {
         guard self.store === store, let vault else { throw ClipboardBackupError.moduleStopped }
+        backupsInFlight += 1
+        defer { backupsInFlight -= 1 }
         let written = try await ClipboardBackupReader.writeImages(of: plan, from: url, to: store.imagesDirectory, progress: progress)
         var vaultFiles: [URL] = []
         func discardWrittenFiles() {

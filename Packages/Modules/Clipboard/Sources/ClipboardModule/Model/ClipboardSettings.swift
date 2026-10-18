@@ -28,6 +28,10 @@ struct ClipboardSettingKeys {
     static let historyLimitRange = 50...5000
     static let imageStorageLimitMBRange = 50...2000
     static let boardLockIdleMinutesRange = 1...240
+    /// Shared with `ClipboardRetentionKeys`, so the rule that runs while the module is off is the one the rows show.
+    static let historyLimitDefault = 500
+    static let retentionDefault = Retention.month
+    static let imageStorageLimitMBDefault = 250
 
     let paused: SettingKey<Bool>
     let historyLimit: SettingKey<Int>
@@ -70,9 +74,9 @@ struct ClipboardSettingKeys {
 
     init(_ settings: ModuleSettings) {
         paused = settings.key("paused", default: false)
-        historyLimit = settings.key("historyLimit", default: 500, clampedTo: Self.historyLimitRange)
-        retention = settings.key("retention", default: .month)
-        imageStorageLimitMB = settings.key("imageStorageLimitMB", default: 250, clampedTo: Self.imageStorageLimitMBRange)
+        historyLimit = settings.key("historyLimit", default: Self.historyLimitDefault, clampedTo: Self.historyLimitRange)
+        retention = settings.key("retention", default: Self.retentionDefault)
+        imageStorageLimitMB = settings.key("imageStorageLimitMB", default: Self.imageStorageLimitMBDefault, clampedTo: Self.imageStorageLimitMBRange)
         ignoreSensitive = settings.key("ignoreSensitive", default: true)
         excludedBundleIDs = settings.key("excludedBundleIDs", default: [])
         clickAction = settings.key("clickAction", default: .paste)
@@ -93,4 +97,18 @@ struct ClipboardSettingKeys {
         playSounds = settings.key("playSounds", default: false)
         linkPreviews = settings.key("linkPreviews", default: false)
     }
+}
+
+/// The three keys of the retention rule, built without a `ModuleSettings` (whose initializer is the registry's): for the daily clean-up
+/// when Clipboard has been off since launch and no Settings page has shown its rows yet, so nothing has handed the module its settings.
+/// The names are the ones `ModuleSettings` makes (`module.clipboard.<name>`), and a test holds them to `ClipboardSettingKeys`.
+enum ClipboardRetentionKeys {
+    static let historyLimit = SettingKey<Int>(
+        "module.clipboard.historyLimit", default: ClipboardSettingKeys.historyLimitDefault, clampedTo: ClipboardSettingKeys.historyLimitRange
+    )
+    static let retention = SettingKey<Retention>("module.clipboard.retention", default: ClipboardSettingKeys.retentionDefault)
+    static let imageStorageLimitMB = SettingKey<Int>(
+        "module.clipboard.imageStorageLimitMB", default: ClipboardSettingKeys.imageStorageLimitMBDefault,
+        clampedTo: ClipboardSettingKeys.imageStorageLimitMBRange
+    )
 }

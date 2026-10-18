@@ -136,7 +136,7 @@ final class ClipboardStore {
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path(percentEncoded: false))
     }
 
-    private nonisolated static func isImageFileName(_ fileName: String) -> Bool {
+    nonisolated static func isImageFileName(_ fileName: String) -> Bool {
         fileName.wholeMatch(of: /[0-9a-f]{64}\.png/) != nil
     }
 
