@@ -2,33 +2,65 @@ import AppKit
 import NotchUI
 import SwiftUI
 
-/// The Screenshot tab: the recent captures as a strip of thumbnails, newest first.
+/// The Screenshot tab: the recent captures as a strip of thumbnails, newest first, or the recordings as a list, with "Quay" above.
 struct ScreenshotTabView: View {
     static let emptyMessage = "Chưa có ảnh chụp nào.\nDùng phím tắt chụp màn hình (mặc định ⌃⌥S)."
+
+    enum Page: Hashable {
+        case captures, recordings
+    }
 
     let module: ScreenshotModule
 
     @Environment(\.notch) private var notch
+    @State private var page = Page.captures
     /// A menu of this app is being tracked, e.g. a card's context menu.
     @State private var isMenuOpen = false
     /// "Lưu thành…" is open: its panel is a window of this app, so a click there would otherwise close the notch.
     @State private var isSaving = false
+    /// A recording's "Xoá" is waiting for its answer, which the notch must stay open for.
+    @State private var pendingDelete: UUID?
 
     var body: some View {
-        content
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            // The pin is set right here, not in `onChange`, which could wait until the menu's tracking loop ends.
-            .onReceive(NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)) { _ in
-                isMenuOpen = true
-                notch.setPinned(true)
+        VStack(alignment: .leading, spacing: 8) {
+            header
+            switch page {
+            case .captures: content
+            case .recordings: RecordingListView(module: module, pendingDelete: $pendingDelete)
             }
-            .onReceive(NotificationCenter.default.publisher(for: NSMenu.didEndTrackingNotification)) { _ in
-                isMenuOpen = false
-                notch.setPinned(isSaving)
-            }
-            .onDisappear {
-                if isMenuOpen || isSaving { notch.setPinned(false) }
-            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // The pin is set right here, not in `onChange`, which could wait until the menu's tracking loop ends.
+        .onReceive(NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)) { _ in
+            isMenuOpen = true
+            notch.setPinned(true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSMenu.didEndTrackingNotification)) { _ in
+            isMenuOpen = false
+            notch.setPinned(isSaving || pendingDelete != nil)
+        }
+        .onChange(of: pendingDelete) { notch.setPinned(isMenuOpen || isSaving || pendingDelete != nil) }
+        .onDisappear {
+            if isMenuOpen || isSaving || pendingDelete != nil { notch.setPinned(false) }
+            pendingDelete = nil
+        }
+        // What is on disk may have changed since the notch was last open.
+        .task { await module.refreshRecordings() }
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            sectionButton("Ảnh chụp", .captures)
+            sectionButton(module.state.recordings.isEmpty ? "Bản quay" : "Bản quay (\(module.state.recordings.count))", .recordings)
+            Spacer(minLength: 8)
+            RecordingControlsView(module: module)
+        }
+    }
+
+    private func sectionButton(_ title: String, _ target: Page) -> some View {
+        Button(title) { page = target }
+            .buttonStyle(RecordingCapsuleStyle(tint: page == target ? NotchTokens.accent : nil))
+            .accessibilityAddTraits(page == target ? .isSelected : [])
     }
 
     @ViewBuilder private var content: some View {
@@ -70,7 +102,7 @@ struct ScreenshotTabView: View {
         Task {
             await module.saveAs(record)
             isSaving = false
-            notch.setPinned(isMenuOpen)
+            notch.setPinned(isMenuOpen || pendingDelete != nil)
         }
     }
 

@@ -6,6 +6,8 @@ protocol RecordingEditorHosting: AnyObject {
     /// Shows the editor of the recording in `folder`, or brings its window forward if it is open. Throws when the recording
     /// cannot be opened: still being recorded, or its project cannot be read.
     func open(folder: URL) throws(RecordingEditorError)
+    /// Whether an editor has the recording in `folder` open, so it is not deleted from under it.
+    func isOpen(folder: URL) -> Bool
     func closeAll()
 }
 
@@ -114,6 +116,10 @@ final class RecordingEditorWindowController: NSObject, RecordingEditorHosting {
     }
 
     var openFolders: [URL] { Array(sessions.keys) }
+
+    func isOpen(folder: URL) -> Bool {
+        sessions[folder.standardizedFileURL] != nil
+    }
 
     private func end(_ session: Session) {
         session.model.cancelExport()

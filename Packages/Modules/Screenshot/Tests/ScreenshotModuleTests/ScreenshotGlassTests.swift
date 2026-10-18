@@ -72,7 +72,8 @@ import Testing
             service: FakeCaptureService(), overlay: FakeOverlay(), recognizer: FakeRecognizer(), pasteboard: FakePasteboard(),
             chip: FakeCaptureChip(), makeEditors: { _ in FakeEditors() },
             hasScreenAccess: { false }, onScreenWindows: { [] }, saveDirectory: { _ in nil },
-            dragCopiesDirectory: FileManager.default.temporaryDirectory.appending(path: "MyNotchTests-drags-\(UUID().uuidString)")
+            dragCopiesDirectory: FileManager.default.temporaryDirectory.appending(path: "MyNotchTests-drags-\(UUID().uuidString)"),
+            recording: FakeRecordingSystem().dependencies
         )
     }
 

@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Screenshots in the notch: a hotkey freezes the screens, the overlay picks a region, window or display, and the
 /// result goes to the tray, optionally the clipboard, and a chip with "Sửa" and "Chép" beside it. A second hotkey reads
-/// the text of a region instead (OCR).
+/// the text of a region instead (OCR). The same overlay picks what to record, and `RecordingCoordinator` makes the recording.
 public final class ScreenshotModule: FeatureModule {
     public let descriptor = ModuleDescriptor(
         id: "screenshot",
@@ -12,10 +12,13 @@ public final class ScreenshotModule: FeatureModule {
         systemImage: "camera.viewfinder",
         defaultEnabled: true,
         permissions: [.screenRecording],
-        // Only the folder the "Lưu vào" setting points at is written; Pictures needs no permission.
-        optionalPermissions: [.desktopFolder, .downloadsFolder],
+        // Only the folder the "Lưu vào" setting points at is written; Pictures needs no permission. Recording works without the
+        // microphone (it is switched off in the settings) and without Accessibility (only the mouse is noticed).
+        optionalPermissions: [.microphone, .accessibility, .desktopFolder, .downloadsFolder],
         permissionReasons: [
-            .screenRecording: "Chụp màn hình.",
+            .screenRecording: "Chụp và quay màn hình.",
+            .microphone: "Quay màn hình kèm tiếng nói của bạn.",
+            .accessibility: "Biết lúc bạn gõ phím khi quay, để zoom không thu về giữa câu. MyNotch không ghi phím nào, chỉ ghi thời điểm.",
             .desktopFolder: "Lưu ảnh vào Desktop (nơi lưu mặc định của “Lưu vào”).",
             .downloadsFolder: "Lưu ảnh vào Downloads khi chọn nơi lưu là Downloads.",
         ],
@@ -24,6 +27,8 @@ public final class ScreenshotModule: FeatureModule {
 
     static let captureShortcut = KeyboardShortcuts.Shortcut(.s, modifiers: [.control, .option])
     static let ocrShortcut = KeyboardShortcuts.Shortcut(.o, modifiers: [.control, .option])
+    static let recordShortcut = KeyboardShortcuts.Shortcut(.r, modifiers: [.control, .option])
+    static let recordPauseShortcut = KeyboardShortcuts.Shortcut(.r, modifiers: [.control, .option, .shift])
 
     let state = ScreenshotState()
     /// Set while running.
@@ -43,12 +48,16 @@ public final class ScreenshotModule: FeatureModule {
     let makeEditors: @MainActor (ScreenshotModule) -> any MarkupEditorHosting
     private(set) var context: ModuleContext?
     private(set) var keys: ScreenshotSettingKeys?
-    private let service: any CaptureService
-    private let overlay: any SelectionOverlay
-    private let hasScreenAccess: () -> Bool
-    private let onScreenWindows: () -> [CapturableWindow]
+    let service: any CaptureService
+    let overlay: any SelectionOverlay
+    let hasScreenAccess: () -> Bool
+    let onScreenWindows: () -> [CapturableWindow]
     /// True from the hotkey until the overlay is gone, so a second press cannot stack another overlay.
-    private var isSelecting = false
+    var isSelecting = false
+    /// What recording gets from the system; tests give fakes.
+    let recordingDependencies: RecordingDependencies
+    /// Makes the recordings; set while running.
+    private(set) var recording: RecordingCoordinator?
 
     public convenience init() {
         self.init(
@@ -61,12 +70,13 @@ public final class ScreenshotModule: FeatureModule {
                 CapturableWindow.parse(CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? [])
             },
             saveDirectory: { $0.standardDirectory },
-            dragCopiesDirectory: Self.defaultDragCopiesDirectory
+            dragCopiesDirectory: Self.defaultDragCopiesDirectory,
+            recording: .live
         )
     }
 
-    /// Tests pass fakes, so they never touch ScreenCaptureKit, create panels or editor windows, ask for access or write a
-    /// pasteboard.
+    /// Tests pass fakes, so they never touch ScreenCaptureKit, create panels or editor windows, ask for access, record, open a
+    /// microphone or write a pasteboard. Nothing here has a default for that reason.
     init(
         service: any CaptureService,
         overlay: any SelectionOverlay,
@@ -77,7 +87,8 @@ public final class ScreenshotModule: FeatureModule {
         hasScreenAccess: @escaping () -> Bool,
         onScreenWindows: @escaping () -> [CapturableWindow],
         saveDirectory: @escaping (SaveLocation) -> URL?,
-        dragCopiesDirectory: URL
+        dragCopiesDirectory: URL,
+        recording: RecordingDependencies
     ) {
         self.service = service
         self.overlay = overlay
@@ -89,6 +100,7 @@ public final class ScreenshotModule: FeatureModule {
         self.onScreenWindows = onScreenWindows
         self.saveDirectory = saveDirectory
         self.dragCopiesDirectory = dragCopiesDirectory
+        recordingDependencies = recording
     }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
@@ -102,7 +114,8 @@ public final class ScreenshotModule: FeatureModule {
         state.records = store.load()
         self.store = store
         self.context = context
-        keys = ScreenshotSettingKeys(context.settings)
+        let keys = ScreenshotSettingKeys(context.settings)
+        self.keys = keys
         chip = CaptureChipController(presenter: chipPresenter, scheduler: context.scheduler)
         context.hotkeys.register("capture", title: "Chụp màn hình", initial: Self.captureShortcut) { [weak self] in
             self?.beginCapture(.regionOrWindow)
@@ -110,10 +123,27 @@ public final class ScreenshotModule: FeatureModule {
         context.hotkeys.register("ocr", title: "OCR vùng chọn", initial: Self.ocrShortcut) { [weak self] in
             self?.beginCapture(.ocrRegion)
         }
+        let recordings = RecordingCoordinator(
+            module: self, context: context, keys: keys, state: state,
+            store: RecordingStore(root: context.storage.directory.appending(path: "Recordings", directoryHint: .isDirectory)),
+            dependencies: recordingDependencies
+        )
+        recording = recordings
+        context.hotkeys.register("record", title: "Quay màn hình hoặc dừng quay", initial: Self.recordShortcut) { [weak recordings] in
+            recordings?.toggleFromShortcut()
+        }
+        context.hotkeys.register("recordPause", title: "Tạm dừng hoặc tiếp tục quay", initial: Self.recordPauseShortcut) { [weak recordings] in
+            recordings?.pauseFromShortcut()
+        }
+        // Also what finds a recording that a crash cut short and rescues it.
+        context.run { [weak recordings] in await recordings?.refreshList() }
     }
 
     public func stop() async {
         overlay.cancel()
+        // A recording is closed properly, and kept; the editors of recordings close with it.
+        await recording?.shutdown()
+        recording = nil
         chip?.hide()
         chip = nil
         editors?.closeAll()
@@ -124,7 +154,11 @@ public final class ScreenshotModule: FeatureModule {
         keys = nil
         store = nil
         state.records = []
+        state.recordings = []
     }
+
+    /// Stop and pause while a recording is made, for when the notch is hidden; the menu asks each time it opens.
+    public var menuItems: [ModuleMenuItem] { recording?.menuItems ?? [] }
 
     public func makeTab() -> NotchTab? {
         NotchTab(
@@ -152,7 +186,8 @@ public final class ScreenshotModule: FeatureModule {
 
     /// One capture from hotkey to tray, or to the clipboard for OCR. Ignored while an overlay is already up.
     func capture(mode: SelectionMode) async {
-        guard let context, let keys, let store, !isSelecting else { return }
+        // Not while a recording is being set up either: it may be waiting for an answer about the microphone, before its overlay.
+        guard let context, let keys, let store, !isSelecting, recording?.phase != .selecting else { return }
         guard hasScreenAccess() else {
             showPermissionHint()
             return
@@ -319,14 +354,14 @@ public final class ScreenshotModule: FeatureModule {
         context?.presenter.showToast(AnyView(ScreenshotToast(text: text, systemImage: systemImage)), duration: duration)
     }
 
-    private func showPermissionHint() {
+    func showPermissionHint() {
         showToast(
             "Cần quyền Ghi màn hình: bật MyNotch trong Cài đặt hệ thống → Quyền riêng tư & Bảo mật",
             systemImage: "lock.rectangle.fill", duration: .seconds(5)
         )
     }
 
-    private func report(_ error: any Error) {
+    func report(_ error: any Error) {
         switch CaptureError(error) {
         case .permissionDenied:
             showPermissionHint()
@@ -339,7 +374,7 @@ public final class ScreenshotModule: FeatureModule {
     }
 
     /// Work that outlived its run of the module (stopped, or stopped and started again) must not touch the new one.
-    private func isCurrent(_ context: ModuleContext) -> Bool {
+    func isCurrent(_ context: ModuleContext) -> Bool {
         self.context === context && !Task.isCancelled
     }
 }

@@ -18,6 +18,7 @@ import Testing
     let chip = FakeCaptureChip()
     let editors = FakeEditors()
     let system = FakeSystem()
+    let recordingSystem = FakeRecordingSystem()
     let module: ScreenshotModule
     let harness: RegistryHarness
     /// The harness's temporary storage root, removed when the test ends.
@@ -35,7 +36,8 @@ import Testing
             chip: chip, makeEditors: { _ in editors },
             hasScreenAccess: { system.hasScreenAccess }, onScreenWindows: { system.windows },
             saveDirectory: { _ in system.saveDirectory },
-            dragCopiesDirectory: dragsDirectory
+            dragCopiesDirectory: dragsDirectory,
+            recording: recordingSystem.dependencies
         )
         harness = RegistryHarness([module])
         harness.permissions.statuses[.screenRecording] = .granted
@@ -81,9 +83,11 @@ import Testing
     @Test func declaresThePermissionsItUsesAndWhy() {
         let descriptor = module.descriptor
         #expect(descriptor.permissions == [.screenRecording])
-        #expect(descriptor.optionalPermissions == [.desktopFolder, .downloadsFolder])
+        #expect(descriptor.optionalPermissions == [.microphone, .accessibility, .desktopFolder, .downloadsFolder])
         #expect(descriptor.permissionReasons == [
-            .screenRecording: "Chụp màn hình.",
+            .screenRecording: "Chụp và quay màn hình.",
+            .microphone: "Quay màn hình kèm tiếng nói của bạn.",
+            .accessibility: "Biết lúc bạn gõ phím khi quay, để zoom không thu về giữa câu. MyNotch không ghi phím nào, chỉ ghi thời điểm.",
             .desktopFolder: "Lưu ảnh vào Desktop (nơi lưu mặc định của “Lưu vào”).",
             .downloadsFolder: "Lưu ảnh vào Downloads khi chọn nơi lưu là Downloads.",
         ])
@@ -105,15 +109,22 @@ import Testing
         #expect(module.makeSettingsView(environment) != nil)
     }
 
-    @Test func startRegistersTheCaptureAndOCRHotkeys() async throws {
+    @Test func startRegistersTheCaptureOCRAndRecordingHotkeys() async throws {
         await start()
 
-        #expect(harness.hotkeys.registrations.map(\.id) == ["screenshot_capture", "screenshot_ocr"])
-        #expect(harness.hotkeys.registrations.map(\.title) == ["Chụp màn hình", "OCR vùng chọn"])
+        #expect(harness.hotkeys.registrations.map(\.id) == ["screenshot_capture", "screenshot_ocr", "screenshot_record", "screenshot_recordPause"])
+        #expect(harness.hotkeys.registrations.map(\.title) == [
+            "Chụp màn hình", "OCR vùng chọn", "Quay màn hình hoặc dừng quay", "Tạm dừng hoặc tiếp tục quay",
+        ])
+        #expect(harness.defaultCollisions.reports.isEmpty)
         let capture = try #require(harness.hotkeys.registrations.first)
-        let ocr = try #require(harness.hotkeys.registrations.last)
+        let ocr = try #require(harness.hotkeys.registrations.first { $0.id == "screenshot_ocr" })
         #expect(harness.hotkeyBackend.getShortcut(for: capture.name) == KeyboardShortcuts.Shortcut(.s, modifiers: [.control, .option]))
         #expect(harness.hotkeyBackend.getShortcut(for: ocr.name) == KeyboardShortcuts.Shortcut(.o, modifiers: [.control, .option]))
+        let record = try #require(harness.hotkeys.registrations.first { $0.id == "screenshot_record" })
+        let pause = try #require(harness.hotkeys.registrations.first { $0.id == "screenshot_recordPause" })
+        #expect(harness.hotkeyBackend.getShortcut(for: record.name) == KeyboardShortcuts.Shortcut(.r, modifiers: [.control, .option]))
+        #expect(harness.hotkeyBackend.getShortcut(for: pause.name) == KeyboardShortcuts.Shortcut(.r, modifiers: [.control, .option, .shift]))
 
         await harness.registry.setEnabled(false, for: "screenshot")
         #expect(harness.hotkeys.registrations.isEmpty)

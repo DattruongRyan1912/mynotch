@@ -35,6 +35,24 @@ nonisolated struct RecordingStore: Sendable {
         try? FileManager.default.removeItem(at: folder(for: id))
     }
 
+    /// Removes one recording: its folder, with the segments, the activity and the project, and nothing else. The folder is named by
+    /// the ID alone, so no path can lead out of `root`, and a link standing in for it is left alone. False when there was no such
+    /// folder or it could not be removed. The caller makes sure the recording is not being made or edited.
+    @discardableResult func remove(id: UUID) -> Bool {
+        // A trailing slash makes the system follow a link, so the path is used without one.
+        var path = folder(for: id).path(percentEncoded: false)
+        while path.count > 1, path.hasSuffix("/") { path.removeLast() }
+        let target = URL(filePath: path, directoryHint: .notDirectory)
+        let type = try? FileManager.default.attributesOfItem(atPath: path)[.type] as? FileAttributeType
+        guard type == .typeDirectory else { return false }
+        do {
+            try FileManager.default.removeItem(at: target)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// The recordings, newest first. A recording still marked as being recorded that is not in `active` was cut short: it is
     /// rescued first (`RecordingRecovery`), which marks it incomplete. A folder without a readable project is skipped.
     @concurrent func list(excluding active: Set<UUID> = []) async -> [RecordingSummary] {

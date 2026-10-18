@@ -42,7 +42,7 @@ nonisolated struct OverlayInteraction {
     /// The window a press landed on in window mode; the click counts once the button is released over it too.
     private var pressedWindow: CGWindowID?
 
-    private(set) var isWindowMode = false
+    private(set) var isWindowMode: Bool
     private(set) var highlight: Highlight = .none
 
     /// `windows` are in CG global points, front to back; windows of `excludingPID` (MyNotch) are never offered.
@@ -51,6 +51,7 @@ nonisolated struct OverlayInteraction {
         self.displays = displays
         self.windows = windows
         self.excludingPID = excludingPID
+        isWindowMode = mode.startsOnWindows
         primaryHeight = GeometryMapper.primaryHeight(of: displays) ?? displays.map(\.frame.maxY).max() ?? 0
     }
 
@@ -75,6 +76,14 @@ nonisolated struct OverlayInteraction {
             "Kéo để chọn vùng  ·  Return: cả màn hình  ·  Esc: huỷ"
         case .ocrRegion:
             "Kéo để chọn vùng chứa chữ cần chép  ·  Return: cả màn hình  ·  Esc: huỷ"
+        case .recordRegionOrWindow where isWindowMode:
+            "Bấm vào cửa sổ để quay  ·  Space: chọn vùng  ·  Return: cả màn hình  ·  Esc: huỷ"
+        case .recordRegionOrWindow:
+            "Kéo để chọn vùng quay  ·  Space: chọn cửa sổ  ·  Return: cả màn hình  ·  Esc: huỷ"
+        case .recordRegion:
+            "Kéo để chọn vùng quay  ·  Return: cả màn hình  ·  Esc: huỷ"
+        case .recordWindow:
+            "Bấm vào cửa sổ để quay  ·  Esc: huỷ"
         }
     }
 
@@ -83,10 +92,11 @@ nonisolated struct OverlayInteraction {
         case .escape:
             return .cancel
         case .returnKey:
+            guard mode.hasWholeScreenKey else { return .none }
             guard let display = GeometryMapper.display(containing: pointer, in: displays) ?? displays.first else { return .cancel }
             return .finish(.fullScreen(displayID: display.id))
         case .space:
-            guard mode == .regionOrWindow, drag == nil else { return .none }
+            guard mode.switchesWithSpace, drag == nil else { return .none }
             isWindowMode.toggle()
             pressedWindow = nil
             updateHover(at: pointer)

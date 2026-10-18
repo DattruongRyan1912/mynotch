@@ -175,6 +175,47 @@ import Testing
         #expect(list.allSatisfy { !$0.isIncomplete })
     }
 
+    @Test func removingARecordingTakesItsFolderAndNothingElse() throws {
+        let doomed = try make(created: 1)
+        let kept = try make(created: 2)
+        let exported = folder.file("Movies/MyNotch/demo.mp4")
+        try FileManager.default.createDirectory(at: exported.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(count: 10).write(to: exported)
+
+        #expect(store.remove(id: doomed.id))
+
+        #expect(!FileManager.default.fileExists(atPath: store.folder(for: doomed.id).path))
+        #expect(FileManager.default.fileExists(atPath: store.folder(for: kept.id).appending(path: "segment-001.mov").path))
+        #expect(FileManager.default.fileExists(atPath: exported.path) && FileManager.default.fileExists(atPath: store.root.path))
+    }
+
+    @Test func removingARecordingThatIsNotThereIsFalseAndTouchesNothing() throws {
+        let kept = try make(created: 2)
+        #expect(!store.remove(id: UUID()))
+        #expect(FileManager.default.fileExists(atPath: store.folder(for: kept.id).path))
+    }
+
+    @Test func aLinkStandingInForARecordingIsNotFollowed() throws {
+        let precious = folder.file("Precious")
+        try FileManager.default.createDirectory(at: precious, withIntermediateDirectories: true)
+        try Data(count: 10).write(to: precious.appending(path: "keep.txt"))
+        let id = UUID()
+        try FileManager.default.createDirectory(at: store.root, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: store.folder(for: id), withDestinationURL: precious)
+
+        #expect(!store.remove(id: id))
+
+        #expect(FileManager.default.fileExists(atPath: precious.appending(path: "keep.txt").path))
+    }
+
+    @Test func aFileWhereAFolderShouldBeIsNotRemoved() throws {
+        let id = UUID()
+        try FileManager.default.createDirectory(at: store.root, withIntermediateDirectories: true)
+        try Data(count: 10).write(to: store.folder(for: id))
+        #expect(!store.remove(id: id))
+        #expect(FileManager.default.fileExists(atPath: store.folder(for: id).path))
+    }
+
     @Test func anEmptyOrMissingRecordingsFolderIsAnEmptyList() async {
         #expect(await store.list().isEmpty)
     }

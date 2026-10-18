@@ -25,6 +25,22 @@ final class ScreenCaptureKitService: CaptureService {
         }
     }
 
+    func currentDisplays() async throws -> [DisplayInfo] {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            let displays: [DisplayInfo] = content.displays.compactMap { display in
+                guard let frame = Self.screenFrame(of: display) else { return nil }
+                // The filter's scale is the one a frozen frame of this display is made at, so both agree on the pixels.
+                let scale = CGFloat(SCContentFilter(display: display, excludingWindows: []).pointPixelScale)
+                return DisplayInfo(id: display.displayID, frame: frame, scale: scale)
+            }
+            guard !displays.isEmpty else { throw CaptureError.noDisplays }
+            return displays
+        } catch {
+            throw Self.mapped(error)
+        }
+    }
+
     func captureWindow(id: CGWindowID, includeShadow: Bool) async throws -> CGImage {
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)

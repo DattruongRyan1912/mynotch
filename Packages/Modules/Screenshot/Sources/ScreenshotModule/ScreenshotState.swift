@@ -5,4 +5,8 @@ import Observation
 final class ScreenshotState {
     /// Newest first.
     var records: [CaptureRecord] = []
+    /// Where a recording is, for the tab, the notch and the menu.
+    var recordingPhase = RecordingPhase.idle
+    /// The recordings on disk, newest first.
+    var recordings: [RecordingSummary] = []
 }
