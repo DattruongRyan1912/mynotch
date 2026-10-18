@@ -15,6 +15,9 @@ enum CapybaraArt {
     /// The board row of the line round the top of the capybara's rump when it sits, lies in its tub or listens: a rider's feet stand on the
     /// row of rim above it.
     static let backTop = 12
+    /// The board row of the line over the crown of its head when it sits or soaks, which is the top of its head between its ears (they reach a
+    /// row higher). When it has sunk in the tub for a frog to sit on it (`deepest` rows), it is that many rows lower.
+    static let crown = 5
     /// How far, in pixels, a rider's picture is from the capybara's own for it to sit on the rump: not at all, the capybara's rump and the
     /// rider's seat are at the same place in both (and in their mirror images), which is what the rider's art is drawn for.
     static let perchShift = 0.0

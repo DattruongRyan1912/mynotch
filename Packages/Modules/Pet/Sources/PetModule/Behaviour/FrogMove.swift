@@ -14,10 +14,14 @@ nonisolated enum FrogMove: CaseIterable, Equatable, Sendable {
     // `hopOn` is the hop from the bank onto the lily pad and `hopOff` the hop back; on the pad it does what it does on the ground (the same
     // pictures, a few rows higher), and sleeps there.
     case hopOn, hopOff, padSit, padBlink, padPuff, padWatch, padFlick, padJump, padSleep
+    // On the capybara's head, where it is a smaller frog (there is room for no more over the head of a capybara in the water): `headHopOn`
+    // is the hop on to it from the ground, `headHopOff` the hop off it the other way, and between them it sits and blinks. (Appended: the
+    // numbers the views know the moves by are their places in this list.)
+    case headHopOn, headSit, headBlink, headHopOff
 
     /// Where the frog is when it is doing this, and so what it has to do to get from one move to another.
     enum Stance: Equatable, Sendable {
-        case ground, pad
+        case ground, pad, head
     }
 
     /// The stance the move is made in and, once through, ends in (a move that changes it ends in this).
@@ -25,6 +29,16 @@ nonisolated enum FrogMove: CaseIterable, Equatable, Sendable {
         switch self {
         case .sit, .blink, .puff, .hop, .watch, .flick, .jump, .snapOut, .snapIn, .gulp, .sleep, .hopOff: .ground
         case .hopOn, .padSit, .padBlink, .padPuff, .padWatch, .padFlick, .padJump, .padSleep: .pad
+        case .headHopOn, .headSit, .headBlink: .head
+        case .headHopOff: .ground
+        }
+    }
+
+    /// Whether it is on the capybara's head, or in the air on its way on or off it: drawn over the capybara, which it sits on.
+    var isOnTheHead: Bool {
+        switch self {
+        case .headHopOn, .headSit, .headBlink, .headHopOff: true
+        default: false
         }
     }
 
@@ -38,6 +52,10 @@ nonisolated enum FrogMove: CaseIterable, Equatable, Sendable {
         case .padFlick: .flick
         case .padJump: .jump
         case .padSleep: .sleep
+        case .headSit: .sit
+        case .headBlink: .blink
+        case .headHopOn: .hopOn
+        case .headHopOff: .hopOff
         default: self
         }
     }

@@ -118,6 +118,9 @@ final class CatStage {
     /// The joint scene the characters are in, if any, and how many have been begun: for tests.
     var jointPlay: JointDirector.Play? { joint.play }
     var jointScenesBegun: Int { joint.begun }
+    /// The characters that owe each other no room now: the two of a scene, and the two of one that is over and whose guest is not out of
+    /// the host's way yet.
+    var jointExempt: Set<Int> { joint.exempt }
 
     // MARK: Views
 
@@ -431,11 +434,20 @@ final class CatStage {
         // Their numbers change, and one of a scene's two may be going: the scene is over before they do.
         _ = endJointScene(now: sources.clock())
         // A character that stays keeps what it was doing, and one that is not there before comes with nothing.
-        var kept = slots
+        var unclaimed = Array(slots.indices)
+        var origin: [Int?] = []
+        let before = slots
         slots = wanted.map { kind in
-            if let index = kept.firstIndex(where: { $0.kind == kind }) { return kept.remove(at: index) }
+            if let position = unclaimed.firstIndex(where: { before[$0].kind == kind }) {
+                let index = unclaimed.remove(at: position)
+                origin.append(index)
+                return before[index]
+            }
+            origin.append(nil)
             return Slot(kind: kind, species: sources.species(kind), brain: nil)
         }
+        // A guest that is still on its way out of the host's room is the same one under another number.
+        joint.renumber(origin)
         guard isAlive, !isShutDown else { return }
         if slots.isEmpty {
             nextTick?.cancel()

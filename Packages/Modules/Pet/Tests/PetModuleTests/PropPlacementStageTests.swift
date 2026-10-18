@@ -33,7 +33,7 @@ import Testing
             rig.advance(0.25)
             let now = rig.scheduler.seconds
             let poses = stage.poses
-            let play = stage.jointPlay
+            let playing = stage.jointExempt
             func rests(_ pose: Pose) -> Bool { pose.from == pose.to || now >= pose.end }
             for (owner, pose) in poses.enumerated() {
                 guard let prop = pose.prop, prop.look.occupies else { continue }
@@ -44,7 +44,8 @@ import Testing
                 default: break
                 }
                 for (other, otherPose) in poses.enumerated() where other != owner && rests(otherPose) {
-                    if let play, Set([owner, other]) == [play.host, play.guest] { continue }
+                    // (The pair that is playing, or only just done and still getting out of each other's way, owes nothing.)
+                    if playing.contains(owner), playing.contains(other) { continue }
                     for place in [prop.to] + prop.alsoAt {
                         let apart = abs(otherPose.position(at: now) - place) * travel
                         if apart < width {

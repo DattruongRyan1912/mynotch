@@ -85,6 +85,9 @@ nonisolated struct HamsterBrain: Sendable {
     /// It has looked as long as it will, and does not look again until the pointer has gone away.
     private var tired = false
     private var lastFreezeEnd = -TimeInterval.infinity
+    /// The part it plays in a scene with the capybara, if it does (see `HamsterBrain.join`), and what it does by it.
+    private var joint: JointRun?
+    private var jointSteps: [HamsterStep] = []
 
     init(seed: UInt64, now: TimeInterval, position: Double = 0.5, facing: Facing = .left) {
         generator = SplitMix64(seed: seed)
@@ -105,7 +108,8 @@ nonisolated struct HamsterBrain: Sendable {
 
     /// A stroke: a hop for joy, and then it goes on with what it was doing.
     mutating func pet(now: TimeInterval) -> Outcome {
-        guard !isCrossing(at: now), !Self.unbroken.contains(move) else { return .unchanged }
+        // (One that is in a scene is done with it before it is stroked, and is on its way out: it is not stroked in the middle of that.)
+        guard !isCrossing(at: now), !Self.unbroken.contains(move), joint == nil else { return .unchanged }
         let before = plan
         var steps: [HamsterStep] = [.stay(stance == .wheel ? .wheelHappy : .happy, Self.happyDuration...Self.happyDuration)]
         if isStaring {
@@ -125,6 +129,8 @@ nonisolated struct HamsterBrain: Sendable {
     mutating func resume(now: TimeInterval) {
         queue = []
         scene = nil
+        joint = nil
+        jointSteps = []
         clearProps()
         stance = .seated
         resumeStep = nil
@@ -140,6 +146,8 @@ nonisolated struct HamsterBrain: Sendable {
         self.travel = travel
         self.senses = senses
         settle(lane: lane)
+        // In a scene with the capybara nothing it senses matters: only the capybara and the time.
+        if joint != nil { return updateJoint(now: now, lane: lane, before: before) }
         let burst = tuning.reactsToBusyMachine && senses.busyBurst
         // With the reaction off a busy Mac and a quiet one are the same to it: nothing of the load is read.
         effort = tuning.reactsToBusyMachine ? min(max(burst ? max(senses.cpuLoad, WheelPace.sprint.risesAt) : senses.cpuLoad, 0), 1) : 0
@@ -162,7 +170,8 @@ nonisolated struct HamsterBrain: Sendable {
     /// is a jump, and then it has nothing it was playing with: a wheel would be left across the camera.
     mutating func settle(lane: LaneContext) {
         keeper = LaneKeeper(lane)
-        guard plan.from == plan.to, !(lane.crossing.isEmpty && lane.zones.isEmpty) else { return }
+        // (One that plays by the capybara is where the scene puts it.)
+        guard joint == nil, plan.from == plan.to, !(lane.crossing.isEmpty && lane.zones.isEmpty) else { return }
         let here = keeper.settled(plan.to)
         guard here != plan.to else { return }
         // (A wheel that is going is on the pose and no longer on the brain: it goes with the rest.)
@@ -384,6 +393,8 @@ nonisolated struct HamsterBrain: Sendable {
             planned = made(move, now: now, duration: Double.random(in: seconds, using: &generator))
         case .go(let place):
             planned = go(place, now: now)
+        case .goTo(let target):
+            planned = go(to: target, now: now)
         case .placeWheel:
             planned = placeWheel(now: now)
         case .hopIn:
@@ -426,6 +437,9 @@ nonisolated struct HamsterBrain: Sendable {
             fpsScale: 1
         )
         pose.prop = nextProp(for: move)
+        // Behind the capybara it is hidden by it, and the place it goes to when it is done is kept free for it.
+        pose.behind = joint?.scene == .hamsterBehind
+        pose.reserves = joint.map { [$0.place.exit] } ?? []
         return pose
     }
 
@@ -483,7 +497,17 @@ nonisolated struct HamsterBrain: Sendable {
             wheelStart = spot
             target = spot.start
         }
-        target = keeper.destination(target, from: here)
+        return go(to: target, now: now)
+    }
+
+    /// Scurries to `target`, held to what the lane lets it do: out of the places it must not stop in, and no further than it can reach.
+    private mutating func go(to target: Double, now: TimeInterval) -> Pose? {
+        let here = plan.position(at: now)
+        guard travel >= 1 else {
+            queue = []
+            return nil
+        }
+        let target = keeper.destination(target, from: here)
         let covered = abs(target - here) * travel
         guard covered >= 1 else { return nil }
         // A walk is as quick as it is, whatever the Mac is doing.
@@ -608,4 +632,125 @@ nonisolated struct HamsterBrain: Sendable {
 
 nonisolated extension HamsterBrain: CharacterBrain {
     var pose: Pose { plan }
+}
+
+// MARK: Playing with the capybara
+
+nonisolated extension HamsterBrain {
+    /// What it may be doing for the scene to take it from it: awake, on its feet or sitting, nothing that cannot be broken off.
+    private static let joinable: Set<HamsterMove> = [.sit, .blink, .groom, .puffed, .scurry]
+    /// How far from the capybara's picture, in pixels, the hamster's is for it to be behind it (over its rump, so that its head is what
+    /// comes up over its back), and for it to curl up at its back and at its snout: for a capybara that faces right (see `JointRoom`). The
+    /// hamster's picture is 17 across in the middle of its frame, and it is touching the capybara's, which is 28.
+    private static let behindOffset = -5.0
+    private static let napOffsets = (rump: -24.0, front: 22.0)
+    /// How near the place the lane let it go to, in pixels, it has to be to be by the capybara.
+    private static let arrivalTolerance = 3.0
+
+    var jointScene: JointScene.ID? { joint?.scene }
+
+    /// Where it would be for `scene` by `host`, which holds still: nil when there is no room (the lane, the camera, the way there and the
+    /// way out), or it is not a scene it plays.
+    private func jointPlace(for scene: JointScene.ID, host: Pose, now: TimeInterval, lane: LaneContext) -> JointPlace? {
+        let room = JointRoom(host: host, now: now, travel: travel, keeper: LaneKeeper(lane))
+        let here = plan.position(at: now)
+        switch scene {
+        case .hamsterBehind: return room.hidings(offset: Self.behindOffset, from: here).first
+        case .hamsterNap: return room.placings(offsets: Self.napOffsets, from: here).first
+        default: return nil
+        }
+    }
+
+    func canJoin(_ invite: JointInvite, now: TimeInterval) -> Bool {
+        guard invite.role == .guest, joint == nil, effort < Self.busyFrom, !isCrossing(at: now), Self.joinable.contains(move), !hasProps,
+              plan.prop == nil, travel >= 1 else { return false }
+        // The room is judged as it will be once the scene has begun, with the capybara's own place no longer in the way.
+        return jointPlace(for: invite.scene, host: invite.partner, now: now, lane: invite.lane) != nil
+    }
+
+    mutating func join(_ invite: JointInvite, now: TimeInterval) {
+        guard let place = jointPlace(for: invite.scene, host: invite.partner, now: now, lane: invite.lane) else { return }
+        keeper = LaneKeeper(invite.lane)
+        scene = nil
+        resumeStep = nil
+        joint = JointRun(scene: invite.scene, host: invite.partner, now: now, place: place)
+        jointSteps = HamsterScene.together(invite.scene, using: &generator)
+        queue = [.goTo(place.target)]
+        startJointQueue(now: now)
+    }
+
+    /// The scene is over for it, wherever it is in it: one that is by the capybara goes out of its room (getting up, or uncurling, first),
+    /// and one that is on its way to it goes about its day. A hop or a curl that is half done is finished first.
+    mutating func leaveJoint(now: TimeInterval) -> Outcome {
+        guard var run = joint, run.phase != .exit else { return .unchanged }
+        let before = plan
+        run.phase = .exit
+        joint = run
+        // (A move that cannot be broken off is gone on with to where it ends.)
+        let ends = Self.unbroken.contains(move) && now < plan.end ? plan.to : plan.position(at: now)
+        let near = run.isNear(ends, travel: travel)
+        queue = near ? [.goTo(run.place.exit)] : []
+        if !(Self.unbroken.contains(move) && now < plan.end) { startJointQueue(now: now) }
+        return outcome(since: before)
+    }
+
+    /// An update of one that is in a scene: nothing it senses matters, only the capybara and the time.
+    fileprivate mutating func updateJoint(now: TimeInterval, lane: LaneContext, before: Pose) -> Outcome {
+        guard let run = joint else { return .unchanged }
+        if run.phase != .exit {
+            // The capybara is where it was and is still being played with; if not, out it goes.
+            let holds = lane.joint.map { sight in
+                sight.scene == run.scene && sight.role == .guest && abs(sight.partner.position(at: now) - run.host) < 1e-9
+            } ?? false
+            if !holds {
+                _ = leaveJoint(now: now)
+                return outcome(since: before)
+            }
+        }
+        if now >= plan.end { startJointQueue(now: now) }
+        return outcome(since: before)
+    }
+
+    /// Begins the next step of the part, or the next part of it when there is none left: the going there, the being there, the going.
+    private mutating func startJointQueue(now: TimeInterval) {
+        for _ in 0..<16 {
+            guard var run = joint else { break }
+            if queue.isEmpty {
+                switch run.phase {
+                case .approach:
+                    // It is by the capybara, or the lane did not let it get there, which is the end of the scene for it.
+                    if abs(plan.position(at: now) - run.place.target) * travel <= Self.arrivalTolerance {
+                        run.phase = .together
+                        queue = jointSteps
+                    } else {
+                        run.phase = .exit
+                        queue = []
+                    }
+                case .together:
+                    run.phase = .exit
+                    queue = [.goTo(run.place.exit)]
+                case .exit:
+                    finishJoint(now: now)
+                    return
+                }
+                joint = run
+                continue
+            }
+            let step = queue.removeFirst()
+            if let planned = begin(step, now: now) {
+                plan = planned
+                return
+            }
+        }
+        finishJoint(now: now)
+    }
+
+    /// The scene is over and its day goes on, from where it stands: after a moment of sitting, which is the time the stage takes to tell it where
+    /// the capybara is (the room it owed the capybara no longer is none), so that what it sets out first is out of the capybara's way.
+    private mutating func finishJoint(now: TimeInterval) {
+        joint = nil
+        jointSteps = []
+        queue = [.stay(.sit, 0.5...0.5)]
+        startQueue(now: now)
+    }
 }

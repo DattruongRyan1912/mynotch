@@ -31,11 +31,12 @@ import Testing
         let asked: [FrogMove: Int] = [
             .sit: 4, .blink: 4, .puff: 6, .hop: 6, .watch: 2, .flick: 5, .jump: 8, .snapOut: 4, .snapIn: 3, .gulp: 6, .sleep: 4, .hopOn: 6, .hopOff: 6,
             .padSit: 4, .padBlink: 4, .padPuff: 6, .padWatch: 2, .padFlick: 5, .padJump: 8, .padSleep: 4,
+            .headHopOn: 6, .headSit: 4, .headBlink: 4, .headHopOff: 6,
         ]
         #expect(Set(asked.keys) == Set(FrogMove.allCases))
         for move in FrogMove.allCases { #expect(move.frameCount == asked[move], "\(move)") }
-        // A move on the pad is the same move as on the ground, in the same number of pictures at the same pace.
-        for move in FrogMove.allCases where move.stance == .pad && move != .hopOn {
+        // A move on the pad or on the head is the same move as on the ground, in the same number of pictures at the same pace.
+        for move in FrogMove.allCases where (move.stance == .pad && move != .hopOn) || [.headSit, .headBlink, .headHopOn, .headHopOff].contains(move) {
             let ground = move.onTheGround
             #expect(ground != move && move.frameCount == ground.frameCount && move.fps == ground.fps && move.loops == ground.loops, "\(move)")
         }
@@ -184,7 +185,8 @@ import Testing
             for (index, frame) in frames(move).enumerated() {
                 let ink = box(frame, ignoring: ignoring)
                 let centre = Double(ink.left + ink.right) / 2
-                #expect(abs(centre - 15.5) < 6.5, "\(move) \(index): centred at \(centre)")
+                // (A frog on the head of the capybara is where the capybara's head is, which is towards the front of its frame.)
+                #expect(abs(centre - 15.5) < (move.isOnTheHead ? 9.5 : 6.5), "\(move) \(index): centred at \(centre)")
                 #expect(ink.left >= 1 && ink.right <= 30, "\(move) \(index): on the board, \(ink)")
             }
         }

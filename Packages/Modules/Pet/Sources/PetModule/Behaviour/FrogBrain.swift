@@ -40,7 +40,7 @@ nonisolated struct FrogBrain: Sendable {
     static let mothOutside = (left: 20.0, right: 40.0)
     /// What it drops everything for is held to these moves: a stroke, the pointer or a burst of work is not taken while it hops on to the pad
     /// or off it, jumps for joy, shoots its tongue at a moth, takes it in or swallows it.
-    static let unbroken: Set<FrogMove> = [.hopOn, .hopOff, .jump, .padJump, .snapOut, .snapIn, .gulp]
+    static let unbroken: Set<FrogMove> = [.hopOn, .hopOff, .headHopOn, .headHopOff, .jump, .padJump, .snapOut, .snapIn, .gulp]
     /// What the pointer and a burst of work wait for, as a stroke does not: a blink, a puff, a flick of the tongue, and a leg of hops, which
     /// is not broken off in the air.
     static let holds: Set<FrogMove> = [.blink, .padBlink, .puff, .padPuff, .flick, .padFlick]
@@ -98,6 +98,11 @@ nonisolated struct FrogBrain: Sendable {
     private var burstHeard = false
     /// It is on its way to sleep, which takes a few steps: to the pad, up, on it.
     private var sleeping = false
+    /// The part it plays in a scene with the capybara, if it does (see `FrogBrain.join`): which way the capybara looks, and whether it has
+    /// sunk far enough in the water for a frog to hop on to its head.
+    private var joint: JointRun?
+    private var jointFacing = Facing.right
+    private var jointReady = false
 
     init(seed: UInt64, now: TimeInterval, position: Double = 0.5, facing: Facing = .left) {
         generator = SplitMix64(seed: seed)
@@ -121,7 +126,8 @@ nonisolated struct FrogBrain: Sendable {
 
     /// A stroke: a hop in place for joy, and then it goes on with what it was doing.
     mutating func pet(now: TimeInterval) -> Outcome {
-        guard !isCrossing(at: now), !Self.unbroken.contains(move) else { return .unchanged }
+        // (One that is in a scene is done with it before it is stroked, and is on its way out: it is not stroked in the middle of that.)
+        guard !isCrossing(at: now), !Self.unbroken.contains(move), joint == nil else { return .unchanged }
         let before = plan
         var steps: [FrogStep] = [.stay(stance == .pad ? .padJump : .jump, FrogMove.jump.passDuration...FrogMove.jump.passDuration)]
         if watching {
@@ -155,6 +161,8 @@ nonisolated struct FrogBrain: Sendable {
     mutating func resume(now: TimeInterval) {
         queue = []
         scene = nil
+        joint = nil
+        jointReady = false
         clearProps()
         stance = .ground
         resumeStep = nil
@@ -172,6 +180,8 @@ nonisolated struct FrogBrain: Sendable {
         self.travel = travel
         self.senses = senses
         settle(lane: lane)
+        // In a scene with the capybara nothing it senses matters: only the capybara and the time.
+        if joint != nil { return updateJoint(now: now, lane: lane, before: before) }
         // With the reaction off a busy Mac and a quiet one are the same to it: nothing of the load is read.
         let burst = tuning.reactsToBusyMachine && senses.busyBurst
         busyness = tuning.reactsToBusyMachine ? min(max((senses.cpuLoad - Self.busyFrom) / (1 - Self.busyFrom), 0), 1) : 0
@@ -193,7 +203,8 @@ nonisolated struct FrogBrain: Sendable {
     /// is a jump, and then it has nothing it was playing with: a pad would be left across the camera.
     mutating func settle(lane: LaneContext) {
         keeper = LaneKeeper(lane)
-        guard plan.from == plan.to, !(lane.crossing.isEmpty && lane.zones.isEmpty) else { return }
+        // (One that plays by the capybara is where the scene puts it.)
+        guard joint == nil, plan.from == plan.to, !(lane.crossing.isEmpty && lane.zones.isEmpty) else { return }
         let here = keeper.settled(plan.to)
         guard here != plan.to else { return }
         // (A prop that is going is on the pose and no longer on the brain: it goes with the rest.)
@@ -452,6 +463,12 @@ nonisolated struct FrogBrain: Sendable {
                 queue.insert(.hopOff, at: 0)
                 return nil
             }
+            if stance == .head {
+                // Off the capybara's head first, whatever the step is.
+                queue.insert(step, at: 0)
+                queue.insert(.leapDown(joint?.place.target ?? plan.position(at: now)), at: 0)
+                return nil
+            }
             stance = needed
         }
         let planned: Pose?
@@ -481,6 +498,15 @@ nonisolated struct FrogBrain: Sendable {
         case .look:
             watching = true
             planned = made(stance == .pad ? .padWatch : .watch, now: now, duration: 2, facing: facing(lookWay))
+        case .leapUp(let seat):
+            let here = plan.position(at: now)
+            planned = made(.headHopOn, now: now, duration: FrogMove.headHopOn.passDuration, facing: jointFacing, from: here, to: seat)
+        case .leapDown(let launch):
+            let here = plan.position(at: now)
+            planned = made(
+                .headHopOff, now: now, duration: FrogMove.headHopOff.passDuration, facing: jointFacing == .right ? .left : .right, from: here,
+                to: launch
+            )
         }
         if planned != nil, let ends = step.endStance { stance = ends }
         return planned
@@ -495,6 +521,10 @@ nonisolated struct FrogBrain: Sendable {
         let here = pad != nil ? there : keeper.settled(there)
         var pose = Pose(motion: move.motion, facing: facing ?? plan.facing, from: from ?? here, to: to ?? from ?? here, began: now, duration: duration)
         pose.prop = nextProp(for: move)
+        // On the capybara's head it is over the capybara, which it sits on.
+        pose.raised = move.isOnTheHead
+        // The places it hops on from and goes to when it is done with the capybara are kept free for it.
+        pose.reserves = joint.map { [$0.place.target, $0.place.exit] } ?? []
         return pose
     }
 
@@ -780,4 +810,153 @@ nonisolated struct FrogBrain: Sendable {
 
 nonisolated extension FrogBrain: CharacterBrain {
     var pose: Pose { plan }
+}
+
+// MARK: Playing with the capybara
+
+nonisolated extension FrogBrain {
+    /// What it may be doing for the scene to take it from it: sitting still on the ground, with nothing out.
+    private static let joinable: Set<FrogMove> = [.sit, .blink, .puff]
+    /// How far behind the capybara's head, in pixels, the place it hops on from may be: the hop on to the head is a hop of this length, and
+    /// the places it can hop to from where it is are a whole number of hops (`FrogMove.hopLength`) from it, so there is room to choose.
+    private static let launchRange: ClosedRange<Double> = 15...33
+    /// How near the place the lane let it go to, in pixels, it has to be to hop on from there.
+    private static let arrivalTolerance = 3.0
+
+    var jointScene: JointScene.ID? { joint?.scene }
+
+    /// Where it would hop on from and out to for `scene` by `host`, which holds still: the place behind the capybara a whole number of hops from
+    /// where the frog is, and the place a whole number of hops further, out of the room of the capybara and of what it has out. Nil when
+    /// there is no room (the lane, the camera, the way there and the way out), or it is not a scene it plays.
+    private func jointPlace(for scene: JointScene.ID, host: Pose, now: TimeInterval, lane: LaneContext) -> JointPlace? {
+        guard scene == .frogOnHead, travel >= 1 else { return nil }
+        let keeper = LaneKeeper(lane)
+        let seat = host.position(at: now)
+        let way = host.facing == .right ? 1.0 : -1.0
+        let here = plan.position(at: now)
+        let room = JointRoom(host: host, now: now, travel: travel, keeper: keeper).places
+        let (clear, step) = (JointRoom.clearance / travel, FrogMove.hopLength / travel)
+        // Out of the room of everything the capybara has, behind it.
+        let limit = way > 0 ? (room.min() ?? seat) - clear : (room.max() ?? seat) + clear
+        for launch in hopPlaces(from: here) where Self.launchRange.contains((seat - launch) * way * travel) {
+            guard keeper.isFree(launch), keeper.destination(launch, from: here) == launch else { continue }
+            // The hop on to the head is not across the camera.
+            let (low, high) = (min(launch, seat), max(launch, seat))
+            if keeper.lane.crossing.contains(where: { high > $0.lowerBound && low < $0.upperBound }) { continue }
+            // The way out is a leg of hops, which may go through the camera when the lane behind the capybara has no more room.
+            for hops in 1...14 {
+                let exit = launch - way * Double(hops) * step
+                guard (0.0...1.0).contains(exit) else { break }
+                guard way > 0 ? exit <= limit : exit >= limit, keeper.isFree(exit), keeper.reach(from: launch).contains(exit) else { continue }
+                return JointPlace(target: launch, exit: exit, side: -way, inFront: false)
+            }
+        }
+        return nil
+    }
+
+    func canJoin(_ invite: JointInvite, now: TimeInterval) -> Bool {
+        guard invite.role == .guest, joint == nil, busyness == 0, !isCrossing(at: now), Self.joinable.contains(move), stance == .ground,
+              !hasProps, !watching, !sleeping, plan.prop == nil, travel >= 1 else { return false }
+        // The room is judged as it will be once the scene has begun, with the capybara's own place no longer in the way.
+        return jointPlace(for: invite.scene, host: invite.partner, now: now, lane: invite.lane) != nil
+    }
+
+    mutating func join(_ invite: JointInvite, now: TimeInterval) {
+        guard let place = jointPlace(for: invite.scene, host: invite.partner, now: now, lane: invite.lane) else { return }
+        keeper = LaneKeeper(invite.lane)
+        scene = nil
+        resumeStep = nil
+        jointFacing = invite.partner.facing
+        jointReady = false
+        joint = JointRun(scene: invite.scene, host: invite.partner, now: now, place: place)
+        queue = [.walkTo(place.target)]
+        startJointQueue(now: now)
+    }
+
+    /// The scene is over for it, wherever it is in it: one that is on the capybara's head hops off (when it has landed, if it is on its way
+    /// up), and then hops out of its room; one that is on its way to it goes about its day. A hop that is half done is finished first.
+    mutating func leaveJoint(now: TimeInterval) -> Outcome {
+        guard var run = joint, run.phase != .exit else { return .unchanged }
+        let before = plan
+        run.phase = .exit
+        joint = run
+        if stance == .head {
+            queue = [.leapDown(run.place.target), .walkTo(run.place.exit)]
+        } else {
+            // (A hop that cannot be broken off is gone on with to where it ends.)
+            let ends = Self.unbroken.contains(move) && now < plan.end ? plan.to : plan.position(at: now)
+            let near = run.isNear(ends, travel: travel)
+            queue = near ? [.walkTo(run.place.exit)] : []
+        }
+        if !(Self.unbroken.contains(move) && now < plan.end) { startJointQueue(now: now) }
+        return outcome(since: before)
+    }
+
+    /// An update of one that is in a scene: nothing it senses matters, only the capybara and the time.
+    fileprivate mutating func updateJoint(now: TimeInterval, lane: LaneContext, before: Pose) -> Outcome {
+        guard let run = joint else { return .unchanged }
+        let sight = lane.joint
+        jointReady = sight?.partner.perch?.spot == .head
+        if run.phase != .exit {
+            // The capybara is where it was and is still being played with, and has sunk for the frog if it is on its head; if not, out it
+            // goes.
+            let holds = sight.map { sight in
+                sight.scene == run.scene && sight.role == .guest && abs(sight.partner.position(at: now) - run.host) < 1e-9
+            } ?? false
+            if !holds || (stance == .head && !jointReady) {
+                _ = leaveJoint(now: now)
+                return outcome(since: before)
+            }
+        }
+        if now >= plan.end { startJointQueue(now: now) }
+        return outcome(since: before)
+    }
+
+    /// Begins the next step of the part, or the next part of it when there is none left: the going there, the being there, the going.
+    private mutating func startJointQueue(now: TimeInterval) {
+        for _ in 0..<16 {
+            guard var run = joint else { break }
+            if queue.isEmpty {
+                switch run.phase {
+                case .approach:
+                    // It is where it hops on from, or the lane did not let it get there, which is the end of the scene for it.
+                    if abs(plan.position(at: now) - run.place.target) * travel <= Self.arrivalTolerance {
+                        run.phase = .together
+                        queue = FrogScene.together(seat: run.host, launch: run.place.target, using: &generator)
+                    } else {
+                        run.phase = .exit
+                        queue = []
+                    }
+                case .together:
+                    run.phase = .exit
+                    queue = [.walkTo(run.place.exit)]
+                case .exit:
+                    finishJoint(now: now)
+                    return
+                }
+                joint = run
+                continue
+            }
+            // It does not hop on until the capybara has sunk far enough: it waits, sitting, a moment at a time.
+            if run.phase == .together, case .leapUp = queue[0], !jointReady {
+                plan = made(.sit, now: now, duration: 0.25)
+                return
+            }
+            let step = queue.removeFirst()
+            if let planned = begin(step, now: now) {
+                plan = planned
+                return
+            }
+        }
+        finishJoint(now: now)
+    }
+
+    /// The scene is over and its day goes on, from where it stands: after a moment of sitting, which is the time the stage takes to tell it where
+    /// the capybara is (the room it owed the capybara no longer is none), so that what it sets out first is out of the capybara's way.
+    private mutating func finishJoint(now: TimeInterval) {
+        joint = nil
+        jointReady = false
+        queue = [.stay(.sit, 0.5...0.5)]
+        startQueue(now: now)
+    }
 }

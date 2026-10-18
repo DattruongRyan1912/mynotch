@@ -535,6 +535,9 @@ nonisolated extension CatBrain {
 
     var jointScene: JointScene.ID? { joint?.scene }
 
+    /// Where it goes when it is done with the capybara, while it is in a scene.
+    var jointExit: Double? { joint?.exit }
+
     /// Where it would hop from, sit and walk to on `partner`, which has a back to give: nil when there is no room (the lane, the camera,
     /// the way). It comes from the capybara's rump, which is behind the way it faces, and hops forward onto it; when it has hopped off
     /// it walks out of the capybara's way, which it must have the room for, or it would be moved out of it with a jump when the scene is
@@ -542,12 +545,16 @@ nonisolated extension CatBrain {
     private func seating(
         on partner: Pose, now: TimeInterval, keeper: LaneKeeper
     ) -> (launch: Double, seat: Double, exit: Double, direction: Double, host: Double)? {
-        guard travel >= 40, let perch = partner.perch else { return nil }
+        guard travel >= 40, let perch = partner.perch, perch.spot == .back else { return nil }
         let host = partner.position(at: now)
         let seat = host + perch.dx / travel
         let direction = partner.facing == .right ? 1.0 : -1.0
         let launch = seat - direction * CatMove.hopSpan / travel
-        let exit = seat - direction * CatMove.clearance / travel
+        // It walks out to where it is out of the room of all that the capybara has, which is more than its own when it has its tub out: the
+        // place it hops into the tub from is behind it, where the cat comes from.
+        let places = JointRoom(host: partner, now: now, travel: travel, keeper: keeper).places
+        let clear = CatMove.clearance / travel
+        let exit = direction > 0 ? (places.min() ?? host) - clear : (places.max() ?? host) + clear
         let here = plan.position(at: now)
         guard (0.0...1.0).contains(seat), (0.0...1.0).contains(launch), (0.0...1.0).contains(exit),
               keeper.destination(launch, from: here) == launch, keeper.settled(seat) == seat, keeper.settled(exit) == exit,
@@ -601,7 +608,7 @@ nonisolated extension CatBrain {
         if current.phase != .hopOff, current.phase != .walkOff {
             // The host is where it was and still gives its back to ride on; if not, down it comes.
             let hostHolds = lane.joint.map { sight in
-                sight.scene == current.scene && sight.role == .guest && sight.partner.perch != nil
+                sight.scene == current.scene && sight.role == .guest && sight.partner.perch?.spot == .back
                     && abs(sight.partner.position(at: now) - current.host) < 1e-9
             } ?? false
             if !hostHolds {

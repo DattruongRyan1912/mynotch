@@ -318,8 +318,9 @@ final class CatSpriteView: NSView {
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        // One that sits on another is over it: it is drawn above every character that does not, with what it plays with.
-        sprite.zPosition = pose.raised ? Self.raisedHeight : 0
+        // One that sits on another is over it: it is drawn above every character that does not, with what it plays with. One that hides
+        // behind another is under every character that does not.
+        sprite.zPosition = pose.raised ? Self.raisedHeight : (pose.behind ? -Self.raisedHeight : 0)
         layers.prop.zPosition = sprite.zPosition
         prepare(sprite, strip: strip, size: size)
         sprite.position = CGPoint(x: from, y: base)

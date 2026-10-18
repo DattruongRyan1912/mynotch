@@ -66,12 +66,16 @@ nonisolated enum FrogStep: Equatable, Sendable {
     case reel
     /// Sits up and watches the pointer, which goes on until the pointer is gone (see `FrogBrain`).
     case look
+    /// Hops on to the capybara's head, which is at this place (a share of the lane), from where it stands; and off it, to this place.
+    case leapUp(Double)
+    case leapDown(Double)
 
     /// The footing it has to be on to do it, which may mean hopping off the pad first; nil for what it does on either (looking).
     var stance: FrogMove.Stance? {
         switch self {
         case .stay(let move, _): move.stance
         case .hopOff: .pad
+        case .leapDown: .head
         case .look: nil
         default: .ground
         }
@@ -81,7 +85,8 @@ nonisolated enum FrogStep: Equatable, Sendable {
     var endStance: FrogMove.Stance? {
         switch self {
         case .hopOn: .pad
-        case .hopOff: .ground
+        case .leapUp: .head
+        case .hopOff, .leapDown: .ground
         default: stance
         }
     }
@@ -132,5 +137,25 @@ nonisolated extension FrogScene {
         case .crossOver:
             return [.walk(.farEdge), .stay(.sit, seconds(2, 4))]
         }
+    }
+}
+
+nonisolated extension FrogScene {
+    /// What it does while it is on the capybara's head, from the moment it has hopped on to the moment it hops off: it sits, and blinks, a
+    /// good while. `seat` is where the capybara's head is and `launch` where it hops on from and off to. (Getting there and going are the
+    /// brain's.)
+    static func together(seat: Double, launch: Double, using generator: inout SplitMix64) -> [FrogStep] {
+        func seconds(_ low: Double, _ high: Double) -> ClosedRange<Double> {
+            let start = Double.random(in: low...high, using: &generator)
+            return start...start
+        }
+        var steps: [FrogStep] = [
+            .leapUp(seat), .stay(.headSit, seconds(2, 4)), .stay(.headBlink, FrogMove.headBlink.passDuration...FrogMove.headBlink.passDuration),
+            .stay(.headSit, seconds(3, 6)),
+        ]
+        if Double.random(in: 0..<1, using: &generator) < 0.6 {
+            steps += [.stay(.headBlink, FrogMove.headBlink.passDuration...FrogMove.headBlink.passDuration), .stay(.headSit, seconds(3, 6))]
+        }
+        return steps + [.leapDown(launch)]
     }
 }

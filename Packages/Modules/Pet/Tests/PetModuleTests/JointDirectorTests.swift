@@ -8,6 +8,10 @@ nonisolated struct ScriptedBrain: CharacterBrain {
     var pose: Pose
     var ready = true
     var takesThePart = true
+    /// The scenes it says yes to, if it is choosy (nil: all of them).
+    var only: Set<JointScene.ID>?
+    /// It is still in the scene after it is told to leave, as a guest that has to hop off and walk away is, until it says it is done.
+    var lingers = false
     var scene: JointScene.ID?
     private(set) var asked: [JointInvite] = []
     private(set) var joined: [JointInvite] = []
@@ -25,7 +29,7 @@ nonisolated struct ScriptedBrain: CharacterBrain {
     mutating func resume(now: TimeInterval) {}
     mutating func pet(now: TimeInterval) -> BrainOutcome { .unchanged }
 
-    func canJoin(_ invite: JointInvite, now: TimeInterval) -> Bool { ready && scene == nil }
+    func canJoin(_ invite: JointInvite, now: TimeInterval) -> Bool { ready && scene == nil && (only?.contains(invite.scene) ?? true) }
 
     mutating func join(_ invite: JointInvite, now: TimeInterval) {
         joined.append(invite)
@@ -35,7 +39,7 @@ nonisolated struct ScriptedBrain: CharacterBrain {
     mutating func leaveJoint(now: TimeInterval) -> BrainOutcome {
         left += 1
         let was = scene != nil
-        scene = nil
+        if !lingers { scene = nil }
         return was ? .changed : .unchanged
     }
 
@@ -294,5 +298,129 @@ nonisolated struct ScriptedBrain: CharacterBrain {
         moth.prop = PoseProp(look: PropLook(key: 0, fps: 1), from: 0.9, to: 0.9)
         let lane = LaneRules.context(for: 1, poses: [moth, nil], crossing: [], separation: 0.1, now: 0)
         #expect(lane.zones.count == 1)
+    }
+
+    // MARK: More than one scene for a pair
+
+    @Test func ofTheScenesThatFitItTakesOneAtRandomAndWithOnlyOneThatFitsThereIsNothingToDrawSoThePairPlaysAsItAlwaysDid() {
+        var counts: [JointScene.ID: Int] = [:]
+        for seed in 1...40 as ClosedRange<UInt64> {
+            var director = JointDirector(seed: seed)
+            var brains: Brains = [ScriptedBrain(), ScriptedBrain()]
+            _ = run(&director, brains: &brains, kinds: [.capybara, .hamster], seconds: 400, untilBegun: true)
+            if let play = director.play { counts[play.scene.id, default: 0] += 1 }
+        }
+        #expect(counts[.hamsterBehind, default: 0] > 8 && counts[.hamsterNap, default: 0] > 8, "both, over many days: \(counts)")
+        // Only one of them fits: that one, every time, and at the very times a pair with one scene to play has it: nothing is drawn but the few
+        // minutes between one scene and the next, which a replay of the stream (the first draw, and one after each scene) gives to the second.
+        func begins(_ kinds: [CharacterKind], only: JointScene.ID, seed: UInt64) -> [TimeInterval] {
+            var director = JointDirector(seed: seed)
+            var host = ScriptedBrain(), guest = ScriptedBrain()
+            host.only = [only]
+            guest.only = [only]
+            var brains: Brains = [host, guest]
+            var starts: [TimeInterval] = []
+            for second in 1...(2 * 3600) {
+                let now = TimeInterval(second)
+                if let start = starts.last, now == start + 30, var one = brains[1] as? ScriptedBrain { one.finish(); brains[1] = one }
+                let before = director.begun
+                _ = director.direct(now: now, kinds: kinds, brains: &brains)
+                if director.begun != before {
+                    starts.append(now)
+                    #expect(director.play?.scene.id == only)
+                }
+            }
+            return starts
+        }
+        func replay(seed: UInt64) -> [TimeInterval] {
+            var stream = SplitMix64(seed: seed)
+            var due = 1 + Double.random(in: JointDirector.spacing, using: &stream)
+            var starts: [TimeInterval] = []
+            while due < Double(2 * 3600) {
+                let start = due.rounded(.up)
+                starts.append(start)
+                due = start + 30 + Double.random(in: JointDirector.spacing, using: &stream)
+            }
+            return starts
+        }
+        for seed in 1...6 as ClosedRange<UInt64> {
+            let expected = replay(seed: seed)
+            #expect(expected.count > 20)
+            for (kinds, scene) in [([CharacterKind.capybara, .cat], JointScene.ID.catOnCapybara), ([.capybara, .hamster], .hamsterNap), ([.capybara, .corgi], .corgiBeside)] {
+                #expect(begins(kinds, only: scene, seed: seed) == expected, "seed \(seed), \(scene): one draw too many or too few")
+            }
+        }
+    }
+
+    @Test func aSceneThatFitsIsChosenOverOnesThatDoNotWhateverTheOrder() {
+        for seed in 1...12 as ClosedRange<UInt64> {
+            var director = JointDirector(seed: seed)
+            var host = ScriptedBrain()
+            host.only = [.penguinBeside, .corgiBeside]
+            var brains: Brains = [host, ScriptedBrain(), ScriptedBrain(), ScriptedBrain()]
+            var done: [JointScene.ID] = []
+            for second in 1...(3 * 3600) {
+                let now = TimeInterval(second)
+                if let play = director.play, now - play.began >= 30, var guest = brains[play.guest] as? ScriptedBrain { guest.finish(); brains[play.guest] = guest }
+                let before = director.begun
+                _ = director.direct(now: now, kinds: [.capybara, .cat, .penguin, .corgi], brains: &brains)
+                if director.begun != before, let play = director.play { done.append(play.scene.id) }
+            }
+            #expect(!done.isEmpty && done.allSatisfy { [.penguinBeside, .corgiBeside].contains($0) }, "seed \(seed): \(Set(done))")
+        }
+    }
+
+    // MARK: Out of each other's way
+
+    @Test func aGuestThatIsStillGettingOutOfTheWayKeepsOwingTheHostNothingAndNothingBeginsUntilItIsClear() {
+        var director = JointDirector(seed: 5)
+        var guest = ScriptedBrain()
+        guest.lingers = true
+        var brains: Brains = [ScriptedBrain(), guest]
+        _ = run(&director, brains: &brains, kinds: [.capybara, .penguin], seconds: 400, untilBegun: true)
+        #expect(director.play != nil && director.exempt == [0, 1])
+        // The scene is over (the guest is told), and the guest is not out of the host's way yet.
+        _ = director.end(now: 410, brains: &brains)
+        #expect(director.play == nil && director.exempt == [0, 1] && director.leaving != nil, "still excused: \(director.exempt)")
+        _ = director.direct(now: 420, kinds: [.capybara, .penguin], brains: &brains)
+        #expect(director.exempt == [0, 1], "still on its way out at 420")
+        // It is clear: it says so.
+        var out = scripted(brains, 1)
+        out.finish()
+        brains[1] = out
+        _ = director.direct(now: 430, kinds: [.capybara, .penguin], brains: &brains)
+        #expect(director.exempt.isEmpty && director.leaving == nil)
+        // Nothing begins while it is leaving, whatever the time.
+        var again = JointDirector(seed: 5)
+        var lingering = ScriptedBrain()
+        lingering.lingers = true
+        var more: Brains = [ScriptedBrain(), lingering]
+        _ = run(&again, brains: &more, kinds: [.capybara, .penguin], seconds: 400, untilBegun: true)
+        _ = again.end(now: 410, brains: &more)
+        let begun = again.begun
+        var stuck = scripted(more, 1)
+        stuck.scene = .penguinBeside
+        more[1] = stuck
+        let later = run(&again, brains: &more, kinds: [.capybara, .penguin], from: 410, seconds: 2000)
+        #expect(later.isEmpty && again.begun == begun, "it is not out of the way yet")
+    }
+
+    @Test func aGuestThatLeftAndWasNotLingeringIsNotLeavingAndAnotherCharactersNumbersFollowIt() {
+        var director = JointDirector(seed: 8)
+        var guest = ScriptedBrain()
+        guest.lingers = true
+        var brains: Brains = [ScriptedBrain(), ScriptedBrain(), guest]
+        let kinds: [CharacterKind] = [.cat, .capybara, .penguin]
+        _ = run(&director, brains: &brains, kinds: kinds, seconds: 600, untilBegun: true)
+        let play = director.play
+        #expect(play?.host == 1 && play?.guest == 2)
+        _ = director.end(now: 700, brains: &brains)
+        #expect(director.leaving?.guest == 2 && director.exempt == [1, 2])
+        // The cat is taken off the stage: the capybara is 0 and the penguin 1 now.
+        director.renumber([1, 2])
+        #expect(director.leaving?.host == 0 && director.leaving?.guest == 1 && director.exempt == [0, 1])
+        // The penguin is taken off it: nobody is left on its way out.
+        director.renumber([0, nil])
+        #expect(director.leaving == nil && director.exempt.isEmpty)
     }
 }

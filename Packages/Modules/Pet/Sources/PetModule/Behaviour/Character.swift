@@ -58,7 +58,15 @@ nonisolated struct PropLook: Hashable, Sendable {
 /// A place on a character where another can sit: how far, in pixels of the picture, the rider's picture is from this one's, left edge to
 /// left edge, for the way this one faces now.
 nonisolated struct Perch: Equatable, Sendable {
+    /// Where on it the rider sits.
+    nonisolated enum Spot: Equatable, Sendable {
+        case back
+        /// The top of the head, which a capybara has to be low in the water to give: there is no room above it in the picture otherwise.
+        case head
+    }
+
     var dx: Double
+    var spot = Spot.back
 }
 
 /// Something with the character on the lane. Where it is, as a share of the lane like the character's own places (one that leaves goes
@@ -92,6 +100,11 @@ nonisolated struct Pose: Equatable, Sendable {
     var perch: Perch?
     /// Drawn over the characters that are not: one that sits on another is not behind it.
     var raised = false
+    /// Drawn under the characters that are not: one that hides behind another (the hamster behind the capybara) is hidden by it.
+    var behind = false
+    /// Places, as shares of the lane, that nobody else stops in or sets up a prop in while it is in this pose, for where it is going to be
+    /// next (a guest in a scene with the capybara: the place it goes to when it is done, which has to be free when it gets there).
+    var reserves: [Double] = []
 
     var end: TimeInterval { began + duration }
 
@@ -101,7 +114,7 @@ nonisolated struct Pose: Equatable, Sendable {
     /// start over.
     func looksLike(_ other: Pose) -> Bool {
         guard motion.loops, motion == other.motion, facing == other.facing, from == other.from, to == other.to, fpsScale == other.fpsScale,
-              delay == other.delay, prop == other.prop, perch == other.perch, raised == other.raised else { return false }
+              delay == other.delay, prop == other.prop, perch == other.perch, raised == other.raised, behind == other.behind else { return false }
         return (from == to && prop?.from == prop?.to) || duration == other.duration
     }
 

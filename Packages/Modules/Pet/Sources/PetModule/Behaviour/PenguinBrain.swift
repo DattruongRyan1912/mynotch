@@ -75,6 +75,9 @@ nonisolated struct PenguinBrain: Sendable {
     /// It has looked as long as it will, and does not look again until the pointer has gone away.
     private var tired = false
     private var lastFreezeEnd = -TimeInterval.infinity
+    /// The part it plays in a scene with the capybara, if it does (see `PenguinBrain.join`), and the way the capybara looks.
+    private var joint: JointRun?
+    private var jointFacing = Facing.right
 
     init(seed: UInt64, now: TimeInterval, position: Double = 0.5, facing: Facing = .left) {
         generator = SplitMix64(seed: seed)
@@ -98,7 +101,8 @@ nonisolated struct PenguinBrain: Sendable {
 
     /// A stroke: a jump for joy, and then it goes on with what it was doing.
     mutating func pet(now: TimeInterval) -> Outcome {
-        guard !isCrossing(at: now), !Self.unbroken.contains(move) else { return .unchanged }
+        // (One that is in a scene is done with it before it is stroked, and is on its way out: it is not stroked in the middle of that.)
+        guard !isCrossing(at: now), !Self.unbroken.contains(move), joint == nil else { return .unchanged }
         let before = plan
         let joy = Self.happyDuration...Self.happyDuration
         var steps: [PenguinStep] = [.stay(stance == .fishing ? .fishHappy : .happy, joy)]
@@ -123,6 +127,7 @@ nonisolated struct PenguinBrain: Sendable {
     mutating func resume(now: TimeInterval) {
         queue = []
         scene = nil
+        joint = nil
         clearProps()
         stance = .standing
         resumeStep = nil
@@ -137,6 +142,8 @@ nonisolated struct PenguinBrain: Sendable {
         self.travel = travel
         self.senses = senses
         settle(lane: lane)
+        // In a scene with the capybara nothing it senses matters: only the capybara and the time.
+        if joint != nil { return updateJoint(now: now, lane: lane, before: before) }
         // With the reaction off a busy Mac and a quiet one are the same to it: nothing of the load is read.
         busyness = tuning.reactsToBusyMachine ? min(max((senses.cpuLoad - Self.busyFrom) / (1 - Self.busyFrom), 0), 1) : 0
         if tuning.reactsToBusyMachine, senses.busyBurst { busyness = max(busyness, Self.burstBusyness) }
@@ -158,7 +165,8 @@ nonisolated struct PenguinBrain: Sendable {
         var shut = lane
         shut.closed += lane.crossing
         walkKeeper = LaneKeeper(shut)
-        guard plan.from == plan.to, !(lane.crossing.isEmpty && lane.zones.isEmpty) else { return }
+        // (One that plays by the capybara is where the scene puts it.)
+        guard joint == nil, plan.from == plan.to, !(lane.crossing.isEmpty && lane.zones.isEmpty) else { return }
         let here = keeper.settled(plan.to)
         guard here != plan.to else { return }
         // (A hole that is closing is on the pose and no longer on the brain: it goes with the rest.)
@@ -386,6 +394,8 @@ nonisolated struct PenguinBrain: Sendable {
             planned = holeGoes(now: now)
         case .stare:
             planned = stare(now: now)
+        case .turnTo(let way):
+            planned = made(.lookBack, now: now, duration: PenguinMove.lookBack.passDuration, facing: way)
         }
         if planned != nil { stance = step.endStance }
         return planned
@@ -424,6 +434,8 @@ nonisolated struct PenguinBrain: Sendable {
             fpsScale: fpsScale
         )
         pose.prop = nextProp(for: move)
+        // The place it goes to when it is done with the capybara is kept free for it.
+        pose.reserves = joint.map { [$0.place.exit] } ?? []
         return pose
     }
 
@@ -607,4 +619,122 @@ nonisolated struct PenguinBrain: Sendable {
 
 nonisolated extension PenguinBrain: CharacterBrain {
     var pose: Pose { plan }
+}
+
+// MARK: Playing with the capybara
+
+nonisolated extension PenguinBrain {
+    /// What it may be doing for the scene to take it from it: on its feet and awake.
+    private static let joinable: Set<PenguinMove> = [.stand, .blink, .flap, .waddle]
+    /// How far from the capybara's picture, in pixels, the penguin's is for it to stand at its back and at its snout, for a capybara that
+    /// faces right (see `JointRoom`): the penguin's picture is 21 across, and it is touching the capybara's, which is 28.
+    private static let offsets = (rump: -25.0, front: 26.0)
+    /// How near the place the lane let it go to, in pixels, it has to be to be by the capybara.
+    private static let arrivalTolerance = 3.0
+
+    var jointScene: JointScene.ID? { joint?.scene }
+
+    /// Where it would stand for `scene` by `host`, which holds still: nil when there is no room (the lane, the camera, the way there and the
+    /// way out), or it is not a scene it plays. It stands at the capybara's back if there is room there, where it looks the way the
+    /// capybara looks without turning round.
+    private func jointPlace(for scene: JointScene.ID, host: Pose, now: TimeInterval, lane: LaneContext) -> JointPlace? {
+        guard scene == .penguinBeside else { return nil }
+        let places = JointRoom(host: host, now: now, travel: travel, keeper: LaneKeeper(lane)).placings(offsets: Self.offsets, from: plan.position(at: now))
+        return places.first { !$0.inFront } ?? places.first
+    }
+
+    func canJoin(_ invite: JointInvite, now: TimeInterval) -> Bool {
+        guard invite.role == .guest, joint == nil, busyness == 0, !isCrossing(at: now), Self.joinable.contains(move), !hasProps,
+              plan.prop == nil, travel >= 1 else { return false }
+        // The room is judged as it will be once the scene has begun, with the capybara's own place no longer in the way.
+        return jointPlace(for: invite.scene, host: invite.partner, now: now, lane: invite.lane) != nil
+    }
+
+    mutating func join(_ invite: JointInvite, now: TimeInterval) {
+        guard let place = jointPlace(for: invite.scene, host: invite.partner, now: now, lane: invite.lane) else { return }
+        keeper = LaneKeeper(invite.lane)
+        var shut = invite.lane
+        shut.closed += invite.lane.crossing
+        walkKeeper = LaneKeeper(shut)
+        scene = nil
+        resumeStep = nil
+        jointFacing = invite.partner.facing
+        joint = JointRun(scene: invite.scene, host: invite.partner, now: now, place: place)
+        queue = [.slideTo(place.target)]
+        startJointQueue(now: now)
+    }
+
+    /// The scene is over for it, wherever it is in it: one that is by the capybara gets up and waddles out of its room, and one that is on its
+    /// way to it goes about its day. A slide, a getting up or a turn that is half done is finished first.
+    mutating func leaveJoint(now: TimeInterval) -> Outcome {
+        guard var run = joint, run.phase != .exit else { return .unchanged }
+        let before = plan
+        run.phase = .exit
+        joint = run
+        // (A move that cannot be broken off is gone on with to where it ends.)
+        let ends = Self.unbroken.contains(move) && now < plan.end ? plan.to : plan.position(at: now)
+        let near = run.isNear(ends, travel: travel)
+        queue = near ? [.walkTo(run.place.exit)] : []
+        if !(Self.unbroken.contains(move) && now < plan.end) { startJointQueue(now: now) }
+        return outcome(since: before)
+    }
+
+    /// An update of one that is in a scene: nothing it senses matters, only the capybara and the time.
+    fileprivate mutating func updateJoint(now: TimeInterval, lane: LaneContext, before: Pose) -> Outcome {
+        guard let run = joint else { return .unchanged }
+        if run.phase != .exit {
+            // The capybara is where it was and is still being played with; if not, out it goes.
+            let holds = lane.joint.map { sight in
+                sight.scene == run.scene && sight.role == .guest && abs(sight.partner.position(at: now) - run.host) < 1e-9
+            } ?? false
+            if !holds {
+                _ = leaveJoint(now: now)
+                return outcome(since: before)
+            }
+        }
+        if now >= plan.end { startJointQueue(now: now) }
+        return outcome(since: before)
+    }
+
+    /// Begins the next step of the part, or the next part of it when there is none left: the going there, the being there, the going.
+    private mutating func startJointQueue(now: TimeInterval) {
+        for _ in 0..<16 {
+            guard var run = joint else { break }
+            if queue.isEmpty {
+                switch run.phase {
+                case .approach:
+                    // It is by the capybara, or the lane did not let it get there, which is the end of the scene for it.
+                    if abs(plan.position(at: now) - run.place.target) * travel <= Self.arrivalTolerance {
+                        run.phase = .together
+                        queue = PenguinScene.together(turning: plan.facing != jointFacing, facing: jointFacing, using: &generator)
+                    } else {
+                        run.phase = .exit
+                        queue = []
+                    }
+                case .together:
+                    run.phase = .exit
+                    queue = [.walkTo(run.place.exit)]
+                case .exit:
+                    finishJoint(now: now)
+                    return
+                }
+                joint = run
+                continue
+            }
+            let step = queue.removeFirst()
+            if let planned = begin(step, now: now) {
+                plan = planned
+                return
+            }
+        }
+        finishJoint(now: now)
+    }
+
+    /// The scene is over and its day goes on, from where it stands: after a moment of standing, which is the time the stage takes to tell it where
+    /// the capybara is (the room it owed the capybara no longer is none), so that what it sets out first is out of the capybara's way.
+    private mutating func finishJoint(now: TimeInterval) {
+        joint = nil
+        queue = [.stay(.stand, 0.5...0.5)]
+        startQueue(now: now)
+    }
 }

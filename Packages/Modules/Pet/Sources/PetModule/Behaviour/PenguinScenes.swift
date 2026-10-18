@@ -66,12 +66,14 @@ nonisolated enum PenguinStep: Equatable, Sendable {
     case holeGoes
     /// Turns to look at the pointer, which goes on until it is gone (see `PenguinBrain`).
     case stare
+    /// Turns round, through facing the viewer, to face this way: it is by the capybara, and looks the way it does.
+    case turnTo(Facing)
 
     /// The way the penguin has to be to do it, which may mean getting up, lying down or untucking first.
     var stance: PenguinMove.Stance {
         switch self {
         case .stay(let move, _): move.stance
-        case .walk, .walkTo, .slip, .placeHole, .cast, .holeGoes, .stare: .standing
+        case .walk, .walkTo, .slip, .placeHole, .cast, .holeGoes, .stare, .turnTo: .standing
         case .slide, .slideTo: .lying
         case .reel: .fishing
         }
@@ -130,5 +132,22 @@ nonisolated extension PenguinScene {
         case .nap:
             return [.stay(.tucked, seconds(8, 16)), .stay(.stand, seconds(1, 2))]
         }
+    }
+}
+
+nonisolated extension PenguinScene {
+    /// What it does while it is by the capybara, from the moment it is there to the moment it goes: it gets up, turns to look the way the
+    /// capybara does if it came to it from the front, and stands by it, blinking and now and then flapping. (Getting there and going are the
+    /// brain's.) `turning` is whether it faces the wrong way for that when it is there, and `facing` the way the capybara looks.
+    static func together(turning: Bool, facing: Facing, using generator: inout SplitMix64) -> [PenguinStep] {
+        func seconds(_ low: Double, _ high: Double) -> ClosedRange<Double> {
+            let start = Double.random(in: low...high, using: &generator)
+            return start...start
+        }
+        var steps: [PenguinStep] = [.stay(.stand, seconds(1, 2))]
+        if turning { steps += [.stay(.lookTurn, PenguinMove.lookTurn.passDuration...PenguinMove.lookTurn.passDuration), .turnTo(facing)] }
+        steps += [.stay(.stand, seconds(3, 6)), .stay(.blink, 0.4...0.4), .stay(.stand, seconds(3, 6))]
+        if Double.random(in: 0..<1, using: &generator) < 0.5 { steps += [.stay(.flap, seconds(1.5, 2.5)), .stay(.stand, seconds(2, 4))] }
+        return steps
     }
 }

@@ -23,6 +23,8 @@ nonisolated enum LaneRules {
                 if let prop = pose.prop, prop.look.occupies {
                     for place in [prop.to] + prop.alsoAt { lane.zones.append((place - separation)...(place + separation)) }
                 }
+                // And what it has asked to be kept free for where it is going.
+                for place in pose.reserves { lane.zones.append((place - separation)...(place + separation)) }
             }
             if isCrossing(pose, through: crossing, at: now) { lane.closed = crossing }
         }

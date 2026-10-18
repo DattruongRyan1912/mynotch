@@ -26,7 +26,7 @@ import Testing
         let asked: [CapybaraMove: Int] = [
             .walk: 6, .sit: 4, .blink: 1, .doze: 8, .hold: 2, .peel: 4, .chew: 4, .happy: 4, .sweat: 4, .turn: 3, .watch: 1, .turnBack: 3,
             .lie: 2, .sleep: 4, .lieDown: 4, .sitUp: 4, .sitDown: 4, .standUp: 4, .climbIn: 6, .climbOut: 6, .soak: 4, .soakOrange: 4,
-            .soakHappy: 4,
+            .soakHappy: 4, .soakSink: 4, .soakDeep: 4, .soakRise: 4,
         ]
         #expect(Set(asked.keys) == Set(CapybaraMove.allCases))
         for move in CapybaraMove.allCases { #expect(move.frameCount == asked[move], "\(move)") }

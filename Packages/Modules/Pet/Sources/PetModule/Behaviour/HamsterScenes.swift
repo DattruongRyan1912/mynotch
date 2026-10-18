@@ -46,6 +46,8 @@ nonisolated enum HamsterStep: Equatable, Sendable {
     /// Stays where it is with this move, for this many seconds.
     case stay(HamsterMove, ClosedRange<Double>)
     case go(HamsterPlace)
+    /// Goes to this place exactly, a share of the lane (which the capybara, in a scene with it, has set the place of).
+    case goTo(Double)
     /// Sits while a wheel pops up in front of it, a hop away.
     case placeWheel
     /// Hops into the wheel.
@@ -65,7 +67,7 @@ nonisolated enum HamsterStep: Equatable, Sendable {
     var stance: HamsterMove.Stance {
         switch self {
         case .stay(let move, _): move.stance
-        case .go: .standing
+        case .go, .goTo: .standing
         case .hopOut, .run: .wheel
         case .placeWheel, .hopIn, .wheelGoes, .placeSeeds, .stuff: .seated
         }
@@ -113,6 +115,30 @@ nonisolated extension HamsterScene {
             return [.stay(.sit, seconds(0.8, 1.6)), .stay(.groom, seconds(4, 8)), .stay(.sit, seconds(1, 2))]
         case .nap:
             return [.stay(.ball, seconds(8, 16)), .stay(.sit, seconds(1, 2))]
+        }
+    }
+}
+
+nonisolated extension HamsterScene {
+    /// What it does while it is by the capybara, from the moment it is there to the moment it goes: the part of a scene it plays with it.
+    /// Hiding behind it, the capybara hides all of it but its head, which comes up over its back now and then to look about, upright and with
+    /// its ears up; asleep by it, it curls into a ball against its side and sleeps. (Getting there and going are the brain's.)
+    static func together(_ scene: JointScene.ID, using generator: inout SplitMix64) -> [HamsterStep] {
+        func seconds(_ low: Double, _ high: Double) -> ClosedRange<Double> {
+            let start = Double.random(in: low...high, using: &generator)
+            return start...start
+        }
+        switch scene {
+        case .hamsterBehind:
+            var steps: [HamsterStep] = [.stay(.sit, seconds(1.5, 3)), .stay(.freeze, seconds(1.5, 3)), .stay(.sit, seconds(0.8, 1.6))]
+            if Double.random(in: 0..<1, using: &generator) < 0.6 {
+                steps += [.stay(.blink, 0.4...0.4), .stay(.freeze, seconds(1.5, 2.5)), .stay(.sit, seconds(1, 2))]
+            }
+            return steps
+        case .hamsterNap:
+            return [.stay(.sit, seconds(0.6, 1.2)), .stay(.ball, seconds(2, 4)), .stay(.sleep, seconds(8, 14)), .stay(.ball, seconds(1, 2))]
+        default:
+            return []
         }
     }
 }

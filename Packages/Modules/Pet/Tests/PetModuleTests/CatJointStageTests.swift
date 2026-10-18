@@ -292,6 +292,35 @@ import Testing
         #expect(longest > 10 && longest <= JointDirector.longest + 1, "\(longest)")
     }
 
+    @Test func whenTheSceneIsEndedEarlyByAClickOnTheCatOrTheLaneMovingTheCapybaraDoesNotJumpAndItsTubIsNotTakenFromIt() throws {
+        var ended = 0, withATub = 0
+        for seed: UInt64 in [3, 8, 21, 34, 55, 89] {
+            for how in ["click", "lane"] {
+                let rig = pair(seed: seed)
+                #expect(untilScene(rig, minutes: 90) { perched($0) })
+                let host = try #require(rig.hosts.first)
+                let before = rig.stage.poses[1]
+                if before.prop != nil { withATub += 1 }
+                if how == "click" {
+                    let cat = host.characters[0].sprite
+                    try click(host, at: CGPoint(x: cat.frame.midX, y: cat.frame.midY + 3))
+                } else {
+                    let size = rig.container.frame.size
+                    rig.container.setFrameSize(NSSize(width: size.width + 40, height: size.height))
+                    rig.container.layoutSubtreeIfNeeded()
+                }
+                #expect(rig.stage.jointPlay == nil)
+                ended += 1
+                // The cat is hopping off and walking out of the way, and is excused of the capybara's room until it is: the capybara stays.
+                expectHostStaysPut(rig, was: before, seconds: 8, "seed \(seed), \(how)")
+                for _ in 0..<(4 * 60) { rig.advance(0.25) }
+                #expect(rig.stage.jointExempt.isEmpty)
+                rig.hide()
+            }
+        }
+        #expect(ended == 12 && withATub >= 3, "\(ended) scenes ended early, \(withATub) of them with a tub")
+    }
+
     // MARK: Occasionally, one at a time
 
     @Test func atMostOneAtATimeWithAnotherCatOnTheScreenAndNeverSoonerThanAFewMinutesAfterTheLast() {
@@ -340,6 +369,7 @@ import Testing
                 let now = rig.scheduler.seconds
                 let poses = rig.stage.poses
                 let play = rig.stage.jointPlay
+                let excused = rig.stage.jointExempt
                 if play != nil, !wasPlaying { scenes += 1 }
                 wasPlaying = play != nil
                 var inCrossing = 0
@@ -347,7 +377,7 @@ import Testing
                 for (index, pose) in poses.enumerated() {
                     if LaneRules.isCrossing(pose, through: crossing, at: now) { inCrossing += 1 }
                     for other in poses.indices where other > index {
-                        if let play, Set([index, other]) == [play.host, play.guest] { continue }
+                        if excused.contains(index), excused.contains(other) { continue }
                         guard rests(pose), rests(poses[other]) else { continue }
                         let apart = abs(pose.position(at: now) - poses[other].position(at: now)) * travel
                         if apart < width { overlaps.append("seed \(seed) at \(now): \(index) and \(other) \(apart) points apart") }
@@ -355,9 +385,11 @@ import Testing
                     // Whoever has a tub out has the room round it too: nobody else is at rest in it.
                     for (owner, tub) in poses.enumerated() where owner != index {
                         guard let prop = tub.prop, prop.look.occupies, rests(pose) else { continue }
-                        if let play, Set([index, owner]) == [play.host, play.guest] { continue }
-                        let apart = abs(pose.position(at: now) - prop.to) * travel
-                        if apart < width { overlaps.append("seed \(seed) at \(now): \(index) is \(apart) points from \(owner)'s tub") }
+                        if excused.contains(index), excused.contains(owner) { continue }
+                        for place in [prop.to] + prop.alsoAt {
+                            let apart = abs(pose.position(at: now) - place) * travel
+                            if apart < width { overlaps.append("seed \(seed) at \(now): \(index) is \(apart) points from \(owner)'s tub or where it hops from") }
+                        }
                     }
                 }
                 if inCrossing > 1 { together.append("seed \(seed) at \(now): \(inCrossing) in the crossing") }

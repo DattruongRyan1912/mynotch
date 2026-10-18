@@ -29,7 +29,9 @@ nonisolated struct CapybaraBrain: Sendable {
     /// How long the pose of a capybara that is played with holds, before it holds again.
     static let hostHold: TimeInterval = 8
     /// What it does is held to these moves: a stroke is not taken while it is hopping, getting up or down or turning its head.
-    static let unbroken: Set<CapybaraMove> = [.climbIn, .climbOut, .sitDown, .standUp, .lieDown, .sitUp, .turn, .turnBack, .happy, .soakHappy]
+    static let unbroken: Set<CapybaraMove> = [
+        .climbIn, .climbOut, .sitDown, .standUp, .lieDown, .sitUp, .turn, .turnBack, .happy, .soakHappy, .soakSink, .soakRise,
+    ]
 
     /// The tub: where it stands (a share of the lane: where the capybara is when it is in it) and how far it has come.
     private struct Tub {
@@ -84,9 +86,10 @@ nonisolated struct CapybaraBrain: Sendable {
 
     /// A stroke: a happy squint and a heart, and then it goes on with what it was doing.
     mutating func pet(now: TimeInterval) -> Outcome {
+        // One that is stroked is not played with any more: the scene is over for it, and so for whoever sits on it. (A capybara sunk in its
+        // tub comes up first, which is not a stroke taken.)
+        _ = leaveJoint(now: now)
         guard !isCrossing(at: now), !Self.unbroken.contains(move) else { return .unchanged }
-        // One that is stroked is not played with any more: the scene is over for it, and so for whoever sits on it.
-        hosting = nil
         let before = plan
         var steps: [CapybaraStep] = [.stay(stance == .soaking ? .soakHappy : .happy, Self.happyDuration...Self.happyDuration)]
         // What was left of a pose it stayed in goes on afterwards: a soak is not cut short by a stroke.
@@ -118,7 +121,7 @@ nonisolated struct CapybaraBrain: Sendable {
         busyness = tuning.reactsToBusyMachine ? min(max((senses.cpuLoad - CatBrain.busyFrom) / (1 - CatBrain.busyFrom), 0), 1) : 0
         guard hosting == nil else {
             // Played on: it holds the pose it is in, for as long as it takes.
-            if now >= plan.end { plan = extended(now: now) }
+            if now >= plan.end { plan = held(now: now) }
             return outcome(since: before)
         }
         let sticky = Self.unbroken.contains(move) && now < plan.end || isCrossing(at: now)
@@ -156,26 +159,52 @@ nonisolated struct CapybaraBrain: Sendable {
 
     var jointScene: JointScene.ID? { hosting }
 
-    /// It gives its back to ride on while it sits or soaks, holding still, with nothing set out for the scene it is in.
+    /// The moves it is in a state to be played with in, for each scene: it holds one of them for as long as it takes. The cat sits on its back
+    /// while it sits or soaks, and the frog on its head when it soaks without an orange (and sinks first); the others are by it or behind it,
+    /// which asks no more of it than that it holds still, so it may be dozing too, and the hamster asleep by it is the likeliest of all.
+    static func hostMoves(for scene: JointScene.ID) -> Set<CapybaraMove> {
+        switch scene {
+        case .catOnCapybara: [.sit, .blink, .soak, .soakOrange]
+        case .frogOnHead: [.soak]
+        case .hamsterBehind, .hamsterNap, .penguinBeside, .corgiBeside: [.sit, .blink, .doze, .soak, .soakOrange]
+        }
+    }
+
+    /// It holds still in a pose that suits the scene, with nothing set out for it but its tub, which is there and not on its way in or out.
     func canJoin(_ invite: JointInvite, now: TimeInterval) -> Bool {
-        guard invite.role == .host, invite.scene == .catOnCapybara, hosting == nil, move.givesPerch, plan.from == plan.to,
+        guard invite.role == .host, hosting == nil, Self.hostMoves(for: invite.scene).contains(move), plan.from == plan.to,
               !isCrossing(at: now) else { return false }
         if stance == .soaking { return tub?.phase == .occupied && orange == nil && peel == nil }
         // Nothing out, and not a tub on its way into the floor: that is a pose that has a picture of its own to finish.
         return stance == .seated && !hasProps && plan.prop == nil
     }
 
+    /// Takes the part: it holds still, and sinks into the water first if it is the frog that is coming.
     mutating func join(_ invite: JointInvite, now: TimeInterval) {
         hosting = invite.scene
+        if invite.scene == .frogOnHead { plan = made(.soakSink, now: now, duration: CapybaraMove.soakSink.passDuration) }
     }
 
+    /// The scene is over, or it is not played on any more: it goes on with its day, and one that has sunk in the water comes up first.
     mutating func leaveJoint(now: TimeInterval) -> Outcome {
+        guard hosting != nil else { return .unchanged }
         hosting = nil
-        return .unchanged
+        let before = plan
+        switch move {
+        case .soakDeep:
+            plan = made(.soakRise, now: now, duration: CapybaraMove.soakRise.passDuration)
+        case .soakSink:
+            // It finishes sinking, which is not broken off, and comes up.
+            queue.insert(.stay(.soakRise, CapybaraMove.soakRise.passDuration...CapybaraMove.soakRise.passDuration), at: 0)
+        default:
+            break
+        }
+        return outcome(since: before)
     }
 
-    /// The same pose, held for a while longer.
-    private func extended(now: TimeInterval) -> Pose {
+    /// The same pose, held for a while longer: what it holds for a scene, with the sinking followed by the sinking's end.
+    private mutating func held(now: TimeInterval) -> Pose {
+        if move == .soakSink { return made(.soakDeep, now: now, duration: Self.hostHold) }
         var held = plan
         held.began = now
         held.duration = Self.hostHold
@@ -379,7 +408,7 @@ nonisolated struct CapybaraBrain: Sendable {
             fpsScale: 1
         )
         pose.prop = nextProp()
-        if move.givesPerch { pose.perch = Perch(dx: CapybaraMove.perchShift) }
+        if let spot = move.perchSpot { pose.perch = Perch(dx: CapybaraMove.perchShift, spot: spot) }
         return pose
     }
 

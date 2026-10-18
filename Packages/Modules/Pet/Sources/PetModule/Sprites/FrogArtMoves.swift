@@ -11,6 +11,10 @@ extension FrogArt {
         switch move {
         case .hopOn: return hopOnFrames
         case .hopOff: return hopOffFrames
+        case .headHopOn: return headHopOnFrames
+        case .headHopOff: return headHopOffFrames
+        case .headSit: return headSitFrames
+        case .headBlink: return headBlinkFrames
         default: break
         }
         switch move.onTheGround {

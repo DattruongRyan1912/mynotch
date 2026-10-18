@@ -58,6 +58,17 @@ struct CapyDrive {
         record(brain.pet(now: now))
     }
 
+    /// Takes the part in a scene, and lets go of it, which change what it is doing for a picture of their own.
+    mutating func join(_ invite: JointInvite) {
+        let before = brain.pose
+        brain.join(invite, now: now)
+        if brain.pose != before { history.append((now, brain.pose)); every.append(brain.pose) }
+    }
+
+    mutating func leave() {
+        record(brain.leaveJoint(now: now))
+    }
+
     mutating func resume() {
         brain.resume(now: now)
         history.append((now, brain.pose))
@@ -91,7 +102,7 @@ func propProblems(_ trail: [(move: CapybaraMove, prop: CapybaraProp?)]) -> [Stri
         .tubRippling: [.tubEmpty, .tubRippling, .tubGoing], .tubGoing: [nil], .peel: [.peel, .peelGoing], .peelGoing: [nil], .orange: [.orange, nil],
     ]
     for (index, entry) in trail.enumerated() {
-        let soaking = [CapybaraMove.climbIn, .climbOut, .soak, .soakOrange, .soakHappy].contains(entry.move)
+        let soaking = [CapybaraMove.climbIn, .climbOut, .soak, .soakOrange, .soakHappy, .soakSink, .soakDeep, .soakRise].contains(entry.move)
         if soaking, entry.prop != .tubRippling { problems.append("\(index): \(entry.move) with \(String(describing: entry.prop))") }
         if !soaking, entry.prop == .tubRippling { problems.append("\(index): \(entry.move) in the tub, which it is not in") }
         if entry.prop == .tubAppearing, entry.move != .sit { problems.append("\(index): the tub comes up under a \(entry.move)") }

@@ -61,5 +61,10 @@ nonisolated extension CatPlan {
 }
 
 nonisolated extension CatBrain: CharacterBrain {
-    var pose: Pose { plan.pose }
+    var pose: Pose {
+        var pose = plan.pose
+        // The place the cat goes to when it is done with the capybara is kept free for it.
+        pose.reserves = jointExit.map { [$0] } ?? []
+        return pose
+    }
 }

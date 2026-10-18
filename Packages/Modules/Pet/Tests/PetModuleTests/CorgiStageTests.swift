@@ -430,7 +430,7 @@ import Testing
             rig.advance(0.25)
             let now = rig.scheduler.seconds
             let poses = stage.poses
-            let play = stage.jointPlay
+            let playing = stage.jointExempt
             #expect(poses.count == kinds.count)
             var (inCrossing, walking) = (0, 0)
             func rests(_ pose: Pose) -> Bool { pose.from == pose.to || now >= pose.end }
@@ -441,11 +441,10 @@ import Testing
                     if kinds[index] == .corgi { report.balls += 1 }
                     // Nobody else is at rest where the prop is, or where its owner stands or hops from.
                     for (other, otherPose) in poses.enumerated() where other != index && rests(otherPose) {
-                        // (The pair that are playing, one on the other's back, owe each other nothing.)
-                        if let play, Set([index, other]) == [play.host, play.guest] { continue }
-                        // (The capybara's tub is held to its own place here, as PET6's test holds it: a cat has been found at rest 13 points from
-                        // the place the capybara hops from, once or twice in fifteen minutes.)
-                        for place in kinds[index] == .capybara ? [prop.from] : [prop.to] + prop.alsoAt {
+                        // (The pair that are playing, or only just done and still getting out of each other's way, owe each other nothing.)
+                        if playing.contains(index), playing.contains(other) { continue }
+                        // (Every prop keeps the place its owner stands or hops from too, the capybara's tub as the rest.)
+                        for place in [prop.to] + prop.alsoAt {
                             let apart = abs(otherPose.position(at: now) - place) * travel
                             if apart < width { report.inTheWay.append("\(label) at \(now): \(other) \(apart) points from the room \(index)'s prop takes") }
                         }
@@ -458,7 +457,7 @@ import Testing
                     }
                 }
                 for other in poses.indices where other > index {
-                    if let play, Set([index, other]) == [play.host, play.guest] { continue }
+                    if playing.contains(index), playing.contains(other) { continue }
                     guard rests(poses[index]), rests(poses[other]) else { continue }
                     let apart = abs(poses[index].position(at: now) - poses[other].position(at: now)) * travel
                     if apart < width { report.overlaps.append("\(label) at \(now): \(index) and \(other) \(apart) points apart (\(width) is a picture)") }

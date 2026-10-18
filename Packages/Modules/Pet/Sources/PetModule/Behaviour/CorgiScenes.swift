@@ -132,3 +132,18 @@ nonisolated extension CorgiScene {
         }
     }
 }
+
+nonisolated extension CorgiScene {
+    /// What it does while it is by the capybara, from the moment it is there to the moment it goes: now and then a little wiggle of its rear,
+    /// and then it lies down with its chin on its paws for a good while (getting down and up are the brain's). (Getting there and going are
+    /// the brain's too.)
+    static func together(using generator: inout SplitMix64) -> [CorgiStep] {
+        func seconds(_ low: Double, _ high: Double) -> ClosedRange<Double> {
+            let start = Double.random(in: low...high, using: &generator)
+            return start...start
+        }
+        var steps: [CorgiStep] = []
+        if Double.random(in: 0..<1, using: &generator) < 0.6 { steps += [.stay(.wiggle, seconds(1.5, 2.5))] }
+        return steps + [.stay(.lie, seconds(10, 20)), .stay(.stand, seconds(0.5, 1))]
+    }
+}

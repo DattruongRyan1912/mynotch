@@ -31,15 +31,19 @@ extension CapybaraArt {
         case .soak: [soak(), soak(), soak(), soak(face: .blink)]
         case .soakOrange: (0..<4).map { soak(face: $0 == 3 ? .blink : .half, withOrange: true, breath: $0 >= 2 ? 1 : 0) }
         case .soakHappy: soakHappyFrames
+        case .soakSink: soakSinkFrames
+        case .soakDeep: soakDeepFrames
+        case .soakRise: Array(soakSinkFrames.reversed())
         }
     }
 
     /// The capybara sitting with its eyes open, then shut: what one that does not move at all (Reduce Motion) shows.
     static var restingFrames: [PixelFrame] { [sit(), sit(face: .blink)] }
 
-    /// The sitting capybara in profile, its head up over its shoulders.
-    static func sit(breath: Int = 0, face: Face = .open, extras: (inout CatCanvas) -> Void = { _ in }) -> PixelFrame {
-        capybara(body: seated, legs: [], sitting: true, head: (16, 4 + breath), face: face, joined: 5, extras: extras)
+    /// The sitting capybara in profile, its head up over its shoulders. `sunk` is how many rows lower the whole of it is drawn, which in the
+    /// tub is how far down in the water it is.
+    static func sit(breath: Int = 0, face: Face = .open, sunk: Int = 0, extras: (inout CatCanvas) -> Void = { _ in }) -> PixelFrame {
+        capybara(body: seated, legs: [], sitting: true, head: (16, 4 + breath), face: face, joined: 5, lift: -sunk, extras: extras)
     }
 
     /// Lying down, its chin on the floor.
@@ -243,6 +247,17 @@ extension CapybaraArt {
             extras(&canvas)
         }
     }
+
+    /// How far down it goes for a frog to sit on its head: the picture is drawn this many rows lower and the water of the tub, which is drawn
+    /// over it, is over all of it but the top of its head, so that its eyes are the last of it above the water and the crown of its head,
+    /// where the frog sits, is `deepest` rows lower than it is when it soaks (and `backTop` is nothing any more: its back is under the water).
+    static let deepest = 5
+
+    /// Sinking: the whole of it a row lower at a time, until it is where it is for the frog.
+    static var soakSinkFrames: [PixelFrame] { (1..<deepest).map { sit(sunk: $0) } }
+
+    /// Sunk to its eyes, still, with its eyes open and now and then shut.
+    static var soakDeepFrames: [PixelFrame] { [sit(sunk: deepest), sit(sunk: deepest), sit(face: .half, sunk: deepest), sit(face: .blink, sunk: deepest)] }
 
     static var soakHappyFrames: [PixelFrame] {
         (0..<4).map { index in
