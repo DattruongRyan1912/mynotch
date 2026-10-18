@@ -12,23 +12,6 @@ struct ScreenshotActivityIcon: View {
     }
 }
 
-/// The new capture, 16 pt, or the camera when its thumbnail could not be made.
-struct ScreenshotActivityThumbnail: View {
-    let image: CGImage?
-
-    var body: some View {
-        if let image {
-            Image(decorative: image, scale: 2)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 16, height: 16)
-                .clipShape(RoundedRectangle(cornerRadius: 3))
-        } else {
-            ScreenshotActivityIcon(systemImage: "camera.viewfinder")
-        }
-    }
-}
-
 /// A short line in the 64 pt beside the closed notch; two lines at most, so "Đã chép 120 ký tự" fits.
 struct ScreenshotActivityText: View {
     let text: String

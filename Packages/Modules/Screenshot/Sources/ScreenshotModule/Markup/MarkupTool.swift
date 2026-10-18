@@ -3,6 +3,8 @@ import CoreGraphics
 /// The editor's drawing tools, in toolbar order.
 nonisolated enum MarkupTool: CaseIterable, Sendable {
     case arrow, rectangle, text, highlighter, step, magnifier, ruler, redact, erase
+    /// Draws no annotation: its drag makes the crop frame, which `MarkupEditorModel` keeps until it is applied.
+    case crop
 
     var title: String {
         switch self {
@@ -15,6 +17,7 @@ nonisolated enum MarkupTool: CaseIterable, Sendable {
         case .ruler: "Thước đo"
         case .redact: "Che vùng"
         case .erase: "Xoá thông minh"
+        case .crop: "Cắt"
         }
     }
 
@@ -25,6 +28,7 @@ nonisolated enum MarkupTool: CaseIterable, Sendable {
         case .magnifier: "\(title): kéo từ tâm ra ngoài để phóng to phần ảnh bên dưới"
         case .ruler: "\(title): kéo giữa hai điểm; giữ ⇧ để giữ ngang hoặc dọc"
         case .erase: "\(title): tô vùng chọn bằng màu viền quanh nó; nếu viền không đồng nhất thì làm nhoè (pixel hoá) vùng đó"
+        case .crop: "\(title): kéo một khung trên ảnh, kéo cạnh hoặc góc để chỉnh; Return để áp dụng, Esc để huỷ"
         default: title
         }
     }
@@ -40,12 +44,14 @@ nonisolated enum MarkupTool: CaseIterable, Sendable {
         case .ruler: "ruler"
         case .redact: "checkerboard.rectangle"
         case .erase: "eraser"
+        case .crop: "crop"
         }
     }
 
-    /// Whether the colour and thickness choices apply; redaction and erasing take their look from the pixels.
+    /// Whether the colour and thickness choices apply; redaction and erasing take their look from the pixels, and
+    /// cropping draws nothing.
     var usesStyle: Bool {
-        self != .redact && self != .erase
+        self != .redact && self != .erase && self != .crop
     }
 
     /// The shape a drag through `points` (image pixels, first = where it started) draws, or nil for the text tool
@@ -81,7 +87,7 @@ nonisolated enum MarkupTool: CaseIterable, Sendable {
             let tip = options.snapsToAxis ? Ruler.snapped(end, from: start) : end
             guard Ruler.distance(from: start, to: tip) >= minimum else { return nil }
             return .ruler(from: start, to: tip, style: style, fontSize: options.thickness.fontSize * 0.6 * pixelsPerPoint, scale: options.pointScale)
-        case .text:
+        case .text, .crop:
             return nil
         }
     }

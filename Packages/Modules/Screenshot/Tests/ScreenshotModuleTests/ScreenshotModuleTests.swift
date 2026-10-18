@@ -15,6 +15,8 @@ import Testing
     let overlay = FakeOverlay()
     let recognizer = FakeRecognizer()
     let pasteboard = FakePasteboard()
+    let chip = FakeCaptureChip()
+    let editors = FakeEditors()
     let system = FakeSystem()
     let module: ScreenshotModule
     let harness: RegistryHarness
@@ -27,8 +29,10 @@ import Testing
         let system = system
         let dragsDirectory = FileManager.default.temporaryDirectory.appending(path: "MyNotchTests-drags-\(UUID().uuidString)", directoryHint: .isDirectory)
         self.dragsDirectory = dragsDirectory
+        let editors = editors
         module = ScreenshotModule(
             service: service, overlay: overlay, recognizer: recognizer, pasteboard: pasteboard,
+            chip: chip, makeEditors: { _ in editors },
             hasScreenAccess: { system.hasScreenAccess }, onScreenWindows: { system.windows },
             saveDirectory: { _ in system.saveDirectory },
             dragCopiesDirectory: dragsDirectory
@@ -208,6 +212,7 @@ import Testing
         #expect(module.state.records.isEmpty)
         #expect(pasteboard.images.isEmpty)
         #expect(activity == nil)
+        #expect(chip.shown.isEmpty)
         #expect(harness.presenter.toastCount == 0)
     }
 
@@ -229,10 +234,11 @@ import Testing
         #expect(bitmap.pixel(0, 0) == Bitmap.Pixel(r: 20, g: 30, b: 0, a: 255))
         #expect(bitmap.pixel(39, 49) == Bitmap.Pixel(r: 59, g: 79, b: 0, a: 255))
 
-        #expect(activity?.id == "captured")
-        #expect(activity?.expiresAfter == .seconds(3))
-        harness.scheduler.advance(by: .seconds(3))
+        // The chip beside the capture, which "Sửa" and "Chép" are on, is the only announcement.
+        #expect(chip.isVisible)
         #expect(activity == nil)
+        harness.scheduler.advance(by: .seconds(6))
+        #expect(!chip.isVisible)
         #expect(harness.presenter.toastCount == 0)
     }
 
@@ -283,7 +289,7 @@ import Testing
         #expect((record.pixelWidth, record.pixelHeight) == (120, 80))
         #expect(try dpi(of: #require(module.store?.url(for: record.id))) == 144)
         #expect(pasteboard.images.first?.image.width == 120)
-        #expect(activity?.id == "captured")
+        #expect(chip.isVisible)
     }
 
     @Test func windowShadowFollowsTheSetting() async throws {
@@ -319,18 +325,7 @@ import Testing
 
         #expect(module.state.records.count == 1)
         #expect(pasteboard.images.isEmpty)
-        #expect(activity?.id == "captured")
-    }
-
-    @Test func theCapturedActivityCanBeTurnedOff() async throws {
-        await start()
-        let (settings, keys) = try settings()
-        settings.set(false, for: keys.showCapturedActivity)
-
-        await module.capture(mode: .regionOrWindow)
-
-        #expect(module.state.records.count == 1)
-        #expect(activity == nil)
+        #expect(chip.isVisible)
     }
 
     @Test func keepCountIsRespected() async throws {
@@ -356,7 +351,7 @@ import Testing
         #expect(module.state.records.isEmpty)
         #expect(harness.presenter.toastCount == 1)
         #expect(pasteboard.images.count == 1)
-        #expect(activity == nil)
+        #expect(chip.shown.isEmpty)
     }
 
     @Test(.timeLimit(.minutes(1))) func aSecondHotkeyWhileTheOverlayIsUpIsIgnored() async {

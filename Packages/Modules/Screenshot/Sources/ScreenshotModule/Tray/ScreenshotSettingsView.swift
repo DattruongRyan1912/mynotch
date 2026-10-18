@@ -15,6 +15,7 @@ struct ScreenshotSettingsView: View {
     var body: some View {
         Group {
             Toggle("Chép ảnh vào clipboard sau khi chụp", isOn: settings.binding(keys.copyToClipboard))
+            Toggle("Chép ảnh vào clipboard khi sửa xong", isOn: settings.binding(keys.copyWhenDone))
             Stepper(
                 "Giữ \(settings.value(keys.keepCount)) ảnh gần nhất",
                 value: settings.binding(keys.keepCount), in: ScreenshotSettingKeys.keepCountRange, step: 5
@@ -23,7 +24,7 @@ struct ScreenshotSettingsView: View {
                 ForEach(SaveLocation.allCases, id: \.self) { Text($0.title).tag($0) }
             }
             Toggle("Chụp cửa sổ kèm bóng đổ", isOn: settings.binding(keys.windowShadow))
-            Toggle("Hiện “Đã chụp” bên cạnh notch", isOn: settings.binding(keys.showCapturedActivity))
+            Toggle("Hiện ảnh vừa chụp kèm nút Sửa", isOn: settings.binding(keys.showCaptureChip))
             Picker("Nền phần mở rộng khi sửa ảnh", selection: settings.binding(keys.canvasFill)) {
                 ForEach(CanvasFill.allCases, id: \.self) { Text($0.title).tag($0) }
             }

@@ -8,15 +8,15 @@ import Testing
     }
 
     @Test func theNewToolsFollowTheOldOnesInToolbarOrder() {
-        #expect(MarkupTool.allCases == [.arrow, .rectangle, .text, .highlighter, .step, .magnifier, .ruler, .redact, .erase])
+        #expect(MarkupTool.allCases == [.arrow, .rectangle, .text, .highlighter, .step, .magnifier, .ruler, .redact, .erase, .crop])
         #expect(MarkupTool.allCases.map(\.title) == [
-            "Mũi tên", "Hình chữ nhật", "Chữ", "Bút dạ quang", "Đánh số bước", "Kính lúp", "Thước đo", "Che vùng", "Xoá thông minh",
+            "Mũi tên", "Hình chữ nhật", "Chữ", "Bút dạ quang", "Đánh số bước", "Kính lúp", "Thước đo", "Che vùng", "Xoá thông minh", "Cắt",
         ])
         #expect(Set(MarkupTool.allCases.map(\.systemImage)).count == MarkupTool.allCases.count)
     }
 
-    @Test func onlyRedactionAndErasingIgnoreColourAndThickness() {
-        #expect(MarkupTool.allCases.filter { !$0.usesStyle } == [.redact, .erase])
+    @Test func onlyRedactionErasingAndCroppingIgnoreColourAndThickness() {
+        #expect(MarkupTool.allCases.filter { !$0.usesStyle } == [.redact, .erase, .crop])
     }
 
     @Test func theEraseTooltipSaysWhatItDoesWhenTheBorderIsNotOneColour() {

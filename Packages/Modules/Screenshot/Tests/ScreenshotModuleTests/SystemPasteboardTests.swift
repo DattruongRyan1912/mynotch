@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import ImageIO
+import MyNotchCore
 import Testing
 @testable import ScreenshotModule
 
@@ -37,6 +38,20 @@ import Testing
         let types = (board.types ?? []).map(\.rawValue)
         #expect(!types.isEmpty)
         #expect(!types.contains { $0.contains("mynotch") || $0.hasPrefix("org.nspasteboard") })
+    }
+
+    @Test func aMarkedWriteCarriesMyNotchsOwnWriteTypeBesideTheImage() async throws {
+        #expect(await writer.write(try CaptureStoreTests.image(width: 30, height: 20), scale: 2, markedAsOwn: true))
+        let types = (board.types ?? []).map(\.rawValue)
+        #expect(types.contains(OwnPasteboardWrite.typeIdentifier))
+        #expect(types.contains("io.lucasvu.mynotch.clipboard"))
+        #expect(try size(of: #require(board.data(forType: .png))) == CGSize(width: 30, height: 20))
+        #expect(try size(of: #require(board.data(forType: .tiff))) == CGSize(width: 30, height: 20))
+    }
+
+    @Test func anUnmarkedWriteStaysUnmarkedWhenAskedExplicitly() async throws {
+        #expect(await writer.write(try CaptureStoreTests.image(width: 4, height: 4), scale: 1, markedAsOwn: false))
+        #expect(!(board.types ?? []).contains(OwnPasteboardWrite.pasteboardType))
     }
 
     @Test func replacesWhatWasThere() async throws {

@@ -1,20 +1,28 @@
 import AppKit
 import CoreGraphics
 import ImageIO
+import MyNotchCore
 import UniformTypeIdentifiers
 
 /// Puts captures and recognised text on a pasteboard. A protocol so tests never write to the real one.
 protocol PasteboardWriting: AnyObject {
     /// Replaces the pasteboard's contents with `image` as PNG and TIFF; `scale` (pixels per point) sets their DPI.
-    /// False when the pasteboard refused the data.
-    func write(_ image: CGImage, scale: CGFloat) async -> Bool
+    /// `markedAsOwn` adds `OwnPasteboardWrite`'s type, so Clipboard history treats the write as MyNotch's own instead of
+    /// recording it. False when the pasteboard refused the data.
+    func write(_ image: CGImage, scale: CGFloat, markedAsOwn: Bool) async -> Bool
 
     /// Replaces the pasteboard's contents with `text`.
     func write(_ text: String) -> Bool
 }
 
-/// Writes to a real pasteboard, the general one by default. It adds no marker type: the Clipboard module records
-/// screenshots like any other image.
+extension PasteboardWriting {
+    /// An ordinary copy, with no marker type: the Clipboard module records screenshots like any other image.
+    func write(_ image: CGImage, scale: CGFloat) async -> Bool {
+        await write(image, scale: scale, markedAsOwn: false)
+    }
+}
+
+/// Writes to a real pasteboard, the general one by default. It marks a write as MyNotch's own only when asked to.
 final class SystemPasteboard: PasteboardWriting {
     private let pasteboard: NSPasteboard
 
@@ -22,12 +30,13 @@ final class SystemPasteboard: PasteboardWriting {
         self.pasteboard = pasteboard
     }
 
-    func write(_ image: CGImage, scale: CGFloat) async -> Bool {
+    func write(_ image: CGImage, scale: CGFloat, markedAsOwn: Bool) async -> Bool {
         // Encoding a large capture twice takes a while, hence off the main actor.
         guard let png = try? await CaptureStore.pngData(image, scale: scale),
               let tiff = await Self.tiffData(image, scale: scale) else { return false }
         let item = NSPasteboardItem()
         guard item.setData(png, forType: .png), item.setData(tiff, forType: .tiff) else { return false }
+        if markedAsOwn { guard item.setData(Data(), forType: OwnPasteboardWrite.pasteboardType) else { return false } }
         pasteboard.clearContents()
         return pasteboard.writeObjects([item])
     }

@@ -34,12 +34,15 @@ nonisolated struct MarkupDocument: Codable, Equatable, Sendable {
     var imageSize: CGSize
     /// In drawing order: later annotations cover earlier ones.
     var annotations: [Annotation] = []
+    /// The part of the finished canvas that is kept, in the same annotation space, or nil to keep all of it. The canvas is
+    /// cut to it last, so annotations never move and clearing it brings every pixel back; see `MarkupDocument+Crop`.
+    var crop: CGRect?
     /// What the canvas's padding is filled with. It follows the Settings choice at the time of editing and is not
     /// saved with the annotations, so changing the setting also restyles captures that are edited again.
     var canvasFill: CanvasFill = .standard
 
     private enum CodingKeys: String, CodingKey {
-        case imageSize, annotations
+        case imageSize, annotations, crop
     }
 }
 

@@ -3,8 +3,8 @@ import MyNotchCore
 import SwiftUI
 
 /// Screenshots in the notch: a hotkey freezes the screens, the overlay picks a region, window or display, and the
-/// result goes to the tray, optionally the clipboard, and an activity beside the notch. A second hotkey reads the
-/// text of a region instead (OCR).
+/// result goes to the tray, optionally the clipboard, and a chip with "Sửa" and "Chép" beside it. A second hotkey reads
+/// the text of a region instead (OCR).
 public final class ScreenshotModule: FeatureModule {
     public let descriptor = ModuleDescriptor(
         id: "screenshot",
@@ -36,7 +36,11 @@ public final class ScreenshotModule: FeatureModule {
     /// Each drag of a capture gets its own folder here; `start` removes the folders of earlier runs.
     let dragCopiesDirectory: URL
     /// The markup editor's windows, made when the first one opens.
-    var editors: MarkupEditorWindowController?
+    var editors: (any MarkupEditorHosting)?
+    /// The chip beside a new capture; set while running.
+    private(set) var chip: CaptureChipController?
+    private let chipPresenter: any CaptureChipPresenting
+    let makeEditors: @MainActor (ScreenshotModule) -> any MarkupEditorHosting
     private(set) var context: ModuleContext?
     private(set) var keys: ScreenshotSettingKeys?
     private let service: any CaptureService
@@ -49,7 +53,8 @@ public final class ScreenshotModule: FeatureModule {
     public convenience init() {
         self.init(
             service: ScreenCaptureKitService(), overlay: SelectionOverlayController(), recognizer: VisionTextRecognizer(),
-            pasteboard: SystemPasteboard(),
+            pasteboard: SystemPasteboard(), chip: SystemCaptureChipWindow(),
+            makeEditors: { MarkupEditorWindowController(module: $0) },
             // Preflight only reads the grant; it never shows the system prompt.
             hasScreenAccess: { CGPreflightScreenCaptureAccess() },
             onScreenWindows: {
@@ -60,12 +65,15 @@ public final class ScreenshotModule: FeatureModule {
         )
     }
 
-    /// Tests pass fakes, so they never touch ScreenCaptureKit, create panels, ask for access or write a pasteboard.
+    /// Tests pass fakes, so they never touch ScreenCaptureKit, create panels or editor windows, ask for access or write a
+    /// pasteboard.
     init(
         service: any CaptureService,
         overlay: any SelectionOverlay,
         recognizer: any TextRecognizing,
         pasteboard: any PasteboardWriting,
+        chip: any CaptureChipPresenting,
+        makeEditors: @escaping @MainActor (ScreenshotModule) -> any MarkupEditorHosting,
         hasScreenAccess: @escaping () -> Bool,
         onScreenWindows: @escaping () -> [CapturableWindow],
         saveDirectory: @escaping (SaveLocation) -> URL?,
@@ -75,6 +83,8 @@ public final class ScreenshotModule: FeatureModule {
         self.overlay = overlay
         self.recognizer = recognizer
         self.pasteboard = pasteboard
+        chipPresenter = chip
+        self.makeEditors = makeEditors
         self.hasScreenAccess = hasScreenAccess
         self.onScreenWindows = onScreenWindows
         self.saveDirectory = saveDirectory
@@ -93,6 +103,7 @@ public final class ScreenshotModule: FeatureModule {
         self.store = store
         self.context = context
         keys = ScreenshotSettingKeys(context.settings)
+        chip = CaptureChipController(presenter: chipPresenter, scheduler: context.scheduler)
         context.hotkeys.register("capture", title: "Chụp màn hình", initial: Self.captureShortcut) { [weak self] in
             self?.beginCapture(.regionOrWindow)
         }
@@ -103,6 +114,8 @@ public final class ScreenshotModule: FeatureModule {
 
     public func stop() async {
         overlay.cancel()
+        chip?.hide()
+        chip = nil
         editors?.closeAll()
         editors = nil
         ocrTask?.cancel()
@@ -145,6 +158,8 @@ public final class ScreenshotModule: FeatureModule {
             return
         }
         cancelOCR()
+        // The chip is a window of its own: it has to be gone before the screens are frozen, or it would be in the capture.
+        chip?.hide()
         let selection: Selection?
         do {
             selection = try await select(mode)
@@ -208,7 +223,7 @@ public final class ScreenshotModule: FeatureModule {
         return (display ?? displays.first)?.scale ?? 1
     }
 
-    /// Stores the capture, copies it if asked and announces it. A capture that cannot be stored is still copied.
+    /// Stores the capture, copies it if asked and puts the chip beside it. A capture that cannot be stored is still copied.
     private func keep(_ image: CGImage, scale: CGFloat, store: CaptureStore, keys: ScreenshotSettingKeys, context: ModuleContext) async {
         var record: CaptureRecord?
         do {
@@ -221,14 +236,16 @@ public final class ScreenshotModule: FeatureModule {
         if context.settings.value(keys.copyToClipboard), !(await pasteboard.write(image, scale: scale)) {
             showToast("Không chép được ảnh", systemImage: "exclamationmark.triangle.fill")
         }
-        guard let record, isCurrent(context), context.settings.value(keys.showCapturedActivity) else { return }
-        let thumbnail = await store.thumbnail(for: record.id, maxPixel: 32)
-        guard isCurrent(context) else { return }
-        context.activities.set(LiveActivity(
-            id: "captured", expiresAfter: .seconds(3),
-            leading: AnyView(ScreenshotActivityThumbnail(image: thumbnail)),
-            trailing: AnyView(ScreenshotActivityText(text: "Đã chụp"))
-        ))
+        guard let record, isCurrent(context), context.settings.value(keys.showCaptureChip) else { return }
+        let thumbnail = await store.thumbnail(for: record.id, maxPixel: CaptureChipView.thumbnailMaxPixel)
+        // Not while another capture has the screens: the chip is gone before they freeze and stays gone until it is done.
+        guard isCurrent(context), !isSelecting else { return }
+        // The buttons are the only way into the editor from here: nothing opens by itself.
+        chip?.show(
+            thumbnail: thumbnail,
+            edit: { [weak self] in self?.context?.run { await self?.edit(record) } },
+            copy: { [weak self] in self?.context?.run { await self?.copy(record) } }
+        )
     }
 
     // MARK: OCR

@@ -39,15 +39,19 @@ struct MarkupEditorView: View {
 
     private func canvas(fit: ImageFit) -> some View {
         let draft = model.draft
+        let cropFrame = model.cropFrame
         return ZStack(alignment: .topLeading) {
             // The gesture belongs to the picture layer only, so clicks inside the text field edit its text.
             ZStack(alignment: .topLeading) {
-                Image(decorative: model.preview, scale: 1)
+                Image(decorative: model.displayedPreview, scale: 1)
                     .resizable()
                     .interpolation(.high)
                     .frame(width: fit.frame.width, height: fit.frame.height)
                     .offset(x: fit.frame.minX, y: fit.frame.minY)
-                Canvas { context, _ in Self.draw(draft, in: &context, fit: fit) }
+                Canvas { context, _ in
+                    Self.draw(draft, in: &context, fit: fit)
+                    if let cropFrame { Self.drawCropFrame(cropFrame, in: &context, fit: fit) }
+                }
                     // Shows the highlighter's multiply blend against the image while dragging.
                     .blendMode(model.tool == .highlighter ? .multiply : .normal)
                     .allowsHitTesting(false)
@@ -138,6 +142,30 @@ struct MarkupEditorView: View {
                 cgContext.scaleBy(x: fit.scale, y: fit.scale)
                 MarkupRenderer.draw(draft, in: cgContext)
             }
+        }
+    }
+
+    /// The crop frame over the picture: everything outside it dimmed, thirds to line things up by, and a handle on each
+    /// corner and edge. Where a handle sits is what `CropFrame.grab` takes hold of.
+    private static func drawCropFrame(_ frame: CGRect, in context: inout GraphicsContext, fit: ImageFit) {
+        let rect = fit.viewRect(fromImage: frame)
+        var dimmed = Path(fit.frame)
+        dimmed.addRect(rect)
+        context.fill(dimmed, with: .color(.black.opacity(0.5)), style: FillStyle(eoFill: true))
+        var thirds = Path()
+        for step in [1.0 / 3, 2.0 / 3] {
+            thirds.move(to: CGPoint(x: rect.minX + rect.width * step, y: rect.minY))
+            thirds.addLine(to: CGPoint(x: rect.minX + rect.width * step, y: rect.maxY))
+            thirds.move(to: CGPoint(x: rect.minX, y: rect.minY + rect.height * step))
+            thirds.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + rect.height * step))
+        }
+        context.stroke(thirds, with: .color(.white.opacity(0.35)), lineWidth: 1)
+        context.stroke(Path(rect), with: .color(.white), lineWidth: 1.5)
+        for handle in CropHandle.allCases {
+            let point = handle.point(in: rect)
+            let square = CGRect(x: point.x - 4, y: point.y - 4, width: 8, height: 8)
+            context.fill(Path(square), with: .color(.white))
+            context.stroke(Path(square), with: .color(.black.opacity(0.6)), lineWidth: 1)
         }
     }
 

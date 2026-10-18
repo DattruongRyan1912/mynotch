@@ -11,6 +11,15 @@ nonisolated extension Annotation {
         return image.contains(footprint.outline) ? nil : footprint.ink
     }
 
+    /// Everything this annotation touches, wherever it is: its ink, or for redaction and erasing the pixels they replace. A
+    /// crop keeps an annotation when this meets it.
+    var inkBounds: CGRect {
+        switch self {
+        case .redact(let rect), .erase(let rect): rect.standardized
+        default: footprint?.ink ?? .null
+        }
+    }
+
     /// `outline` is the geometry the user placed; `ink` adds the stroke's width and the arrow head.
     private var footprint: (outline: CGRect, ink: CGRect)? {
         switch self {

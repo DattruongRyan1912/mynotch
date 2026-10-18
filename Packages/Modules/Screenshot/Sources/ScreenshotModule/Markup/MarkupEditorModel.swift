@@ -11,6 +11,14 @@ nonisolated struct TextDraft: Equatable, Sendable {
     var pixelsPerPoint: CGFloat
 }
 
+/// What a drag of the crop tool does, decided where it began and kept until it ends.
+private nonisolated struct CropGesture {
+    let start: CGPoint
+    /// The frame as the drag found it, which every move of the pointer is applied to; nil when there was none.
+    let frame: CropFrame?
+    let grab: CropGrab
+}
+
 /// The markup editor's state: tool choices, the shape being drawn, inline text, undo history and the flattened
 /// preview. Gesture positions arrive already converted to annotation pixels (origin at the capture's top-left, so
 /// they may be negative or past its far edges), so the view only handles layout.
@@ -19,18 +27,28 @@ nonisolated struct TextDraft: Equatable, Sendable {
     /// The capture's pixels per point, for the ruler's label.
     let pointScale: CGFloat
     private(set) var tool: MarkupTool = .arrow
+    /// The tool the crop tool returns to once the frame is applied or cancelled.
+    @ObservationIgnored private var toolBeforeCrop: MarkupTool = .arrow
     var color: RGBAColor = .red
     var thickness: StrokeThickness = .medium
     var magnification: CGFloat = 2
     /// The shape under the pointer during a drag, drawn live over the preview.
     private(set) var draft: Annotation?
     var text: TextDraft?
-    /// The canvas with every committed annotation burned in, as it will be saved.
+    /// The canvas with every committed annotation burned in and cut to the crop, as it will be saved.
     private(set) var preview: CGImage
+    /// The same before the crop: the whole canvas, which the crop tool shows so the frame can reach every pixel.
+    private(set) var canvasPreview: CGImage
     /// How far the canvas reaches past the capture, from the annotations that stick out.
     private(set) var canvas: CanvasInsets
+    /// The part of annotation space `preview` shows: the crop, or else the whole canvas.
+    private(set) var outputBounds: CGRect
+    /// The crop frame being dragged, in annotation pixels, not applied yet.
+    private(set) var cropFrame: CGRect?
+    private(set) var cropAspect: CropAspect = .free
     private var history: UndoStack
     @ObservationIgnored private var dragPoints: [CGPoint] = []
+    @ObservationIgnored private var cropGesture: CropGesture?
     @ObservationIgnored private let render: (CGImage, MarkupDocument) -> CGImage?
 
     /// `document` reopens earlier markup; it must belong to `image`. `pointScale` is the capture's pixels per point,
@@ -49,13 +67,20 @@ nonisolated struct TextDraft: Equatable, Sendable {
         // A document that cannot be drawn shows the plain capture, which is also all the canvas then is.
         let rendered = Self.rendered(image, document, using: render)
         canvas = rendered == nil ? .zero : document.canvas
-        preview = rendered ?? image
+        canvasPreview = rendered?.canvas ?? image
+        preview = rendered?.saved ?? image
+        outputBounds = rendered == nil ? CGRect(origin: .zero, size: document.imageSize) : document.outputBounds
     }
 
     var document: MarkupDocument { history.document }
-    var canvasSize: CGSize { canvas.size(of: document.imageSize) }
-    /// The annotation-space point at the canvas's top-left corner.
-    var canvasOrigin: CGPoint { CGPoint(x: -canvas.left, y: -canvas.top) }
+    var isCropping: Bool { tool == .crop }
+    /// The part of annotation space the editor shows: the whole canvas while the crop tool is up, else the saved picture.
+    var displayedBounds: CGRect { isCropping ? canvas.bounds(of: document.imageSize) : outputBounds }
+    /// What the editor draws: `canvasPreview` while the crop tool is up, else `preview`.
+    var displayedPreview: CGImage { isCropping ? canvasPreview : preview }
+    var canvasSize: CGSize { displayedBounds.size }
+    /// The annotation-space point at the top-left corner of what the editor shows.
+    var canvasOrigin: CGPoint { displayedBounds.origin }
     var canUndo: Bool { history.canUndo }
     var canRedo: Bool { history.canRedo }
     /// The size of the text being typed, in image pixels.
@@ -63,12 +88,28 @@ nonisolated struct TextDraft: Equatable, Sendable {
 
     func select(_ tool: MarkupTool) {
         commitText()
+        guard tool != self.tool else { return }
+        if self.tool == .crop {
+            // A frame that was not applied goes with the tool.
+            cropFrame = nil
+            cropGesture = nil
+        }
+        if tool == .crop {
+            toolBeforeCrop = self.tool
+            // The tool starts from the crop that is applied, so it can be widened again, and always starts free.
+            cropFrame = document.cropWithinCanvas(canvas)
+            cropAspect = .free
+        }
         self.tool = tool
     }
 
     /// `start` and `end` are annotation pixels; `pixelsPerPoint` converts the view-sized thickness into pixels. A
     /// drawing tool may be dragged past the capture's edge, which grows the canvas when the shape is committed.
     func dragChanged(from start: CGPoint, to end: CGPoint, pixelsPerPoint: CGFloat, modifiers: MarkupModifiers = []) {
+        guard tool != .crop else {
+            dragCropFrame(from: start, to: end, pixelsPerPoint: pixelsPerPoint)
+            return
+        }
         guard tool != .text, !removesStep(modifiers) else { return }
         track(from: limited(start), to: limited(end), minimumStep: pixelsPerPoint)
         draft = tool.annotation(through: dragPoints, options: options(pixelsPerPoint, modifiers))
@@ -80,6 +121,11 @@ nonisolated struct TextDraft: Equatable, Sendable {
         defer {
             dragPoints = []
             draft = nil
+        }
+        guard tool != .crop else {
+            dragCropFrame(from: start, to: end, pixelsPerPoint: pixelsPerPoint)
+            cropGesture = nil
+            return
         }
         let start = limited(start), end = limited(end)
         if removesStep(modifiers) {
@@ -118,6 +164,83 @@ nonisolated struct TextDraft: Equatable, Sendable {
         edit { $0.redo() }
     }
 
+    // MARK: Crop
+
+    /// How far from a frame's corner or edge, in view points, the pointer takes hold of its handle.
+    static let cropHandleReach: CGFloat = 10
+
+    /// Chooses the frame's ratio. A fixed one reshapes the frame there is to the biggest of that ratio inside it, or makes
+    /// the biggest one that fits the canvas when there is none.
+    func setCropAspect(_ aspect: CropAspect) {
+        guard isCropping else { return }
+        cropAspect = aspect
+        guard let ratio = aspect.ratio(of: document.imageSize) else { return }
+        if let cropFrame {
+            self.cropFrame = CropFrame(rect: cropFrame, bounds: canvas.bounds(of: document.imageSize), ratio: ratio).fitting(ratio: ratio).rect
+        } else {
+            cropFrame = CropFrame.largest(ratio: ratio, in: canvas.bounds(of: document.imageSize)).rect
+        }
+    }
+
+    /// Cuts the canvas to the frame as one undoable step and goes back to the tool that was in use. Annotations the
+    /// crop leaves nothing of are removed with it, and the step badges after them renumbered; the others keep their
+    /// coordinates, so undoing brings everything back. A frame that is the whole canvas is no crop at all.
+    func applyCrop() {
+        guard isCropping else { return }
+        let frame = cropFrame
+        leaveCropTool()
+        guard let frame else { return }
+        let canvasBounds = canvas.bounds(of: document.imageSize)
+        let rect = CropFrame(rect: frame, bounds: canvasBounds, ratio: nil).pixelRect
+        guard rect.width >= 1, rect.height >= 1 else { return }
+        let crop: CGRect? = rect == canvasBounds ? nil : rect
+        edit {
+            $0.apply { document in
+                document.crop = crop
+                guard let crop else { return }
+                let kept = document.annotations.filter { $0.inkBounds.intersects(crop) }
+                guard kept.count != document.annotations.count else { return }
+                document.annotations = StepBadges.renumbered(kept)
+            }
+        }
+    }
+
+    /// Drops the frame, leaving the document as it was, and goes back to the tool that was in use.
+    func cancelCrop() {
+        guard isCropping else { return }
+        leaveCropTool()
+    }
+
+    private func leaveCropTool() {
+        cropFrame = nil
+        cropGesture = nil
+        tool = toolBeforeCrop == .crop ? .arrow : toolBeforeCrop
+    }
+
+    /// Takes hold of a handle, the frame's middle or nothing where the drag began, and applies the drag to what it took
+    /// hold of: resizing, moving, or making a new frame. A drag too small to make a frame leaves the one there was.
+    private func dragCropFrame(from start: CGPoint, to end: CGPoint, pixelsPerPoint: CGFloat) {
+        let bounds = canvas.bounds(of: document.imageSize)
+        let ratio = cropAspect.ratio(of: document.imageSize)
+        var gesture = cropGesture
+        if gesture?.start != start {
+            let frame = cropFrame.map { CropFrame(rect: $0, bounds: bounds, ratio: ratio) }
+            let reach = Self.cropHandleReach * max(pixelsPerPoint, 0)
+            gesture = CropGesture(start: start, frame: frame, grab: frame?.grab(at: start, tolerance: reach) ?? .outside)
+            cropGesture = gesture
+        }
+        guard let gesture else { return }
+        let delta = CGSize(width: end.x - start.x, height: end.y - start.y)
+        switch (gesture.grab, gesture.frame) {
+        case (.handle(let handle), let frame?):
+            cropFrame = frame.resized(handle, by: delta).rect
+        case (.inside, let frame?):
+            cropFrame = frame.moved(by: delta).rect
+        default:
+            cropFrame = CropFrame.dragging(from: start, to: end, in: bounds, ratio: ratio)?.rect ?? gesture.frame?.rect
+        }
+    }
+
     /// The document to save, copy or compare, including text still being typed.
     func finishedDocument() -> MarkupDocument {
         commitText()
@@ -148,11 +271,20 @@ nonisolated struct TextDraft: Equatable, Sendable {
 
     /// `point` held inside what the current tool may reach: redaction and erasing work on pixels that exist, so they
     /// stop at the canvas; everything else may grow the canvas, but only so far as `CanvasInsets.limit` allows, which
-    /// keeps a drag that leaves the window from asking for an enormous bitmap.
+    /// keeps a drag that leaves the window from asking for an enormous bitmap. A cropped picture is all there is to draw
+    /// on: every tool stops at its edge, since whatever went past it would be cut away.
     private func limited(_ point: CGPoint) -> CGPoint {
         let size = document.imageSize
+        let canvasBounds = canvas.bounds(of: size)
         let reach = CGFloat(CanvasInsets.limit(for: size))
-        let allowed = tool == .redact || tool == .erase ? canvas.bounds(of: size) : CGRect(origin: .zero, size: size).insetBy(dx: -reach, dy: -reach)
+        let allowed: CGRect
+        if outputBounds != canvasBounds {
+            allowed = outputBounds
+        } else if tool == .redact || tool == .erase {
+            allowed = canvasBounds
+        } else {
+            allowed = CGRect(origin: .zero, size: size).insetBy(dx: -reach, dy: -reach)
+        }
         return CGPoint(x: min(max(point.x, allowed.minX), allowed.maxX), y: min(max(point.y, allowed.minY), allowed.maxY))
     }
 
@@ -177,18 +309,33 @@ nonisolated struct TextDraft: Equatable, Sendable {
         guard history.document != before else { return }
         guard let rendered = Self.rendered(image, history.document, using: render) else { return }
         canvas = history.document.canvas
-        preview = rendered
+        canvasPreview = rendered.canvas
+        preview = rendered.saved
+        outputBounds = history.document.outputBounds
     }
 
-    /// The capture itself while there is nothing to draw (nor any padding); nil when rendering fails, which is logged
-    /// since the annotations would otherwise vanish from the screen without a word.
-    private static func rendered(_ image: CGImage, _ document: MarkupDocument, using render: (CGImage, MarkupDocument) -> CGImage?) -> CGImage? {
-        guard !document.annotations.isEmpty else { return image }
-        guard let rendered = render(image, document) else {
-            logger.error("Could not render \(document.annotations.count) annotations onto a \(image.width)×\(image.height) capture")
+    /// The canvas with every annotation, and that canvas cut to the crop. The capture itself while there is nothing to
+    /// draw (nor any padding) and nothing cropped; nil when rendering fails, which is logged since the annotations would
+    /// otherwise vanish from the screen without a word.
+    private static func rendered(
+        _ image: CGImage, _ document: MarkupDocument, using render: (CGImage, MarkupDocument) -> CGImage?
+    ) -> (canvas: CGImage, saved: CGImage)? {
+        var uncropped = document
+        uncropped.crop = nil
+        var canvas = image
+        if !document.annotations.isEmpty {
+            guard let flattened = render(image, uncropped) else {
+                logger.error("Could not render \(document.annotations.count) annotations onto a \(image.width)×\(image.height) capture")
+                return nil
+            }
+            canvas = flattened
+        }
+        guard let crop = document.cropWithinCanvas else { return (canvas, canvas) }
+        guard let cut = MarkupRenderer.cut(canvas, to: crop, canvasBounds: uncropped.canvas.bounds(of: document.imageSize)) else {
+            logger.error("Could not crop a \(canvas.width)×\(canvas.height) canvas to \(Int(crop.width))×\(Int(crop.height))")
             return nil
         }
-        return rendered
+        return (canvas, cut)
     }
 
     private static let logger = Log.logger(category: "MarkupEditor")

@@ -12,6 +12,15 @@ struct MarkupEditorSource {
     let canvasFill: CanvasFill
 }
 
+/// What the module needs of the editor's windows: to open one and to close them all. A protocol so tests open no window.
+protocol MarkupEditorHosting: AnyObject {
+    /// Shows the editor of `record`, or brings its window forward if it is already open.
+    func open(_ record: CaptureRecord, source: MarkupEditorSource)
+    func closeAll()
+}
+
+extension MarkupEditorWindowController: MarkupEditorHosting {}
+
 /// The tray's "Sửa": opening the editor, and what its Lưu and Copy do with the result. Results show as toasts.
 extension ScreenshotModule {
     /// Opens the editor for `record`, or brings its window forward when it is already open.
@@ -23,7 +32,7 @@ extension ScreenshotModule {
         }
         // The window is a regular app window; the notch has nothing more to show behind it.
         context.presenter.close()
-        let editors = editors ?? MarkupEditorWindowController(module: self)
+        let editors = editors ?? makeEditors(self)
         self.editors = editors
         editors.open(record, source: source)
     }
@@ -47,28 +56,59 @@ extension ScreenshotModule {
         return MarkupEditorSource(image: loaded.image, document: document, scale: loaded.scale, canvasFill: fill)
     }
 
-    /// Lưu: keeps the untouched PNG and the annotations next to the capture the first time, then replaces the
-    /// visible image with the flattened one. A capture without annotations that was never edited stays as it is.
+    /// What saving an edit did.
+    private enum SaveOutcome {
+        case failed
+        /// Nothing was edited and nothing was kept before, so the capture stays as it is.
+        case unchanged
+        /// The stored picture was replaced by this one.
+        case saved(CGImage)
+    }
+
+    /// Lưu, which is also "Xong": keeps the untouched PNG and the edits next to the capture the first time, then
+    /// replaces the visible image with the flattened one. When Settings says so, the saved picture is also copied, marked
+    /// as MyNotch's own write, so it can be pasted at once. One toast tells how it went. A capture that was never edited
+    /// and has nothing to save stays as it is, and nothing is copied.
     func saveMarkup(_ document: MarkupDocument, of source: MarkupEditorSource, for record: CaptureRecord) async -> Bool {
+        switch await persistMarkup(document, of: source, for: record) {
+        case .failed:
+            return false
+        case .unchanged:
+            return true
+        case .saved(let flattened):
+            let copies = context.flatMap { context in keys.map { context.settings.value($0.copyWhenDone) } } ?? false
+            guard copies else {
+                showToast("Đã lưu ảnh đã sửa", systemImage: "checkmark.circle.fill")
+                return true
+            }
+            if await pasteboard.write(flattened, scale: source.scale, markedAsOwn: true) {
+                showToast("Đã chép ảnh", systemImage: "doc.on.clipboard.fill")
+            } else {
+                showToast("Không chép được ảnh", systemImage: "exclamationmark.triangle.fill")
+            }
+            return true
+        }
+    }
+
+    private func persistMarkup(_ document: MarkupDocument, of source: MarkupEditorSource, for record: CaptureRecord) async -> SaveOutcome {
         guard let store, let current = store.url(for: record.id) else {
             showToast("Không lưu được ảnh đã sửa", systemImage: "exclamationmark.triangle.fill")
-            return false
+            return .failed
         }
         let original = store.originalURL(for: record.id)
         let isEdited = FileManager.default.fileExists(atPath: original.path(percentEncoded: false))
-        if document.annotations.isEmpty, !isEdited { return true }
+        if !document.hasEdits, !isEdited { return .unchanged }
         do {
             let flattened = try await Self.keepSidecars(
                 of: current, original: original, markup: store.markupURL(for: record.id), document: document, image: source.image
             )
-            try await store.replaceImage(id: record.id, with: flattened, scale: source.scale, hasMarkup: !document.annotations.isEmpty)
+            try await store.replaceImage(id: record.id, with: flattened, scale: source.scale, hasMarkup: document.hasEdits)
             refreshRecords()
-            showToast("Đã lưu ảnh đã sửa", systemImage: "checkmark.circle.fill")
-            return true
+            return .saved(flattened)
         } catch {
             context?.logger.error("Could not save markup: \(error, privacy: .public)")
             showToast("Không lưu được ảnh đã sửa", systemImage: "exclamationmark.triangle.fill")
-            return false
+            return .failed
         }
     }
 

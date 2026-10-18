@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The editor's single row of controls: tools, colours, thickness, undo/redo and the Huỷ / Copy / Lưu actions.
+/// The editor's row of controls: tools, colours, thickness, undo/redo and the Huỷ / Chép / Lưu actions, with a row under
+/// it for the tool that has options (the lens's zoom, the crop's ratio).
 struct MarkupToolbar: View {
     @Bindable var model: MarkupEditorModel
     let onCancel: () -> Void
@@ -11,6 +12,7 @@ struct MarkupToolbar: View {
         VStack(spacing: 0) {
             controls
             if model.tool == .magnifier { magnificationRow }
+            if model.isCropping { cropRow }
         }
     }
 
@@ -44,29 +46,67 @@ struct MarkupToolbar: View {
                 Button("Hoàn tác", systemImage: "arrow.uturn.backward", action: model.undo)
                     .keyboardShortcut("z", modifiers: .command)
                     .help("Hoàn tác (⌘Z)")
-                    .disabled(!model.canUndo || model.text != nil)
+                    .disabled(!model.canUndo || model.text != nil || model.isCropping)
                 Button("Làm lại", systemImage: "arrow.uturn.forward", action: model.redo)
                     .keyboardShortcut("z", modifiers: [.command, .shift])
                     .help("Làm lại (⇧⌘Z)")
-                    .disabled(!model.canRedo || model.text != nil)
+                    .disabled(!model.canRedo || model.text != nil || model.isCropping)
             }
             .labelStyle(.iconOnly)
             .fixedSize()
 
+            // Copying or saving while a frame is up would leave out the crop that is not applied yet.
             HStack(spacing: 8) {
                 Button("Huỷ", action: onCancel)
                 Button("Chép", action: onCopy)
                     .help("Chép ảnh đã sửa")
+                    .disabled(model.isCropping)
                 Button("Lưu", action: onSave)
                     .keyboardShortcut("s", modifiers: .command)
                     .buttonStyle(.borderedProminent)
-                    .help("Lưu (⌘S)")
+                    .help(saveHelp)
+                    .disabled(model.isCropping)
             }
             .fixedSize()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
+
+    /// The crop's ratio and its two buttons, shown only while the crop tool is selected: Return applies the frame and Esc
+    /// drops it, as the buttons' shortcuts.
+    private var cropRow: some View {
+        HStack(spacing: 8) {
+            Text("Tỉ lệ")
+            Picker("Tỉ lệ", selection: Binding(get: { model.cropAspect }, set: { model.setCropAspect($0) })) {
+                ForEach(CropAspect.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            if let frame = model.cropFrame {
+                Text("\(Int(frame.width.rounded())) × \(Int(frame.height.rounded()))")
+                    .monospacedDigit()
+            } else {
+                Text("Kéo trên ảnh để chọn vùng cần giữ")
+            }
+            Spacer(minLength: 0)
+            Button("Huỷ", action: model.cancelCrop)
+                .keyboardShortcut(.cancelAction)
+                .help("Huỷ khung cắt (Esc)")
+            Button("Xong", action: model.applyCrop)
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(model.cropFrame == nil)
+                .help("Cắt ảnh theo khung (Return)")
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+    }
+
+    private var saveHelp: String { "Lưu (⌘S)" }
 
     private var thicknessTitle: String {
         switch model.tool {

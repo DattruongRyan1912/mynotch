@@ -6,7 +6,8 @@ import Foundation
 nonisolated enum MarkupRenderer {
     /// The capture with its annotations drawn in order, or nil if no bitmap could be made. The bitmap is the capture's
     /// pixel size plus the padding of the document's canvas, filled as `document.canvasFill` says, with the capture
-    /// at the padding's offset. Annotations are scaled when `document.imageSize` differs from the image's pixel size.
+    /// at the padding's offset, then cut to `document.crop` if there is one. Annotations are scaled when
+    /// `document.imageSize` differs from the image's pixel size.
     static func flatten(_ image: CGImage, _ document: MarkupDocument) -> CGImage? {
         let width = image.width, height = image.height
         let hasSize = document.imageSize.width > 0 && document.imageSize.height > 0
@@ -53,7 +54,10 @@ nonisolated enum MarkupRenderer {
                 context.restoreGState()
             }
         }
-        return context.makeImage()
+        guard let canvas = context.makeImage() else { return nil }
+        // Cut last, so a lens or a redaction near the edge still sees and hides the pixels the crop does not keep.
+        guard let crop = document.cropWithinCanvas(insets) else { return canvas }
+        return cut(canvas, to: crop, canvasBounds: insets.bounds(of: document.imageSize))
     }
 
     /// Draws a vector annotation into a context whose user space is image pixels with y down: the flattened bitmap,
