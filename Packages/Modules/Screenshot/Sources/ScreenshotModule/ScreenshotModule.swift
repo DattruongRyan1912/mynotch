@@ -58,6 +58,14 @@ public final class ScreenshotModule: FeatureModule {
     let recordingDependencies: RecordingDependencies
     /// Makes the recordings; set while running.
     private(set) var recording: RecordingCoordinator?
+    /// The settings `start` or the Settings page gave, kept for the storage page, which asks for the clean-up rules whether or not
+    /// the module runs.
+    var storageSettings: ModuleSettings?
+    /// Where the clean-up rules are read from when `storageSettings` is nil: the app's own store, which a module that was off since
+    /// launch has not been given yet. Tests give their own, so none reads the user's.
+    let storageFallbackSettings: SettingsStore
+    /// One line for each clean, made of numbers only; by default it goes to the log. Tests read it.
+    var storageReport: (String) -> Void = { Log.logger(category: "screenshot").info("\($0, privacy: .public)") }
 
     public convenience init() {
         self.init(
@@ -71,12 +79,13 @@ public final class ScreenshotModule: FeatureModule {
             },
             saveDirectory: { $0.standardDirectory },
             dragCopiesDirectory: Self.defaultDragCopiesDirectory,
-            recording: .live
+            recording: .live,
+            storageFallbackSettings: SettingsStore(defaults: .standard)
         )
     }
 
     /// Tests pass fakes, so they never touch ScreenCaptureKit, create panels or editor windows, ask for access, record, open a
-    /// microphone or write a pasteboard. Nothing here has a default for that reason.
+    /// microphone, write a pasteboard or read the user's settings. Nothing here has a default for that reason.
     init(
         service: any CaptureService,
         overlay: any SelectionOverlay,
@@ -88,7 +97,8 @@ public final class ScreenshotModule: FeatureModule {
         onScreenWindows: @escaping () -> [CapturableWindow],
         saveDirectory: @escaping (SaveLocation) -> URL?,
         dragCopiesDirectory: URL,
-        recording: RecordingDependencies
+        recording: RecordingDependencies,
+        storageFallbackSettings: SettingsStore
     ) {
         self.service = service
         self.overlay = overlay
@@ -101,6 +111,7 @@ public final class ScreenshotModule: FeatureModule {
         self.saveDirectory = saveDirectory
         self.dragCopiesDirectory = dragCopiesDirectory
         recordingDependencies = recording
+        self.storageFallbackSettings = storageFallbackSettings
     }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
@@ -116,6 +127,7 @@ public final class ScreenshotModule: FeatureModule {
         self.context = context
         let keys = ScreenshotSettingKeys(context.settings)
         self.keys = keys
+        storageSettings = context.settings
         chip = CaptureChipController(presenter: chipPresenter, scheduler: context.scheduler)
         context.hotkeys.register("capture", title: "Chụp màn hình", initial: Self.captureShortcut) { [weak self] in
             self?.beginCapture(.regionOrWindow)
@@ -168,7 +180,8 @@ public final class ScreenshotModule: FeatureModule {
     }
 
     public func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? {
-        AnyView(ScreenshotSettingsView(settings: environment.settings, keys: ScreenshotSettingKeys(environment.settings)))
+        storageSettings = environment.settings
+        return AnyView(ScreenshotSettingsView(settings: environment.settings, keys: ScreenshotSettingKeys(environment.settings)))
     }
 
     // MARK: Capture

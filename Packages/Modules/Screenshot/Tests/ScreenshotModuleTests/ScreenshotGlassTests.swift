@@ -1,5 +1,7 @@
 import AppKit
 import Foundation
+import MyNotchCore
+import MyNotchTestSupport
 import NotchUI
 import SwiftUI
 import Testing
@@ -73,7 +75,7 @@ import Testing
             chip: FakeCaptureChip(), makeEditors: { _ in FakeEditors() },
             hasScreenAccess: { false }, onScreenWindows: { [] }, saveDirectory: { _ in nil },
             dragCopiesDirectory: FileManager.default.temporaryDirectory.appending(path: "MyNotchTests-drags-\(UUID().uuidString)"),
-            recording: FakeRecordingSystem().dependencies
+            recording: FakeRecordingSystem().dependencies, storageFallbackSettings: SettingsStore(defaults: makeIsolatedDefaults())
         )
     }
 

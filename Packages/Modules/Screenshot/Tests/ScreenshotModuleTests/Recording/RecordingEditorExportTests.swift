@@ -26,6 +26,62 @@ import Testing
         #expect(model.message == nil)
     }
 
+    // MARK: Dating an export
+
+    @Test func anExportIsDatedToTheSecondInTheProjectAndTheNextEditKeepsTheDate() async throws {
+        let moment = Date(timeIntervalSince1970: 1_800_000_123.75)
+        let editor = try await EditorFixture(now: { moment })
+        let model = editor.model!
+        let before = try editor.savedProject().exportedAt
+        #expect(model.project.exportedAt == nil && before == nil)
+
+        await model.export()
+
+        let dated = Date(timeIntervalSince1970: 1_800_000_123)
+        let saved = try editor.savedProject()
+        #expect(model.project.exportedAt == dated && saved.exportedAt == dated)
+        // The editor rewrites the whole file at every edit; a date written only beside the model would be gone after this.
+        model.dismissExport()
+        model.trimStart(to: 1)
+        model.setClickEffect(false)
+        let edited = try editor.savedProject()
+        #expect(edited.exportedAt == dated && edited.cuts == [CutRange(start: 0, end: 1)] && !edited.clickEffect)
+        model.undo()
+        let undone = try editor.savedProject()
+        #expect(undone.exportedAt == dated)
+        // And a second editor on the same folder starts from it.
+        let reopened = try RecordingEditorModel.load(folder: editor.folder, player: FakePreviewPlayer(), pasteboard: FakePasteboard(), exportDirectory: editor.exports.url)
+        #expect(reopened.project.exportedAt == dated)
+    }
+
+    @Test func aLaterExportMovesTheDate() async throws {
+        var moment = Date(timeIntervalSince1970: 1_800_000_000)
+        let editor = try await EditorFixture(now: { moment })
+        await editor.model.export()
+        editor.model.dismissExport()
+        moment = Date(timeIntervalSince1970: 1_800_086_400)
+
+        await editor.model.export()
+
+        let later = try editor.savedProject()
+        #expect(later.exportedAt == Date(timeIntervalSince1970: 1_800_086_400))
+    }
+
+    @Test func anExportThatFailedOrWasCancelledDatesNothing() async throws {
+        let failing = try await EditorFixture(start: false)
+        try FileManager.default.removeItem(at: failing.folder.appending(path: "segment-002.mov"))
+        await failing.model.export()
+        let failedProject = try failing.savedProject()
+        #expect(failing.model.project.exportedAt == nil && failedProject.exportedAt == nil)
+
+        let cancelled = try await EditorFixture()
+        cancelled.model.startExport()
+        cancelled.model.cancelExport()
+        await cancelled.model.export()
+        let cancelledProject = try cancelled.savedProject()
+        #expect(cancelled.model.project.exportedAt == nil && cancelledProject.exportedAt == nil)
+    }
+
     @Test func theLevelThePersonChoseIsTheOneUsed() async throws {
         let editor = try await EditorFixture()
         editor.model.exportLevel = .high

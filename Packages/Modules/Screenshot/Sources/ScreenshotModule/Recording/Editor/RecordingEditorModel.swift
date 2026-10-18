@@ -56,6 +56,7 @@ nonisolated enum RecordingExportState: Equatable, Sendable {
     @ObservationIgnored private let pasteboard: any PasteboardWriting
     @ObservationIgnored private let exportDirectory: URL
     @ObservationIgnored private let reveal: (URL) -> Void
+    @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private let write: (RecordingProject) throws -> Void
 
     var selectedZoom: Int?
@@ -76,10 +77,11 @@ nonisolated enum RecordingExportState: Equatable, Sendable {
     private(set) var exportState = RecordingExportState.idle
     @ObservationIgnored private var exportTask: Task<Void, Never>?
 
-    /// `write` saves the project; tests replace it to see a save that fails.
+    /// `write` saves the project; tests replace it to see a save that fails. `now` is the clock that dates an export.
     init(
         folder: URL, project: RecordingProject, activity: ActivityTrack, player: any PreviewPlaying, pasteboard: any PasteboardWriting,
-        exportDirectory: URL, reveal: @escaping (URL) -> Void = { _ in }, write: ((RecordingProject) throws -> Void)? = nil
+        exportDirectory: URL, reveal: @escaping (URL) -> Void = { _ in }, now: @escaping () -> Date = { .now },
+        write: ((RecordingProject) throws -> Void)? = nil
     ) {
         self.folder = folder
         self.project = project
@@ -88,6 +90,7 @@ nonisolated enum RecordingExportState: Equatable, Sendable {
         self.pasteboard = pasteboard
         self.exportDirectory = exportDirectory
         self.reveal = reveal
+        self.now = now
         self.write = write ?? { try $0.write(to: folder) }
         history = EditHistory(RecordingEdit(of: project))
         planned = ZoomPlanner.plan(activity: activity, rules: project.zoomRules, duration: project.duration)
@@ -96,7 +99,7 @@ nonisolated enum RecordingExportState: Equatable, Sendable {
     /// Opens the recording in `folder`. Without `activity.json` it still opens, with no automatic zooms.
     static func load(
         folder: URL, player: any PreviewPlaying, pasteboard: any PasteboardWriting, exportDirectory: URL,
-        reveal: @escaping (URL) -> Void = { _ in }, save: ((RecordingProject) throws -> Void)? = nil
+        reveal: @escaping (URL) -> Void = { _ in }, now: @escaping () -> Date = { .now }, save: ((RecordingProject) throws -> Void)? = nil
     ) throws(RecordingEditorError) -> RecordingEditorModel {
         let project: RecordingProject
         do {
@@ -115,7 +118,7 @@ nonisolated enum RecordingExportState: Equatable, Sendable {
         }
         let model = RecordingEditorModel(
             folder: folder, project: project, activity: activity, player: player, pasteboard: pasteboard,
-            exportDirectory: exportDirectory, reveal: reveal, write: save
+            exportDirectory: exportDirectory, reveal: reveal, now: now, write: save
         )
         if lost { model.message = "Không đọc được dữ liệu con trỏ, nên bản quay mở không có zoom tự động" }
         return model
@@ -435,6 +438,7 @@ nonisolated enum RecordingExportState: Equatable, Sendable {
                 progress: { fraction in Task { @MainActor [weak self] in self?.noteProgress(fraction) } }
             )
             exportState = .finished(result)
+            markExported()
             // Marked as MyNotch's own: the clipboard history does not record a file it was asked to put there.
             if !pasteboard.write(fileURL: result.url, markedAsOwn: true) {
                 message = "Đã xuất xong nhưng không chép được file vào clipboard"
@@ -447,6 +451,13 @@ nonisolated enum RecordingExportState: Equatable, Sendable {
         } catch {
             exportState = .failed(RecordingExportError.failed(error.localizedDescription).message)
         }
+    }
+
+    /// Dates the export in the project, which is what lets the storage page delete this original later, if the person asked it to.
+    /// Written through the model's own project, so the next edit, which rewrites the whole file, keeps it.
+    private func markExported() {
+        project.exportedAt = Date(timeIntervalSince1970: now().timeIntervalSince1970.rounded(.down))
+        persist()
     }
 
     private func noteProgress(_ fraction: Double) {

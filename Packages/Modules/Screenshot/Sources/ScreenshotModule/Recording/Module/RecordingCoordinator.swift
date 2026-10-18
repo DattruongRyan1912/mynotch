@@ -49,6 +49,18 @@ final class RecordingCoordinator {
     /// The recording being made, which the list, a delete and a clean must leave alone.
     var currentRecordingID: UUID? { recorder.currentRecordingID }
 
+    /// Whether an editor is exporting a recording, which no clean-up may disturb.
+    var isExporting: Bool { editors?.isExporting ?? false }
+
+    /// Whether recordings may be removed at all now. Not while the stream starts or the files close: the folder of the recording in
+    /// the making is there, and its ID is not known to anyone else yet.
+    var canRemoveRecordings: Bool { phase != .starting && phase != .stopping }
+
+    /// Whether a clean may remove this recording: not the one being made, and not one an editor has open.
+    func mayRemove(_ id: UUID) -> Bool {
+        id != recorder.currentRecordingID && editors?.isOpen(folder: store.folder(for: id)) != true
+    }
+
     private var isCurrent: Bool { !isShuttingDown && module?.isCurrent(context) == true }
 
     // MARK: Starting

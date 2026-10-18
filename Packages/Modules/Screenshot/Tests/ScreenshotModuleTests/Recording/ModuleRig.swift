@@ -16,6 +16,8 @@ final class ModuleRig {
     let overlay = FakeOverlay()
     let pasteboard = FakePasteboard()
     let system = FakeSystem()
+    /// Where the clean-up rules come from for a module that was never started: the user's own settings are never read.
+    let fallbackSettings = SettingsStore(defaults: makeIsolatedDefaults())
     let module: ScreenshotModule
     let harness: RegistryHarness
     /// The harness's temporary storage root, removed with the rig.
@@ -29,7 +31,8 @@ final class ModuleRig {
             service: service, overlay: overlay, recognizer: FakeRecognizer(), pasteboard: pasteboard,
             chip: FakeCaptureChip(), makeEditors: { _ in FakeEditors() },
             hasScreenAccess: { system.hasScreenAccess }, onScreenWindows: { system.windows },
-            saveDirectory: { _ in system.saveDirectory }, dragCopiesDirectory: dragsDirectory, recording: recording
+            saveDirectory: { _ in system.saveDirectory }, dragCopiesDirectory: dragsDirectory, recording: recording,
+            storageFallbackSettings: fallbackSettings
         )
         harness = RegistryHarness([module])
         harness.permissions.statuses = [.screenRecording: .granted, .microphone: .granted, .accessibility: .granted]
@@ -71,11 +74,13 @@ final class ModuleRig {
     /// A recording on disk, as a session leaves one: a project, and a segment file of `bytes` bytes.
     @discardableResult
     func makeRecording(
-        status: RecordingProject.Status = .finished, createdAt: Date = Date(timeIntervalSince1970: 1_800_000_000), bytes: Int = 1_000
+        status: RecordingProject.Status = .finished, createdAt: Date = Date(timeIntervalSince1970: 1_800_000_000), bytes: Int = 1_000,
+        exportedAt: Date? = nil
     ) throws -> RecordingProject {
         let made = try recordingStore.create()
         var project = FakeRecorder.project(id: made.id, region: nil, status: status, seconds: 5)
         project.createdAt = createdAt
+        project.exportedAt = exportedAt
         try project.write(to: made.folder)
         try Data(count: bytes).write(to: made.folder.appending(path: "segment-001.mov"))
         return project

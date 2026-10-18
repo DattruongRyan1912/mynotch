@@ -153,6 +153,8 @@ final class FakeRecordingEditors: RecordingEditorHosting {
     private(set) var opened: [URL] = []
     private(set) var closeAllCount = 0
     var openError: RecordingEditorError?
+    /// An export is running in one of the editors.
+    var isExporting = false
     private var open: Set<URL> = []
 
     func open(folder: URL) throws(RecordingEditorError) {

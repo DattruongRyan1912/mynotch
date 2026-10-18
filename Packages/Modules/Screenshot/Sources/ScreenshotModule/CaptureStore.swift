@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import MyNotchCore
 import os
 import UniformTypeIdentifiers
 
@@ -23,9 +24,14 @@ final class CaptureStore {
     /// Bumped when a capture's thumbnails are discarded, so one decoded meanwhile is not cached.
     private var thumbnailRevisions: [UUID: Int] = [:]
 
+    /// Where the captures of a module whose durable folder is `directory` are kept.
+    nonisolated static func capturesFolder(in directory: URL) -> URL {
+        directory.appending(path: "captures", directoryHint: .isDirectory)
+    }
+
     /// `thumbnailCache` is a parameter so tests can use one that never evicts: NSCache drops entries under memory pressure.
     init(directory: URL, cachesDirectory: URL, logger: Logger, thumbnailCache: NSCache<NSString, CGImage> = NSCache()) {
-        capturesDirectory = directory.appending(path: "captures", directoryHint: .isDirectory)
+        capturesDirectory = Self.capturesFolder(in: directory)
         thumbnailsDirectory = cachesDirectory.appending(path: "thumbnails", directoryHint: .isDirectory)
         self.logger = logger
         thumbnails = thumbnailCache
@@ -76,6 +82,40 @@ final class CaptureStore {
             logger.error("Could not save the capture index: \(error, privacy: .public)")
         }
         removeFiles(of: record)
+    }
+
+    /// Keeps the newest `keepCount` captures (at least 1) and removes the rest with their files, as `add` does when it saves a new
+    /// one: the keep count applied now, without a new capture. Returns the bytes of the files removed.
+    @discardableResult
+    func trim(keepCount: Int) -> Int64 {
+        let all = records
+        let kept = Array(all.prefix(max(keepCount, 1)))
+        guard kept.count < all.count else { return 0 }
+        let removed = Array(all.dropFirst(kept.count))
+        do {
+            try save(kept)
+        } catch {
+            logger.error("Could not save the capture index: \(error, privacy: .public)")
+            return 0
+        }
+        records = kept
+        let bytes = removed.reduce(Int64(0)) { $0 + storedBytes(of: $1) }
+        removed.forEach(removeFiles)
+        return bytes
+    }
+
+    /// Removes every capture with its original, annotations and thumbnails, and everything else in the folder, and leaves an empty
+    /// list. The caller says how many bytes that was; this only does it.
+    func deleteAll() async {
+        let ids = records.map(\.id)
+        records = []
+        ids.forEach(removeThumbnails)
+        _ = await StorageFolder.removeContents(of: capturesDirectory)
+        do {
+            try save([])
+        } catch {
+            logger.error("Could not save the capture index: \(error, privacy: .public)")
+        }
     }
 
     /// The capture's PNG, e.g. for dragging it out as a file.
@@ -234,6 +274,14 @@ final class CaptureStore {
     private func save(_ records: [CaptureRecord]) throws {
         try FileManager.default.createDirectory(at: capturesDirectory, withIntermediateDirectories: true)
         try JSONEncoder().encode(records).write(to: indexURL, options: .atomic)
+    }
+
+    /// The PNG, original and annotations of a capture, as they are on disk.
+    private func storedBytes(of record: CaptureRecord) -> Int64 {
+        [fileURL(of: record), originalURL(for: record.id), markupURL(for: record.id)].reduce(Int64(0)) { total, url in
+            let size = (try? FileManager.default.attributesOfItem(atPath: url.path(percentEncoded: false))[.size] as? NSNumber)?.int64Value
+            return total + (size ?? 0)
+        }
     }
 
     private func removeFiles(of record: CaptureRecord) {

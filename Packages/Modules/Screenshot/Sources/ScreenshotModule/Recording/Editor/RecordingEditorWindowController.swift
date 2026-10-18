@@ -8,6 +8,8 @@ protocol RecordingEditorHosting: AnyObject {
     func open(folder: URL) throws(RecordingEditorError)
     /// Whether an editor has the recording in `folder` open, so it is not deleted from under it.
     func isOpen(folder: URL) -> Bool
+    /// Whether any editor is exporting, which no clean-up may disturb.
+    var isExporting: Bool { get }
     func closeAll()
 }
 
@@ -120,6 +122,8 @@ final class RecordingEditorWindowController: NSObject, RecordingEditorHosting {
     func isOpen(folder: URL) -> Bool {
         sessions[folder.standardizedFileURL] != nil
     }
+
+    var isExporting: Bool { sessions.values.contains { $0.model.isExporting } }
 
     private func end(_ session: Session) {
         session.model.cancelExport()

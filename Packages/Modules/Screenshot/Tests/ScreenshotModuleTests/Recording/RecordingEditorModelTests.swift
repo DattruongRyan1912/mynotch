@@ -71,7 +71,7 @@ final class FakePreviewPlayer: PreviewPlaying {
 
     init(
         edit: (inout RecordingProject) -> Void = { _ in }, writeActivity: Bool = true, start: Bool = true,
-        save: ((RecordingProject) throws -> Void)? = nil
+        now: @escaping () -> Date = { .now }, save: ((RecordingProject) throws -> Void)? = nil
     ) async throws {
         let sample = try await EditorSample.snapshot()
         let folder = try TestFolder("editor")
@@ -84,7 +84,7 @@ final class FakePreviewPlayer: PreviewPlaying {
         exports = try TestFolder("editor-exports")
         model = try RecordingEditorModel.load(
             folder: folder.url, player: player, pasteboard: pasteboard, exportDirectory: exports.url,
-            reveal: { [unowned self] in revealed.append($0) }, save: save
+            reveal: { [unowned self] in revealed.append($0) }, now: now, save: save
         )
         try #require(model.zoomSegments.count == 2 || !writeActivity, "the fixture's clicks plan two zooms")
         if start { await model.start() }

@@ -8,6 +8,10 @@ struct ScreenshotSettingKeys {
     static let zoomScaleRange = 1.25...3.0
     /// Seconds without activity before a zoom goes back out.
     static let zoomHoldRange = 0.5...5.0
+    static let defaultKeepCount = 30
+    /// After how many days the storage page may delete the original of a recording that was exported.
+    static let exportedRecordingDaysRange = 1...365
+    static let defaultExportedRecordingDays = 30
 
     let copyToClipboard: SettingKey<Bool>
     let keepCount: SettingKey<Int>
@@ -33,10 +37,13 @@ struct ScreenshotSettingKeys {
     let zoomHoldSeconds: SettingKey<Double>
     let clickEffect: SettingKey<Bool>
     let exportLevel: SettingKey<ExportLevel>
+    /// The storage page's daily rule may delete the original of a recording that was exported, after `exportedRecordingDays`. Off.
+    let cleanExportedRecordings: SettingKey<Bool>
+    let exportedRecordingDays: SettingKey<Int>
 
     init(_ settings: ModuleSettings) {
         copyToClipboard = settings.key("copyToClipboard", default: true)
-        keepCount = settings.key("keepCount", default: 30, clampedTo: Self.keepCountRange)
+        keepCount = settings.key("keepCount", default: Self.defaultKeepCount, clampedTo: Self.keepCountRange)
         saveLocation = settings.key("saveLocation", default: .desktop)
         windowShadow = settings.key("windowShadow", default: true)
         ocrLanguages = settings.key("ocrLanguages", default: OCRService.defaultLanguages)
@@ -50,5 +57,23 @@ struct ScreenshotSettingKeys {
         zoomHoldSeconds = settings.key("zoomHoldSeconds", default: ZoomRules.standard.idleTimeout, clampedTo: Self.zoomHoldRange)
         clickEffect = settings.key("clickEffect", default: true)
         exportLevel = settings.key("exportLevel", default: .chat)
+        cleanExportedRecordings = settings.key("cleanExportedRecordings", default: false)
+        exportedRecordingDays = settings.key(
+            "exportedRecordingDays", default: Self.defaultExportedRecordingDays, clampedTo: Self.exportedRecordingDaysRange
+        )
     }
+}
+
+/// The rules of the daily clean-up, read without the module: by the names `ScreenshotSettingKeys` gives them, in the app's own
+/// settings store, for a module that is off and has no `ModuleSettings` to read them from. A test holds the names to
+/// `ScreenshotSettingKeys`.
+enum ScreenshotRetentionKeys {
+    static let keepCount = SettingKey<Int>(
+        "module.screenshot.keepCount", default: ScreenshotSettingKeys.defaultKeepCount, clampedTo: ScreenshotSettingKeys.keepCountRange
+    )
+    static let cleanExportedRecordings = SettingKey<Bool>("module.screenshot.cleanExportedRecordings", default: false)
+    static let exportedRecordingDays = SettingKey<Int>(
+        "module.screenshot.exportedRecordingDays", default: ScreenshotSettingKeys.defaultExportedRecordingDays,
+        clampedTo: ScreenshotSettingKeys.exportedRecordingDaysRange
+    )
 }

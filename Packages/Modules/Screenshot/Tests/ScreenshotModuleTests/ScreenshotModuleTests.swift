@@ -37,7 +37,7 @@ import Testing
             hasScreenAccess: { system.hasScreenAccess }, onScreenWindows: { system.windows },
             saveDirectory: { _ in system.saveDirectory },
             dragCopiesDirectory: dragsDirectory,
-            recording: recordingSystem.dependencies
+            recording: recordingSystem.dependencies, storageFallbackSettings: SettingsStore(defaults: makeIsolatedDefaults())
         )
         harness = RegistryHarness([module])
         harness.permissions.statuses[.screenRecording] = .granted

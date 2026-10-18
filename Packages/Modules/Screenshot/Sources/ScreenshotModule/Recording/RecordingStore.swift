@@ -53,6 +53,22 @@ nonisolated struct RecordingStore: Sendable {
         }
     }
 
+    /// Every folder of a recording, named by its ID, as it is on disk now. Nothing is read, rescued or changed.
+    func folderIDs() -> [UUID] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: root.path(percentEncoded: false))) ?? []).compactMap(UUID.init(uuidString:))
+    }
+
+    /// The recordings that were exported at or before `cutoff`, read as they are: unlike `list` it rescues nothing and writes
+    /// nothing, so it is safe wherever a recording may be being made. A recording that was never exported, or whose project cannot
+    /// be read, is not among them, and neither is one still marked as being recorded.
+    @concurrent func exported(before cutoff: Date) async -> [UUID] {
+        folderIDs().filter { id in
+            guard let project = try? RecordingProject.load(from: folder(for: id)), project.status != .recording,
+                  let exportedAt = project.exportedAt else { return false }
+            return exportedAt <= cutoff
+        }
+    }
+
     /// The recordings, newest first. A recording still marked as being recorded that is not in `active` was cut short: it is
     /// rescued first (`RecordingRecovery`), which marks it incomplete. A folder without a readable project is skipped.
     @concurrent func list(excluding active: Set<UUID> = []) async -> [RecordingSummary] {

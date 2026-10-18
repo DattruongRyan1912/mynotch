@@ -16,6 +16,25 @@ import Testing
         )
     }
 
+    @Test func theDateOfAnExportRoundTripsAndAFileWithoutOneHasNone() throws {
+        let folder = try TestFolder("project-exported")
+        var original = project()
+        #expect(original.exportedAt == nil)
+        try original.write(to: folder.url)
+        #expect(try RecordingProject.load(from: folder.url).exportedAt == nil)
+
+        original.exportedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        try original.write(to: folder.url)
+        #expect(try RecordingProject.load(from: folder.url) == original)
+
+        // A file written before the field existed has no such key.
+        let older = try JSONSerialization.jsonObject(with: Data(contentsOf: folder.url.appending(path: "project.json"))) as! [String: Any]
+        var without = older
+        without["exportedAt"] = nil
+        try JSONSerialization.data(withJSONObject: without).write(to: folder.url.appending(path: "project.json"))
+        #expect(try RecordingProject.load(from: folder.url).exportedAt == nil)
+    }
+
     @Test func aProjectIsWrittenAndReadBackWithEverythingInIt() throws {
         let folder = try TestFolder("project")
         let original = project()

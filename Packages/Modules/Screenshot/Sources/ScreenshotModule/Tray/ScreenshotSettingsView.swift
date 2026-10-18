@@ -9,6 +9,9 @@ struct ScreenshotSettingsView: View {
     static let recordingNote = "Phím tắt quay và tạm dừng đặt trong trang Phím tắt. Ghi phím cần quyền Trợ năng; không có thì chỉ ghi chuột, "
         + "và MyNotch không bao giờ ghi phím nào, chỉ ghi lúc có phím được nhấn."
 
+    static let exportedRecordingsNote = "Chỉ xoá bản quay gốc đã xuất ít nhất một lần, và chỉ khi không đang quay hay đang xuất. "
+        + "File đã xuất ở ~/Movies/MyNotch luôn được giữ. Mặc định tắt: bản quay gốc không tự xoá."
+
     let settings: ModuleSettings
     let keys: ScreenshotSettingKeys
 
@@ -62,6 +65,19 @@ struct ScreenshotSettingsView: View {
             ForEach(ExportLevel.allCases, id: \.self) { Text($0.title).tag($0) }
         }
         Text(Self.recordingNote)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        Toggle(
+            "Xoá bản quay gốc đã xuất sau \(settings.value(keys.exportedRecordingDays)) ngày",
+            isOn: settings.binding(keys.cleanExportedRecordings)
+        )
+        Stepper(
+            "Số ngày: \(settings.value(keys.exportedRecordingDays))",
+            value: settings.binding(keys.exportedRecordingDays), in: ScreenshotSettingKeys.exportedRecordingDaysRange
+        )
+        .disabled(!settings.value(keys.cleanExportedRecordings))
+        Text(Self.exportedRecordingsNote)
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)

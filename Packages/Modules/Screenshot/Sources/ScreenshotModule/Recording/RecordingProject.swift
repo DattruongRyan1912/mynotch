@@ -46,6 +46,9 @@ nonisolated struct RecordingProject: Codable, Equatable, Sendable, Identifiable 
     var clickEffect = true
     /// What the export is made at, the last one the person chose.
     var exportLevel = ExportLevel.chat
+    /// When the recording was last exported, to a whole second. Nil while it never was: the storage page may delete the original of
+    /// one that was, after the days the person chose, and never one that was not.
+    var exportedAt: Date?
 
     var duration: TimeInterval { segments.reduce(0) { $0 + $1.duration } }
     /// A recording that stopped before the person stopped it, and was rescued.
@@ -98,6 +101,7 @@ nonisolated extension RecordingProject {
         clickEffect = try container.decodeIfPresent(Bool.self, forKey: .clickEffect) ?? true
         // A level a later version added, which this one does not know, is the default and not a file that cannot be opened.
         exportLevel = (try? container.decodeIfPresent(ExportLevel.self, forKey: .exportLevel)) ?? .chat
+        exportedAt = try container.decodeIfPresent(Date.self, forKey: .exportedAt)
     }
 }
 
