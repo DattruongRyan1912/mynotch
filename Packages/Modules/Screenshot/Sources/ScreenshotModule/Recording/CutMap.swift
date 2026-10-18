@@ -67,6 +67,17 @@ nonisolated struct CutMap: Equatable, Sendable {
     /// belong to a part of the video that is not there any more.
     func keptRange(forEdited time: TimeInterval) -> Range<TimeInterval>? { locate(edited: time)?.range }
 
+    /// What to draw at edited time `time`: its moment of the recording and the stretch that plays. A time at or past the end
+    /// counts as the last moment and one before the start as the first, never as nothing: the composition counts its pieces in
+    /// whole ticks, so it can be a few microseconds longer than the stretches add up to, and a frame asked for in that sliver
+    /// must still come from the end of the recording. Nil only for a time that is not a number, or when nothing is left.
+    func nearest(toEdited time: TimeInterval) -> (time: TimeInterval, range: Range<TimeInterval>)? {
+        guard time.isFinite, !kept.isEmpty else { return nil }
+        let clamped = min(max(time, 0), editedDuration.nextDown)
+        guard let (range, offset) = locate(edited: clamped) else { return nil }
+        return (range.lowerBound + (clamped - offset), range)
+    }
+
     /// Where a moment of the recording is in the edited video; nil when it was cut.
     func editedTime(forRecording time: TimeInterval) -> TimeInterval? {
         var offset = 0.0

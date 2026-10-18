@@ -52,24 +52,24 @@ import Testing
         let plan = ZoomPlanner.plan(activity: activity)
 
         #expect(plan.count == 1)
-        #expect(plan[0].start == 2 && plan[0].end == 5.5)
+        #expect(plan.first?.start == 2 && plan.first?.end == 5.5)
     }
 
     @Test func aRestingHandDoesNotKeepTheZoomButASlowDriftThatAddsUpDoes() throws {
         // Moves of 2 px each, 4 px away from the click at most: tremor.
         let tremor = track(clicks: [(2, 100, 100)], moves: [(2.5, 102, 100), (3, 100, 102), (3.2, 103, 101)])
-        #expect(ZoomPlanner.plan(activity: tremor)[0].end == 3.5)
+        #expect(ZoomPlanner.plan(activity: tremor).first?.end == 3.5)
 
         // 3 px at a time: the second step is 6 px from where the last activity was, so it counts.
         let drift = track(clicks: [(2, 100, 100)], moves: [(2.3, 103, 100), (2.6, 106, 100)])
-        #expect(ZoomPlanner.plan(activity: drift)[0].end == 2.6 + 1.5)
+        #expect(ZoomPlanner.plan(activity: drift).first?.end == 2.6 + 1.5)
     }
 
     @Test func typingKeepsTheZoomAfterClickingIntoAField() {
         let plan = ZoomPlanner.plan(activity: track(clicks: [(2, 100, 100)], keys: [3, 4, 5]))
 
         #expect(plan.count == 1)
-        #expect(plan[0].start == 2 && plan[0].end == 6.5)
+        #expect(plan.first?.start == 2 && plan.first?.end == 6.5)
     }
 
     @Test func aKeyAfterTheZoomEndedDoesNotBringItBack() {
@@ -121,7 +121,7 @@ import Testing
         // About twenty points a second, not sixty, and the click's own point is not repeated.
         #expect(segment.focus.count < 60 && segment.focus.count > 30)
         #expect(Set(times).count == times.count)
-        #expect(segment.focusPoint(at: 3.5)!.x > 700)
+        #expect((segment.focusPoint(at: 3.5)?.x ?? 0) > 700)
     }
 
     @Test func aClickOutsideTheVideoDoesNotStartAZoomButCountsInsideOne() {

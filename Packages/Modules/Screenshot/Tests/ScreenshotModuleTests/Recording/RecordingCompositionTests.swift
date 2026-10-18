@@ -62,8 +62,8 @@ import Testing
         // Just before and just after each edge, the picture and the sound belong to the same second.
         let edges: [(at: Double, before: Int, after: Int)] = [(1, 0, 1), (1.5, 1, 4), (2, 4, 5)]
         for edge in edges {
-            let before = frames.first { abs($0.time - (edge.at - 0.05)) < 1e-6 }!
-            let after = frames.first { abs($0.time - edge.at) < 1e-6 }!
+            let before = try #require(frames.first { abs($0.time - (edge.at - 0.05)) < 1e-6 })
+            let after = try #require(frames.first { abs($0.time - edge.at) < 1e-6 })
             expectGrey(before, second: edge.before)
             expectGrey(after, second: edge.after)
             expectLoud(sound, from: edge.at - 0.17, to: edge.at - 0.06, second: edge.before)
@@ -155,6 +155,7 @@ import Testing
         #expect(frames.count == 90)
         for (index, frame) in frames.enumerated() { #expect(abs(frame.time - Double(index) / 30) < 1e-6) }
         // Frames 31 to 45 are inside the zoom-in (1 s to 1.5 s): each is further right than the one before it.
+        try #require(frames.count == 90, "the frame count is the first thing to break when the output follows the file's frames")
         let blues = frames[30...45].map { Int($0.pixels[0].b) }
         for (before, after) in zip(blues, blues.dropFirst()) { #expect(after >= before, "the camera stood still in a frame: \(blues)") }
         #expect(Set(blues).count >= 8, "the camera moved in too few frames: \(blues)")

@@ -53,11 +53,12 @@ nonisolated final class RecordingCompositor: NSObject, AVVideoCompositing, @unch
         }
         // The edited video's time to the recording's, which is what the camera, the rings and the cuts are measured in.
         let editedTime = request.compositionTime.seconds
-        let recordingTime = instruction.cuts.recordingTime(forEdited: editedTime) ?? editedTime
+        let located = instruction.cuts.nearest(toEdited: editedTime)
+        let recordingTime = located?.time ?? editedTime
         let source = request.sourceFrame(byTrackID: instruction.videoTrackID)
         var crop = instruction.camera.rect(at: recordingTime)
         var rings = instruction.clicks?.rings(
-            at: recordingTime, notBefore: instruction.cuts.keptRange(forEdited: editedTime)?.lowerBound ?? 0
+            at: recordingTime, notBefore: located?.range.lowerBound ?? 0
         ) ?? []
         if let source, instruction.camera.frameSize.width > 0 {
             // The camera and the rings work in the pixels the project says the video has; the file is what it is.

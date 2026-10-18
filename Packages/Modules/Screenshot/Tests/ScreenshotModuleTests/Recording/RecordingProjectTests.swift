@@ -72,7 +72,7 @@ import Testing
         #expect(loaded.cuts == [CutRange(start: 1.5, end: 2.25), CutRange(start: 5, end: 6.5)])
         #expect(loaded.zoomRules.scale == 2.75 && loaded.zoomRules.zoomInDuration == 0.8 && loaded.zoomRules.zoomOutDuration == 0.9)
         #expect(loaded.zoomRules.idleTimeout == 2.25 && loaded.zoomRules.mergeGap == 4 && loaded.zoomRules.minimumMovement == 11)
-        #expect(loaded.zoomSegments?.count == 2 && loaded.zoomSegments?[0].manual == true && loaded.zoomSegments?[0].focus.count == 2)
+        #expect(loaded.zoomSegments?.count == 2 && loaded.zoomSegments?.first?.manual == true && loaded.zoomSegments?.first?.focus.count == 2)
         #expect(loaded.clickEffect == false)
     }
 
@@ -102,7 +102,7 @@ import Testing
 
         #expect(project.zoomRules.scale == 3 && project.zoomRules.zoomInDuration == 0.5 && project.zoomRules.mergeGap == 2.5)
         #expect(project.zoomSegments == [ZoomSegment(start: 1, end: 2, scale: 2)])
-        #expect(project.zoomSegments?[0].manual == false && project.zoomSegments?[0].focus.isEmpty == true)
+        #expect(project.zoomSegments?.first?.manual == false && project.zoomSegments?.first?.focus.isEmpty == true)
         #expect(project.cuts == [CutRange(start: 0, end: 1)])
     }
 

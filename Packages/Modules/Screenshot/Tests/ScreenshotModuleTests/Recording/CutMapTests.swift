@@ -83,14 +83,32 @@ import Testing
         #expect(cuts.recordingTime(forEdited: .nan) == nil)
     }
 
-    @Test func editedAndRecordingTimeAreInverseWhereTheMomentWasKept() {
+    @Test func editedAndRecordingTimeAreInverseWhereTheMomentWasKept() throws {
         let cuts = map([(1, 2), (3.5, 6), (6.25, 6.5)])
 
         var time = 0.0
         while time < cuts.editedDuration {
-            let recording = cuts.recordingTime(forEdited: time)!
-            #expect(abs(cuts.editedTime(forRecording: recording)! - time) < 1e-9)
+            let recording = try #require(cuts.recordingTime(forEdited: time))
+            let back = try #require(cuts.editedTime(forRecording: recording))
+            #expect(abs(back - time) < 1e-9)
             time += 0.0625
         }
+    }
+
+    @Test func aTimeJustPastTheEndOrBeforeTheStartIsTheNearestMomentNotNothing() throws {
+        let cuts = map([(2, 5)])
+
+        // The composition can be microseconds longer than the kept stretches: a frame there is the last moment.
+        let past = try #require(cuts.nearest(toEdited: cuts.editedDuration + 0.000_001))
+        #expect(past.range == 5..<10 && past.time <= 10 && past.time > 9.999)
+        let atEnd = try #require(cuts.nearest(toEdited: cuts.editedDuration))
+        #expect(atEnd.range == 5..<10 && atEnd.time <= 10 && atEnd.time > 9.999)
+        let before = try #require(cuts.nearest(toEdited: -1))
+        #expect(before.time == 0 && before.range == 0..<2)
+        // Inside the video it is the same answer as the exact one.
+        let inside = try #require(cuts.nearest(toEdited: 3))
+        #expect(inside.time == cuts.recordingTime(forEdited: 3) && inside.range == 5..<10)
+        #expect(cuts.nearest(toEdited: .nan) == nil)
+        #expect(map([(0, 10)]).nearest(toEdited: 0) == nil)
     }
 }
