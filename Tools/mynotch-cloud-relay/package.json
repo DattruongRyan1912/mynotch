@@ -1,0 +1,22 @@
+{
+  "name": "mynotch-cloud-relay",
+  "version": "1.0.0",
+  "description": "Zero-Knowledge Blind WebSocket Relay for MyNotch Clipboard Sync",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "dev:local": "node local-server.js"
+  },
+  "keywords": ["mynotch", "clipboard", "relay", "websocket", "e2ee"],
+  "author": "Ryan Truong",
+  "license": "MIT",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240405.0",
+    "typescript": "^5.4.5",
+    "wrangler": "^3.50.0"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
