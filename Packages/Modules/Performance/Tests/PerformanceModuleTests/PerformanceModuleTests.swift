@@ -14,6 +14,7 @@ import Testing
         let module: PerformanceModule
         let reader: FakeThermalReader
         let memory: FakeMemoryReader
+        let cpu: FakeCPUReader
         let rig: HelperRig
         let activity: FakeActivity
         let harness: RegistryHarness
@@ -22,17 +23,18 @@ import Testing
         /// `strip` turns the temperature strip on before the module starts, `memoryStrip` the memory one.
         @MainActor init(
             _ reader: FakeThermalReader = FakeThermalReader(), memory: FakeMemoryReader = FakeMemoryReader(),
+            cpu: FakeCPUReader = FakeCPUReader(),
             strip: Bool = false, memoryStrip: Bool = false, rig: HelperRig = HelperRig(), activity: FakeActivity = FakeActivity(),
             configure: (RegistryHarness) -> Void = { _ in }
         ) async {
             let clock = TestClock()
-            let module = PerformanceModule(thermal: reader, memory: memory, helper: rig.manager, now: { clock.date }, activity: activity)
+            let module = PerformanceModule(thermal: reader, memory: memory, cpu: cpu, helper: rig.manager, now: { clock.date }, activity: activity)
             let harness = RegistryHarness([module])
             if strip { harness.settings.set(true, for: PerformanceModuleTests.stripKey) }
             if memoryStrip { harness.settings.set(true, for: PerformanceModuleTests.memoryStripKey) }
             configure(harness)
             await harness.registry.bootstrap()
-            (self.module, self.reader, self.memory, self.rig, self.activity, self.harness, self.clock) = (module, reader, memory, rig, activity, harness, clock)
+            (self.module, self.reader, self.memory, self.cpu, self.rig, self.activity, self.harness, self.clock) = (module, reader, memory, cpu, rig, activity, harness, clock)
         }
 
         /// A tab on screen; `disappear` is what removing it does.
@@ -64,7 +66,13 @@ import Testing
         await settle { f.module.state.usage != nil }
         await settle { !f.module.isReading }
         #expect(f.module.state.usage == FakeMemoryReader.usage)
+        #expect(f.module.state.cpuUsage == 18.5)
+        #expect(f.module.state.cpuProcesses.count == 5)
         #expect(await f.reads() == 0, "there are no sensors to read")
+
+        f.disappear()
+        #expect(f.module.state.cpuUsage == nil)
+        #expect(f.module.state.cpuProcesses.isEmpty)
     }
 
     @Test func withoutSensorsNoTemperatureStripIsOffered() async {

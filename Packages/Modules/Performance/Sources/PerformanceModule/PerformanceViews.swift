@@ -53,12 +53,30 @@ struct ThermalColumn: View {
 
     var body: some View {
         let presentation = ThermalPresentation(state.thermal)
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(presentation.tone?.color ?? NotchTokens.fill(0.3))
+                    .frame(width: 7, height: 7)
+                Text("SoC")
+                    .font(.system(size: 11))
+                    .foregroundStyle(NotchTokens.secondaryText)
+                Spacer(minLength: 6)
+                if let cpuUsage = state.cpuUsage {
+                    Text("\(Int(cpuUsage.rounded()))% CPU")
+                        .font(.system(size: 12, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(NotchTokens.primaryText)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(presentation.accessibilityLabel + (state.cpuUsage.map { ", CPU \($0.rounded())%" } ?? ""))
+
             HStack(alignment: .top, spacing: 14) {
                 summary(presentation)
                 VStack(alignment: .leading, spacing: 2) {
                     ThermalSparkline(history: state.thermal == nil ? ThermalHistory() : state.history, tone: presentation.tone)
-                        .frame(height: 58)
+                        .frame(height: 44)
                     Text("2 phút gần nhất")
                         .font(.system(size: 10))
                         .foregroundStyle(NotchTokens.secondaryText)
@@ -77,14 +95,6 @@ struct ThermalColumn: View {
 
     private func summary(_ presentation: ThermalPresentation) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 5) {
-                Circle()
-                    .fill(presentation.tone?.color ?? NotchTokens.fill(0.3))
-                    .frame(width: 7, height: 7)
-                Text("SoC")
-                    .font(.system(size: 11))
-                    .foregroundStyle(NotchTokens.secondaryText)
-            }
             Text(presentation.soc)
                 .font(.system(size: 36, weight: .semibold, design: .rounded))
                 .monospacedDigit()

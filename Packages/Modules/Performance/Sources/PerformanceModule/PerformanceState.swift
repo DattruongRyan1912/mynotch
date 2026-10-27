@@ -1,13 +1,25 @@
 import Observation
 
+nonisolated enum ProcessRankingMode: String, CaseIterable, Sendable {
+    case cpu = "CPU"
+    case memory = "RAM"
+}
+
 @Observable
 final class PerformanceState {
     /// Whether this Mac's SMC could be opened; the temperature half of the tab is left out when not.
     var hasThermal = false
     var thermal: ThermalSnapshot?
     var history = ThermalHistory()
+    /// Overall system CPU usage percentage (0...100).
+    var cpuUsage: Double?
     var usage: MemoryUsage?
+    /// Top memory-consuming processes.
     var processes: [ProcessRow] = []
+    /// Top CPU-consuming processes.
+    var cpuProcesses: [ProcessRow] = []
+    /// Which process list the user is viewing: .cpu or .memory.
+    var processRankingMode: ProcessRankingMode = .cpu
     /// Whether a tab is on screen: the polling runs only then, or while the strip is shown.
     var isTabVisible = false
     /// What the strip beside the collapsed notch shows; the temperature only on a Mac that has sensors.

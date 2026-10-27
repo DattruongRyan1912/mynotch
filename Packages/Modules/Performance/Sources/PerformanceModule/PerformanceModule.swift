@@ -24,6 +24,7 @@ public final class PerformanceModule: FeatureModule {
     let state = PerformanceState()
     private let thermal: any ThermalReading
     private let memory: any MemoryReading
+    private let cpu: any CPUReading
     private let helper: FanHelperManager
     private let curve: FanCurveRunner
     private let identity = ProcessIdentity()
@@ -48,17 +49,20 @@ public final class PerformanceModule: FeatureModule {
     private struct Demand {
         var thermal: Bool
         var memory: Bool
+        var cpu: Bool
         var processes: Bool
     }
 
     /// The helper manager is passed in: the real one talks to the system's service manager and to a root daemon, which no test
     /// does, so the tests pass one built on fakes.
     init(
-        thermal: any ThermalReading, memory: any MemoryReading, helper: FanHelperManager, now: @escaping () -> Date,
+        thermal: any ThermalReading, memory: any MemoryReading, cpu: any CPUReading = SystemCPUReader(),
+        helper: FanHelperManager, now: @escaping () -> Date,
         activity: any ActivityAssertion = SystemActivityAssertion()
     ) {
         self.thermal = thermal
         self.memory = memory
+        self.cpu = cpu
         self.helper = helper
         self.now = now
         curve = FanCurveRunner(helper: helper, now: now, activity: activity)
@@ -68,7 +72,7 @@ public final class PerformanceModule: FeatureModule {
 
     public convenience init() {
         self.init(
-            thermal: SMCThermalReader(), memory: SystemMemoryReader(),
+            thermal: SMCThermalReader(), memory: SystemMemoryReader(), cpu: SystemCPUReader(),
             helper: FanHelperManager(
                 registration: SMAppServiceRegistration(), client: XPCFanHelperClient(), bundled: { BundledFanHelper.current() },
                 runningApps: { Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)) }
@@ -119,6 +123,8 @@ public final class PerformanceModule: FeatureModule {
         state.history.removeAll()
         state.usage = nil
         state.processes = []
+        state.cpuUsage = nil
+        state.cpuProcesses = []
         state.isTabVisible = false
         state.stripTemperature = false
         state.stripMemory = false
@@ -205,10 +211,15 @@ public final class PerformanceModule: FeatureModule {
 
     private var demand: Demand {
         let tab = visibleTabs > 0
-        return Demand(thermal: state.hasThermal && (tab || state.stripTemperature || state.curveWanted), memory: tab || state.stripMemory, processes: tab)
+        return Demand(
+            thermal: state.hasThermal && (tab || state.stripTemperature || state.curveWanted),
+            memory: tab || state.stripMemory,
+            cpu: tab,
+            processes: tab
+        )
     }
 
-    private var needsPolling: Bool { demand.thermal || demand.memory }
+    private var needsPolling: Bool { demand.thermal || demand.memory || demand.cpu }
 
     /// Starts reading when something needs it and nothing is reading yet, and stops the next read from being scheduled when
     /// nothing does. A read that is already on its way finishes, but schedules nothing.
@@ -227,8 +238,9 @@ public final class PerformanceModule: FeatureModule {
     private func dropWhatNobodyShows() {
         let demand = demand
         if !demand.thermal { state.thermal = nil }
+        if !demand.cpu { state.cpuUsage = nil }
         if !demand.memory { state.usage = nil }
-        if !demand.processes { state.processes = [] }
+        if !demand.processes { state.processes = []; state.cpuProcesses = [] }
     }
 
     private func stopPolling() {
@@ -237,22 +249,24 @@ public final class PerformanceModule: FeatureModule {
     }
 
     private func beginRead() {
-        let (thermal, memory, demand) = (thermal, memory, demand)
+        let (thermal, memory, cpu, demand) = (thermal, memory, cpu, demand)
         readTask = Task { [weak self] in
             let snapshot = demand.thermal ? await thermal.read() : nil
             let memorySnapshot = demand.memory ? await memory.read(topProcesses: demand.processes ? Self.processCount : 0) : nil
+            let cpuSnapshot = demand.cpu ? await cpu.read(topProcesses: demand.processes ? Self.processCount : 0) : nil
             guard !Task.isCancelled else { return }
-            self?.finishRead(thermal: snapshot, memory: memorySnapshot, listedProcesses: demand.processes)
+            self?.finishRead(thermal: snapshot, memory: memorySnapshot, cpu: cpuSnapshot, listedProcesses: demand.processes)
         }
     }
 
     /// Keeps what is still wanted now, which may be less than was asked for when the read began.
-    private func finishRead(thermal: ThermalSnapshot?, memory: MemorySnapshot?, listedProcesses: Bool) {
+    private func finishRead(thermal: ThermalSnapshot?, memory: MemorySnapshot?, cpu: CPUSnapshot?, listedProcesses: Bool) {
         readTask = nil
         guard let context else { return }
         let demand = demand
         if demand.thermal, let thermal { apply(thermal) }
         if demand.memory, let memory { apply(memory, listedProcesses: listedProcesses && demand.processes) }
+        if demand.cpu, let cpu { apply(cpu, listedProcesses: listedProcesses && demand.processes) }
         guard needsPolling else { return }
         // The user approving the helper in System Settings sends nothing; the tick is the chance to see it.
         if helper.phase == .needsApproval {
@@ -282,5 +296,12 @@ public final class PerformanceModule: FeatureModule {
     private func apply(_ snapshot: MemorySnapshot, listedProcesses: Bool) {
         if let usage = snapshot.usage { state.usage = usage }
         if listedProcesses { state.processes = identity.rows(for: snapshot.processes) }
+    }
+
+    private func apply(_ snapshot: CPUSnapshot, listedProcesses: Bool) {
+        if let usage = snapshot.usagePercent { state.cpuUsage = usage }
+        if listedProcesses && !snapshot.processes.isEmpty {
+            state.cpuProcesses = identity.rows(for: snapshot.processes)
+        }
     }
 }

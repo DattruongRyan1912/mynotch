@@ -40,8 +40,12 @@ import Testing
             ].prefix(fans).map { $0 }
         )
         state.usage = FakeMemoryReader.usage
+        state.cpuUsage = 24.5
         state.processes = names.enumerated().map { index, name in
             ProcessRow(id: Int32(index + 1), name: name, size: MemoryFormat.bytes(FakeMemoryReader.gigabyte * UInt64(5 - index)), icon: nil)
+        }
+        state.cpuProcesses = names.enumerated().map { index, name in
+            ProcessRow(id: Int32(index + 1), name: name, size: "\(35 - index * 5)%", icon: nil)
         }
         return state
     }

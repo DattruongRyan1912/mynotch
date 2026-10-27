@@ -28,6 +28,18 @@ final class ProcessIdentity {
         }
     }
 
+    func rows(for processes: [ProcessCPU]) -> [ProcessRow] {
+        processes.map { process in
+            let app = NSRunningApplication(processIdentifier: process.pid)
+            let bundlePath = app?.bundleURL?.path ?? process.path.flatMap(ProcessRanking.appBundlePath(of:))
+            let percentText = String(format: "%.1f%%", process.percent)
+            return ProcessRow(
+                id: process.pid, name: app?.localizedName ?? process.name, size: percentText,
+                icon: bundlePath.map { icon(ofAppAt: $0) }
+            )
+        }
+    }
+
     private func icon(ofAppAt path: String) -> NSImage {
         if let cached = icons[path] { return cached }
         if icons.count >= Self.iconLimit { icons.removeAll() }

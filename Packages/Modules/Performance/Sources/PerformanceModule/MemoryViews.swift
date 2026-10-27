@@ -38,13 +38,19 @@ struct MemoryColumn: View {
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(presentation.accessibilityLabel)
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
                 fact(presentation.pressure, "Áp lực")
                 fact(presentation.swap, "Swap")
                 fact(presentation.compressed, "Nén")
+                Spacer(minLength: 2)
+                ProcessModePicker(mode: Binding(
+                    get: { state.processRankingMode },
+                    set: { state.processRankingMode = $0 }
+                ))
             }
             VStack(spacing: 3) {
-                ForEach(state.processes) { ProcessRowView(row: $0) }
+                let displayed = state.processRankingMode == .cpu ? state.cpuProcesses : state.processes
+                ForEach(displayed) { ProcessRowView(row: $0) }
             }
         }
         .lineLimit(1)
@@ -113,3 +119,36 @@ struct ProcessRowView: View {
         }
     }
 }
+
+/// Switch between CPU and RAM top processes list.
+struct ProcessModePicker: View {
+    @Binding var mode: ProcessRankingMode
+
+    var body: some View {
+        HStack(spacing: 2) {
+            button(.cpu, label: "CPU")
+            button(.memory, label: "RAM")
+        }
+        .padding(2)
+        .background(Capsule().fill(NotchTokens.fill(0.12)))
+    }
+
+    private func button(_ target: ProcessRankingMode, label: String) -> some View {
+        let isSelected = mode == target
+        return Button(action: { mode = target }) {
+            Text(label)
+                .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? NotchTokens.primaryText : NotchTokens.secondaryText)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background {
+                    if isSelected {
+                        Capsule().fill(NotchTokens.fill(0.22))
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(target == .cpu ? "Hiện tiến trình CPU" : "Hiện tiến trình RAM")
+    }
+}
+
