@@ -20,7 +20,7 @@ nonisolated enum SelectionSkip: String, Sendable, CaseIterable {
     case shapeName = "shape-name"
     /// Not something written to be read: code, a log line, a path, a link, an identifier, or mostly numbers and marks.
     case shapeCode = "shape-code"
-    /// One word that is not a name: a dictionary's business, and in an editor or a terminal nearly every double click.
+    /// One word that is not a name: too little for the recognizer to tell its language, so it gets the small button only.
     case shapeShort = "shape-short"
     case sameLanguage = "same-language"
     /// The recognizer is not sure enough, or the text has no accents and is held to more.
@@ -35,14 +35,14 @@ nonisolated enum SelectionSkip: String, Sendable, CaseIterable {
 
 extension SelectionSkip {
     /// Whether a selection skipped for this reason gets the small translate button: when it is only a guess that nothing is
-    /// worth translating (a name or heading, a doubtful language, text in the user's own language, which they may want in
-    /// another). Not for what is certainly nothing to translate (code, links, paths, one plain word), nor for anything that
+    /// worth translating (a name or heading, one word, a doubtful language, text in the user's own language, which they may
+    /// want in another). Not for what is certainly nothing to translate (code, links, paths), nor for anything that
     /// was not read, was refused, or was already handled. Exhaustive on purpose: a new reason must be decided here.
     var offersButton: Bool {
         switch self {
-        case .shapeName, .lowConfidence, .sameLanguage, .noHint: true
+        case .shapeName, .shapeShort, .lowConfidence, .sameLanguage, .noHint: true
         case .notTrusted, .noFrontApp, .ownApp, .denied, .cooldown, .secure, .unresponsive, .none, .tooLong, .blank, .unchanged,
-             .shapeCode, .shapeShort, .unsupportedLanguage, .noConversion, .cancelled: false
+             .shapeCode, .unsupportedLanguage, .noConversion, .cancelled: false
         }
     }
 }

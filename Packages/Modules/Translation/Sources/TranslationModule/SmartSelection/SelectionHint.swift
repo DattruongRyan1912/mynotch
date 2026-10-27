@@ -9,7 +9,7 @@ nonisolated struct SelectionHint: Equatable, Sendable {
         /// reason it needs ("Cần tải gói ngôn ngữ") or nothing.
         case button
         /// A selection that was read but not translated by itself, for a reason that is only a guess: just a small translate
-        /// button, which does what the shortcut does. `text` is empty and `reason` says why it is offered.
+        /// button, which opens the selection in the tab, translated. `text` is empty and `reason` says why it is offered.
         case translateButton
 
         /// What the log calls it.

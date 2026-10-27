@@ -45,6 +45,8 @@ import Testing
         ("Tim Cook", "shape-name"),
         ("Hello", "shape-name"),
         ("Hello world", "low-confidence"),
+        ("ephemeral", "shape-short"),
+        ("shape", "shape-short"),
         ("Hôm nay trời đẹp quá, chúng ta đi dạo nhé", "same-language"),
     ])
     func aSoftSkipGetsTheButton(text: String, reason: String) async throws {
@@ -60,7 +62,6 @@ import Testing
     }
 
     @Test(arguments: [
-        ("ephemeral", "shape-short"),
         ("let value = compute(input)", "shape-code"),
         ("https://example.com/blog/2026/10/why-we-moved", "shape-code"),
         ("/Users/ryan/Project/MyNotch/Packages", "shape-code"),
@@ -474,30 +475,42 @@ import Testing
 
     // MARK: a click
 
-    @Test func aClickRunsTheShortcutsPathOnceAndTheButtonGoes() async throws {
+    @Test func aClickOpensTheTabOnTheSelectionOnceAndTheButtonGoes() async throws {
         await fixture.start()
         await select(heading)
         let content = try #require(chip.current).content
         #expect(fixture.accessibility.reads == 1, "the passive read")
         content.open()
-        await fixture.module.selectionRead?.value
         #expect(fixture.harness.presenter.openedTabs == ["translation"])
         #expect(fixture.state.input == heading)
-        #expect(fixture.accessibility.reads == 2, "the shortcut reads the selection itself")
+        #expect(fixture.accessibility.reads == 1, "the selection the button was offered for is not read again")
         #expect(!chip.isVisible)
         #expect(log.lines.filter { $0 == "button clicked" }.count == 1)
         // The button is gone: a second click on it does nothing.
         content.open()
-        await fixture.module.selectionRead?.value
         #expect(fixture.harness.presenter.openedTabs == ["translation"])
         #expect(log.lines.filter { $0 == "button clicked" }.count == 1)
+    }
+
+    /// Chrome and Electron apps (Claude, VS Code) move their focus off selected page text to the group around it, which has no
+    /// selected text, so a read at the time of the click finds nothing; that used to open the tab empty.
+    @Test func aClickOpensTheTextItWasOfferedForAfterTheAppStopsSayingIt() async throws {
+        fixture.focus("com.anthropic.claudefordesktop")
+        await fixture.start()
+        await select(heading)
+        fixture.accessibility.standing = nil
+        fixture.accessibility.application = nil
+        try #require(chip.current).content.open()
+        await fixture.translated()
+        #expect(fixture.state.input == heading)
+        #expect(fixture.state.selectionSource?.text == heading)
+        #expect(fixture.state.selectionSource?.application.bundleID == "com.anthropic.claudefordesktop")
     }
 
     @Test func aClickLeavesTheTabHoldingTheSelectionAndItsApp() async throws {
         await fixture.start()
         await select(heading)
         try #require(chip.current).content.open()
-        await fixture.module.selectionRead?.value
         await fixture.translated()
         #expect(fixture.state.selectionSource?.text == heading)
         #expect(fixture.state.selectionSource?.application.bundleID == "com.apple.Safari")
@@ -510,7 +523,6 @@ import Testing
         await fixture.start()
         await select(heading)
         try #require(chip.current).content.open()
-        await fixture.module.selectionRead?.value
         await fixture.translated()
         await settle()
         #expect(fixture.harness.presenter.openedTabs == ["translation"])
@@ -564,7 +576,6 @@ import Testing
         await fixture.start()
         await select(heading)
         try #require(chip.current).content.open()
-        await fixture.module.selectionRead?.value
         await fixture.translated()
         await settle()
         #expect(fixture.engine.requests.count == 1)
@@ -639,7 +650,6 @@ import Testing
         let secrets = ["Zebraquartz", "Marmalade", "Plumbus"]
         await select("\(secrets[0]) Insights")
         try #require(chip.current).content.open()
-        await fixture.module.selectionRead?.value
         await select("\(secrets[1]) Insights")
         await select("\(secrets[2]) Insights")
         #expect(log.lines(startingWith: "button shown").count == 3)
@@ -660,7 +670,7 @@ import Testing
 
 /// Which reason ends in a button and which in nothing.
 @Suite struct SelectionButtonDecisionTableTests {
-    static let soft: Set<SelectionSkip> = [.shapeName, .lowConfidence, .sameLanguage, .noHint]
+    static let soft: Set<SelectionSkip> = [.shapeName, .shapeShort, .lowConfidence, .sameLanguage, .noHint]
 
     @Test(arguments: SelectionSkip.allCases)
     func eachReasonIsAButtonOrNothing(reason: SelectionSkip) {
@@ -668,7 +678,8 @@ import Testing
     }
 
     @Test func theReasonsThatAreOnlyAGuessAreTheOnesThatGetIt() {
-        #expect(SelectionSkip.allCases.filter(\.offersButton).count == 4)
+        #expect(SelectionSkip.allCases.filter(\.offersButton).count == 5)
+        #expect(SelectionSkip.shapeShort.offersButton)
         #expect(SelectionSkip.shapeName.offersButton)
         #expect(SelectionSkip.lowConfidence.offersButton)
         #expect(SelectionSkip.sameLanguage.offersButton)
@@ -676,7 +687,7 @@ import Testing
     }
 
     @Test(arguments: [
-        SelectionSkip.shapeCode, .shapeShort, .none, .secure, .denied, .notTrusted, .ownApp, .tooLong, .blank,
+        SelectionSkip.shapeCode, .none, .secure, .denied, .notTrusted, .ownApp, .tooLong, .blank,
         .noFrontApp, .cooldown, .unresponsive, .unchanged, .unsupportedLanguage, .noConversion, .cancelled,
     ])
     func theseNeverGetIt(reason: SelectionSkip) {

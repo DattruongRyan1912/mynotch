@@ -172,7 +172,7 @@ struct SelectionChipLabel: View {
 }
 
 /// The small translate button: a glyph on a black circle about 22 pt across, the chip's own surface, so it reads on the classic
-/// notch and on glass alike. It asks for nothing else: a click does what the shortcut does. Hiding the app is a right click,
+/// notch and on glass alike. It asks for nothing else: a click opens the selection in the tab. Hiding the app is a right click,
 /// since there is no room for a "⋯". It comes up transparent (the panel fades it in), so it is not drawn here.
 struct SelectionTranslateButton: View {
     static let side: CGFloat = 22

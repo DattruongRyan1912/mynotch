@@ -48,8 +48,8 @@ struct SmartSelectionSetup {
 
 /// "Bôi đen là hiểu": watches for selections in other apps, understands them (a conversion or a preview of a translation)
 /// and shows what it found beside the selection and, if the user wants, beside the collapsed notch. A selection that is read
-/// but not translated by itself, for a reason that is only a guess (a name or heading, a doubtful language, the user's own
-/// language), gets a small translate button instead, which does what ⌃⌥T does.
+/// but not translated by itself, for a reason that is only a guess (a name or heading, one word, a doubtful language, the
+/// user's own language), gets a small translate button instead, which opens it in the tab, translated.
 ///
 /// Nothing the user selects is written anywhere or sent anywhere from here, and it is held in memory only until the next
 /// selection or the end of the module: the preview is on-device, and the selected text is never logged.
@@ -96,7 +96,6 @@ final class SmartSelection {
     private let setup: SmartSelectionSetup
     private let keys: TranslationKeys
     private let openResult: @MainActor (SelectionSource) -> Void
-    private let translateSelection: @MainActor () -> Void
     private var chip: SelectionChip!
     private var watcher: SelectionWatcher?
     private var isWatching = false
@@ -119,18 +118,15 @@ final class SmartSelection {
     private var keyPressedSinceSelection = false
 
     /// - Parameters:
-    ///   - open: the chip's "Mở": opens the notch's Translation tab on the selection.
-    ///   - translate: the small button's click: what the shortcut does, which reads the selection again and opens the tab on it,
-    ///     translating at once whatever "Dịch ngay khi mở" says.
+    /// - Parameter open: the chip's "Mở" and the small button's click: opens the notch's Translation tab on the selection,
+    ///   translated at once.
     init(
-        context: ModuleContext, setup: SmartSelectionSetup, decider: SelectionDecider, open: @escaping @MainActor (SelectionSource) -> Void,
-        translate: @escaping @MainActor () -> Void
+        context: ModuleContext, setup: SmartSelectionSetup, decider: SelectionDecider, open: @escaping @MainActor (SelectionSource) -> Void
     ) {
         self.context = context
         self.setup = setup
         self.decider = decider
         openResult = open
-        translateSelection = translate
         keys = TranslationKeys(context.settings)
         chip = SelectionChip(
             scheduler: context.scheduler,
@@ -463,14 +459,15 @@ final class SmartSelection {
         )
     }
 
-    /// The small button's click: what ⌃⌥T does with the selection, through the module's own shortcut path, which reads the
-    /// selection again and opens the tab on it (translating at once, which the closure asks for). The button goes first, and a
-    /// button that is already gone does nothing.
+    /// The small button's click: the tab opens on the selection the button was offered for, translated at once. It is not
+    /// read again: by the time of the click a Chrome or Electron app has moved its focus off the text (to the group around
+    /// it, which has no selected text), so a second read finds nothing. The button goes first, and a button that is already
+    /// gone does nothing.
     private func translateButtonClicked() {
-        guard chip.hint?.kind == .translateButton else { return }
+        guard let hint = chip.hint, hint.kind == .translateButton else { return }
         log("button clicked")
         chip.dismiss()
-        translateSelection()
+        openResult(hint.source)
     }
 
     /// "Mở": the result of the selection the chip is showing, in the notch.

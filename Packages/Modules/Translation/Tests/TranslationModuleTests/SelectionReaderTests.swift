@@ -147,6 +147,32 @@ final class FakePauses {
         #expect(accessibility.reads == 0)
     }
 
+    /// The system-wide element does not always say which app has the focus (it answers "cannot complete" while the app in
+    /// front reads fine): the app in front is read then, as a passive read does.
+    @Test func theFrontAppIsReadWhenTheFocusedOneIsNotKnown() async {
+        accessibility.application = nil
+        let textEdit = FocusedApplication(processID: 42, bundleID: "com.apple.TextEdit")
+        accessibility.frontmost = textEdit
+        accessibility.selections = ["frontmatter CYBEROS-03 và ingest"]
+        #expect(await makeReader().selection() == SelectionSource(text: "frontmatter CYBEROS-03 và ingest", application: textEdit))
+    }
+
+    @Test func withMyNotchFocusedTheAppInFrontIsRead() async {
+        accessibility.application = FocusedApplication(processID: getpid(), bundleID: "io.lucasvu.mynotch")
+        let textEdit = FocusedApplication(processID: 42, bundleID: "com.apple.TextEdit")
+        accessibility.frontmost = textEdit
+        accessibility.selections = ["Xin chào"]
+        #expect(await makeReader().selection() == SelectionSource(text: "Xin chào", application: textEdit))
+    }
+
+    @Test func myNotchInFrontIsNotRead() async {
+        accessibility.application = nil
+        accessibility.frontmost = FocusedApplication(processID: getpid(), bundleID: "io.lucasvu.mynotch")
+        accessibility.selections = ["Xin chào"]
+        #expect(await makeReader().selection() == nil)
+        #expect(accessibility.reads == 0)
+    }
+
     @Test func myNotchItselfIsNotRead() async {
         accessibility.application = FocusedApplication(processID: getpid(), bundleID: "com.google.Chrome")
         accessibility.selections = ["Xin chào"]

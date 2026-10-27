@@ -12,8 +12,8 @@ import SwiftUI
 /// Apple's translation instead of switching by itself. With "Bôi đen là hiểu" on, a selection in any app is understood
 /// without a keystroke: its conversion or a preview of its translation (Apple's on-device engine only) shows in a small chip
 /// beside it, and the chip's "Mở" opens the full result in this tab. A selection it does not translate by itself, for a
-/// reason that is only a guess (a name or heading, a doubtful language, the user's own language), gets a small translate
-/// button instead, whose click does what the shortcut does.
+/// reason that is only a guess (a name or heading, one word, a doubtful language, the user's own language), gets a small
+/// translate button instead, whose click opens that selection in this tab, translated.
 public final class TranslationModule: FeatureModule {
     public let descriptor = ModuleDescriptor(
         id: "translation",
@@ -129,8 +129,7 @@ public final class TranslationModule: FeatureModule {
         let smart = SmartSelection(
             context: context, setup: smartSelectionSetup,
             decider: SelectionDecider(converter: converter, preview: smartSelectionSetup.preview, languages: languages, settings: context.settings),
-            open: { [weak self] in self?.openSelection($0) },
-            translate: { [weak self] in self?.selectionShortcutPressed(translatingAtOnce: true) }
+            open: { [weak self] in self?.openSelection($0) }
         )
         smartSelection = smart
         context.hotkeys.register("translateSelection", title: "Dịch đoạn chữ đang chọn", initial: shortcut) { [weak self] in
@@ -259,19 +258,18 @@ public final class TranslationModule: FeatureModule {
 
     /// The shortcut. The tab opens at once, empty and saying it is reading, since a slow app can take most of a
     /// second to answer; the selection fills it when the read ends. Nothing read leaves it empty, ready for typing.
-    ///
-    /// - Parameter translatingAtOnce: translate whatever "Dịch ngay khi mở" says. The shortcut itself goes by that setting; the
-    ///   small translate button asks for it, since a click that opens the tab with the text and no translation reads as broken.
-    func selectionShortcutPressed(translatingAtOnce: Bool = false) {
+    func selectionShortcutPressed() {
         guard let context, let translator else { return }
         selectionRead?.cancel()
         translator.receive(nil, translate: false)
         forgetSelection()
         state.isReadingSelection = true
+        // Found before the notch opens: once open, it can have the focus itself.
+        let application = selection.targetApplication()
         showTab(context)
         selection.useChromiumAccessibility = context.settings.value(TranslationKeys(context.settings).useChromiumAccessibility)
         selectionRead = Task { [weak self, selection] in
-            let source = await selection.selection()
+            let source = await selection.selection(in: application)
             // A newer press, Services text or stopping took over while the app was being read.
             guard let self, !Task.isCancelled else { return }
             selectionRead = nil
@@ -279,7 +277,7 @@ public final class TranslationModule: FeatureModule {
             // Text typed meanwhile is what the user wants translated.
             guard state.input.isEmpty else { return }
             state.selectionSource = source
-            receive(source?.text, translatingAtOnce: translatingAtOnce)
+            receive(source?.text)
         }
     }
 
@@ -294,7 +292,7 @@ public final class TranslationModule: FeatureModule {
         showTab(context)
     }
 
-    /// The chip's "Mở": the tab opens on a selection that was understood without a keystroke. It is translated at once whatever
+    /// The chip's "Mở", and its small translate button: the tab opens on a selection that was understood without a keystroke. It is translated at once whatever
     /// the auto-translate setting says, since the user asked to see it, and by the engine chosen in Settings, which is the
     /// first time anything but Apple's on-device engine sees it. The selection's app is kept, so the result can be spoken
     /// and written back over it like one read by the shortcut.
@@ -405,11 +403,9 @@ public final class TranslationModule: FeatureModule {
         }
     }
 
-    private func receive(_ text: String?, translatingAtOnce: Bool = false) {
+    private func receive(_ text: String?) {
         guard let context, let translator else { return }
-        translator.receive(
-            text, translate: translatingAtOnce || context.settings.value(TranslationKeys(context.settings).autoTranslateOnOpen)
-        )
+        translator.receive(text, translate: context.settings.value(TranslationKeys(context.settings).autoTranslateOnOpen))
     }
 
     private func showTab(_ context: ModuleContext) {

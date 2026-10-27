@@ -187,6 +187,34 @@ struct ModuleFixture {
         #expect(fixture.harness.presenter.openedTabs == ["translation"])
     }
 
+    /// The open notch can take the keyboard, and then the focused and the front app can both read as MyNotch by the time
+    /// the selection is read: the app to read is the one that held the selection when the shortcut was pressed.
+    @Test func shortcutReadsTheAppThatHadTheSelectionBeforeTheNotchOpened() async {
+        await fixture.start()
+        let textEdit = FocusedApplication(processID: 42, bundleID: "com.apple.TextEdit")
+        fixture.accessibility.application = textEdit
+        fixture.accessibility.selections = ["frontmatter CYBEROS-03 và ingest"]
+        fixture.module.selectionShortcutPressed()
+        let myNotch = FocusedApplication(processID: getpid(), bundleID: "io.lucasvu.mynotch")
+        fixture.accessibility.application = myNotch
+        fixture.accessibility.frontmost = myNotch
+        await fixture.module.selectionRead?.value
+        #expect(fixture.state.input == "frontmatter CYBEROS-03 và ingest")
+        #expect(fixture.state.selectionSource == SelectionSource(text: "frontmatter CYBEROS-03 và ingest", application: textEdit))
+    }
+
+    /// The notch was already open and had the keyboard when the shortcut was pressed: the app in front is read.
+    @Test func shortcutWithTheNotchFocusedReadsTheAppInFront() async {
+        await fixture.start()
+        let textEdit = FocusedApplication(processID: 42, bundleID: "com.apple.TextEdit")
+        fixture.accessibility.application = FocusedApplication(processID: getpid(), bundleID: "io.lucasvu.mynotch")
+        fixture.accessibility.frontmost = textEdit
+        fixture.accessibility.selections = ["Hello, how are you today?"]
+        fixture.module.selectionShortcutPressed()
+        await fixture.module.selectionRead?.value
+        #expect(fixture.state.selectionSource == SelectionSource(text: "Hello, how are you today?", application: textEdit))
+    }
+
     @Test func aSecondPressSupersedesTheFirstRead() async {
         await fixture.start()
         fixture.focus("com.google.Chrome")

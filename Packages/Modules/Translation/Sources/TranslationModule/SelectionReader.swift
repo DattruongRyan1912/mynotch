@@ -49,10 +49,24 @@ final class SelectionReader {
         self.pause = pause
     }
 
+    /// The app whose selection is read: the one with the keyboard focus, else the one in front. The system-wide element
+    /// does not always say which app has the focus (it can answer "cannot complete" while the app in front reads fine), and
+    /// MyNotch's own text fields don't count: the selection belongs to another app, which stays in front while the notch
+    /// panel has the keyboard. Asked before the notch opens, since an open notch can take the focus.
+    func targetApplication() -> FocusedApplication? {
+        guard accessibility.isTrusted else { return nil }
+        let ownProcessID = getpid()
+        if let focused = accessibility.focusedApplication(), focused.processID != ownProcessID { return focused }
+        return accessibility.frontmostApplication().flatMap { $0.processID == ownProcessID ? nil : $0 }
+    }
+
     func selection() async -> SelectionSource? {
-        // MyNotch's own text fields don't count: the selection belongs to another app.
-        guard accessibility.isTrusted, let application = accessibility.focusedApplication(),
-              application.processID != getpid() else { return nil }
+        await selection(in: targetApplication())
+    }
+
+    /// The selection in `application`, found by `targetApplication()`; nil when there is none.
+    func selection(in application: FocusedApplication?) async -> SelectionSource? {
+        guard accessibility.isTrusted, let application, application.processID != getpid() else { return nil }
         switch read(application) {
         case .text(let text): return SelectionSource(text: text, application: application)
         case .unresponsive: return nil
