@@ -85,6 +85,51 @@ import Testing
         #expect(captures.map(\.content) == [.text("hunter2"), .text("Xin chào")])
     }
 
+    /// Passwords.app writes only public.utf8-plain-text, no marker, so the app in front is what tells.
+    @Test(arguments: ["com.apple.Passwords", "com.1password.1password"])
+    func aCopyFromAPasswordManagerIsNotReadWhenSensitiveCopiesAreIgnored(bundleID: String) {
+        frontmost = (bundleID, nil)
+        monitor.start()
+        pasteboard.copy(Self.text("hunter2"))
+        scheduler.advance(by: Self.interval)
+
+        #expect(pasteboard.snapshotCount == 0)
+        #expect(captures.isEmpty)
+    }
+
+    @Test func aCopyFromAPasswordManagerIsReportedSensitiveWhenTheSettingKeepsIt() {
+        ignoreSensitive = false
+        frontmost = ("com.apple.Passwords", "Passwords")
+        monitor.start()
+        pasteboard.copy(Self.text("hunter2"))
+        scheduler.advance(by: Self.interval)
+
+        #expect(captures == [Capture(
+            content: .text("hunter2"), imageData: nil, bundleID: "com.apple.Passwords", appName: "Passwords", isSensitive: true
+        )])
+    }
+
+    /// The copy happened between two ticks, so a password manager in front at either tick makes it a secret.
+    @Test(arguments: [true, false], [("com.apple.Passwords", "com.apple.Safari"), ("com.apple.Safari", "com.apple.Passwords")])
+    func aCopyAcrossASwitchWithAPasswordManagerIsASecret(ignoreSensitive: Bool, apps: (before: String, after: String)) {
+        self.ignoreSensitive = ignoreSensitive
+        frontmost = (apps.before, nil)
+        monitor.start()
+        pasteboard.copy(Self.text("hunter2"))
+        frontmost = (apps.after, nil)
+        scheduler.advance(by: Self.interval)
+
+        #expect(captures.map(\.isSensitive) == (ignoreSensitive ? [] : [true]))
+    }
+
+    @Test func plainTextFromAnotherAppIsNotASecret() {
+        monitor.start()
+        pasteboard.copy(Self.text("Xin chào"))
+        scheduler.advance(by: Self.interval)
+
+        #expect(captures.map(\.isSensitive) == [false])
+    }
+
     @Test func everyChangeIsCaptured() {
         monitor.start()
         pasteboard.copy(Self.text("one"))

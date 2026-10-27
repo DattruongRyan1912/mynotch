@@ -1,3 +1,4 @@
+import MyNotchCore
 import SwiftUI
 
 /// A card's context menu (spec 3.4). A view of its own because SwiftUI evaluates it only when the menu opens, so
@@ -40,6 +41,18 @@ struct ClipboardCardMenu: View {
         }
         if let onEdit, ClipboardEditing.text(of: item) != nil {
             Button("Sửa…", systemImage: "pencil") { onEdit(item) }
+        }
+        if item.content.kind == .image {
+            Button("Sửa ảnh", systemImage: "pencil.and.scribble") {
+                if let source = module.previewImageSource(of: item) {
+                    switch source {
+                    case .file(let url):
+                        NotificationCenter.default.post(name: .openMarkupEditorForImage, object: url)
+                    case .memory(let data):
+                        NotificationCenter.default.post(name: .openMarkupEditorForImage, object: data)
+                    }
+                }
+            }
         }
         boards
         if ClipboardModule.openableLink(of: item) != nil {

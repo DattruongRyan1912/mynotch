@@ -225,9 +225,9 @@ final class FakeSystem {
         settings.set(true, for: keys.paused)
         copy("while paused")
         settings.set(false, for: keys.paused)
-        settings.set(["com.1password.1password"], for: keys.excludedBundleIDs)
-        system.frontmost = ("com.1password.1password", "1Password")
-        copy("hunter2")
+        settings.set(["com.apple.Notes"], for: keys.excludedBundleIDs)
+        system.frontmost = ("com.apple.Notes", "Notes")
+        copy("private note")
         #expect(items.isEmpty)
 
         settings.set([], for: keys.excludedBundleIDs)

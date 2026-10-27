@@ -59,16 +59,23 @@ final class ClipboardMonitor {
         let policy = shouldCapture()
         // Either app may have made the copy, so an excluded app on either side of the switch skips it.
         guard !policy.paused, !Self.isExcluded(source, by: policy), !Self.isExcluded(current, by: policy) else { return }
+        // Same either-side rule. Skipped secrets are not even read, like an excluded app's copies.
+        let fromPasswordManager = Self.isPasswordManager(source) || Self.isPasswordManager(current)
+        if fromPasswordManager, policy.classifier.ignoreSensitive { return }
         // Classifying on the main actor is fine for now: TIFF is read only without PNG,
         // and converting even a 96 MB TIFF to PNG measured 0.17 s.
         guard let snapshot = pasteboard.snapshot(),
               case .content(let content, let imageData) = policy.classifier.classify(snapshot) else { return }
         // Still true with "ignore sensitive" off, so whoever must never keep a secret can tell.
-        onCapture(content, imageData, source, ClipboardClassifier.isSensitive(snapshot))
+        onCapture(content, imageData, source, fromPasswordManager || ClipboardClassifier.isSensitive(snapshot))
     }
 
     private static func isExcluded(_ app: SourceApp, by policy: CapturePolicy) -> Bool {
         app.bundleID.map(policy.excluded.contains) ?? false
+    }
+
+    private static func isPasswordManager(_ app: SourceApp) -> Bool {
+        app.bundleID.map(ClipboardClassifier.passwordManagerBundleIDs.contains) ?? false
     }
 
     private func scheduleTick() {

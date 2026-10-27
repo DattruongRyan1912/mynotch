@@ -79,6 +79,7 @@ struct ClipboardSettingsView: View {
             storage
             ClipboardBackupRows(backup: backup, isAvailable: canBackUp)
             ClipboardMCPRows(isOn: settings.binding(keys.mcpEnabled), actions: mcp, isRunning: canBackUp)
+            ClipboardCloudSyncRows()
             TimelineView(.periodic(from: .now, by: 2)) { _ in
                 pasteboardAccess(pasteboardAccessBehavior())
             }

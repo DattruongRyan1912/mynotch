@@ -1,4 +1,5 @@
 import AppKit
+import MyNotchCore
 import SwiftUI
 
 /// The large preview: the item the window it belongs to has selected, drawn big. It follows that selection while it is open,
@@ -12,8 +13,13 @@ struct ClipboardPreviewView: View {
             if let item = host.previewedItem {
                 // A fresh view per item and per version of its words, so nothing loaded for the one before can show for the next, and
                 // an item the editor replaced is drawn again.
-                ClipboardPreviewItemView(item: item, imageSource: module.previewImageSource(of: item), link: module.linkPreviewDisplay(for: item))
-                    .id(ClipboardPreviewIdentity(id: item.id, contentHash: item.contentHash))
+                ClipboardPreviewItemView(
+                    item: item,
+                    imageSource: module.previewImageSource(of: item),
+                    link: module.linkPreviewDisplay(for: item),
+                    onEditImage: { host.closePreview() }
+                )
+                .id(ClipboardPreviewIdentity(id: item.id, contentHash: item.contentHash))
             } else {
                 Color.clear
             }
@@ -35,6 +41,7 @@ struct ClipboardPreviewItemView: View {
     let imageSource: ClipboardPreviewImageSource?
     /// What was read of a link's page, when link previews are on and this link may be read.
     var link: ClipboardLinkPreviewDisplay?
+    var onEditImage: (() -> Void)?
     /// Worked out once, the first time it is needed: the view is made again at every change of the history while it is open, and the
     /// cut of a 2 MB text should not be.
     @State private var cache = ContentCache()
@@ -79,6 +86,20 @@ struct ClipboardPreviewItemView: View {
             if let app = item.sourceAppName { Text(app) }
             Text(ClipboardCardText.relativeTime(item.copiedAt, now: .now))
             Spacer(minLength: 12)
+            if item.content.kind == .image, imageSource != nil {
+                Button {
+                    editImage()
+                } label: {
+                    Label("Sửa ảnh", systemImage: "pencil.and.scribble")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.accentColor.opacity(0.12), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Mở ảnh trong trình chỉnh sửa ảnh (Markup Editor)")
+            }
             Text("↑↓ đổi mục  ·  ⏎ dán  ·  esc đóng")
         }
         .font(.system(size: 12))
@@ -86,6 +107,17 @@ struct ClipboardPreviewItemView: View {
         .lineLimit(1)
         .padding(.horizontal, 18)
         .frame(height: 36)
+    }
+
+    private func editImage() {
+        guard let imageSource else { return }
+        onEditImage?()
+        switch imageSource {
+        case .file(let url):
+            NotificationCenter.default.post(name: .openMarkupEditorForImage, object: url)
+        case .memory(let data):
+            NotificationCenter.default.post(name: .openMarkupEditorForImage, object: data)
+        }
     }
 
     private var kindTitle: String {

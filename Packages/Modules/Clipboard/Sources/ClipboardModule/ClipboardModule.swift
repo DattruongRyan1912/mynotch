@@ -114,6 +114,8 @@ public final class ClipboardModule: FeatureModule {
     lazy var storageFallbackSettings = SettingsStore(defaults: .standard)
     /// Told one line per clean of the Storage page: numbers only, never what was copied. A test reads them.
     var storageReport: (String) -> Void = { Log.logger(category: "clipboard").info("\($0, privacy: .public)") }
+    /// Sends a copied text to the paired phone. A test reads what would leave the Mac.
+    var sendToCloud: (_ text: String, _ sourceApp: String?) -> Void = { CloudSyncManager.shared.sendClip(text: $0, sourceApp: $1) }
     /// Backups being written or restored. The Storage page's cleans do nothing while there are any: a backup reads the pictures of the history,
     /// and a restore stores pictures before it adds their items.
     var backupsInFlight = 0
@@ -304,6 +306,9 @@ public final class ClipboardModule: FeatureModule {
             for await _ in Observations({ settings.value(keys.stackPersist) }) {
                 self?.writeStackFile()
             }
+        }
+        CloudSyncManager.shared.onClipReceived = { [weak self] payload in
+            self?.handleCloudClipReceived(payload)
         }
     }
 
@@ -889,6 +894,37 @@ public final class ClipboardModule: FeatureModule {
                 id: "copied", expiresAfter: .milliseconds(1500),
                 leading: AnyView(ClipboardActivityIcon(systemImage: "doc.on.clipboard.fill")),
                 trailing: AnyView(ClipboardActivityIcon(systemImage: content.kind.systemImage))
+            ))
+        }
+
+        // Transmit text to Android via E2EE Cloud Sync if enabled and not sensitive
+        if !isSensitive {
+            switch content {
+            case .text(let text):
+                sendToCloud(text, source.name)
+            default:
+                break
+            }
+        }
+    }
+
+    private func handleCloudClipReceived(_ payload: CloudSyncPayload) {
+        guard let context, let keys else { return }
+        let content = ClipboardContent.text(payload.content)
+        let source: ClipboardMonitor.SourceApp = (bundleID: "com.android.device", name: payload.sourceApp ?? "Android")
+
+        var addedID: UUID?
+        update { history in
+            addedID = history.add(content, hash: ClipboardContent.hash(of: content), source: source, at: now(), isSensitive: false).id
+            return []
+        }
+        playCaptureSound(for: addedID)
+
+        if context.settings.value(keys.showCopiedActivity) {
+            context.activities.set(LiveActivity(
+                id: "copied", expiresAfter: .milliseconds(2500),
+                leading: AnyView(ClipboardActivityIcon(systemImage: "iphone.and.arrow.forward")),
+                trailing: AnyView(ClipboardActivityIcon(systemImage: "doc.on.clipboard.fill"))
             ))
         }
     }
