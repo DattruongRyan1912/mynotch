@@ -1,7 +1,7 @@
 # MyNotch: quay màn hình để gửi demo
 
 - **Ngày:** 2026-10-18
-- **Trạng thái:** Thiết kế, chờ duyệt
+- **Trạng thái:** Đã duyệt (2026-10-18) và đã triển khai (REC1 đến REC4): xem [ghi chú Ảnh chụp, mục 11](../notes/2026-10-14-screenshot-implementation.html). Chỗ khác với spec: file gốc là HEVC, fragmented, trong các file `segment-00N.mov` (spec để người làm chọn định dạng file gốc, mục 7); "Chất lượng cao" bị giới hạn bởi H.264 level 5.2 (một màn 5K ở 60 fps ra 3946 × 2218); file MP4 xuất chép vào clipboard với dấu "của MyNotch" nên không vào lịch sử Clipboard.
 - **Tham khảo tính năng:** OpenScreen (getopenscreen.com, giấy phép MIT). Chỉ tham khảo tính năng. Tự viết, không chép mã, giống mọi module của MyNotch.
 
 ## 1. Ý định

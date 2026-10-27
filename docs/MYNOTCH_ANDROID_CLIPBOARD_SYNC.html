@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hướng Dẫn & Kiến Trúc: Đồng Bộ Clipboard macOS ↔ Android (MyNotch Cloud Sync)</title>
+  <style>
+    :root {
+      --bg: #09090b;
+      --card: #18181b;
+      --card-border: #27272a;
+      --text: #f4f4f5;
+      --text-muted: #a1a1aa;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --accent: #8b5cf6;
+      --code-bg: #121215;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 40px 20px;
+    }
+    .container { max-width: 960px; margin: 0 auto; }
+    header { margin-bottom: 40px; border-bottom: 1px solid var(--card-border); padding-bottom: 24px; }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 9999px;
+      background-color: rgba(59, 130, 246, 0.15);
+      color: var(--primary);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      margin-bottom: 12px;
+    }
+    h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 8px; }
+    .lead { font-size: 16px; color: var(--text-muted); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin: 24px 0; }
+    .card {
+      background-color: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+    .card h3 { font-size: 18px; margin-bottom: 10px; color: #fff; display: flex; align-items: center; gap: 8px; }
+    .card p { font-size: 14px; color: var(--text-muted); }
+    pre {
+      background-color: var(--code-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 14px;
+      overflow-x: auto;
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      font-size: 13px;
+      color: #e4e4e7;
+      margin: 12px 0;
+      position: relative;
+    }
+    .copy-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      color: #d4d4d8;
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .copy-btn:hover { background: #3f3f46; color: #fff; }
+    .step-list { list-style: none; counter-reset: steps; margin: 24px 0; }
+    .step-item {
+      position: relative;
+      padding-left: 48px;
+      margin-bottom: 24px;
+    }
+    .step-item::before {
+      counter-increment: steps;
+      content: counter(steps);
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 32px;
+      height: 32px;
+      background: var(--primary);
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 14px;
+    }
+    .step-title { font-size: 17px; font-weight: 700; margin-bottom: 6px; color: #fff; }
+    .tag-e2ee { background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); padding: 2px 6px; border-radius: 4px; font-size: 11px; }
+    .diagram-box {
+      background: #101014;
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 20px;
+      margin: 20px 0;
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #a1a1aa;
+      white-space: pre;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <span class="badge">MYNOTCH CROSS-PLATFORM</span>
+      <h1>Đồng Bộ Clipboard Cloud macOS ↔ Android</h1>
+      <p class="lead">Hệ thống đồng bộ hai chiều bảo mật đầu cuối (E2EE Zero-Knowledge) qua WebSocket Relay giữa MyNotch (macOS) và Flutter App (Android).</p>
+    </header>
+
+    <div class="grid">
+      <div class="card">
+        <h3>🔒 E2EE Zero-Knowledge</h3>
+        <p>Mã hóa AES-256-GCM trực tiếp trên máy với 12-byte CSPRNG Nonce mới cho từng lần copy. Cloud Relay không có khóa bí mật và hoàn toàn không thể đọc nội dung.</p>
+      </div>
+      <div class="card">
+        <h3>⚡ Tốc Độ Realtime</h3>
+        <p>Sử dụng giao thức WebSocket hai chiều. Hoạt động trên mọi mạng Internet: Wi-Fi văn phòng, mạng nhà hoặc 4G/5G khi đang di chuyển ngoài đường.</p>
+      </div>
+      <div class="card">
+        <h3>📱 Ghép Đôi 1-Click QR</h3>
+        <p>Mac sinh mã QR chứa thông tin kênh và khóa bí mật. App Android chỉ cần mở camera quét mã là tự động thiết lập bảo mật và kết nối trong 2 giây.</p>
+      </div>
+    </div>
+
+    <h2 style="margin-top: 36px; font-size: 22px;">Sơ Đồ Kiến Trúc Hệ Thống (Data Flow)</h2>
+    <div class="diagram-box">
++---------------------+           +------------------------+           +---------------------+
+|    macOS MyNotch    |           |   Cloudflare Relay     |           |   Android Flutter   |
+|  (ClipboardModule)  |           |   (Blind WebSocket)    |           |  (MyNotch Sync App) |
++---------------------+           +------------------------+           +---------------------+
+           |                                  |                                   |
+           |  1. Người dùng sao chép trên Mac |                                   |
+           |  2. Mã hóa AES-256-GCM           |                                   |
+           |  3. Gửi Ciphertext qua WSS       |                                   |
+           |--------------------------------->|                                   |
+           |                                  |  4. Chuyển tiếp gói tin mã hóa    |
+           |                                  |---------------------------------->|
+           |                                  |                                   | 5. Giải mã E2EE
+           |                                  |                                   | 6. Ghi vào Clipboard
+           |                                  |                                   |
+           |                                  |  8. Gửi gói tin mã hóa            | 7. Người dùng bấm
+           |                                  |<----------------------------------|    "Gửi sang Mac"
+           |  9. Giải mã E2EE                 |                                   |
+           | 10. Ghi NSPasteboard (có marker) |                                   |
+           |<---------------------------------|                                   |
+    </div>
+
+    <h2 style="margin-top: 36px; font-size: 22px;">Quy Trình Khởi Chạy &amp; Sử Dụng (3 Bước)</h2>
+    <ol class="step-list">
+      <li class="step-item">
+        <div class="step-title">Bước 1: Hạ tầng Cloudflare Workers Relay</div>
+        <p style="color: var(--text-muted); font-size: 14px;">Hệ thống Cloudflare Relay chính thức đang hoạt động tại:</p>
+        <pre><button class="copy-btn" onclick="navigator.clipboard.writeText('https://mynotch-cloud-relay.dattruong1912.workers.dev/health')">Copy</button><code># Endpoint Public (Durable Objects SQLite + WebSocket Hibernation):
+wss://mynotch-cloud-relay.dattruong1912.workers.dev/ws
+
+# Kiểm tra trạng thái máy chủ:
+curl -sS https://mynotch-cloud-relay.dattruong1912.workers.dev/health</code></pre>
+      </li>
+
+      <li class="step-item">
+        <div class="step-title">Bước 2: Cài Đặt Bản APK Mới Nhất Lên Điện Thoại</div>
+        <p style="color: var(--text-muted); font-size: 14px;">File bộ cài Release APK (v1.0.0 đã tích hợp Auto-Send &amp; Share Sheet) đã được đẩy trực tiếp lên Google Drive của bạn:</p>
+        <pre><button class="copy-btn" onclick="navigator.clipboard.writeText('open &quot;/Users/ryantruong/Library/CloudStorage/GoogleDrive-dattruong19122003@gmail.com/My Drive/MyNotch Sync Releases&quot;')">Copy</button><code>open "/Users/ryantruong/Library/CloudStorage/GoogleDrive-dattruong19122003@gmail.com/My Drive/MyNotch Sync Releases"</code></pre>
+        <p style="color: var(--text-muted); font-size: 14px; margin-top: 6px;">👉 Cài đặt file <code>mynotch-sync-android-v1.0.0-release.apk</code> lên điện thoại.</p>
+      </li>
+
+      <li class="step-item">
+        <div class="step-title">Bước 3: Ghép Đôi &amp; Trải Nghiệm Tự Động</div>
+        <p style="color: var(--text-muted); font-size: 14px;">
+          1. Mở <strong>MyNotch Settings</strong> trên Mac &gt; <strong>Clipboard</strong> &gt; bật <strong>"Đồng bộ Clipboard đa thiết bị"</strong> &gt; bấm <strong>"Xem mã QR"</strong>.<br>
+          2. Mở app <strong>MyNotch Sync</strong> trên điện thoại &gt; bấm <strong>"Quét mã QR từ Mac"</strong>.<br>
+          3. <strong>Sử dụng siêu tốc:</strong><br>
+          &nbsp;&nbsp;• <strong>Mac ➔ Android:</strong> Tự động 100% trong nền.<br>
+          &nbsp;&nbsp;• <strong>Android ➔ Mac:</strong> Copy chữ ở bất kỳ đâu &gt; Chạm mở icon app MyNotch là tự động gửi sang Mac ngay lập tức (Auto-Send on Resume), hoặc bôi đen chữ chọn <em>Chia sẻ / Process Text &gt; MyNotch Sync</em>.
+        </p>
+      </li>
+    </ol>
+
+    <h2 style="margin-top: 36px; font-size: 22px;">Kiểm Thử &amp; Đảm Bảo Chất Lượng</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>🛡️ Chống Vòng Lặp Echo</h3>
+        <p>Khi Mac nhận clip từ Android và ghi vào pasteboard, hệ thống gắn kèm thẻ <code>OwnPasteboardWrite.pasteboardType</code> để <code>ClipboardMonitor</code> không nhầm lẫn gửi ngược lại lên Cloud.</p>
+      </div>
+      <div class="card">
+        <h3>⚡ Auto-Send on Resume (Zero-Click)</h3>
+        <p>Giải quyết triệt để rào cản Clipboard Sandbox của Android 10+: Ngay khi app quay lại Foreground (Resume), hệ thống tự so sánh hash và bắn nội dung mới sang Mac chỉ trong 0.1 giây.</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

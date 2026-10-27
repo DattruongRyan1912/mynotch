@@ -1,5 +1,7 @@
 # Bộ chỉnh âm (EQ) cho cả máy: Kế hoạch triển khai
 
+> **Trạng thái (2026-10-18):** đã làm hết sáu việc (EQ1 đến EQ5 do các agent làm, việc 6 ghép vào app do người điều phối: `f772706`). Kế hoạch giữ nguyên như lúc viết; chỗ khác và kết quả: [ghi chú triển khai Âm thanh](../notes/2026-10-18-equalizer-implementation.html).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** EQ 10 băng có preamp, áp lên mọi âm thanh của máy theo từng thiết bị đầu ra. Hồ sơ dạng danh sách thả xuống, đổi nhanh trong tab Nhạc, chỉnh trong tab "Âm thanh".

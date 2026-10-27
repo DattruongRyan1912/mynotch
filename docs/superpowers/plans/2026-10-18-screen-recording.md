@@ -1,5 +1,7 @@
 # Quay màn hình để gửi demo: Kế hoạch triển khai
 
+> **Trạng thái (2026-10-18):** đã làm hết REC1 đến REC4 (`8ef594e`, `323c4ce`, `52223c7`, `ed609c9`, `2d8d2d3`, `c7553d1`) và việc dung lượng ST3 (`55a3560`, `41dba8a`). Kế hoạch giữ nguyên như lúc viết; chỗ khác và kết quả: [ghi chú Ảnh chụp, mục 11 và 12](../notes/2026-10-14-screenshot-implementation.html).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Quay màn hình từ notch, có micro. Chỉnh sửa gồm cắt và zoom tự động theo hoạt động. Xuất MP4 rồi chép vào clipboard.

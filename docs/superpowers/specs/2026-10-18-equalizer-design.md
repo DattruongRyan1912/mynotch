@@ -1,7 +1,7 @@
 # MyNotch: bộ chỉnh âm (EQ) cho cả máy
 
 - **Ngày:** 2026-10-18
-- **Trạng thái:** Thiết kế, chờ duyệt
+- **Trạng thái:** Đã duyệt (2026-10-18) và đã triển khai: xem [ghi chú triển khai Âm thanh](../notes/2026-10-18-equalizer-implementation.html). Chỗ khác với spec: tab chứa hàng EQ tên là "Media" (không phải "Nhạc"); thiếu quyền thì EQ tự dừng sau khoảng 10 giây im lặng và chỉ "Thử lại" hay bật rồi tắt mới chạy lại; một thiết bị không dựng được không làm ngừng các thiết bị khác.
 - **Thay cho:** eqMac. Người dùng chỉ dùng phần EQ, không dùng App Mixer.
 
 ## 1. Ý định

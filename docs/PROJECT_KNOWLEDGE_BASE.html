@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MyNotch — Sổ Tay Tri Thức Dự Án & Kiến Trúc Kỹ Thuật (Project Knowledge Base)</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --fg: #1d1d1f;
+      --muted: #86868b;
+      --line: #e5e5ea;
+      --card: #f5f5f7;
+      --card-border: #e1e1e6;
+      --accent: #0071e3;
+      --accent-hover: #0077ed;
+      --code-bg: #1c1c1e;
+      --code-fg: #f2f2f7;
+      --sidebar-bg: #fbfbfd;
+      --tag-bg: #e8e8ed;
+      --success: #34c759;
+      --warning: #ff9f0a;
+      --danger: #ff453a;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #000000;
+        --fg: #f5f5f7;
+        --muted: #86868b;
+        --line: #2c2c2e;
+        --card: #1c1c1e;
+        --card-border: #38383a;
+        --accent: #2997ff;
+        --accent-hover: #47a6ff;
+        --code-bg: #121214;
+        --code-fg: #f2f2f7;
+        --sidebar-bg: #0a0a0c;
+        --tag-bg: #2c2c2e;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .container {
+      display: grid;
+      grid-template-columns: 290px minmax(0, 1fr);
+      min-height: 100vh;
+      max-width: 1480px;
+      margin: 0 auto;
+    }
+    /* Sidebar */
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 32px 20px;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--line);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .brand-icon {
+      width: 38px;
+      height: 38px;
+      background: linear-gradient(135deg, #1d1d1f 0%, #0071e3 100%);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 20px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    .brand h2 { font-size: 18px; font-weight: 600; letter-spacing: -0.4px; }
+    .brand p { font-size: 12px; color: var(--muted); }
+    .search-box {
+      margin-bottom: 20px;
+      position: relative;
+    }
+    .search-box input {
+      width: 100%;
+      padding: 8px 12px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 13px;
+      color: var(--fg);
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .search-box input:focus { border-color: var(--accent); }
+    nav ul { list-style: none; }
+    nav li { margin-bottom: 4px; }
+    nav a {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--muted);
+      text-decoration: none;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+    nav a:hover, nav a.active {
+      background: var(--card);
+      color: var(--fg);
+    }
+    nav a.sub { padding-left: 24px; font-size: 12.5px; font-weight: 400; }
+    .badge-count {
+      background: var(--tag-bg);
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 10px;
+      color: var(--muted);
+    }
+
+    /* Main Content */
+    main {
+      padding: 40px 60px 100px;
+      max-width: 1020px;
+      min-width: 0;
+    }
+    .hero {
+      margin-bottom: 48px;
+      padding-bottom: 32px;
+      border-bottom: 1px solid var(--line);
+    }
+    .hero h1 {
+      font-size: 38px;
+      font-weight: 700;
+      letter-spacing: -0.8px;
+      margin-bottom: 12px;
+      line-height: 1.2;
+    }
+    .hero p {
+      font-size: 18px;
+      color: var(--muted);
+      max-width: 760px;
+    }
+    .quick-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 20px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      font-size: 12.5px;
+      font-weight: 500;
+    }
+
+    section {
+      margin-bottom: 64px;
+      scroll-margin-top: 40px;
+    }
+    h2 {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+    }
+    h3 {
+      font-size: 18px;
+      font-weight: 600;
+      margin: 28px 0 12px;
+      letter-spacing: -0.3px;
+    }
+    p, li {
+      font-size: 15px;
+      line-height: 1.65;
+      color: var(--fg);
+    }
+    ul, ol {
+      margin: 12px 0 18px 24px;
+    }
+    li { margin-bottom: 6px; }
+
+    /* Cards & Grids */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 18px;
+      margin: 20px 0;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 20px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+    }
+    .card h4 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .card p { font-size: 13.5px; color: var(--muted); }
+
+    /* Code blocks */
+    pre {
+      position: relative;
+      background: var(--code-bg);
+      color: var(--code-fg);
+      padding: 16px 20px;
+      border-radius: 10px;
+      font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+      font-size: 13.5px;
+      line-height: 1.55;
+      overflow-x: auto;
+      margin: 16px 0 24px;
+      border: 1px solid #2d2d30;
+    }
+    code {
+      font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      background: var(--tag-bg);
+      padding: 2px 6px;
+      border-radius: 5px;
+    }
+    pre code { background: none; padding: 0; }
+    .copy-btn {
+      position: absolute;
+      top: 10px;
+      right: 12px;
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 6px;
+      font-size: 11px;
+      padding: 4px 10px;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      transition: background 0.15s;
+    }
+    .copy-btn:hover { background: rgba(255,255,255,0.25); }
+
+    /* Tables */
+    .table-container {
+      overflow-x: auto;
+      margin: 20px 0 28px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      text-align: left;
+    }
+    th, td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    th {
+      background: var(--card);
+      font-weight: 600;
+      color: var(--fg);
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(125, 125, 125, 0.04); }
+
+    /* Alert callouts */
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: var(--card);
+      padding: 16px 20px;
+      border-radius: 0 10px 10px 0;
+      margin: 20px 0;
+      font-size: 14px;
+    }
+    .callout.warning { border-left-color: var(--warning); }
+    .callout.success { border-left-color: var(--success); }
+    .callout.danger { border-left-color: var(--danger); }
+    .callout h5 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+
+    /* Diagrams (ASCII / SVG representation) */
+    .diagram-box {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 24px;
+      margin: 24px 0;
+      overflow-x: auto;
+    }
+    .diagram-title {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    @media (max-width: 900px) {
+      .container { grid-template-columns: 1fr; }
+      aside { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--line); }
+      main { padding: 24px 20px 60px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <!-- SIDEBAR NAVIGATION -->
+  <aside>
+    <div class="brand">
+      <div class="brand-icon">M</div>
+      <div>
+        <h2>MyNotch Docs</h2>
+        <p>Knowledge Base v0.1.0</p>
+      </div>
+    </div>
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="Tìm kiếm nhanh kiến thức...">
+    </div>
+    <nav>
+      <ul>
+        <li><a href="#overview">1. Tổng Quan & Triết Lý</a></li>
+        <li><a href="#architecture">2. Kiến Trúc Hệ Thống</a></li>
+        <li><a href="#core-frameworks" class="sub">MyNotchCore & NotchUI</a></li>
+        <li><a href="#lifecycle" class="sub">Vòng đời & Polling</a></li>
+        <li><a href="#modules">3. Danh Mục 18 Module</a></li>
+        <li><a href="#mod-media" class="sub">Media & Smart Focus</a></li>
+        <li><a href="#mod-performance" class="sub">Performance (CPU, SMC, Quạt)</a></li>
+        <li><a href="#mod-screenshot" class="sub">Screenshot & Screen Record</a></li>
+        <li><a href="#mod-clipboard" class="sub">Clipboard & MCP Server</a></li>
+        <li><a href="#mod-equalizer" class="sub">Equalizer (EQ Toàn máy)</a></li>
+        <li><a href="#mod-aiagents" class="sub">AI Agents & Pet</a></li>
+        <li><a href="#security-tcc">4. Bảo Mật & Quyền TCC</a></li>
+        <li><a href="#code-signing" class="sub">Ký Chứng Chỉ & Designated Req</a></li>
+        <li><a href="#dev-workflow">5. Hướng Dẫn Phát Triển</a></li>
+        <li><a href="#troubleshooting">6. Xử Lý Sự Cố (FAQ)</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main>
+    <div class="hero">
+      <h1>Sổ Tay Tri Thức Dự Án MyNotch</h1>
+      <p>Tài liệu kỹ thuật tổng hợp, kiến trúc hệ thống, danh mục module nghiệp vụ, cơ chế an ninh TCC và sổ tay vận hành dành cho đội ngũ phát triển.</p>
+      <div class="quick-meta">
+        <span class="pill"><strong>Target OS:</strong> macOS 26.0+</span>
+        <span class="pill"><strong>Ngôn ngữ:</strong> Swift 6 (Strict Concurrency)</span>
+        <span class="pill"><strong>Giao diện:</strong> SwiftUI + AppKit Interop</span>
+        <span class="pill"><strong>Thiết kế:</strong> Clean-Room Modular</span>
+        <span class="pill"><strong>Team ID:</strong> B394MAY4QN</span>
+      </div>
+    </div>
+
+    <!-- PHẦN 1: TỔNG QUAN & TRIẾT LÝ -->
+    <section id="overview">
+      <h2>1. Tổng Quan & Triết Lý Thiết Kế</h2>
+      <p><strong>MyNotch</strong> là ứng dụng thanh trạng thái và tiện ích mở rộng vùng Notch phần cứng (hoặc Notch ảo trên màn hình ngoài) dành cho macOS 26 trở lên, được xây dựng hoàn toàn mới từ đầu với nguyên tắc <em>Clean-room Design</em>:</p>
+      <ul>
+        <li><strong>Clean-Room Principle:</strong> Lấy trải nghiệm Notch hiện đại làm tham chiếu nhưng hoàn toàn <em>không sao chép mã nguồn</em> của bất kỳ ứng dụng bên thứ ba nào. Mã nguồn tách biệt thành 18 package độc lập trong <code>Packages/Modules/</code>.</li>
+        <li><strong>Swift 6 Concurrency:</strong> Toàn bộ codebase áp dụng <code>SWIFT_STRICT_CONCURRENCY: complete</code> và <code>SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor</code>. Các luồng I/O ngầm, đọc kernel Mach ticks, Audio DSP, SMC đều chạy trên các isolated Actor hoặc utility queues an toàn dữ liệu 100%.</li>
+        <li><strong>Kích thước Notch chuẩn 192pt:</strong> Chiều cao mở rộng của Notch được giới hạn nghiêm ngặt ở mức 192pt nhằm bảo đảm tỷ lệ vàng hiển thị, không che lấp cửa sổ làm việc và được kiểm thử tự động qua <code>PerformanceTabLayoutTests</code>.</li>
+        <li><strong>Tiết kiệm năng lượng (On-Demand Demand-Driven Polling):</strong> Ứng dụng không bao giờ thăm dò dữ liệu ngầm liên tục nếu người dùng không mở tab tương ứng (trừ các background daemon cần thiết như điều khiển đường cong quạt).</li>
+      </ul>
+    </section>
+
+    <!-- PHẦN 2: KIẾN TRÚC HỆ THỐNG -->
+    <section id="architecture">
+      <h2>2. Kiến Trúc Hệ Thống & Nền Tảng Cốt Lõi</h2>
+      <p>Hệ thống được tổ chức theo mô hình phân tầng chặt chẽ. Mỗi module nghiệp vụ chỉ tương tác với app chính thông qua các abstractions của <code>MyNotchCore</code>.</p>
+
+      <div class="diagram-box">
+        <div class="diagram-title">Sơ Đồ Phân Tầng Kiến Trúc MyNotch</div>
+        <pre><code>+---------------------------------------------------------------------------------+
+|                                App (MyNotch)                                    |
+|   AppDelegate.swift  |  Menu Bar Controller  |  Settings Window  |  Info.plist  |
++---------------------------------------------------------------------------------+
+                                      |
+       +------------------------------+------------------------------+
+       v                                                             v
++-------------------------------+                     +-------------------------------+
+|            NotchUI            |                     |          MyNotchCore          |
+|  ScreenManager (Notch Detect) |                     |  FeatureModule Protocol       |
+|  NotchWindowController        | <------------------ |  Registry & ActivityCenter    |
+|  ActivitySlots & Strip Engine |                     |  LiveActivity & SettingKey    |
++-------------------------------+                     +-------------------------------+
+       ^                                                             ^
+       |                                                             |
++---------------------------------------------------------------------------------+
+|                    18 Feature Modules (Packages/Modules/*)                      |
+|  Media  |  Performance  |  Clipboard  |  Screenshot  |  Equalizer  |  Pet  ...  |
++---------------------------------------------------------------------------------+
+       |                                                             |
+       v                                                             v
++---------------------------------+                 +---------------------------------+
+|         External Daemons        |                 |       System Kernel & APIs      |
+|  mynotch-fan-helper (root daemon)|                 |  Mach Host Stats (HOST_CPU)     |
+|  mediaremote-adapter (Perl/ObjC)|                 |  AppleSMC Sensors & Fan RPM     |
+|  mynotch-clipboard-mcp          |                 |  ScreenCaptureKit & CoreAudio   |
+|  Chrome Extension Bridge        |                 |  TCC & AppleEvents Automation   |
++---------------------------------+                 +---------------------------------+</code><button class="copy-btn">Copy</button></pre>
+      </div>
+
+      <h3 id="core-frameworks">Các Gói Nền Tảng Trọng Yếu</h3>
+      <div class="grid-2">
+        <div class="card">
+          <h4>MyNotchCore <span>Gói Core</span></h4>
+          <p>Định nghĩa protocol <code>FeatureModule</code>, vòng đời khởi tạo, đăng ký phím tắt (KeyboardShortcuts), lưu trữ thiết lập (<code>SettingKey</code>), và quản lý thanh trạng thái <code>LiveActivity</code> / <code>ActivityCenter</code>.</p>
+        </div>
+        <div class="card">
+          <h4>NotchUI <span>Gói Giao Diện</span></h4>
+          <p>Điều phối cửa sổ Notch nổi (<code>NSPanel</code> không chiếm focus), phát hiện tai thỏ phần cứng MacBook và render tai thỏ ảo trên màn hình ngoài; quản lý Animation 120fps mở rộng / thu gọn.</p>
+        </div>
+        <div class="card">
+          <h4>DebugTools <span>Gói Chẩn Đoán</span></h4>
+          <p>Cung cấp logger, tracer hiệu năng, và công cụ debug trạng thái module phục vụ chế độ phát triển mà không ảnh hưởng tới bản Release.</p>
+        </div>
+        <div class="card">
+          <h4>HelperDaemons <span>Công Cụ Đặc Quyền</span></h4>
+          <p>Bao gồm <code>mynotch-fan-helper</code> (chạy quyền root qua <code>SMAppService.daemon</code>) và <code>mynotch-youtube-host</code> kết nối Native Messaging Chrome Extension.</p>
+        </div>
+      </div>
+
+      <h3 id="lifecycle">Cơ Chế Vòng Đời & On-Demand Polling</h3>
+      <p>Nhằm tối ưu pin trên MacBook, MyNotch sử dụng cơ chế cấu trúc nhu cầu (<code>Demand</code>):</p>
+      <ul>
+        <li><code>visibleTabs &gt; 0</code>: Khi notch được người dùng mở ra và tab của module đang hiển thị, module mới bắt đầu kích hoạt timer đọc dữ liệu (ví dụ đọc CPU mỗi 2 giây).</li>
+        <li><code>dropWhatNobodyShows()</code>: Khi tab đóng lại, toàn bộ bộ nhớ đệm và dữ liệu thời gian thực được huỷ bỏ ngay lập tức (<code>state.cpuUsage = nil</code>, <code>state.cpuProcesses = []</code>).</li>
+        <li>Riêng chức năng điều khiển quạt (Fan Curve) có thể chạy ngầm độc lập khi được kích hoạt với mức tiêu thụ tài nguyên tối thiểu.</li>
+      </ul>
+    </section>
+
+    <!-- PHẦN 3: DANH MỤC 18 MÔ-ĐUN -->
+    <section id="modules">
+      <h2>3. Danh Mục Chi Tiết 18 Module Nghiệp Vụ</h2>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Module</th>
+              <th>Mã Định Danh</th>
+              <th>Mặc Định</th>
+              <th>Quyền Yêu Cầu</th>
+              <th>Chức Năng & Điểm Nổi Bật</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Media</strong></td>
+              <td><code>media</code></td>
+              <td>Bật</td>
+              <td>Automation (AppleEvents)</td>
+              <td>Phát nhạc từ mọi app, sóng nhạc, karaoke theo chữ, click chuyển thẳng tới Tab YouTube/App phát.</td>
+            </tr>
+            <tr>
+              <td><strong>Performance</strong></td>
+              <td><code>performance</code></td>
+              <td>Bật</td>
+              <td>Root Helper (tuỳ chọn quạt)</td>
+              <td>% CPU tổng (Mach kernel), Top CPU process, nhiệt độ SoC, RAM, điều khiển quạt (Fan Curve).</td>
+            </tr>
+            <tr>
+              <td><strong>Screenshot</strong></td>
+              <td><code>screenshot</code></td>
+              <td>Bật</td>
+              <td>Screen Recording</td>
+              <td>Chụp màn hình, OCR, chỉnh sửa hình ảnh, quay màn hình, zoom tự động theo click chuột, xuất MP4.</td>
+            </tr>
+            <tr>
+              <td><strong>Equalizer</strong></td>
+              <td><code>equalizer</code></td>
+              <td>Bật</td>
+              <td>Audio Capture</td>
+              <td>Bộ chỉnh âm 10 băng tần toàn hệ thống thay thế eqMac, không cần driver âm thanh, lưu profile.</td>
+            </tr>
+            <tr>
+              <td><strong>Clipboard</strong></td>
+              <td><code>clipboard</code></td>
+              <td>Bật</td>
+              <td>Accessibility (tuỳ chọn)</td>
+              <td>Lịch sử clipboard, tô màu mã nguồn, bảo mật board bằng mật khẩu, MCP server cho Claude/Codex.</td>
+            </tr>
+            <tr>
+              <td><strong>AI Agents</strong></td>
+              <td><code>aiagents</code></td>
+              <td>Bật</td>
+              <td>Automation</td>
+              <td>Giám sát trạng thái Claude Code & Codex, đếm token, duyệt yêu cầu quyền trực tiếp trên Notch.</td>
+            </tr>
+            <tr>
+              <td><strong>Pet (Thú cưng)</strong></td>
+              <td><code>pet</code></td>
+              <td>Bật</td>
+              <td>Không</td>
+              <td>6 nhân vật pixel (mèo, capybara, hamster, chim cánh cụt, corgi, ếch) vui nhộn quanh camera.</td>
+            </tr>
+            <tr>
+              <td><strong>Dịch (Translation)</strong></td>
+              <td><code>translation</code></td>
+              <td>Bật</td>
+              <td>Accessibility (tuỳ chọn)</td>
+              <td>Dịch thuật trực tiếp trên máy bằng Apple Translation, bôi đen là hiểu, quy đổi đơn vị/múi giờ.</td>
+            </tr>
+            <tr>
+              <td><strong>Lịch (Calendar)</strong></td>
+              <td><code>calendar</code></td>
+              <td>Bật</td>
+              <td>Calendars, Reminders</td>
+              <td>Lịch trình trong ngày, thông báo cuộc họp trực tuyến kèm nút bấm Tham gia (Meet, Zoom, Teams).</td>
+            </tr>
+            <tr>
+              <td><strong>Việc cần làm (Todo)</strong></td>
+              <td><code>todo</code></td>
+              <td>Bật</td>
+              <td>Reminders</td>
+              <td>Quản lý công việc lưu trữ Apple Reminders, thêm nhanh 1 dòng, việc quá hạn tự đưa lên đầu.</td>
+            </tr>
+            <tr>
+              <td><strong>Cổng (Ports)</strong></td>
+              <td><code>ports</code></td>
+              <td>Bật</td>
+              <td>Không</td>
+              <td>Quét tiến trình đang lắng nghe cổng TCP/UDP, mở trình duyệt nhanh, kill process chiếm port.</td>
+            </tr>
+            <tr>
+              <td><strong>Battery</strong></td>
+              <td><code>battery</code></td>
+              <td>Bật</td>
+              <td>Không</td>
+              <td>Hiển thị trạng thái pin thanh ngang trực quan, công suất sạc watt, chu kỳ sạc, dung lượng tối đa.</td>
+            </tr>
+            <tr>
+              <td><strong>Hệ thống (System)</strong></td>
+              <td><code>system</code></td>
+              <td>Bật</td>
+              <td>Accessibility (tuỳ chọn)</td>
+              <td>Thay thế thanh HUD âm lượng, độ sáng macOS; thông báo pin Bluetooth, Caps Lock.</td>
+            </tr>
+            <tr>
+              <td><strong>Khay (Shelf)</strong></td>
+              <td><code>shelf</code></td>
+              <td>Bật</td>
+              <td>Không</td>
+              <td>Kéo thả file lên Notch; chuyển đổi định dạng ảnh/tài liệu, nén zip, tách nền, nhận dạng chữ OCR.</td>
+            </tr>
+            <tr>
+              <td><strong>Hẹn giờ (Timer)</strong></td>
+              <td><code>timer</code></td>
+              <td>Bật</td>
+              <td>Không</td>
+              <td>Đồng hồ đếm ngược Tập trung (Pomodoro), Nhắc việc, Nghỉ giải lao, bấm giờ trực tiếp.</td>
+            </tr>
+            <tr>
+              <td><strong>Shortcuts</strong></td>
+              <td><code>shortcuts</code></td>
+              <td>Bật</td>
+              <td>Không</td>
+              <td>Kích hoạt nhanh các phím tắt Apple Shortcuts trực tiếp từ danh sách trên Notch.</td>
+            </tr>
+            <tr>
+              <td><strong>Chia cửa sổ (WindowLayout)</strong></td>
+              <td><code>windows</code></td>
+              <td>Tắt</td>
+              <td>Accessibility</td>
+              <td>Kéo cửa sổ lên notch để chia nửa màn hình, chia tư, chia ba hoặc phóng to màn hình.</td>
+            </tr>
+            <tr>
+              <td><strong>Màn hình khoá (LockScreen)</strong></td>
+              <td><code>lockscreen</code></td>
+              <td>Tắt</td>
+              <td>Không</td>
+              <td>Thử nghiệm widget phát nhạc và lời bài hát hiển thị ngay trên Lock Screen qua SkyLight.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="mod-media">Module Media & Smart Browser Tab Focus</h3>
+      <p>Module Media theo dõi bài hát đang phát thông qua <code>mediaremote-adapter</code> (lắng nghe daemon MediaRemote của macOS). Tính năng nổi bật nhất vừa được hoàn thiện là <strong>Smart Browser Tab Activation</strong>:</p>
+      <ul>
+        <li><strong>Vấn đề:</strong> Trước đây, khi click vào bài hát phát từ YouTube, hệ thống chỉ kích hoạt ứng dụng Google Chrome/Safari chung chung, khiến người dùng bị rơi vào tab đang làm việc khác thay vì tab đang phát nhạc.</li>
+        <li><strong>Giải pháp kỹ thuật:</strong> Kết hợp giữa <code>NSRunningApplication.activate</code> và một kịch bản AppleScript bất đồng bộ 4 tầng (trong <code>Task.detached</code>):
+          <ol>
+            <li>Tìm tab trong trình duyệt có URL chứa <code>youtube.com</code> hoặc <code>youtu.be</code> VÀ tiêu đề chứa tên bài hát đang phát.</li>
+            <li>Nếu không khớp tiêu đề, chọn tab YouTube đầu tiên đang mở.</li>
+            <li>Nếu không phải YouTube, quét tab có tiêu đề khớp với tên bài hát (hỗ trợ SoundCloud, Bandcamp, Zing MP3).</li>
+            <li>Đưa tab đó thành <code>active tab</code> của cửa sổ và chuyển window index về 1.</li>
+          </ol>
+        </li>
+      </ul>
+
+      <h3 id="mod-performance">Module Hiệu Năng (Performance): CPU, SMC & Quạt</h3>
+      <p>Cung cấp khả năng giám sát tài nguyên sâu tới cấp kernel mà không phụ thuộc vào công cụ command-line chậm:</p>
+      <ul>
+        <li><strong>Đo % CPU Tổng:</strong> Sử dụng Mach host API <code>host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, ...)</code> tính toán độ chênh lệch (delta) của <code>cpu_ticks</code> (user, system, nice, idle) theo thời gian thực chuẩn Activity Monitor.</li>
+        <li><strong>Top Tiến Trình CPU:</strong> Sử dụng hàm kernel <code>proc_pid_rusage(pid, RUSAGE_INFO_V4, &amp;info)</code> đo chính xác nano giây CPU tiêu thụ của từng PID. Bộ chọn <code>[CPU | RAM]</code> trên giao diện cho phép chuyển đổi chế độ xem tức thì.</li>
+        <li><strong>Cảm Biến Nhiệt SMC:</strong> Đọc trực tiếp các sensor die CPU/GPU thông qua IOKit AppleSMC.</li>
+        <li><strong>Điều Khiển Quạt:</strong> Sử dụng giao tiếp XPC với helper daemon <code>mynotch-fan-helper</code> đã được đăng ký thông qua <code>SMAppService.daemon</code>. Cung cấp tính năng an toàn tự động trả quạt về chế độ mặc định của Apple nếu máy vượt ngưỡng 95°C hoặc mất tín hiệu quá 15 giây.</li>
+      </ul>
+    </section>
+
+    <!-- PHẦN 4: BẢO MẬT & QUYỀN TCC -->
+    <section id="security-tcc">
+      <h2>4. Cơ Chế Bảo Mật, Quyền TCC & Ký Mã (Code Signing)</h2>
+      <p>Hệ thống macOS quản lý quyền riêng tư thông qua cơ chế <strong>TCC (Transparency, Consent, and Control)</strong>. Hiểu rõ cách TCC xác thực ứng dụng là điều tối quan trọng đối với các lập trình viên:</p>
+
+      <div class="callout warning">
+        <h5>Bản Chất Hiện Tượng "Mất Quyền Khi Build Mới":</h5>
+        <p>Khi build với cờ <code>CODE_SIGN_IDENTITY="-"</code> (Ad-hoc signing), macOS không thể neo quyền vào một Developer Certificate cố định. Thay vào đó, TCC lưu quyền theo <strong>mã băm nhị phân (CDHash)</strong> của ứng dụng. Mỗi lần sửa code và compile lại, CDHash thay đổi khiến macOS coi ứng dụng là một phần mềm lạ bị sửa đổi và tự động vô hiệu hoá toàn bộ quyền Trợ năng / Ghi màn hình đã cấp.</p>
+      </div>
+
+      <h3 id="code-signing">Cấu Hình Ký Mã Chuẩn (Designated Requirement)</h3>
+      <p>Để macOS ghi nhớ quyền vĩnh viễn xuyên suốt các lần build, dự án bắt buộc phải được ký bằng chứng chỉ Apple Development với Team Identifier hợp lệ:</p>
+      <pre><code># Kiểm tra chứng chỉ hợp lệ trong Keychain máy:
+security find-identity -v -p codesigning
+
+# Cấu hình chuẩn trong project.yml:
+settingGroups:
+  signing:
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "Apple Development"
+    DEVELOPMENT_TEAM: B394MAY4QN
+
+# Lệnh build giữ nguyên quyền TCC:
+xcodebuild -scheme MyNotch -destination 'platform=macOS' \
+  DEVELOPMENT_TEAM="B394MAY4QN" \
+  CODE_SIGN_IDENTITY="Apple Development" build</code><button class="copy-btn">Copy</button></pre>
+      <p>Khi được ký đúng chuẩn, Designated Requirement của app sẽ là:</p>
+      <pre><code>designated => identifier "io.lucasvu.mynotch" and anchor apple generic and certificate leaf[subject.CN] = "Apple Development: dattruong19122003@gmail.com (3CHN565YD5)"</code><button class="copy-btn">Copy</button></pre>
+    </section>
+
+    <!-- PHẦN 5: HƯỚNG DẪN PHÁT TRIỂN -->
+    <section id="dev-workflow">
+      <h2>5. Hướng Dẫn Phát Triển, Kiểm Thử & Triển Khai</h2>
+      <p>Quy trình chuẩn mực để làm việc với repository MyNotch:</p>
+
+      <h3>1. Yêu cầu môi trường</h3>
+      <ul>
+        <li>macOS 26.0 trở lên.</li>
+        <li>Xcode 26.6 (đường dẫn <code>xcode-select -p</code> trỏ đúng vào Xcode app).</li>
+        <li>XcodeGen: <code>brew install xcodegen</code>.</li>
+      </ul>
+
+      <h3>2. Các câu lệnh thông dụng</h3>
+      <pre><code># 1. Sinh lại file project Xcode từ project.yml:
+xcodegen generate
+
+# 2. Chạy test cho một package cụ thể (cực nhanh, ~3-4 giây):
+swift test --package-path Packages/Modules/Performance
+swift test --package-path Packages/Modules/Media
+
+# 3. Chạy toàn bộ test gate kiểm tra toàn diện:
+./scripts/verify.sh
+
+# 4. Build và triển khai bản Release vào /Applications:
+xcodebuild -scheme MyNotch -destination 'platform=macOS' \
+  DEVELOPMENT_TEAM="B394MAY4QN" CODE_SIGN_IDENTITY="Apple Development" build
+
+# Cập nhật nhị phân và khởi chạy:
+killall MyNotch || true
+rm -rf /Applications/MyNotch.app
+cp -R ~/Library/Developer/Xcode/DerivedData/MyNotch-*/Build/Products/Debug/MyNotch.app /Applications/
+open /Applications/MyNotch.app</code><button class="copy-btn">Copy</button></pre>
+
+      <h3>3. Triết lý Kiểm thử (Swift Testing Framework)</h3>
+      <p>Dự án sử dụng framework kiểm thử hiện đại <code>Testing</code> (Swift Testing) thay thế cho XCTest truyền thống:</p>
+      <ul>
+        <li>Khai báo test suite bằng <code>@Suite struct MySuiteTests</code> và các test case bằng <code>@Test func myCase()</code>.</li>
+        <li><strong>Fakes instead of Mocks:</strong> Tuyệt đối không sử dụng các framework mock phức tạp phụ thuộc reflection. Dự án tự hiện thực các Actor Fake (ví dụ: <code>FakeThermalReader</code>, <code>FakeCPUReader</code>, <code>FakeMemoryReader</code>) để kiểm thử luồng thời gian thực với <code>TestClock</code>.</li>
+      </ul>
+    </section>
+
+    <!-- PHẦN 6: SỔ TAY SỰ CỐ & FAQ -->
+    <section id="troubleshooting">
+      <h2>6. Sổ Tay Bảo Trì & Xử Lý Sự Cố Thường Gặp (FAQ)</h2>
+      
+      <div class="card" style="margin-bottom: 16px;">
+        <h4>1. Click vào bài hát không mở YouTube tab mà chỉ mở cửa sổ chung?</h4>
+        <p><strong>Khắc phục:</strong> macOS yêu cầu cấp quyền Automation (AppleEvents). Khi click lần đầu, hãy kiểm tra popup hệ thống và bấm <strong>Cho phép (Allow)</strong>. Ngoài ra, hãy đảm bảo bạn đang chạy bản build mới nhất có tích hợp <code>PlayerApp.focusBrowserTab</code>.</p>
+      </div>
+
+      <div class="card" style="margin-bottom: 16px;">
+        <h4>2. App bị mất quyền Trợ năng / Ghi màn hình sau khi cập nhật?</h4>
+        <p><strong>Khắc phục:</strong> Nguyên nhân do trước đó bạn chạy bản build Ad-hoc. Hãy build với cờ <code>CODE_SIGN_IDENTITY="Apple Development"</code> và <code>DEVELOPMENT_TEAM="B394MAY4QN"</code>. Sau đó vào <strong>System Settings &gt; Privacy &amp; Security &gt; Accessibility</strong>, gạt Tắt rồi gạt Bật lại mục MyNotch 1 lần duy nhất để macOS lưu chứng chỉ.</p>
+      </div>
+
+      <div class="card" style="margin-bottom: 16px;">
+        <h4>3. Kiểm tra hai bản MyNotch chạy đè nhau?</h4>
+        <p><strong>Khắc phục:</strong> Luôn kiểm tra <code>pgrep -fl MyNotch</code> trước khi mở bản mới. Tránh chạy đồng thời bản trong DerivedData và bản trong <code>/Applications</code>.</p>
+      </div>
+
+      <div class="card">
+        <h4>4. Các phím tắt mặc định toàn hệ thống</h4>
+        <p>
+          <code>⌃⌥N</code>: Mở / đóng Notch &bull; 
+          <code>⇧⌘C</code>: Mở bảng nổi Clipboard &bull; 
+          <code>⌃⌥S</code>: Chụp màn hình &bull; 
+          <code>⌃⌥R</code>: Bắt đầu / dừng quay màn hình &bull; 
+          <code>⌃⌥T</code>: Mở dịch thuật &bull; 
+          <code>⌃⌥D</code>: Mở danh sách Todo.
+        </p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+  // Copy button handler
+  document.querySelectorAll('pre').forEach(pre => {
+    const btn = pre.querySelector('.copy-btn');
+    if (!btn) return;
+    btn.onclick = () => {
+      const code = pre.querySelector('code');
+      navigator.clipboard.writeText(code ? code.innerText : pre.innerText);
+      const originalText = btn.textContent;
+      btn.textContent = 'Đã chép!';
+      btn.style.background = 'rgba(52, 199, 89, 0.4)';
+      setTimeout(() => {
+        btn.textContent = originalText;
+        btn.style.background = '';
+      }, 1500);
+    };
+  });
+
+  // Instant filter in navigation
+  const searchInput = document.getElementById('searchInput');
+  const navLinks = document.querySelectorAll('nav li');
+  searchInput.addEventListener('input', (e) => {
+    const term = e.target.value.toLowerCase().trim();
+    navLinks.forEach(li => {
+      const text = li.textContent.toLowerCase();
+      li.style.display = text.includes(term) ? '' : 'none';
+    });
+  });
+</script>
+
+</body>
+</html>

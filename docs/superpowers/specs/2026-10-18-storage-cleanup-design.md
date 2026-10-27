@@ -1,7 +1,7 @@
 # MyNotch: dọn dẹp dữ liệu
 
 - **Ngày:** 2026-10-18
-- **Trạng thái:** Đã duyệt trong chat ("chuẩn")
+- **Trạng thái:** Đã duyệt trong chat ("chuẩn") và đã triển khai (ST1 đến ST3): xem [ghi chú nền tảng, mục 17](../notes/2026-10-14-platform-foundation-implementation.html#17-dung-lượng-st1-và-khung-dọn-dẹp), [ghi chú Clipboard, mục 20](../notes/2026-10-14-clipboard-implementation.html) và [ghi chú Ảnh chụp, mục 12](../notes/2026-10-14-screenshot-implementation.html). Chỗ làm kỹ hơn spec: bản quay chia thành "Bản quay đã xuất" (có "Dọn") và "Bản quay chưa xuất" (chỉ xem; không bao giờ có nút dọn); mục Clipboard chỉ xoá mục có ảnh module tự lưu (mục chỉ có đường dẫn file được giữ).
 - **Hiện trạng:** khoảng 69 MB, gồm clipboard 58 MB, ảnh chụp 10 MB, còn lại khoảng 1 MB. Bản quay màn hình sắp có sẽ làm con số này tăng nhanh.
 
 ## 1. Ý định

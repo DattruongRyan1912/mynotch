@@ -2,7 +2,8 @@
 
 - **Ngày:** 2026-10-18
 - **Trạng thái:** Đã duyệt. Người dùng nói "làm hết đi", nên các lựa chọn không được hỏi đều là của người viết và có đánh dấu.
-- **Nền:** module Pet hiện có, gồm mèo pixel, cổng dịch chuyển qua camera, mèo trong viên thuốc, và mỗi loại notch một stage (PET4).
+- **Nền:** module Pet hiện có, gồm mèo pixel, cổng dịch chuyển qua camera, mèo trong viên thuốc, và mỗi loại notch một stage (PET4; PET5 đổi thành mỗi màn một stage).
+- **Trạng thái triển khai:** xong PET5 đến PET11 (khung nhiều nhân vật, capybara, hamster, chim cánh cụt, corgi, ếch, chơi chung với capybara): xem [ghi chú triển khai Thú cưng](../notes/2026-10-17-pet-implementation.html). Tên module hiển thị là "Thú cưng"; nhãn trong Settings còn nói "mèo" cho các mục áp dụng cho mọi loài. Việc giới hạn activity theo từng màn cho màn đặt "Không có" (SCOPE1) chưa xong khi viết.
 
 ## 1. Ý định
 
