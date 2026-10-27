@@ -26,6 +26,11 @@ final class NotchWindowController {
     private let drawsActiveGlass: Bool
     private let registry: ModuleRegistry
     private let activities: ActivityCenter
+    /// The display this notch is on, by the UUID CoreGraphics gives it (what an activity's `displayScope` is made of); nil when it is not
+    /// known, which has every activity.
+    private let displayUUID: String?
+    /// The live activities as this screen has them: what is not shown on it is not there, so the notch is idle when nothing else is.
+    private let feed: ScreenActivities
     private let captureHiding: () -> CaptureHiding
     private let swipesBetweenTabs: () -> Bool
     private let systemAllowsSwipe: () -> Bool
@@ -71,11 +76,14 @@ final class NotchWindowController {
         swipeToOpen: @escaping () -> SwipeSensitivity? = { nil },
         theme: NotchTheme? = nil,
         drawsActiveGlass: Bool = true,
-        feel: @escaping (Haptic) -> Void = { _ in }
+        feel: @escaping (Haptic) -> Void = { _ in },
+        displayUUID: String? = nil
     ) {
         self.displayID = displayID
         self.registry = registry
         self.activities = activities
+        self.displayUUID = displayUUID
+        feed = activities.screen(displayUUID)
         self.captureHiding = captureHiding
         self.swipesBetweenTabs = swipesBetweenTabs
         self.systemAllowsSwipe = systemAllowsSwipe
@@ -89,7 +97,9 @@ final class NotchWindowController {
         model = NotchViewModel(scheduler: scheduler, availableTabs: { [weak registry] in registry?.pages.selectable ?? [] }, delays: delays)
         panel = NotchPanel(frame: geometry.panelFrame(in: screen.frame))
         hosting = FirstMouseHostingView(
-            rootView: NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry, theme: theme)
+            rootView: NotchRootView(
+                model: model, activities: activities, registry: registry, geometry: geometry, theme: theme, display: displayUUID
+            )
         )
         hosting.frame = CGRect(origin: .zero, size: geometry.panelSize)
         panel.contentView = hosting
@@ -127,10 +137,12 @@ final class NotchWindowController {
         screenFrame = screen.frame
         geometry = newGeometry
         // The panel may hold fewer or more bubbles with the new geometry.
-        model.bubbleCount = CompactAccessories.bubbleCount(activities: activities, geometry: newGeometry)
+        model.bubbleCount = CompactAccessories.bubbleCount(activities: feed, geometry: newGeometry)
         // The new shape first, then the frame: `setFrame(display: true)` draws at once, and it must not draw the old shape
         // in the new frame.
-        hosting.rootView = NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry, theme: theme)
+        hosting.rootView = NotchRootView(
+            model: model, activities: activities, registry: registry, geometry: geometry, theme: theme, display: displayUUID
+        )
         panel.setFrame(geometry.panelFrame(in: screen.frame), display: true)
         hosting.frame = CGRect(origin: .zero, size: geometry.panelSize)
         refreshHitTesting()
@@ -318,12 +330,12 @@ final class NotchWindowController {
     /// bubbles and the list come from the same `CompactAccessories` the view draws, so the two cannot disagree.
     private func zone(at point: CGPoint, dragging: Bool) -> PointerZone {
         let state = model.displayState
-        let accessories = CompactAccessories(activities: activities, geometry: geometry, isListOpen: model.isListOpen, state: state)
+        let accessories = CompactAccessories(activities: feed, geometry: geometry, isListOpen: model.isListOpen, state: state)
         return geometry.pointerZone(
             at: point, state: state, contentHeight: registry.contentHeight(for: state, tabUnderToast: model.tabUnderToast),
-            strip: activities.stripHeight(on: geometry.kind), bubbles: accessories.bubbles, listRows: accessories.listRows, dragging: dragging,
-            tabCount: registry.tabs.count, stripWidth: model.stripWidth(of: activities, on: geometry.kind),
-            hasBody: activities.currentHasBody, in: screenFrame
+            strip: feed.stripHeight(on: geometry.kind), bubbles: accessories.bubbles, listRows: accessories.listRows, dragging: dragging,
+            tabCount: registry.tabs.count, stripWidth: model.stripWidth(of: feed, on: geometry.kind),
+            hasBody: feed.currentHasBody, in: screenFrame
         )
     }
 
@@ -380,25 +392,25 @@ final class NotchWindowController {
     }
 
     private func observe() {
-        observation = Task { [weak self, activities, registry, model] in
+        observation = Task { [weak self, feed, registry, model] in
             for await observed in Observations({ [weak self] () -> Observed in
                 let state = model.displayState
                 let covered = model.tabUnderToast
                 // The geometry is the controller's own; it only changes through `update`, which sets the bubble count itself.
                 let geometry = self?.geometry
-                let bubbles = geometry.map { CompactAccessories.bubbleCount(activities: activities, geometry: $0) } ?? 0
+                let bubbles = geometry.map { CompactAccessories.bubbleCount(activities: feed, geometry: $0) } ?? 0
                 return Observed(
-                    hasActivity: activities.current != nil,
-                    activityIDs: "primary=\(activities.current?.id ?? "-") others=\(activities.others.map(\.id)) hidden=\(activities.hiddenCount)",
-                    stripHeight: geometry.map { activities.stripHeight(on: $0.kind) } ?? activities.stripHeight,
+                    hasActivity: feed.current != nil,
+                    activityIDs: "primary=\(feed.current?.id ?? "-") others=\(feed.others.map(\.id)) hidden=\(feed.hiddenCount)",
+                    stripHeight: geometry.map { feed.stripHeight(on: $0.kind) } ?? feed.stripHeight,
                     bubbles: bubbles,
                     listRows: geometry.map {
-                        CompactAccessories(activities: activities, geometry: $0, isListOpen: model.isListOpen, state: state).listRows
+                        CompactAccessories(activities: feed, geometry: $0, isListOpen: model.isListOpen, state: state).listRows
                     } ?? 0,
                     state: state,
                     contentHeight: registry.contentHeight(for: state, tabUnderToast: covered),
                     tabCount: registry.tabs.count,
-                    stripWidth: model.stripWidth(of: activities, on: geometry?.kind ?? .hardware),
+                    stripWidth: model.stripWidth(of: feed, on: geometry?.kind ?? .hardware),
                     wantsKeyboard: NotchKeyboardPolicy.wantsKeyboard(state: state, tabUnderToast: covered, tabs: registry.tabs),
                     focusesKeyboard: NotchKeyboardPolicy.focusesKeyboard(
                         state: state, tabUnderToast: covered, tabs: registry.tabs, onPurpose: model.isOpenedOnPurpose

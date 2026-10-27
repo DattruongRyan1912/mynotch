@@ -67,7 +67,7 @@ public final class NotchInterface {
     public var accent: Color { theme?.accent ?? NotchTokens.accent }
 
     /// What a window of MyNotch that is not the notch draws its background on: black, or Liquid Glass when the user chose that
-    /// look. Put it in with `.environment(\.notchSurface, interface.surface)` before `.notchSurface(in:)`. Read in a view's
+    /// look. `.notchSurface(in:of:)` puts it in. Read in a view's
     /// body it makes the view redraw when the look changes. Black until a theme is followed.
     public var surface: NotchSurface { theme?.floatingSurface ?? .solid }
 

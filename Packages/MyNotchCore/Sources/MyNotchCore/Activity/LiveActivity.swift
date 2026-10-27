@@ -14,6 +14,26 @@ nonisolated public enum BottomScope: Sendable {
     case hardwareNotchOnly
 }
 
+/// Which screens an activity is shown on, by the UUID CoreGraphics gives a display (`CGDisplayCreateUUIDFromDisplayID`), which stays the same
+/// when the display is unplugged and plugged in again. A screen an activity is not shown on behaves as if the activity did not exist: it is
+/// never that screen's primary activity, nor a bubble beside its notch, nor a row of its list, and the next activity takes its place.
+nonisolated public enum DisplayScope: Equatable, Sendable {
+    /// Every screen, also one plugged in later. What every activity has unless it says otherwise.
+    case allScreens
+    /// Only the screens listed.
+    case only(Set<String>)
+    /// Every screen but the ones listed, so that a screen nobody has said anything about, one plugged in later for instance, has it.
+    case allExcept(Set<String>)
+
+    public func includes(_ display: String) -> Bool {
+        switch self {
+        case .allScreens: true
+        case .only(let displays): displays.contains(display)
+        case .allExcept(let displays): !displays.contains(display)
+        }
+    }
+}
+
 /// Small content shown beside the notch while it is closed, and optionally a strip under it. The activity that is
 /// not the primary one shows only as a bubble (`minimal`) and as a row in a list of all of them (`summary`).
 public struct LiveActivity: Identifiable {
@@ -28,6 +48,8 @@ public struct LiveActivity: Identifiable {
     public let bottomHeight: CGFloat
     /// Which screens the strip is for; a screen it is not for shows the activity as if it had none.
     public let bottomScope: BottomScope
+    /// Which screens show the activity at all, strip or no strip; on a screen it is not for there is no such activity (see `DisplayScope`).
+    public let displayScope: DisplayScope
     /// A view drawn over the whole top row of the collapsed notch while this is the current activity: as wide as the notch is (which it asks
     /// for with `View.notchBodyWidth`, if it wants the notch wider) and as tall as the notch's body, from edge to edge of it between the
     /// ears, over what `leading` and `trailing` draw. It is not scaled with them (the notch draws them bigger on a tall pill), and it takes a
@@ -64,6 +86,7 @@ public struct LiveActivity: Identifiable {
         bottom: AnyView? = nil,
         bottomHeight: CGFloat = 0,
         bottomScope: BottomScope = .allScreens,
+        displayScope: DisplayScope = .allScreens,
         body: AnyView? = nil,
         minimal: AnyView? = nil,
         summary: String? = nil
@@ -76,6 +99,7 @@ public struct LiveActivity: Identifiable {
         self.bottom = bottom
         self.bottomHeight = bottom == nil ? 0 : max(bottomHeight, 0)
         self.bottomScope = bottomScope
+        self.displayScope = displayScope
         self.body = body
         self.minimal = minimal
         self.summary = summary?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true ? nil : summary

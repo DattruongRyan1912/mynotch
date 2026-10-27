@@ -91,7 +91,7 @@ public final class NotchTheme {
     }
 
     /// The surface for a window or view of MyNotch that is not the notch (a floating panel): black or glass, never the open
-    /// notch's blur. See `View.notchSurface(in:)`.
+    /// notch's blur. See `View.notchSurface(in:of:)`.
     public var floatingSurface: NotchSurface {
         .resolve(look: look, classicGlass: false, tinted: glassTint, state: .closed)
     }

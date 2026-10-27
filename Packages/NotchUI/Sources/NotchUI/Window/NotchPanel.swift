@@ -63,7 +63,7 @@ final class NotchPanel: NSPanel {
 
     /// What makes AppKit take the key appearance back: the panel resigning key, the app activating or deactivating (Settings does),
     /// the panel changing screen or what hides it. The flag says whether it is this panel's own notification.
-    private static let resets: [(Notification.Name, Bool)] = [
+    static let resets: [(Notification.Name, Bool)] = [
         (NSWindow.didResignKeyNotification, true), (NSWindow.didChangeScreenNotification, true),
         (NSWindow.didChangeOcclusionStateNotification, true), (NSApplication.didBecomeActiveNotification, false),
         (NSApplication.didResignActiveNotification, false),

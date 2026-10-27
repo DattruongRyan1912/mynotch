@@ -10,6 +10,8 @@ struct NotchRootView: View {
     let geometry: NotchGeometry
     /// The user's accent and glass; nothing is the notch's own purple and no glass.
     var theme: NotchTheme?
+    /// The screen this notch is on, by its display UUID: it shows the activities that are shown on that screen. Nil for every activity.
+    var display: String?
 
     @Namespace private var glassNamespace
     /// With `tiles`: whether the tiles' views are in the tree. They are while the notch is open (or a toast covers its tab), and stay
@@ -18,6 +20,9 @@ struct NotchRootView: View {
     @State private var tilesInTree = false
 
     private var state: NotchState { model.displayState }
+
+    /// The live activities as this screen has them: what is not shown on it is not there.
+    private var feed: ScreenActivities { activities.screen(display) }
 
     /// What the notch is drawn on: black, the classic look's blur, or Liquid Glass.
     private var surface: NotchSurface { theme?.surface(for: state) ?? .solid }
@@ -58,26 +63,26 @@ struct NotchRootView: View {
 
     /// The bubbles and the open list that hang off the collapsed notch; nothing in every other state.
     private var accessories: CompactAccessories {
-        CompactAccessories(activities: activities, geometry: geometry, isListOpen: model.isListOpen, state: state)
+        CompactAccessories(activities: feed, geometry: geometry, isListOpen: model.isListOpen, state: state)
     }
 
     /// The width the current activity's strip asked for (`View.notchStripWidth`), which the collapsed notch is as wide as, also while the
     /// list is open under it; 0 when it has no strip or has not asked.
-    private var stripWidth: CGFloat { model.stripWidth(of: activities, on: geometry.kind) }
+    private var stripWidth: CGFloat { model.stripWidth(of: feed, on: geometry.kind) }
 
     /// A strip tells the notch the width it wants: kept for its activity, while the strip is the one on show. The strip leaving (the
     /// notch opening, the activity ending, the list opening) reports 0 on its way out, which is not a request.
     private func strip(reportsWidth width: CGFloat, _ accessories: CompactAccessories, bottom: CGFloat) {
         // A strip is under the notch while it is not the list's turn; a body is over its top row all the time.
-        guard state == .compact, bottom > 0 || activities.currentHasBody, accessories.listRows == 0 || activities.currentHasBody,
-              let id = activities.current?.id else { return }
+        guard state == .compact, bottom > 0 || feed.currentHasBody, accessories.listRows == 0 || feed.currentHasBody,
+              let id = feed.current?.id else { return }
         model.reportStripWidth(width, for: id)
     }
 
     /// How far the collapsed notch grows: for the open list, which takes the strip's place, else for the current
     /// activity's strip; 0 in every other state.
     private func bottomHeight(_ accessories: CompactAccessories) -> CGFloat {
-        geometry.bottomHeight(for: state, strip: activities.stripHeight(on: geometry.kind), listRows: accessories.listRows)
+        geometry.bottomHeight(for: state, strip: feed.stripHeight(on: geometry.kind), listRows: accessories.listRows)
     }
 
     /// Everything that moves the shape. The notch animates all of it with the one spring, so a strip or the list
@@ -135,7 +140,7 @@ struct NotchRootView: View {
     private var glassPlan: NotchGlassPlan {
         let surface = surface
         // The bubbles are only drawn, and so only planned, beside the collapsed notch.
-        let slots = surface.isLiquidGlass && state == .compact ? ActivitySlot.bubbles(of: activities, capacity: geometry.bubbleCapacity) : []
+        let slots = surface.isLiquidGlass && state == .compact ? ActivitySlot.bubbles(of: feed, capacity: geometry.bubbleCapacity) : []
         return NotchGlassPlan(
             surface: surface, bubbleIDs: slots.map(\.id), accent: theme?.accent ?? NotchTokens.accent, style: style, isOpen: isOpen
         )
@@ -150,7 +155,7 @@ struct NotchRootView: View {
         let radii = geometry.cornerRadii(for: state)
         let _ = NotchPerf.count(.bodies)
         let _ = NotchLog.record(
-            "body display=\(state.logDescription) size=\(size.width)x\(size.height) strip=\(activities.stripHeight(on: geometry.kind)) "
+            "body display=\(state.logDescription) size=\(size.width)x\(size.height) strip=\(feed.stripHeight(on: geometry.kind)) "
                 + "bottom=\(bottom) bubbles=\(accessories.bubbles) list=\(accessories.listRows) shownTab=\(shownTab?.id.rawValue ?? "-")"
         )
         let shape = geometry.shape(for: state)
@@ -349,7 +354,7 @@ struct NotchRootView: View {
     @ViewBuilder private var bubbles: some View {
         if state == .compact {
             ActivityBubbles(
-                slots: ActivitySlot.bubbles(of: activities, capacity: geometry.bubbleCapacity),
+                slots: ActivitySlot.bubbles(of: feed, capacity: geometry.bubbleCapacity),
                 geometry: geometry, stripWidth: stripWidth, iconScale: geometry.collapsedContentScale, label: label(for:), activate: activate
             )
             .transition(.asymmetric(insertion: .opacity.animation(NotchTokens.enter), removal: .opacity.animation(NotchTokens.leave)))
@@ -362,7 +367,7 @@ struct NotchRootView: View {
         case .closed:
             EmptyView()
         case .compact:
-            if let entry = activities.current {
+            if let entry = feed.current {
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
                         entry.activity.leading.frame(width: geometry.config.compactSideWidth).scaled(geometry.collapsedContentScale)
@@ -375,7 +380,7 @@ struct NotchRootView: View {
                     // the strip's place while it is open.
                     if accessories.listRows > 0 {
                         ActivityList(
-                            rows: ActivitySlot.listRows(of: activities, capacity: NotchGeometry.maxListRows),
+                            rows: ActivitySlot.listRows(of: feed, capacity: NotchGeometry.maxListRows),
                             label: label(for:), hasTab: model.hasTab(of:), open: { model.openTab(of: $0) }
                         )
                         .frame(height: bottomHeight(accessories))

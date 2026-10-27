@@ -1,8 +1,9 @@
 import Observation
 
-/// Holds every module's live activities and exposes the one to display.
+/// Holds every module's live activities and exposes the one to display. The notch of a screen reads `screen(_:)`, which leaves out what is
+/// not shown on that screen; the center's own `current`, `others`, `ordered` and `hiddenCount` count every activity, whatever its scope.
 @Observable
-public final class ActivityCenter {
+public final class ActivityCenter: ActivityFeed {
     public struct Entry: Identifiable, Equatable {
         public let module: ModuleID
         public let activity: LiveActivity
@@ -32,20 +33,25 @@ public final class ActivityCenter {
     /// change, "copied", a finished agent), the most recently set one first, so it holds the notch for its few seconds
     /// and the former primary steps back in when it is gone. Among activities without an expiry it goes to the one that
     /// became live first, so a newcomer never takes the notch and an update never makes it flip. `raise` beats both.
-    public private(set) var current: Entry?
+    public var current: Entry? { all.current }
     /// The activities after `current`, in the same order, at most `maxOthers`: what the notch shows as bubbles.
-    public private(set) var others: [Entry] = []
+    public var others: [Entry] { all.others }
     /// Every live activity in display order, `current` first, with no cap: what a list of all of them shows. It
     /// changes with every `set`, so a view that only needs a count reads `hiddenCount` instead.
-    public private(set) var ordered: [Entry] = []
+    public var ordered: [Entry] { all.ordered }
     /// How many activities are neither `current` nor in `others`: what a "+N" beside the notch adds up. Assigned only
     /// when the number changes, so a view that reads it is not redrawn by content updates.
-    public private(set) var hiddenCount = 0
+    public var hiddenCount: Int { all.hiddenCount }
     /// Every live activity in the order it was added.
     public private(set) var entries: [Entry] = []
 
     @ObservationIgnored private let scheduler: any Scheduler
     @ObservationIgnored private let maxOthers: Int
+    /// Every activity, for no screen in particular: what `current`, `others`, `ordered` and `hiddenCount` read.
+    @ObservationIgnored private let all: ScreenActivities
+    /// One for each display that was asked for, kept for good: there are as many as displays have ever been connected, and each is a few
+    /// entries long. They all follow the entries.
+    @ObservationIgnored private var screens: [String: ScreenActivities] = [:]
     @ObservationIgnored private var expiries: [String: ScheduledAction] = [:]
     /// Rises with each new entry; among activities without an expiry the lowest wins ties. `raise` hands out
     /// `raisedSequence`, which only falls and so stays below every entry added before or after it.
@@ -54,8 +60,20 @@ public final class ActivityCenter {
     @ObservationIgnored private var revision = 0
 
     public init(scheduler: any Scheduler, maxOthers: Int = 3) {
+        let maxOthers = max(maxOthers, 0)
         self.scheduler = scheduler
-        self.maxOthers = max(maxOthers, 0)
+        self.maxOthers = maxOthers
+        all = ScreenActivities(display: nil, maxOthers: maxOthers, sorted: [])
+    }
+
+    /// The activities as the notch of `display` has them, which is the UUID CoreGraphics gives it: those that are shown on it
+    /// (`LiveActivity.displayScope`), in the same order, the first one its primary. Without a display it is every activity.
+    public func screen(_ display: String?) -> ScreenActivities {
+        guard let display else { return all }
+        if let screen = screens[display] { return screen }
+        let screen = ScreenActivities(display: display, maxOthers: maxOthers, sorted: entries.sorted { $0.precedes($1) })
+        screens[display] = screen
+        return screen
     }
 
     /// Adds the activity, or replaces an existing one with the same id in place so frequent
@@ -112,13 +130,8 @@ public final class ActivityCenter {
     /// Assigns each property only when it changes, so removing an entry nobody shows doesn't redraw a view.
     private func recompute() {
         let sorted = entries.sorted { $0.precedes($1) }
-        let winner = sorted.first
-        let bubbles = Array(sorted.dropFirst().prefix(maxOthers))
-        let hidden = max(sorted.count - 1 - bubbles.count, 0)
-        if sorted != ordered { ordered = sorted }
-        if winner != current { current = winner }
-        if bubbles != others { others = bubbles }
-        if hidden != hiddenCount { hiddenCount = hidden }
+        all.update(from: sorted)
+        for screen in screens.values { screen.update(from: sorted) }
     }
 }
 

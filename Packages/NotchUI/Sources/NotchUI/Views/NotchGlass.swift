@@ -181,33 +181,43 @@ extension View {
         }
     }
 
-    /// Draws the view on the notch's own surface in `shape`: black in the classic look, Liquid Glass in the other, whichever the
-    /// `notchSurface` of its environment says (the notch's root view sets it). For a window or view of MyNotch that wants to
-    /// look like the notch, a floating panel for one, which hosts SwiftUI on its own and so has to put the look in itself:
+    /// Draws the view on the notch's own surface in `shape`, exactly as `interface` draws the notch: black in the classic look,
+    /// Liquid Glass in the other, with the user's clarity (the material under clear glass). For a window or view of MyNotch that wants
+    /// to look like the notch, a floating panel for one, which hosts SwiftUI on its own and so has to put the look in itself:
     ///
     ///     content
-    ///         .environment(\.notchSurface, interface.surface)
-    ///         .environment(\.notchAccent, interface.accent)
-    ///         .notchSurface(in: RoundedRectangle(cornerRadius: 18))
+    ///         .notchSurface(in: RoundedRectangle(cornerRadius: 18), of: interface)
     ///
-    /// Nothing is forced on the content: on glass it keeps the window's colour scheme, as the glass itself follows the system's
-    /// appearance. Read `notchSurface` for the `primaryStyle` and `secondaryStyle` that stay readable on both looks. The glass is
-    /// drawn by the window server, which needs a window that is not opaque.
+    /// The surface and the accent are put in the environment of both the content and the surface, so the content can read
+    /// `notchSurface` for the `primaryStyle` and `secondaryStyle` that stay readable on both looks. Nothing is forced on the content:
+    /// on glass it keeps the window's colour scheme, as the glass itself follows the system's appearance. The glass is drawn by the
+    /// window server, which needs a window that is not opaque.
+    public func notchSurface(in shape: some Shape, of interface: NotchInterface) -> some View {
+        modifier(NotchSurfaceModifier(shape: shape, style: interface.theme?.glassStyle ?? .default))
+            .environment(\.notchSurface, interface.surface)
+            .environment(\.notchAccent, interface.accent)
+    }
+
+    /// The same surface from the `notchSurface` and `notchAccent` of the environment, which must be set outside this modifier, in
+    /// the default glass style.
     public func notchSurface(in shape: some Shape) -> some View {
-        modifier(NotchSurfaceModifier(shape: shape))
+        modifier(NotchSurfaceModifier(shape: shape, style: .default))
     }
 }
 
 private struct NotchSurfaceModifier<S: Shape>: ViewModifier {
     let shape: S
+    let style: NotchGlassStyle
     @Environment(\.notchSurface) private var surface
     @Environment(\.notchAccent) private var accent
 
     func body(content: Content) -> some View {
+        let plan = NotchGlassPlan(surface: surface, bubbleIDs: [], accent: accent, style: style)
         content
             .background(NotchBackdrop(surface: surface, bodyHeight: 0))
+            .background { if plan.blursUnder && plan.panelHasGlass { shape.fill(NotchGlassPlan.blurMaterial) } }
             .clipShape(shape)
-            .notchGlass(NotchGlassPlan(surface: surface, bubbleIDs: [], accent: accent).notch, in: shape)
+            .notchGlass(plan.notch, in: shape)
     }
 }
 

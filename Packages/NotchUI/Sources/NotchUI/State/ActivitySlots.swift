@@ -26,12 +26,12 @@ enum ActivitySlot: Identifiable, Equatable {
 
     /// The bubbles for what is live besides the primary activity. At most `capacity` of them, the last one "+N" when
     /// there are more activities than that (the primary does not count).
-    static func bubbles(of activities: ActivityCenter, capacity: Int) -> [ActivitySlot] {
+    static func bubbles(of activities: some ActivityFeed, capacity: Int) -> [ActivitySlot] {
         fit(activities.others, extra: activities.hiddenCount, capacity: capacity)
     }
 
     /// The rows of the list: every live activity, the primary first.
-    static func listRows(of activities: ActivityCenter, capacity: Int) -> [ActivitySlot] {
+    static func listRows(of activities: some ActivityFeed, capacity: Int) -> [ActivitySlot] {
         fit(activities.ordered, capacity: capacity)
     }
 }
@@ -53,7 +53,7 @@ struct CompactAccessories: Equatable {
 
     /// Nothing while the notch is not collapsed with an activity; otherwise as many bubbles as there are other
     /// activities and the panel holds, and the open list's rows when there is a bubble to hover.
-    init(activities: ActivityCenter, geometry: NotchGeometry, isListOpen: Bool, state: NotchState) {
+    init(activities: some ActivityFeed, geometry: NotchGeometry, isListOpen: Bool, state: NotchState) {
         guard state == .compact else { self = .none; return }
         let bubbles = Self.bubbleCount(activities: activities, geometry: geometry)
         self.init(bubbles: bubbles, listRows: isListOpen && bubbles > 0 ? min(activities.ordered.count, NotchGeometry.maxListRows) : 0)
@@ -62,7 +62,7 @@ struct CompactAccessories: Equatable {
     /// How many bubbles `activities` has beside the notch, whatever the notch is doing: what the view model needs to
     /// know to open a list at all. `others` is capped at three and never holds the primary, so this does not read
     /// `ordered`, which changes with every update of any activity.
-    static func bubbleCount(activities: ActivityCenter, geometry: NotchGeometry) -> Int {
+    static func bubbleCount(activities: some ActivityFeed, geometry: NotchGeometry) -> Int {
         min(geometry.bubbleCapacity, activities.others.count)
     }
 }
