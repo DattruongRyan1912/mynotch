@@ -141,7 +141,7 @@ targets:
       - target: mynotch-fan-helper
         embed: true
         link: false
-        codeSign: true
+        codeSign: false
         copy:
           destination: executables
     info:
@@ -290,6 +290,7 @@ targets:
     settings:
       groups: [signing]
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch.fan-helper
+        PRODUCT_BUNDLE_IDENTIFIER: mynotch-fan-helper
         SKIP_INSTALL: YES
         ENABLE_HARDENED_RUNTIME: YES
+        OTHER_CODE_SIGN_FLAGS: "--identifier mynotch-fan-helper"
