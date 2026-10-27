@@ -33,7 +33,11 @@ final class LyricsPanelHost {
     /// Makes the panel what the settings say. Safe to call again whatever changed: a panel that is up is not brought forward.
     func apply() {
         model.fontSize = settings.value(keys.lyricsPanelFontSize)
-        controller.apply(opacity: settings.value(keys.lyricsPanelOpacity), clickThrough: settings.value(keys.lyricsPanelClickThrough))
+        model.background = settings.value(keys.lyricsPanelBackground)
+        controller.apply(
+            opacity: settings.value(keys.lyricsPanelOpacity), clickThrough: settings.value(keys.lyricsPanelClickThrough),
+            outlinesText: model.outlinesText
+        )
         let isShown = settings.value(keys.lyricsPanel)
         store.setLyricsPanelShown(isShown)
         alsoTells?.setLyricsPanelShown(isShown)

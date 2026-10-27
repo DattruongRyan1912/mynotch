@@ -175,6 +175,33 @@ import Testing
         controller.hide()
     }
 
+    @Test func aLightBackgroundGivesTheLinesADarkEdge() throws {
+        let controller = makeController()
+        controller.show(content: AnyView(Color.clear))
+        let layer = try #require((controller.panel?.contentView as? LyricsPanelContainer)?.hosting.layer)
+        #expect(layer.shadowOpacity == 0)
+        controller.apply(opacity: 1, clickThrough: false, outlinesText: true)
+        #expect(layer.shadowOpacity == 1)
+        #expect(LyricsPanelModel(background: 0).outlinesText)
+        #expect(!LyricsPanelModel().outlinesText, "the dark background as it always was needs none")
+        controller.hide()
+    }
+
+    @Test func aPressMovesThePanelButNotOnTheCloseButtonOrTheEdges() throws {
+        let controller = makeController()
+        controller.show(content: AnyView(Color.clear))
+        let panel = try #require(controller.panel)
+        let container = try #require(panel.contentView as? LyricsPanelContainer)
+        let size = panel.frame.size
+        #expect(panel.movesOnPress(at: CGPoint(x: size.width / 2, y: size.height / 2)))
+        #expect(!panel.movesOnPress(at: CGPoint(x: 2, y: size.height / 2)), "the edge resizes")
+        #expect(!panel.movesOnPress(at: CGPoint(x: size.width / 2, y: size.height - 2)))
+        container.setHovering(true)
+        let button = container.closeButton.frame
+        #expect(!panel.movesOnPress(at: CGPoint(x: button.midX, y: button.midY)), "the close button is a button")
+        controller.hide()
+    }
+
     @Test func opacityStaysWithinWhatCanBeSeen() throws {
         let controller = makeController()
         controller.show(content: AnyView(Color.clear))

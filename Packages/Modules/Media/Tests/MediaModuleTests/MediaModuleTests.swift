@@ -310,4 +310,31 @@ import Testing
         source.emit(AdapterLines.track())
         #expect(harness.activities.current == nil)
     }
+
+    @Test func openPlayerActivatesAppWithResolvedBundleID() async {
+        await harness.registry.bootstrap()
+        var activated: [(bundleID: String, title: String?)] = []
+        module.activateApp = { bundleID, title in
+            activated.append((bundleID, title))
+            return true
+        }
+
+        // When no active track, does nothing
+        module.tabActions.openPlayer()
+        #expect(activated.isEmpty)
+
+        // When track has parent bundle identifier (e.g. Chrome)
+        source.emit(AdapterLines.track("Video Title", bundle: "com.google.Chrome.helper", parent: "com.google.Chrome"))
+        module.tabActions.openPlayer()
+        #expect(activated.count == 1)
+        #expect(activated[0].bundleID == "com.google.Chrome")
+        #expect(activated[0].title == "Video Title")
+
+        // When track has direct bundle identifier (e.g. Spotify)
+        source.emit(AdapterLines.track("Track", artist: "Artist", bundle: "com.spotify.client"))
+        module.tabActions.openPlayer()
+        #expect(activated.count == 2)
+        #expect(activated[1].bundleID == "com.spotify.client")
+        #expect(activated[1].title == "Track")
+    }
 }

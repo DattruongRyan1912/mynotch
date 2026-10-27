@@ -122,6 +122,47 @@ import Testing
         #expect(book.entry(.app(Self.chrome)) == nil)
     }
 
+    @Test mutating func aPausedFilmChromeReportsIsNotTheMusicTabThatPlays() {
+        // A film in a frame of another site, which the extension cannot see, paused; music playing in another tab.
+        let music = TabRef(connection: 1, tab: 1)
+        var song = Self.tabState("vì em chỉ muốn yêu mãi một người", playing: true)
+        song.durationSeconds = 274
+        book.setTab(music, state: song, site: "soundcloud.com", at: at(0))
+        var film = Self.chromeSession("Xem Bố Già Học Việc HD - Vietsub", playing: false)
+        film.durationSeconds = 7_320
+        book.setSystem(film, at: at(1))
+        #expect(Set(ids) == [.tab(music), .app(Self.chrome)], "two chips, not the film's session on the music's tab")
+        #expect(book.entry(.tab(music))?.isSystemBacked == false)
+        #expect(book.entry(.tab(music))?.state.title == song.title)
+        #expect(book.primaryID == .tab(music), "the notch follows what plays")
+    }
+
+    @Test mutating func aPlayingFilmChromeReportsIsNotTheMusicTabWhenTheirLengthsDiffer() {
+        let music = TabRef(connection: 1, tab: 1)
+        var song = Self.tabState("Song", playing: true)
+        song.durationSeconds = 274
+        book.setTab(music, state: song, at: at(0))
+        var film = Self.chromeSession("Film", playing: true)
+        film.durationSeconds = 7_320
+        book.setSystem(film, at: at(1))
+        #expect(book.entries.count == 2)
+        #expect(book.entry(.app(Self.chrome))?.isSystemBacked == true)
+    }
+
+    @Test mutating func lengthsThatAgreeOrThatAreNotKnownStillMakeOneSource() {
+        let tab = TabRef(connection: 1, tab: 1)
+        var page = Self.tabState("(3) Inbox - Mail", playing: true)
+        page.durationSeconds = 200
+        book.setTab(tab, state: page, at: at(0))
+        var session = Self.chromeSession("Inbox - Mail")
+        session.durationSeconds = 201.5
+        book.setSystem(session, at: at(1))
+        #expect(ids == [.tab(tab)])
+        session.durationSeconds = nil
+        book.setSystem(session, at: at(2))
+        #expect(ids == [.tab(tab)])
+    }
+
     @Test mutating func withTwoTabsPlayingOrNoneADifferingTitleIsNotGuessed() {
         book.setTab(TabRef(connection: 1, tab: 1), state: Self.tabState("One", playing: true), at: at(0))
         book.setTab(TabRef(connection: 1, tab: 2), state: Self.tabState("Two", playing: true), at: at(0))

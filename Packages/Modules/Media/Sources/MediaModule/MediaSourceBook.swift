@@ -277,7 +277,10 @@ nonisolated struct MediaSourceBook: Sendable {
 
     /// The tab that plays what the system plays: the same title once normalised. Of several, one that plays, then the one heard from last.
     /// Failing that, when the titles differ (a page and Chrome may word one title two ways, and they differ for a moment as a video
-    /// changes) the one tab that plays, if exactly one does: a browser session no tab explains is rather that tab than a second chip.
+    /// changes) the one tab that plays, if exactly one does and it could be the same media: a browser session no tab explains is rather
+    /// that tab than a second chip. It could not when the system's session is paused while the tab plays, or when their lengths are
+    /// plainly not the same: that is a page the extension cannot see (a video in a frame of another site) next to the tab that plays,
+    /// two sources that one chip would hide.
     private func tab(playing system: NowPlayingState) -> TabRef? {
         guard let title = system.title else { return nil }
         let wanted = YouTubeCaptionMatcher.normalised(title)
@@ -290,7 +293,18 @@ nonisolated struct MediaSourceBook: Sendable {
             }
         if let same { return same.key }
         let playing = tabs.filter { $0.value.state.isPlaying }
-        return playing.count == 1 ? playing.keys.first : nil
+        guard playing.count == 1, let only = playing.first, Self.couldBeTheSame(system, only.value.state) else { return nil }
+        return only.key
+    }
+
+    /// Lengths further apart than this are two media, not one told two ways.
+    static let durationTolerance: TimeInterval = 5
+
+    /// Whether a playing tab whose title differs from the system's session could still be what that session plays.
+    static func couldBeTheSame(_ system: NowPlayingState, _ tab: NowPlayingState) -> Bool {
+        guard system.isPlaying == tab.isPlaying else { return false }
+        guard let left = system.durationSeconds, let right = tab.durationSeconds, left > 0, right > 0 else { return true }
+        return abs(left - right) <= durationTolerance
     }
 
     private mutating func remember(_ merged: [MediaSourceEntry], at now: Date) {

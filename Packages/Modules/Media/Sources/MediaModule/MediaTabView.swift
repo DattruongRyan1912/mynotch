@@ -31,10 +31,13 @@ struct MediaTabView: View {
     var displayStore: NowPlayingStore?
     /// What the EQ control switches; nil is a tab with none, as it always was.
     var equalizer: EqualizerState?
+    /// The subtitles of what plays; nil is a tab without the control.
+    var subtitles: SubtitleControls?
 
     init(
         store: NowPlayingStore, actions: MediaActions, volume: VolumeModel, sources: MediaSourceModel? = nil,
-        displayStore: NowPlayingStore? = nil, icons: PlayerAppCache = PlayerAppCache(), equalizer: EqualizerState? = nil
+        displayStore: NowPlayingStore? = nil, icons: PlayerAppCache = PlayerAppCache(), equalizer: EqualizerState? = nil,
+        subtitles: SubtitleControls? = nil
     ) {
         self.store = store
         self.actions = actions
@@ -42,6 +45,7 @@ struct MediaTabView: View {
         self.sources = sources
         self.displayStore = displayStore
         self.equalizer = equalizer
+        self.subtitles = subtitles
         _icons = State(initialValue: icons)
     }
 
@@ -53,8 +57,13 @@ struct MediaTabView: View {
     /// Whether the chips are up: there are sources to choose between.
     private var hasChips: Bool { sources?.showsChips ?? false }
 
-    /// Whether the row above the player is up: the chips, the EQ control, or both.
-    private var hasSourceRow: Bool { hasChips || EQQuickControl.isShown(equalizer) }
+    /// Whether the row above the player is up: the chips, the subtitles, the EQ control, or some of them.
+    private var hasSourceRow: Bool { hasChips || hasSubtitleControl || EQQuickControl.isShown(equalizer) }
+
+    /// Subtitles are the primary source's, as lyrics are: the control is not there while the player shows another source.
+    private var hasSubtitleControl: Bool {
+        (sources?.displayIsPrimary ?? true) && SubtitleQuickControl.isShown(subtitles, for: store.state)
+    }
 
     @State private var isAppeared = false
     @Environment(\.notchIsOnScreen) private var isOnScreen
@@ -111,6 +120,9 @@ struct MediaTabView: View {
             } else {
                 Spacer(minLength: 0)
             }
+            if hasSubtitleControl {
+                SubtitleQuickControl(controls: subtitles, state: store.state)
+            }
             EQQuickControl(equalizer: equalizer)
         }
         .frame(height: MediaSourceChipsView.height)
@@ -119,36 +131,57 @@ struct MediaTabView: View {
     private func coverAndControls(compact: Bool) -> some View {
         let size = compact ? Self.compactArtworkSize : Self.artworkSize
         return HStack(spacing: 14) {
-            ArtworkView(artwork: shown.artworkImage, icon: shown.appIcon, size: size, cornerRadius: compact ? 10 : 12)
+            Button(action: actions.openPlayer) {
+                ArtworkView(artwork: shown.artworkImage, icon: shown.appIcon, size: size, cornerRadius: compact ? 10 : 12)
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Mở \(shown.appName ?? "ứng dụng đang phát")")
+            .accessibilityAddTraits(.isButton)
+            .help("Mở \(shown.appName ?? "ứng dụng đang phát")")
             VStack(alignment: .leading, spacing: 0) {
                 if compact {
                     // One line for what two lines said, and no badge: the chips say which app it is. With no chips (only the EQ
                     // control above) nothing does, so the badge stays at the end of the line.
                     if hasChips {
-                        compactTitle
+                        Button(action: actions.openPlayer) {
+                            compactTitle
+                        }
+                        .buttonStyle(.plain)
+                        .help("Mở \(shown.appName ?? "ứng dụng đang phát")")
                     } else {
                         HStack(spacing: 8) {
-                            compactTitle
+                            Button(action: actions.openPlayer) {
+                                compactTitle
+                            }
+                            .buttonStyle(.plain)
+                            .help("Mở \(shown.appName ?? "ứng dụng đang phát")")
                             Spacer(minLength: 0)
-                            PlayerBadge(store: shown)
+                            PlayerBadge(store: shown, open: actions.openPlayer)
                                 .layoutPriority(1)
                         }
                     }
                 } else {
                     HStack(spacing: 8) {
-                        Text(shown.state.title ?? "")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(NotchTokens.primaryText)
-                            .lineLimit(1)
+                        Button(action: actions.openPlayer) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(shown.state.title ?? "")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(NotchTokens.primaryText)
+                                    .lineLimit(1)
+                                Text(shown.state.artist ?? shown.state.album ?? " ")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(NotchTokens.secondaryText)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .help("Mở \(shown.appName ?? "ứng dụng đang phát")")
                         Spacer(minLength: 0)
                         // Takes its width first, so a long title truncates instead of the app name.
-                        PlayerBadge(store: shown)
+                        PlayerBadge(store: shown, open: actions.openPlayer)
                             .layoutPriority(1)
                     }
-                    Text(shown.state.artist ?? shown.state.album ?? " ")
-                        .font(.system(size: 12))
-                        .foregroundStyle(NotchTokens.secondaryText)
-                        .lineLimit(1)
                 }
                 Spacer(minLength: compact ? 2 : 4)
                 PlaybackProgressView(store: shown, seek: actions.seek)
@@ -264,24 +297,28 @@ struct PlaybackProgressView: View {
 /// The playing app's icon and name; browsers show the browser, not their media helper.
 private struct PlayerBadge: View {
     let store: NowPlayingStore
+    var open: (() -> Void)? = nil
 
     var body: some View {
         if let name = store.appName {
-            HStack(spacing: 4) {
-                if let icon = store.appIcon {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: 14, height: 14)
+            Button(action: { open?() }) {
+                HStack(spacing: 4) {
+                    if let icon = store.appIcon {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .interpolation(.high)
+                            .frame(width: 14, height: 14)
+                    }
+                    Text(name)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(NotchTokens.secondaryText)
+                        .lineLimit(1)
+                        .frame(maxWidth: 110, alignment: .leading)
+                        .fixedSize()
                 }
-                Text(name)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(NotchTokens.secondaryText)
-                    .lineLimit(1)
-                    .frame(maxWidth: 110, alignment: .leading)
-                    .fixedSize()
             }
-            .help(name)
+            .buttonStyle(.plain)
+            .help(open != nil ? "Mở \(name)" : name)
         }
     }
 }

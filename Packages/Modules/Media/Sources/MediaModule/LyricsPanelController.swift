@@ -23,6 +23,28 @@ final class LyricsFloatingPanel: NSPanel {
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    /// The edge where a press resizes the panel instead of moving it.
+    static let resizeEdge: CGFloat = 6
+
+    /// A press anywhere but the close button and the edges moves the panel. The window does it, not the views: the view a press lands
+    /// on is one of SwiftUI's own (or the karaoke line's), whose `mouseDownCanMoveWindow` is not ours, so a panel that is never key
+    /// was not moved at all.
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown, movesOnPress(at: event.locationInWindow) {
+            performDrag(with: event)
+            return
+        }
+        super.sendEvent(event)
+    }
+
+    /// Whether a press at `point` (in the window) moves the panel.
+    func movesOnPress(at point: CGPoint) -> Bool {
+        let inner = CGRect(origin: .zero, size: frame.size).insetBy(dx: Self.resizeEdge, dy: Self.resizeEdge)
+        guard inner.contains(point), let content = contentView else { return false }
+        // `hitTest` takes a point in the view's superview.
+        return !(content.hitTest(content.superview?.convert(point, from: nil) ?? point) is NSButton)
+    }
 }
 
 /// Lets a drag that starts anywhere in the panel move it: the lyrics have no controls to click.
@@ -127,6 +149,8 @@ final class LyricsPanelController {
     private var placement: LyricsPanelPlacement
     private var opacity = 1.0
     private var clickThrough = false
+    private var outlinesText = false
+    static let outlineRadius: CGFloat = 2
     private var follower: CaptureHidingFollower?
     private var observers: [NSObjectProtocol] = []
     private var pendingSave: ScheduledAction?
@@ -199,6 +223,7 @@ final class LyricsPanelController {
         let hosting = LyricsHostingView(rootView: content)
         // The window's size is the user's, not what the lyrics ask for.
         hosting.sizingOptions = []
+        hosting.wantsLayer = true
         panel.contentView = LyricsPanelContainer(hosting: hosting) { [weak self] in self?.onCloseRequested() }
         isPlacing = true
         panel.setFrame(frame, display: false)
@@ -250,16 +275,25 @@ final class LyricsPanelController {
         Task { panel.contentView = nil }
     }
 
-    /// The setting's opacity (kept within `opacityRange`) and whether the pointer goes through the panel to what is under it.
-    func apply(opacity: Double, clickThrough: Bool) {
+    /// The setting's opacity (kept within `opacityRange`), whether the pointer goes through the panel to what is under it, and
+    /// whether the lines get a dark edge (the background is too light to read them on).
+    func apply(opacity: Double, clickThrough: Bool, outlinesText: Bool = false) {
         self.opacity = min(max(opacity, Self.opacityRange.lowerBound), Self.opacityRange.upperBound)
         self.clickThrough = clickThrough
+        self.outlinesText = outlinesText
         applySettings()
     }
 
     private func applySettings() {
         panel?.alphaValue = opacity
         panel?.ignoresMouseEvents = clickThrough
+        // On the layer, not in SwiftUI: the karaoke line is layers of its own that a SwiftUI shadow does not reach.
+        if let layer = (panel?.contentView as? LyricsPanelContainer)?.hosting.layer {
+            layer.shadowColor = NSColor.black.cgColor
+            layer.shadowOffset = .zero
+            layer.shadowRadius = Self.outlineRadius
+            layer.shadowOpacity = outlinesText ? 1 : 0
+        }
     }
 
     /// The panel moved or changed size: remembered once it has stood still for `saveDelay`.

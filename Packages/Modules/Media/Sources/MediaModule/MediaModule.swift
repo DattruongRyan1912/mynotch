@@ -38,6 +38,8 @@ struct MediaSettingsKeys {
     let lyricsPanelFontSize: SettingKey<Double>
     /// How opaque the whole panel is.
     let lyricsPanelOpacity: SettingKey<Double>
+    /// How dark the panel's background is, down to none: the lines alone over a film.
+    let lyricsPanelBackground: SettingKey<Double>
     /// The pointer goes through the panel to what is under it, so it can be left over a window.
     let lyricsPanelClickThrough: SettingKey<Bool>
     /// Where the panel was left on each display. Written by the panel, not by a settings row.
@@ -60,6 +62,9 @@ struct MediaSettingsKeys {
         lyricsPanel = settings.key("lyricsPanel", default: false)
         lyricsPanelFontSize = settings.key("lyricsPanelFontSize", default: LyricsPanelModel.defaultFontSize, clampedTo: LyricsPanelModel.fontSizeRange)
         lyricsPanelOpacity = settings.key("lyricsPanelOpacity", default: 0.9, clampedTo: LyricsPanelController.opacityRange)
+        lyricsPanelBackground = settings.key(
+            "lyricsPanelBackground", default: LyricsPanelModel.defaultBackground, clampedTo: LyricsPanelModel.backgroundRange
+        )
         lyricsPanelClickThrough = settings.key("lyricsPanelClickThrough", default: false)
         lyricsPanelFrames = settings.key("lyricsPanelFrames", default: LyricsPanelPlacement())
     }
@@ -73,6 +78,8 @@ struct MediaActions {
     var press: (MediaControlButton) -> Void = { _ in }
     /// Puts the floating lyrics panel up or takes it down.
     var toggleLyricsPanel: () -> Void = {}
+    /// Brings the playing application window to the front.
+    var openPlayer: () -> Void = {}
 }
 
 /// A next or previous that went to the extension and waits for its answer.
@@ -179,6 +186,12 @@ public final class MediaModule: FeatureModule {
     /// The captions the lyric row shows, nil while it shows something else. Compared, so the row is assigned once per
     /// arrival rather than with every position update.
     private var shownCaptions: (videoID: String, revision: Int)?
+    /// The subtitle files the user loaded, by film; the Media tab reads the one for what plays now.
+    let subtitles = SubtitleBook()
+    /// The subtitles the lyric row shows, nil while it shows something else. Compared, like `shownCaptions`.
+    private var shownSubtitles: SubtitleBook.Entry?
+    /// A subtitle file is some hundreds of kilobytes; anything much larger is not one.
+    static let maxSubtitleBytes = 10_000_000
     /// Track the published activity belongs to; nil while none is published. Compared so the activity is
     /// set once per track: everything that changes while a track plays is read by its views from `store`.
     private var publishedTrack: TrackIdentity?
@@ -206,6 +219,10 @@ public final class MediaModule: FeatureModule {
     private var lyricsPanel: LyricsPanelHost?
     /// Puts the lyrics panel on the screen; tests record it instead.
     var presentLyricsPanel: (NSPanel) -> Void = { $0.orderFrontRegardless() }
+    /// Activates the playing application window; tests mock it instead.
+    var activateApp: @MainActor (String, String?) -> Bool = { bundleID, title in
+        PlayerApp.activate(bundleIdentifier: bundleID, title: title)
+    }
     /// The displays the panel is placed on, the main one first; tests give their own.
     var lyricsPanelDisplays: @MainActor () -> [PanelDisplay] = LyricsPanelController.screens
     var lyricsPanelController: LyricsPanelController? { lyricsPanel?.controller }
@@ -331,6 +348,7 @@ public final class MediaModule: FeatureModule {
         lockScreenOffered = false
         spectrumFeed = SpectrumFeed(source: spectrum, store: store, scheduler: context.scheduler, logger: context.logger)
         lyricsTrack = nil
+        subtitles.open(directory: context.storage.directory)
         appleAccount.load()
         lyricsService = LyricsService(
             client: lyricsClient,
@@ -375,7 +393,8 @@ public final class MediaModule: FeatureModule {
             let changes = Observations {
                 (
                     settings.value(keys.lyricsPanel), settings.value(keys.lyricsPanelFontSize),
-                    settings.value(keys.lyricsPanelOpacity), settings.value(keys.lyricsPanelClickThrough)
+                    settings.value(keys.lyricsPanelOpacity), settings.value(keys.lyricsPanelBackground),
+                    settings.value(keys.lyricsPanelClickThrough)
                 )
             }
             for await _ in changes { self?.lyricsPanel?.apply() }
@@ -441,6 +460,8 @@ public final class MediaModule: FeatureModule {
         lyricsDebounce = nil
         lyricsTrack = nil
         shownCaptions = nil
+        shownSubtitles = nil
+        subtitles.close()
         #if DEBUG
         appleDebugTrigger?.stop()
         appleDebugTrigger = nil
@@ -465,7 +486,7 @@ public final class MediaModule: FeatureModule {
             id: descriptor.id, title: "Media", systemImage: "music.note", preferredHeight: MediaTabView.preferredHeight,
             content: AnyView(MediaTabView(
                 store: store, actions: tabActions, volume: volume, sources: sources.model, displayStore: displayStore,
-                icons: PlayerAppCache(lookUp: lookUpApp), equalizer: equalizer
+                icons: PlayerAppCache(lookUp: lookUpApp), equalizer: equalizer, subtitles: subtitleControls
             ))
         )
     }
@@ -489,6 +510,7 @@ public final class MediaModule: FeatureModule {
             lyricsPanel: environment.settings.binding(keys.lyricsPanel),
             lyricsPanelFontSize: environment.settings.binding(keys.lyricsPanelFontSize),
             lyricsPanelOpacity: environment.settings.binding(keys.lyricsPanelOpacity),
+            lyricsPanelBackground: environment.settings.binding(keys.lyricsPanelBackground),
             lyricsPanelClickThrough: environment.settings.binding(keys.lyricsPanelClickThrough),
             youtubeBridge: youtubeBridgeModel(for: environment),
             store: store,
@@ -536,7 +558,8 @@ public final class MediaModule: FeatureModule {
             send: { [weak self] command in self?.send(command, mayAsk: false) },
             seek: { [weak self] seconds in self?.seek(toSeconds: seconds) },
             press: { [weak self] button in self?.press(button, mayAsk: false) },
-            toggleLyricsPanel: { [weak self] in self?.lyricsPanel?.toggle() }
+            toggleLyricsPanel: { [weak self] in self?.lyricsPanel?.toggle() },
+            openPlayer: {}
         )
     }
 
@@ -546,7 +569,8 @@ public final class MediaModule: FeatureModule {
             send: { [weak self] command in self?.send(command) },
             seek: { [weak self] seconds in self?.seek(toSeconds: seconds) },
             press: { [weak self] button in self?.press(button) },
-            toggleLyricsPanel: { [weak self] in self?.lyricsPanel?.toggle() }
+            toggleLyricsPanel: { [weak self] in self?.lyricsPanel?.toggle() },
+            openPlayer: { [weak self] in self?.openPlayer() }
         )
     }
 
@@ -556,8 +580,27 @@ public final class MediaModule: FeatureModule {
             send: { [weak self] command in self?.send(command, to: self?.sources.book.displayedID) },
             seek: { [weak self] seconds in self?.seek(toSeconds: seconds, to: self?.sources.book.displayedID) },
             press: { [weak self] button in self?.press(button, to: self?.sources.book.displayedID) },
-            toggleLyricsPanel: { [weak self] in self?.lyricsPanel?.toggle() }
+            toggleLyricsPanel: { [weak self] in self?.lyricsPanel?.toggle() },
+            openPlayer: { [weak self] in self?.openPlayer(for: self?.sources.book.displayedID) }
         )
+    }
+
+    /// Brings the playing application window to the front.
+    func openPlayer(for id: MediaSourceID? = nil) {
+        let targetBundleID: String?
+        let title: String?
+        if let id, let entry = sources.book.entry(id) {
+            targetBundleID = entry.app ?? entry.state.playerBundleIdentifier
+            title = entry.state.title
+        } else if let displayedID = sources.book.displayedID, let entry = sources.book.entry(displayedID) {
+            targetBundleID = entry.app ?? entry.state.playerBundleIdentifier
+            title = entry.state.title
+        } else {
+            targetBundleID = displayStore.state.playerBundleIdentifier ?? store.state.playerBundleIdentifier
+            title = displayStore.state.title ?? store.state.title
+        }
+        guard let bundleID = targetBundleID, !bundleID.isEmpty else { return }
+        _ = activateApp(bundleID, title)
     }
 
     /// Where a command goes, for the source it is for.
@@ -807,9 +850,7 @@ public final class MediaModule: FeatureModule {
             mode: settings.value(keys.spectrumColorMode), start: settings.value(keys.spectrumGradientStart),
             end: settings.value(keys.spectrumGradientEnd)
         )
-        store.setLyricsOn(lyricsEnabled || youtubeCaptionsEnabled)
-        // Kept in step so that the player keeps its place under the controls (the row is reserved, empty) while it shows another source.
-        displayStore.setLyricsOn(lyricsEnabled || youtubeCaptionsEnabled)
+        updateLyricsOn()
         updateYouTubeBridge()
         refreshDisplay()
     }
@@ -851,6 +892,18 @@ public final class MediaModule: FeatureModule {
     /// the track has no key (an advertisement, no length) or nothing plays. Position and play-state updates leave
     /// the key as it is, so they never fetch.
     private func refreshLyrics() {
+        subtitles.setCurrentKey(SubtitleBook.key(for: store.state))
+        updateLyricsOn()
+        if let entry = subtitles.current {
+            showSubtitles(entry)
+            return
+        }
+        if shownSubtitles != nil {
+            // The film's subtitles were removed or another track started: what the track has otherwise is looked for again.
+            shownSubtitles = nil
+            lyricsTrack = nil
+            show(lyrics: nil)
+        }
         if let captions = matchedCaptions() {
             showCaptions(captions)
             return
@@ -926,6 +979,74 @@ public final class MediaModule: FeatureModule {
         case .instrumental, .notFound:
             refreshActivity()
         }
+    }
+
+    /// Stops a lookup of lyrics from the web that is going or waiting, and forgets which track it was for.
+    private func stopLyricsLookup() {
+        guard lyricsTrack != nil else { return }
+        lyricsTask?.cancel()
+        lyricsTask = nil
+        lyricsDebounce?.cancel()
+        lyricsDebounce = nil
+        lyricsTrack = nil
+        lyricsEpoch += 1
+    }
+
+    /// The row is there while a setting gives it lyrics, or while what plays has subtitles the user loaded.
+    private func updateLyricsOn() {
+        let isOn = lyricsEnabled || youtubeCaptionsEnabled || subtitles.current != nil
+        store.setLyricsOn(isOn)
+        // Kept in step so that the player keeps its place under the controls (the row is reserved, empty) while it shows another source.
+        displayStore.setLyricsOn(isOn)
+    }
+
+    // MARK: Subtitles
+
+    /// What the Media tab's subtitle control acts on.
+    var subtitleControls: SubtitleControls {
+        SubtitleControls(
+            book: subtitles,
+            load: { [weak self] url in self?.loadSubtitles(from: url) },
+            shift: { [weak self] seconds in self?.shiftSubtitles(by: seconds) },
+            resetDelay: { [weak self] in self?.resetSubtitleDelay() },
+            remove: { [weak self] in self?.removeSubtitles() }
+        )
+    }
+
+    /// Loads a subtitle file for what plays now and shows it. False when nothing plays or the file holds no subtitle (the book then
+    /// names it, for the tab).
+    @discardableResult
+    func loadSubtitles(from url: URL) -> Bool {
+        subtitles.setCurrentKey(SubtitleBook.key(for: store.state))
+        let data = (try? Data(contentsOf: url)).flatMap { $0.count <= Self.maxSubtitleBytes ? $0 : nil } ?? Data()
+        let loaded = subtitles.load(data, name: url.lastPathComponent)
+        refreshLyrics()
+        return loaded
+    }
+
+    /// Moves the subtitles of what plays now: positive shows them later.
+    func shiftSubtitles(by seconds: Double) {
+        subtitles.shift(by: seconds)
+        refreshLyrics()
+    }
+
+    func resetSubtitleDelay() {
+        subtitles.resetDelay()
+        refreshLyrics()
+    }
+
+    func removeSubtitles() {
+        subtitles.remove()
+        refreshLyrics()
+    }
+
+    /// The user's subtitles win over captions and lyrics from the web, as captions win over the web.
+    private func showSubtitles(_ entry: SubtitleBook.Entry) {
+        stopLyricsLookup()
+        shownCaptions = nil
+        guard entry != shownSubtitles else { return }
+        shownSubtitles = entry
+        show(lyrics: SubtitleParser.lines(from: entry.cues, delay: entry.delay))
     }
 
     // MARK: YouTube captions
@@ -1037,14 +1158,7 @@ public final class MediaModule: FeatureModule {
 
     /// The captions win over lyrics from the web: a lookup still going is stopped, and one that was shown is replaced.
     private func showCaptions(_ captions: YouTubeCaptionStore.Track) {
-        if lyricsTrack != nil {
-            lyricsTask?.cancel()
-            lyricsTask = nil
-            lyricsDebounce?.cancel()
-            lyricsDebounce = nil
-            lyricsTrack = nil
-            lyricsEpoch += 1
-        }
+        stopLyricsLookup()
         guard shownCaptions?.videoID != captions.videoID || shownCaptions?.revision != captions.revision else { return }
         shownCaptions = (captions.videoID, captions.revision)
         show(lyrics: captions.lines)
@@ -1097,7 +1211,7 @@ public final class MediaModule: FeatureModule {
     /// Lyrics for the current track may still arrive: a lookup is out, the next track has not shown up yet, or captions
     /// from the Chrome extension may still come.
     private var lyricsArePending: Bool {
-        lyricsTask != nil || lyricsDebounce != nil || !store.state.isActive || (youtubeCaptionsEnabled && shownCaptions == nil)
+        lyricsTask != nil || lyricsDebounce != nil || !store.state.isActive || (youtubeCaptionsEnabled && shownCaptions == nil && shownSubtitles == nil)
     }
 
     /// Whether the activity carries the strip: the setting is on and the track plays with synced lyrics, from whichever

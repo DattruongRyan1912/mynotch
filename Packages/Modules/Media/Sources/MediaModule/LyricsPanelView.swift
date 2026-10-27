@@ -8,13 +8,25 @@ import SwiftUI
 final class LyricsPanelModel {
     static let fontSizeRange = 14.0...48.0
     static let defaultFontSize = 22.0
+    static let backgroundRange = 0.0...1.0
+    static let defaultBackground = 0.82
+    /// Lighter than this the lines get a dark edge, or they are lost on a bright film.
+    static let outlineBelow = 0.5
+    /// What a background of none is drawn with: a pixel nothing is drawn in lets the press through to the window under it, and the
+    /// panel could be held by its letters only.
+    static let leastBackground = 0.01
 
     /// The setting's value, which is kept within `fontSizeRange` already.
     var fontSize: Double
+    /// How dark the background is, within `backgroundRange`.
+    var background: Double
 
-    init(fontSize: Double = LyricsPanelModel.defaultFontSize) {
+    init(fontSize: Double = LyricsPanelModel.defaultFontSize, background: Double = LyricsPanelModel.defaultBackground) {
         self.fontSize = min(max(fontSize, Self.fontSizeRange.lowerBound), Self.fontSizeRange.upperBound)
+        self.background = min(max(background, Self.backgroundRange.lowerBound), Self.backgroundRange.upperBound)
     }
+
+    var outlinesText: Bool { background < Self.outlineBelow }
 }
 
 /// What the panel shows at a moment: the lines, or the reason there are none.
@@ -59,7 +71,10 @@ struct LyricsPanelView: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous).fill(Color.black.opacity(0.82)))
+            .background(
+                RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                    .fill(Color.black.opacity(max(model.background, LyricsPanelModel.leastBackground)))
+            )
             .environment(\.notchIsOnScreen, presence.isOnScreen)
             .followingAccent(of: interface)
             // The panel is a window of its own on a dark surface whatever the look is, so the text tokens must be the light ones.

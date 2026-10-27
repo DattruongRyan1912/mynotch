@@ -53,6 +53,8 @@ import Testing
         #expect(keys.lyricsPanel.defaultValue == false)
         #expect(keys.lyricsPanelFontSize.defaultValue == LyricsPanelModel.defaultFontSize)
         #expect(keys.lyricsPanelOpacity.defaultValue == 0.9)
+        #expect(keys.lyricsPanelBackground.defaultValue == LyricsPanelModel.defaultBackground)
+        #expect(keys.lyricsPanelBackground.name == "module.media.lyricsPanelBackground")
         #expect(keys.lyricsPanelClickThrough.defaultValue == false)
         #expect(keys.lyricsPanelFrames.defaultValue == LyricsPanelPlacement())
         #expect(keys.karaoke.name == "module.media.karaoke")
@@ -72,6 +74,9 @@ import Testing
         #expect(harness.settings.value(keys.lyricsPanelOpacity) == LyricsPanelController.opacityRange.lowerBound)
         harness.settings.set(4.0, for: keys.lyricsPanelOpacity)
         #expect(harness.settings.value(keys.lyricsPanelOpacity) == 1)
+        harness.settings.set(-1.0, for: keys.lyricsPanelBackground)
+        #expect(harness.settings.value(keys.lyricsPanelBackground) == 0)
+        #expect(LyricsPanelModel(background: 3).background == 1)
     }
 
     @Test func theRowsSayWhatTheyDo() {

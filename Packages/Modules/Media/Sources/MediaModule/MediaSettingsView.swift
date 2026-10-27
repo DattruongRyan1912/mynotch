@@ -40,6 +40,7 @@ struct MediaSettingsView: View {
     @Binding var lyricsPanel: Bool
     @Binding var lyricsPanelFontSize: Double
     @Binding var lyricsPanelOpacity: Double
+    @Binding var lyricsPanelBackground: Double
     @Binding var lyricsPanelClickThrough: Bool
     let youtubeBridge: YouTubeBridgeModel
     /// Only for the permission hint; the module keeps the store for its whole life, running or not.
@@ -102,7 +103,10 @@ struct MediaSettingsView: View {
                 Text(Self.karaokeTitle)
                 Text(Self.karaokeExplanation)
             }
-            LyricsPanelRows(isOn: $lyricsPanel, fontSize: $lyricsPanelFontSize, opacity: $lyricsPanelOpacity, clickThrough: $lyricsPanelClickThrough)
+            LyricsPanelRows(
+                isOn: $lyricsPanel, fontSize: $lyricsPanelFontSize, opacity: $lyricsPanelOpacity,
+                background: $lyricsPanelBackground, clickThrough: $lyricsPanelClickThrough
+            )
             MediaControlRows(layout: $controlButtons)
         }
     }
@@ -114,12 +118,15 @@ struct LyricsPanelRows: View {
     static let explanation = "Một bảng nhỏ luôn nằm trên các cửa sổ, hiện câu trước, câu đang hát và câu sau. Kéo bảng đi đâu cũng được, kéo cạnh để đổi cỡ; vị trí được nhớ theo từng màn hình. Có nút bật/tắt trong tab Media và có thể gán phím tắt."
     static let fontSizeTitle = "Cỡ chữ của bảng"
     static let opacityTitle = "Độ mờ của bảng"
+    static let backgroundTitle = "Nền của bảng"
+    static let backgroundExplanation = "0% là không còn nền, chỉ còn chữ có viền tối, để xem phim không bị che."
     static let clickThroughTitle = "Cho chuột xuyên qua bảng"
     static let clickThroughExplanation = "Bấm vào bảng sẽ bấm xuống cửa sổ bên dưới; bảng không kéo được cho tới khi tắt mục này."
 
     @Binding var isOn: Bool
     @Binding var fontSize: Double
     @Binding var opacity: Double
+    @Binding var background: Double
     @Binding var clickThrough: Bool
 
     var body: some View {
@@ -138,6 +145,18 @@ struct LyricsPanelRows: View {
                     .monospacedDigit()
                     .frame(width: 40, alignment: .trailing)
             }
+        }
+        LabeledContent {
+            HStack {
+                Slider(value: $background, in: LyricsPanelModel.backgroundRange)
+                    .frame(width: 140)
+                Text("\(Int((background * 100).rounded()))%")
+                    .monospacedDigit()
+                    .frame(width: 40, alignment: .trailing)
+            }
+        } label: {
+            Text(Self.backgroundTitle)
+            Text(Self.backgroundExplanation)
         }
         Toggle(isOn: $clickThrough) {
             Text(Self.clickThroughTitle)
