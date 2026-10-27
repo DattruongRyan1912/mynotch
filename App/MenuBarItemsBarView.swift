@@ -7,6 +7,7 @@ import SwiftUI
 /// front. Esc and a click elsewhere are heard by monitors (`MenuBarItemsBarController`), not by the window.
 final class MenuBarItemsBarPanel: NSPanel {
     private var follower: CaptureHidingFollower?
+    private var glass: ActiveGlassFollower?
 
     init(interface: NotchInterface = .shared) {
         super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -27,6 +28,8 @@ final class MenuBarItemsBarPanel: NSPanel {
         allowsToolTipsWhenApplicationIsInactive = true
         // Like the black menu bar: out of recordings when the user keeps MyNotch's windows out of them while the notch is closed.
         follower = CaptureHidingFollower(self, as: .compact, interface: interface)
+        // Never key, so without this the glass would be the subdued one, without the notch's lensing and rim.
+        glass = ActiveGlassFollower(self, interface: interface)
     }
 
     override var canBecomeKey: Bool { false }
@@ -35,6 +38,8 @@ final class MenuBarItemsBarPanel: NSPanel {
     override func close() {
         follower?.stop()
         follower = nil
+        glass?.stop()
+        glass = nil
         super.close()
     }
 }
@@ -50,28 +55,55 @@ final class MenuBarAppIcons {
 
     func icon(for item: MenuBarItem) -> NSImage {
         if let cached = icons[item.pid] { return cached }
-        let icon = NSRunningApplication(processIdentifier: item.pid)?.icon
+        let icon = NSRunningApplication(processIdentifier: item.pid)?.icon.map(Self.fromLargeSize)
             ?? NSImage(systemSymbolName: "app.dashed", accessibilityDescription: item.ownerName) ?? NSImage()
         icons[item.pid] = icon
         return icon
     }
+
+    /// Only the icon's smallest size of at least 64 pixels, which the bar scales down. At the bar's size a 1x display would pick the
+    /// 18 or 24 pixel size, which some apps ship broken (Docker's are noise).
+    private static func fromLargeSize(_ icon: NSImage) -> NSImage {
+        let large = icon.representations.filter { $0.pixelsWide >= 64 }.min { $0.pixelsWide < $1.pixelsWide }
+        guard let large, let cgImage = large.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return icon }
+        return NSImage(cgImage: cgImage, size: NSSize(width: 64, height: 64))
+    }
+}
+
+/// Whether the bar is drawn out or folded into its right end, by the MyNotch icon: the controller sets it, the view animates it.
+@Observable
+final class MenuBarItemsBarPresence {
+    var isShown = false
 }
 
 /// What the bar draws: the row of items, or a message when there is nothing to show yet, nothing to list or no permission to list it.
+/// It unfolds from its right end with the notch's spring once there is something to show, and folds back the same way.
 struct MenuBarItemsBarView: View {
     let bar: MenuBarItemsBar
     let interface: NotchInterface
     let icons: MenuBarAppIcons
+    let presence: MenuBarItemsBarPresence
     let grantAccessibility: () -> Void
 
-    private static let corner: CGFloat = 16
+    /// How much of its size the folded bar keeps, so it grows out of a pill rather than out of nothing.
+    private static let foldedScale: CGFloat = 0.6
 
     var body: some View {
-        MenuBarItemsBarContent(bar: bar, icons: icons, grantAccessibility: grantAccessibility)
-            .environment(\.notchSurface, interface.surface)
-            .environment(\.notchAccent, interface.accent)
-            .tint(interface.accent)
-            .notchSurface(in: RoundedRectangle(cornerRadius: Self.corner, style: .continuous))
+        let isShown = presence.isShown && bar.phase != .loading
+        GeometryReader { proxy in
+            MenuBarItemsBarContent(bar: bar, icons: icons, grantAccessibility: grantAccessibility)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .opacity(isShown ? 1 : 0)
+                // The content keeps its full width and the surface, which clips it, grows over it from the right.
+                .frame(width: isShown ? proxy.size.width : proxy.size.height, alignment: .trailing)
+                .tint(interface.accent)
+                // The notch's own surface (black or glass, as the user chose), so the bar reads as part of it.
+                .notchSurface(in: RoundedRectangle(cornerRadius: MenuBarItemsBarMetrics.cornerRadius, style: .continuous), of: interface)
+                .scaleEffect(isShown ? 1 : Self.foldedScale, anchor: .trailing)
+                .opacity(isShown ? 1 : 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        }
+        .animation(NotchTokens.spring, value: isShown)
     }
 }
 
@@ -86,7 +118,9 @@ private struct MenuBarItemsBarContent: View {
     var body: some View {
         switch bar.phase {
         case .loading:
-            ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+            ProgressView()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .needsAccessibility:
             HStack(spacing: 10) {
                 Text("Cần quyền Trợ năng để xem icon ẩn.")
@@ -107,30 +141,20 @@ private struct MenuBarItemsBarContent: View {
                 HStack(spacing: MenuBarItemsBarMetrics.spacing) {
                     ForEach(bar.entries) { entry in
                         MenuBarItemButton(
-                            entry: entry, image: bar.images[entry.id], icon: icons.icon(for: entry.item),
+                            entry: entry, icon: icons.icon(for: entry.item),
                             choose: { secondary in bar.choose(entry.id, secondary: secondary) }
                         )
                     }
                 }
-                .padding(MenuBarItemsBarMetrics.padding)
+                .padding(.horizontal, MenuBarItemsBarMetrics.padding)
+                .frame(maxHeight: .infinity)
             }
         }
     }
 }
 
-/// How wide an item's button is: its real look at its own width with a little room, or the app's icon.
-enum MenuBarItemsBarCell {
-    static let inset: CGFloat = 6
-    static let iconSize: CGFloat = 20
-
-    static func width(of entry: MenuBarBarEntry, hasImage: Bool) -> CGFloat {
-        hasImage ? max(entry.item.frame.width, iconSize) + 2 * inset : MenuBarItemsBarMetrics.iconCellWidth
-    }
-}
-
 private struct MenuBarItemButton: View {
     let entry: MenuBarBarEntry
-    let image: CGImage?
     let icon: NSImage
     let choose: (_ secondary: Bool) -> Void
 
@@ -138,8 +162,9 @@ private struct MenuBarItemButton: View {
 
     var body: some View {
         look
-            .frame(width: MenuBarItemsBarCell.width(of: entry, hasImage: image != nil), height: MenuBarItemsBarMetrics.cellHeight)
-            .background(isHovered ? NotchTokens.fill(0.16) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .frame(width: MenuBarItemsBarMetrics.iconCellWidth)
+            .frame(maxHeight: .infinity)
+            .background(isHovered ? NotchTokens.fill(0.16) : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .onHover { isHovered = $0 }
             .help(entry.item.toolTip)
             .accessibilityElement(children: .ignore)
@@ -150,16 +175,12 @@ private struct MenuBarItemButton: View {
             .overlay { MenuBarItemClickCatcher(onClick: choose) }
     }
 
-    @ViewBuilder private var look: some View {
-        if let image {
-            // The capture is one pixel per point times the display's scale.
-            Image(decorative: image, scale: max(CGFloat(image.width) / max(entry.item.frame.width, 1), 1))
-        } else {
-            Image(nsImage: icon)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: MenuBarItemsBarCell.iconSize, height: MenuBarItemsBarCell.iconSize)
-        }
+    /// The app's own icon: sharp at any scale, where a capture of the item is only as sharp as the display it is on.
+    private var look: some View {
+        Image(nsImage: icon)
+            .resizable()
+            .interpolation(.high)
+            .frame(width: MenuBarItemsBarMetrics.iconSize, height: MenuBarItemsBarMetrics.iconSize)
     }
 }
 

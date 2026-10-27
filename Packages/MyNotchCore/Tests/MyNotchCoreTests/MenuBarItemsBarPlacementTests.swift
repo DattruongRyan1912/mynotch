@@ -14,59 +14,65 @@ import Testing
         CGRect(x: x, y: top - 24, width: 28, height: 24)
     }
 
-    // MARK: right-aligned under the icon
+    // MARK: placed to the left of the icon
 
-    @Test func theBarIsRightAlignedUnderTheIconOnANotchedDisplay() {
+    @Test func theBarIsPlacedToTheLeftOfTheIconOnANotchedDisplay() {
         let frame = MenuBarItemsBarPlacement.frame(content: content, anchor: icon(x: 1_540, top: 1_117), screens: [notched])
-        #expect(frame.maxX == 1_568)
-        #expect(frame.size == content)
-        // Directly under the 38-point bar, with a small gap.
-        #expect(frame.maxY == 1_117 - 38 - gap)
+        #expect(frame.maxX == 1_540)
+        #expect(frame.size.width == content.width)
+        #expect(frame.maxY == 1_117)
+        #expect(frame.height == 24)
     }
 
-    @Test func theBarHangsUnderAShorterBarOnADisplayWithoutANotch() {
+    @Test func theBarIsPlacedOnTheBarOnADisplayWithoutANotch() {
         let frame = MenuBarItemsBarPlacement.frame(content: content, anchor: icon(x: 1_300, top: 900), screens: [plain])
-        #expect(frame.maxX == 1_328)
-        #expect(frame.maxY == 900 - 24 - gap)
-        #expect(frame.height == 44)
+        #expect(frame.maxX == 1_300)
+        #expect(frame.maxY == 900)
+        #expect(frame.height == 24)
     }
 
     @Test func anIconAtTheEdgeOfTheDisplayKeepsTheBarInsideItsMargin() {
-        let frame = MenuBarItemsBarPlacement.frame(content: content, anchor: icon(x: 1_410, top: 900), screens: [plain])
+        let frame = MenuBarItemsBarPlacement.frame(content: content, anchor: icon(x: 1_435, top: 900), screens: [plain])
         #expect(frame.maxX == 1_440 - margin)
         #expect(frame.minX == 1_440 - margin - 300)
     }
 
-    // MARK: centred when it does not fit
-
-    @Test func theBarIsCentredWhenRightAligningWouldRunOffTheLeftEdge() {
-        let frame = MenuBarItemsBarPlacement.frame(content: content, anchor: icon(x: 100, top: 900), screens: [plain])
-        #expect(frame.midX == 720)
-        #expect(frame.width == 300)
+    @Test func theBarIsBoundedByTheNotchOnANotchedDisplay() {
+        // Icon at x: 1200. Notch gap is 764...964, so minX is 964 + 8 = 972.
+        // Available width to the left of icon is 1200 - 972 = 228 < 300.
+        let frame = MenuBarItemsBarPlacement.frame(content: content, anchor: icon(x: 1_200, top: 1_117), screens: [notched])
+        #expect(frame.minX == 972)
+        #expect(frame.maxX == 1_200)
+        #expect(frame.width == 228)
+        #expect(frame.maxY == 1_117)
     }
 
     @Test func aBarBarelyFittingIsStillRightAligned() {
-        // The icon's right edge is 308, so a 300-point bar starts exactly at the margin.
-        let frame = MenuBarItemsBarPlacement.frame(content: content, anchor: icon(x: 280, top: 900), screens: [plain])
+        // The icon's left edge is 308, so a 300-point bar starts exactly at margin (8).
+        let frame = MenuBarItemsBarPlacement.frame(content: content, anchor: icon(x: 308, top: 900), screens: [plain])
         #expect(frame.minX == margin)
         #expect(frame.maxX == 308)
     }
 
     @Test func aBarWiderThanTheDisplayTakesItAllAndScrolls() {
         let frame = MenuBarItemsBarPlacement.frame(content: CGSize(width: 3_000, height: 44), anchor: icon(x: 1_300, top: 900), screens: [plain])
-        #expect(frame.width == 1_440 - 2 * margin)
+        #expect(frame.width == 1_300 - margin)
         #expect(frame.minX == margin)
+        #expect(frame.maxX == 1_300)
     }
 
-    @Test func withoutAnIconTheBarIsCentredOnTheMainDisplay() {
+    @Test func withoutAnIconTheBarIsPlacedAtTheRightEdge() {
         let frame = MenuBarItemsBarPlacement.frame(content: content, anchor: nil, screens: [notched, plain])
-        #expect(frame.midX == 864)
-        #expect(frame.maxY == 1_117 - 38 - gap)
+        #expect(frame.maxX == 1_728 - margin)
+        #expect(frame.maxY == 1_117)
+        #expect(frame.height == 38)
     }
 
     @Test func anIconNotOnAnyBarIsAsGoodAsNone() {
         let frame = MenuBarItemsBarPlacement.frame(content: content, anchor: icon(x: -9_900, top: 1_117), screens: [notched])
-        #expect(frame.midX == 864)
+        #expect(frame.maxX == 1_728 - margin)
+        #expect(frame.maxY == 1_117)
+        #expect(frame.height == 38)
     }
 
     // MARK: displays
@@ -74,15 +80,17 @@ import Testing
     @Test func theBarFollowsTheIconToAnotherDisplay() {
         let external = MenuBarScreen(frame: CGRect(x: 1_728, y: -300, width: 2_560, height: 1_440), barHeight: 24)
         let frame = MenuBarItemsBarPlacement.frame(content: content, anchor: icon(x: 4_100, top: 1_140), screens: [notched, external])
-        #expect(frame.maxX == 4_128)
-        #expect(frame.maxY == 1_140 - 24 - gap)
+        #expect(frame.maxX == 4_100)
+        #expect(frame.maxY == 1_140)
+        #expect(frame.height == 24)
     }
 
-    @Test func aDisplayWithANegativeOriginIsCentredWithinItself() {
+    @Test func aDisplayWithANegativeOrigin() {
         let left = MenuBarScreen(frame: CGRect(x: -1_920, y: -200, width: 1_920, height: 1_080), barHeight: 24)
-        let frame = MenuBarItemsBarPlacement.frame(content: content, anchor: icon(x: -1_900, top: 880), screens: [notched, left])
-        #expect(frame.midX == -960)
-        #expect(frame.maxY == 880 - 24 - gap)
+        let frame = MenuBarItemsBarPlacement.frame(content: content, anchor: icon(x: -100, top: 880), screens: [notched, left])
+        #expect(frame.maxX == -100)
+        #expect(frame.maxY == 880)
+        #expect(frame.height == 24)
     }
 
     @Test func noDisplaysLeavesTheBarAtTheOrigin() {

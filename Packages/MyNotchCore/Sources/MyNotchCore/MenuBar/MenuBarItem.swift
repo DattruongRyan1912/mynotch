@@ -77,14 +77,12 @@ public protocol MenuBarItemSource: AnyObject {
     func perform(_ action: MenuBarItemAction, on id: String) -> MenuBarItemActionResult
 }
 
-/// What the items look like, for the bar to show them as the menu bar does. Best effort: whatever cannot be captured is missing.
-public protocol MenuBarItemImageSource: AnyObject {
-    func images(for items: [MenuBarItem]) async -> [String: CGImage]
-}
-
 /// The hider's sections, which the fallback shows for a moment to reach an item the separators push away.
 public protocol MenuBarSectionControl: AnyObject {
     var level: MenuBarHider.Level { get }
+    /// The apps the system keeps off the menu bar now, with their sections; nil when nothing hides that way
+    /// (`MenuBarNativeHiding`), and the separators' places say what is hidden.
+    var hiddenApps: [String: MenuBarSection]? { get }
     func revealAll()
     @discardableResult func restore(to level: MenuBarHider.Level) -> Bool
 }

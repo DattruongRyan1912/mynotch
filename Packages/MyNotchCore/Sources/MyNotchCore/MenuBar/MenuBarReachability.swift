@@ -62,8 +62,24 @@ nonisolated public enum MenuBarReachability {
     /// The items that belong in the bar, left to right as the menu bar lays them out. Items whose frames say nothing (no area)
     /// come last, and items at the same place keep the order the source gave them.
     public static func entries(from items: [MenuBarItem], layout: MenuBarLayout) -> [MenuBarBarEntry] {
-        items
-            .compactMap { item in reason(for: item.frame, in: layout).map { MenuBarBarEntry(item: item, reason: $0) } }
+        sorted(items.compactMap { item in reason(for: item.frame, in: layout).map { MenuBarBarEntry(item: item, reason: $0) } })
+    }
+
+    /// The same while the system keeps the `hidden` apps off the menu bar (`MenuBarNativeHiding`): their items are listed for the
+    /// section they were in, whatever their frames say (where they were before), and the others only for what keeps them out of
+    /// reach on a bar whose separators push nothing.
+    public static func entries(
+        from items: [MenuBarItem], layout: MenuBarLayout, hiddenApps: [String: MenuBarSection]
+    ) -> [MenuBarBarEntry] {
+        let bare = MenuBarLayout(screens: layout.screens)
+        return sorted(items.compactMap { item in
+            let reason = item.ownerBundleID.flatMap { hiddenApps[$0]?.reason } ?? reason(for: item.frame, in: bare)
+            return reason.map { MenuBarBarEntry(item: item, reason: $0) }
+        })
+    }
+
+    private static func sorted(_ entries: [MenuBarBarEntry]) -> [MenuBarBarEntry] {
+        entries
             .sorted { left, right in
                 let leftX = hasArea(left.item.frame) ? left.item.frame.minX : .infinity
                 let rightX = hasArea(right.item.frame) ? right.item.frame.minX : .infinity

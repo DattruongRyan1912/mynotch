@@ -34,6 +34,7 @@ final class FakeItemSource: MenuBarItemSource {
 /// Stands in for the hider's sections.
 final class FakeSections: MenuBarSectionControl {
     var level: MenuBarHider.Level = .collapsed
+    var hiddenApps: [String: MenuBarSection]?
     private(set) var log: [String] = []
     var onReveal: (() -> Void)?
 
@@ -48,24 +49,6 @@ final class FakeSections: MenuBarSectionControl {
         self.level = level
         return true
     }
-}
-
-final class FakeImages: MenuBarItemImageSource {
-    var result: [String: CGImage] = [:]
-    private(set) var asked: [[String]] = []
-
-    func images(for items: [MenuBarItem]) async -> [String: CGImage] {
-        asked.append(items.map(\.id))
-        return result
-    }
-}
-
-private func makeImage() -> CGImage {
-    let context = CGContext(
-        data: nil, width: 4, height: 4, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
-        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-    )!
-    return context.makeImage()!
 }
 
 @Suite struct MenuBarItemsBarTests {
@@ -89,7 +72,6 @@ private func makeImage() -> CGImage {
     private final class Rig {
         let source = FakeItemSource()
         let sections = FakeSections()
-        let images = FakeImages()
         let scheduler = ManualScheduler()
         let settings = SettingsStore(defaults: makeIsolatedDefaults())
         var pointerOnBar = false
@@ -98,10 +80,10 @@ private func makeImage() -> CGImage {
         var openChanges: [Bool] = []
         var failures = 0
 
-        init(withImages: Bool = false) {
+        init() {
             source.listed = [onBar, parked, notchHidden, flat]
             bar = MenuBarItemsBar(
-                source: source, images: withImages ? images : nil, sections: sections, settings: settings, scheduler: scheduler,
+                source: source, sections: sections, settings: settings, scheduler: scheduler,
                 layout: { [unowned self] in layout }, isPointerOnBar: { [unowned self] in pointerOnBar }
             )
             bar.onOpenChanged = { [unowned self] in openChanges.append($0) }
@@ -131,7 +113,6 @@ private func makeImage() -> CGImage {
     @Test func aClosedBarHoldsNothing() {
         let rig = Rig()
         #expect(rig.bar.entries.isEmpty)
-        #expect(rig.bar.images.isEmpty)
     }
 
     // MARK: opening
@@ -145,6 +126,19 @@ private func makeImage() -> CGImage {
         #expect(rig.bar.entries.map(\.reason) == [.offScreen, .underNotch, .zeroSize])
         #expect(rig.source.itemsCalls == 1)
         #expect(rig.openChanges == [true])
+    }
+
+    @Test func whileTheSystemHidesAppsTheirItemsAreListedWhereverTheirFramesSayAndPressedWhereTheyAre() async {
+        let rig = Rig()
+        // The system took "onBar" away; its frame is where it was before, on the bar.
+        rig.sections.hiddenApps = ["com.example.onBar": .hidden]
+        await rig.open()
+        #expect(rig.bar.entries.map(\.id) == ["parked", "notch", "onBar", "flat"])
+        #expect(rig.bar.entries.first { $0.id == "onBar" }?.reason == .hiddenSection)
+        rig.bar.choose("onBar")
+        // Accessibility reaches an item the system hides: no section is shown for it.
+        #expect(rig.sections.log.isEmpty)
+        #expect(rig.source.performed.map(\.id) == ["onBar"])
     }
 
     @Test func theBarIsLoadingUntilTheFirstListArrives() {
@@ -215,6 +209,17 @@ private func makeImage() -> CGImage {
         #expect(rig.source.itemsCalls == 2)
     }
 
+    @Test func aSectionMoveIsReadOnceTheWindowsHaveStoppedSliding() async {
+        let rig = Rig()
+        await rig.open()
+        rig.bar.sectionsMoved()
+        rig.scheduler.advance(by: MenuBarItemsBar.sectionsSettleDelay - .milliseconds(1))
+        #expect(rig.source.itemsCalls == 1)
+        rig.scheduler.advance(by: .milliseconds(1))
+        await rig.bar.settled()
+        #expect(rig.source.itemsCalls == 2)
+    }
+
     @Test func aRefreshPicksUpWhatChanged() async {
         let rig = Rig()
         await rig.open()
@@ -256,15 +261,13 @@ private func makeImage() -> CGImage {
     // MARK: closing
 
     @Test func closingRecordsWhyAndEmptiesTheBar() async {
-        let rig = Rig(withImages: true)
-        rig.images.result = ["parked": makeImage()]
+        let rig = Rig()
         await rig.open()
-        #expect(!rig.bar.images.isEmpty)
+        #expect(!rig.bar.entries.isEmpty)
         rig.bar.close(.escape)
         #expect(!rig.bar.isOpen)
         #expect(rig.bar.lastCloseReason == .escape)
         #expect(rig.bar.entries.isEmpty)
-        #expect(rig.bar.images.isEmpty)
         #expect(rig.openChanges == [true, false])
     }
 
@@ -333,42 +336,6 @@ private func makeImage() -> CGImage {
         #expect(rig.bar.isOpen)
         rig.scheduler.advance(by: .seconds(1))
         #expect(!rig.bar.isOpen)
-    }
-
-    // MARK: item looks
-
-    @Test func capturedImagesAreKeptByItemAndTheRestFallBackToTheAppIcon() async {
-        let rig = Rig(withImages: true)
-        let image = makeImage()
-        rig.images.result = ["parked": image]
-        await rig.open()
-        #expect(rig.images.asked == [["parked", "notch", "flat"]])
-        #expect(rig.bar.images["parked"] === image)
-        #expect(rig.bar.images["notch"] == nil)
-        #expect(rig.bar.entries.map(\.id) == ["parked", "notch", "flat"])
-    }
-
-    @Test func aFailedCaptureLeavesTheListWithTheirTooltips() async {
-        let rig = Rig(withImages: true)
-        rig.images.result = [:]
-        await rig.open()
-        #expect(rig.bar.images.isEmpty)
-        #expect(rig.bar.entries.count == 3)
-        #expect(rig.bar.entries.map(\.item.toolTip) == ["Parked", "Notch", "Flat"])
-    }
-
-    @Test func withoutACaptureSourceNothingIsCaptured() async {
-        let rig = Rig()
-        await rig.open()
-        #expect(rig.images.asked.isEmpty)
-        #expect(rig.bar.images.isEmpty)
-    }
-
-    @Test func nothingIsCapturedWhenThereIsNothingToShow() async {
-        let rig = Rig(withImages: true)
-        rig.source.listed = [Self.onBar]
-        await rig.open()
-        #expect(rig.images.asked.isEmpty)
     }
 
     // MARK: clicking an item

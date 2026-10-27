@@ -37,6 +37,16 @@ public protocol MenuBarSeparator: AnyObject {
     var alwaysHiddenLength: CGFloat { get set }
     /// The second separator's window; nil without one. Only meaningful while its length is normal.
     var alwaysHiddenFrame: CGRect? { get }
+    /// The apps the system keeps off the menu bar now in place of a long separator, with their sections; nil when the
+    /// separators' lengths do the hiding (`MenuBarNativeHiding`).
+    var hiddenApps: [String: MenuBarSection]? { get }
+    /// Whether hiding can work now; false refuses a collapse (where the system hides, without Accessibility to tell which apps).
+    var canHide: Bool { get }
+}
+
+extension MenuBarSeparator {
+    public var hiddenApps: [String: MenuBarSection]? { nil }
+    public var canHide: Bool { true }
 }
 
 /// Collapsing and expanding the menu bar's sections, by hand, by a timer and by the pointer. Time comes from the injected
@@ -184,6 +194,9 @@ public final class MenuBarHider {
         )
     }
 
+    /// The apps the system keeps off the menu bar now, when it does the hiding (`MenuBarSeparator.hiddenApps`).
+    public var hiddenApps: [String: MenuBarSection]? { separator?.hiddenApps }
+
     /// Goes back to `target`, as the bar does after it showed the sections for a moment. Refused (false) under the same rule as
     /// `collapse()`; being there already is a success.
     @discardableResult
@@ -273,6 +286,7 @@ public final class MenuBarHider {
         let wideningHidden = target == .collapsed && level != .collapsed
         let wideningAlways = separator.hasAlwaysHiddenSection && target != .all && level == .all
         guard wideningHidden || wideningAlways else { return true }
+        guard separator.canHide else { return false }
         let screens = separator.screens
         guard let own = separator.separatorFrame, let toggle = separator.toggleFrame,
               MenuBarOrder.isLeftOf(separator: own, toggle: toggle, screens: screens) else { return false }

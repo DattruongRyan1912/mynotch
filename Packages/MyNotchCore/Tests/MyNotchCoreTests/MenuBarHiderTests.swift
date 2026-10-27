@@ -16,6 +16,7 @@ final class FakeSeparator: MenuBarSeparator {
     var alwaysHiddenFrame: CGRect? = CGRect(x: 1_460, y: 1_093, width: 24, height: 24)
     var alwaysHiddenLength: CGFloat = 0 { didSet { alwaysLengths.append(alwaysHiddenLength) } }
     private(set) var alwaysLengths: [CGFloat] = []
+    var canHide = true
 
     /// The user drags "‹" to the right of the icon.
     func dragSeparatorRightOfToggle() {
@@ -54,6 +55,16 @@ final class FakeSeparator: MenuBarSeparator {
     @Test func collapsedPushesTheItemsOnItsLeftOffTheScreenAndExpandedIsNormal() {
         #expect(MenuBarHider.collapsedLength >= 10_000)
         #expect(MenuBarHider.expandedLength == NSStatusItem.variableLength)
+    }
+
+    @Test func aSeparatorThatCannotHideNowRefusesTheCollapse() {
+        let rig = Rig()
+        rig.separator.canHide = false
+        #expect(!rig.hider.collapse())
+        #expect(!rig.hider.isCollapsed)
+        #expect(!rig.separator.lengths.contains(collapsed))
+        rig.separator.canHide = true
+        #expect(rig.hider.collapse())
     }
 
     @Test func attachingShowsEverythingAndLeavesTheSeparatorAtItsNormalLength() {

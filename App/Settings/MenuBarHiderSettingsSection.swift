@@ -3,8 +3,8 @@ import ApplicationServices
 import MyNotchCore
 import SwiftUI
 
-/// "Ẩn bớt icon trên menu bar": the settings of the separator ‹ that hides the icons on its left, of ‹‹ for the zone that
-/// stays hidden until asked for, and of the bar under the menu bar that shows the icons the notch hides.
+/// "Ẩn bớt icon trên menu bar": the settings of hiding the icons left of the MyNotch icon, and of the bar under the menu bar
+/// that shows them.
 struct MenuBarHiderSettingsSection: View {
     let settings: SettingsStore
 
@@ -23,11 +23,11 @@ struct MenuBarHiderSettingsSection: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Cách dùng")
                     .font(.caption.weight(.semibold))
-                Text("1. Giữ ⌘ rồi kéo icon của app khác sang bên trái dấu ‹ để ẩn chúng; để bên phải dấu ‹ thì chúng luôn hiện.")
+                Text("1. Mọi icon nằm bên trái icon MyNotch đều được ẩn. Giữ ⌘ rồi kéo icon của app khác sang bên phải icon MyNotch để nó luôn hiện.")
                 Text(barOn
-                    ? "2. Bấm icon MyNotch hoặc dấu ‹ để mở thanh icon ẩn dưới menu bar; giữ ⌥ khi bấm để hiện icon ngay trên menu bar. Bấm chuột phải vào icon MyNotch để mở menu."
-                    : "2. Bấm icon MyNotch hoặc dấu ‹ để hiện hay ẩn các icon đã ẩn; bấm chuột phải vào icon MyNotch để mở menu.")
-                Text("3. Nếu bấm mà chỉ nghe tiếng bíp, dấu ‹ đang nằm bên phải icon MyNotch: giữ ⌘ rồi kéo nó sang bên trái.")
+                    ? "2. Bấm icon MyNotch để mở thanh icon ẩn dưới menu bar; giữ ⌥ khi bấm để hiện icon ngay trên menu bar. Bấm chuột phải vào icon MyNotch để mở menu."
+                    : "2. Bấm icon MyNotch để hiện hay ẩn các icon đã ẩn; bấm chuột phải vào icon MyNotch để mở menu.")
+                Text("3. Từ macOS 27 cần quyền Trợ năng để biết icon nào nằm bên trái icon MyNotch. Trong lúc icon đang ẩn, bấm đồng hồ vẫn mở Notification Center, chỉ chậm hơn khoảng nửa giây và các icon ẩn hiện ra thoáng qua. Icon Now Playing (▶︎) của macOS cũng bị ẩn theo, vì hệ thống không cho giữ lại; bài đang phát vẫn hiện trên notch.")
                 Text("Tắt Hidden Bar để tránh hai app cùng ẩn icon.")
             }
             .font(.caption).foregroundStyle(.secondary)
@@ -51,11 +51,6 @@ struct MenuBarHiderSettingsSection: View {
                         .font(.caption).foregroundStyle(.orange)
                 }
                 Toggle("Thu gọn ngay khi MyNotch khởi động", isOn: settings.binding(MenuBarHiderSettings.startCollapsed))
-                Toggle("Thêm vùng luôn ẩn (dấu ‹‹)", isOn: settings.binding(MenuBarHiderSettings.alwaysHiddenSection))
-                if settings.value(MenuBarHiderSettings.alwaysHiddenSection) {
-                    Text("Icon bên trái dấu ‹‹ vẫn ẩn khi bạn bấm icon MyNotch. Để xem chúng, giữ ⌥ rồi bấm icon MyNotch (hoặc chọn \"Hiện cả icon luôn ẩn\" trong menu). Lúc đó mới kéo được icon sang bên trái dấu ‹‹; dấu ‹‹ phải nằm ngoài cùng bên trái, trước dấu ‹.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
                 Text("Phím tắt hiện/ẩn icon (chưa đặt sẵn): chọn ở mục Phím tắt bên dưới.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("Hiện khi rê chuột lên thanh menu", isOn: settings.binding(MenuBarHiderSettings.revealOnHover))
@@ -63,8 +58,8 @@ struct MenuBarHiderSettingsSection: View {
                     .font(.caption).foregroundStyle(.secondary)
                 if hasNotchedDisplay {
                     Text(barOn
-                        ? "Máy có notch: khi menu bar đầy, macOS che các icon ở xa nhất sau notch; các icon đó hiện trong thanh icon ẩn. Kéo những icon bạn cần dùng sang bên phải dấu ‹ để chúng luôn nằm trên menu bar."
-                        : "Máy có notch: khi menu bar đầy, macOS che các icon ở xa nhất sau notch. Kéo những icon bạn cần dùng sang bên phải dấu ‹; các icon bên trái sẽ ẩn khi thu gọn.")
+                        ? "Máy có notch: khi menu bar đầy, macOS che các icon ở xa nhất sau notch; các icon đó hiện trong thanh icon ẩn. Kéo những icon bạn cần dùng sang bên phải icon MyNotch để chúng luôn nằm trên menu bar."
+                        : "Máy có notch: khi menu bar đầy, macOS che các icon ở xa nhất sau notch. Kéo những icon bạn cần dùng sang bên phải icon MyNotch; các icon bên trái sẽ ẩn khi thu gọn.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

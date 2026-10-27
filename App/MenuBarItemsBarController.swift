@@ -19,6 +19,9 @@ final class MenuBarItemsBarController {
     private let ownFrames: () -> [CGRect]
 
     private var panel: MenuBarItemsBarPanel?
+    private let presence = MenuBarItemsBarPresence()
+    /// The window of a bar that is folding away, ordered out once the fold is over.
+    private var leaving: (panel: MenuBarItemsBarPanel, task: Task<Void, Never>)?
     private let icons = MenuBarAppIcons()
     private var monitors: [Any] = []
     private var observers: [(center: NotificationCenter, token: NSObjectProtocol)] = []
@@ -35,7 +38,7 @@ final class MenuBarItemsBarController {
         self.ownFrames = ownFrames
         var barPanelFrame: () -> CGRect? = { nil }
         bar = MenuBarItemsBar(
-            source: AccessibilityMenuBarItemSource(), images: ScreenCaptureMenuBarItemImages(), sections: hider,
+            source: AccessibilityMenuBarItemSource(), sections: hider,
             settings: settings, scheduler: scheduler,
             layout: { hider.layout ?? MenuBarLayout(screens: MenuBarScreen.current()) },
             isPointerOnBar: { barPanelFrame().map { $0.insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation) } ?? false }
@@ -45,7 +48,7 @@ final class MenuBarItemsBarController {
         bar.onPressFailed = { [weak self] in self?.notice.show("Không mở được menu của icon này.") }
     }
 
-    /// Whether a click on the MyNotch icon, ‹ or the shortcut opens the bar rather than showing the hidden icons in the menu bar:
+    /// Whether a click on the MyNotch icon or the shortcut opens the bar rather than showing the hidden icons in the menu bar:
     /// the hider and the setting are on, and Accessibility is granted, since the icons are listed through it.
     var isAvailable: Bool {
         MenuBarItemsBar.isAvailable(
@@ -57,7 +60,7 @@ final class MenuBarItemsBarController {
     func toggle() { bar.toggle() }
 
     /// The hider moved a section, so which icons are on the bar changed.
-    func sectionsChanged() { bar.itemsMayHaveChanged() }
+    func sectionsChanged() { bar.sectionsMoved() }
 
     /// The delay or one of the settings changed: the bar follows the delay, and goes if it is not wanted any more.
     func settingsChanged() {
@@ -69,9 +72,14 @@ final class MenuBarItemsBarController {
 
     // MARK: the window
 
+    /// How long the fold takes before the window goes: the notch's spring has settled to the eye by then.
+    private static let foldDuration: Duration = .milliseconds(300)
+
     private func show() {
+        finishLeaving()
+        presence.isShown = false
         let panel = MenuBarItemsBarPanel(interface: interface)
-        let content = MenuBarItemsBarView(bar: bar, interface: interface, icons: icons) { [weak self] in
+        let content = MenuBarItemsBarView(bar: bar, interface: interface, icons: icons, presence: presence) { [weak self] in
             self?.bar.close(.itemChosen)
             Task { _ = await SystemPermissionCenter().request(.accessibility) }
         }
@@ -84,23 +92,39 @@ final class MenuBarItemsBarController {
         panel.orderFrontRegardless()
         installMonitors()
         observeBar()
+        // After the first frame, drawn folded, so the unfolding is animated.
+        Task { [presence] in presence.isShown = true }
     }
 
+    /// Folds the bar, then orders its window out. A click goes through it meanwhile, to whatever is under it.
     private func hide() {
         removeMonitors()
         layoutTask?.cancel()
         layoutTask = nil
-        panel?.orderOut(nil)
-        panel?.close()
-        panel = nil
+        guard let panel else { return }
+        self.panel = nil
+        presence.isShown = false
+        panel.ignoresMouseEvents = true
+        let task = Task { [weak self] in
+            try? await Task.sleep(for: Self.foldDuration)
+            guard !Task.isCancelled else { return }
+            self?.finishLeaving()
+        }
+        leaving = (panel, task)
+    }
+
+    private func finishLeaving() {
+        guard let leaving else { return }
+        self.leaving = nil
+        leaving.task.cancel()
+        leaving.panel.orderOut(nil)
+        leaving.panel.close()
     }
 
     /// The window is as big as what the bar holds, right-aligned under the MyNotch icon (`MenuBarItemsBarPlacement`).
     private func layoutPanel() {
         guard let panel else { return }
-        let widths: [CGFloat] = bar.phase == .ready
-            ? bar.entries.map { MenuBarItemsBarCell.width(of: $0, hasImage: bar.images[$0.id] != nil) }
-            : []
+        let widths = bar.phase == .ready ? bar.entries.map { _ in MenuBarItemsBarMetrics.iconCellWidth } : []
         let size = MenuBarItemsBarMetrics.contentSize(cellWidths: widths)
         panel.setFrame(MenuBarItemsBarPlacement.frame(content: size, anchor: anchor(), screens: MenuBarScreen.current()), display: true)
     }
@@ -109,11 +133,11 @@ final class MenuBarItemsBarController {
 
     private func observeBar() {
         layoutTask = Task { [weak self, bar] in
-            for await _ in Observations({ (bar.phase, bar.entries, bar.images.count) }) {
+            for await _ in Observations({ (bar.phase, bar.entries) }) {
                 self?.layoutPanel()
                 // Counts only: what the items are called is nobody's business but the user's.
                 if bar.phase == .ready {
-                    Log.logger(category: "app").info("Menu-bar items bar: \(bar.entries.count) items listed, \(bar.images.count) captured")
+                    Log.logger(category: "app").info("Menu-bar items bar: \(bar.entries.count) items listed")
                 }
             }
         }

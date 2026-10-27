@@ -2,8 +2,8 @@ import CoreGraphics
 import Observation
 
 /// The bar under the menu bar that holds the icons the notch hides: what it lists, when it is read again, when it closes, and
-/// what a click on an item does. It never touches the menu bar itself: the apps' items, their looks and the hider's sections
-/// come in through the three protocols, and time through the scheduler.
+/// what a click on an item does. It never touches the menu bar itself: the apps' items and the hider's sections
+/// come in through the two protocols, and time through the scheduler.
 ///
 /// Nothing runs while the bar is closed: an event that arrives then is ignored, and the items are read again on every opening.
 @Observable
@@ -30,6 +30,8 @@ public final class MenuBarItemsBar {
 
     /// Events (an app started or quit, the sections moved, a display changed) come in bursts: the list is read once they stop.
     public static let refreshDelay: Duration = .milliseconds(250)
+    /// The items' windows slide for a while after a section moved; read before they stop, they are listed where they pass, out of order.
+    public static let sectionsSettleDelay: Duration = .milliseconds(700)
     /// While the pointer is on the bar a due close waits, looking again this often.
     public static let pointerRecheck: Duration = .seconds(1)
     /// After the sections were shown for an item, how often to look whether it has arrived on the bar, and how many looks to give it.
@@ -42,8 +44,6 @@ public final class MenuBarItemsBar {
     public private(set) var phase = Phase.loading
     /// What the bar holds, left to right.
     public private(set) var entries: [MenuBarBarEntry] = []
-    /// How the items really look, by item ID. Best effort: an item without one is shown as its app's icon. Held only while open.
-    public private(set) var images: [String: CGImage] = [:]
     public private(set) var lastCloseReason: CloseReason?
 
     /// The window follows: open or closed.
@@ -52,7 +52,6 @@ public final class MenuBarItemsBar {
     @ObservationIgnored public var onPressFailed: (() -> Void)?
 
     @ObservationIgnored private let source: any MenuBarItemSource
-    @ObservationIgnored private let imageSource: (any MenuBarItemImageSource)?
     @ObservationIgnored private let sections: any MenuBarSectionControl
     @ObservationIgnored private let settings: SettingsStore
     @ObservationIgnored private let scheduler: any Scheduler
@@ -70,12 +69,11 @@ public final class MenuBarItemsBar {
     @ObservationIgnored private var restoreTarget: MenuBarHider.Level?
 
     public init(
-        source: any MenuBarItemSource, images: (any MenuBarItemImageSource)? = nil, sections: any MenuBarSectionControl,
+        source: any MenuBarItemSource, sections: any MenuBarSectionControl,
         settings: SettingsStore, scheduler: any Scheduler, layout: @escaping () -> MenuBarLayout,
         isPointerOnBar: @escaping () -> Bool = { false }
     ) {
         self.source = source
-        self.imageSource = images
         self.sections = sections
         self.settings = settings
         self.scheduler = scheduler
@@ -101,7 +99,6 @@ public final class MenuBarItemsBar {
         isOpen = true
         phase = .loading
         entries = []
-        images = [:]
         lastCloseReason = nil
         onOpenChanged?(true)
         startRefresh()
@@ -119,7 +116,6 @@ public final class MenuBarItemsBar {
         generation += 1
         refreshTask?.cancel()
         entries = []
-        images = [:]
         onOpenChanged?(false)
     }
 
@@ -134,9 +130,18 @@ public final class MenuBarItemsBar {
     /// An app started or quit, the hider moved a section, or a display changed. Reads the items again once the events stop; a
     /// closed bar ignores them, since it reads them anew when it opens.
     public func itemsMayHaveChanged() {
+        scheduleRefresh(after: Self.refreshDelay)
+    }
+
+    /// The hider moved a section: the items are read again once their windows have stopped sliding.
+    public func sectionsMoved() {
+        scheduleRefresh(after: Self.sectionsSettleDelay)
+    }
+
+    private func scheduleRefresh(after delay: Duration) {
         guard isOpen else { return }
         pendingRefresh?.cancel()
-        pendingRefresh = scheduler.schedule(after: Self.refreshDelay) { [weak self] in
+        pendingRefresh = scheduler.schedule(after: delay) { [weak self] in
             self?.pendingRefresh = nil
             self?.startRefresh()
         }
@@ -159,19 +164,14 @@ public final class MenuBarItemsBar {
         guard source.isTrusted else {
             phase = .needsAccessibility
             entries = []
-            images = [:]
             return
         }
         let items = await source.items()
         guard isOpen, mine == generation else { return }
-        let list = MenuBarReachability.entries(from: items, layout: layout())
+        let list = sections.hiddenApps.map { MenuBarReachability.entries(from: items, layout: layout(), hiddenApps: $0) }
+            ?? MenuBarReachability.entries(from: items, layout: layout())
         entries = list
         phase = .ready
-        images = images.filter { image in list.contains { $0.id == image.key } }
-        guard let imageSource, !list.isEmpty else { return }
-        let captured = await imageSource.images(for: list.map(\.item))
-        guard isOpen, mine == generation else { return }
-        images = captured
     }
 
     // MARK: auto-close
