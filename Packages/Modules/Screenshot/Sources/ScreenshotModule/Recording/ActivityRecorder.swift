@@ -82,10 +82,16 @@ nonisolated final class ActivityRecorder: ActivityEventSink {
         for event in raw.clicks {
             if let t = timeline.recordingTime(forCaptureTime: event.time) {
                 track.clicks.append(.init(t: Self.milliseconds(t), x: Self.tenth(event.point.x), y: Self.tenth(event.point.y), button: event.button))
+            } else if let firstSegment = timeline.segments.first, event.time < firstSegment.start, firstSegment.start - event.time <= 0.5 {
+                track.clicks.append(.init(t: 0, x: Self.tenth(event.point.x), y: Self.tenth(event.point.y), button: event.button))
             }
         }
         for time in raw.keys {
-            if let t = timeline.recordingTime(forCaptureTime: time) { track.keys.append(Self.milliseconds(t)) }
+            if let t = timeline.recordingTime(forCaptureTime: time) {
+                track.keys.append(Self.milliseconds(t))
+            } else if let firstSegment = timeline.segments.first, time < firstSegment.start, firstSegment.start - time <= 0.5 {
+                track.keys.append(0)
+            }
         }
         return track
     }

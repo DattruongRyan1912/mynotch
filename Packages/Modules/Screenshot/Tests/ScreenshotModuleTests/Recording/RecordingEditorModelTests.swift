@@ -399,6 +399,36 @@ final class FakePreviewPlayer: PreviewPlaying {
         #expect(model.zoomSegments.count == 4)
     }
 
+    @Test func quickZoomFromClicksCanRegenerateClearAndToggle() async throws {
+        let editor = try await EditorFixture()
+        let model = editor.model!
+
+        // 1. Clear all zooms
+        model.clearAllZooms()
+        #expect(model.zoomSegments.isEmpty)
+        #expect(try editor.savedProject().zoomSegments == [])
+
+        // 2. Undo clear
+        model.undo()
+        #expect(!model.zoomSegments.isEmpty)
+
+        // 3. Clear again and toggle zoom at click
+        model.clearAllZooms()
+        let click = ActivityTrack.Click(t: 2.0, x: 500, y: 400, button: .left)
+        model.toggleZoom(atClick: click, holdDuration: 1.5)
+        #expect(model.zoomSegments.count == 1)
+        #expect(model.zoomSegments.first?.start == 2.0 && model.zoomSegments.first?.end == 3.5)
+        #expect(model.zoomSegments.first?.focus.first?.x == 500)
+
+        // 4. Toggle again removes the zoom
+        model.toggleZoom(atClick: click)
+        #expect(model.zoomSegments.isEmpty)
+
+        // 5. Generate zooms from clicks with 1.0s duration
+        model.generateZoomsFromClicks(holdDuration: 1.0)
+        #expect(try editor.savedProject().zoomSegments != nil)
+    }
+
     @Test func anEditThatChangesNothingIsNotAStepAndWritesNothing() async throws {
         let editor = try await EditorFixture()
         let model = editor.model!

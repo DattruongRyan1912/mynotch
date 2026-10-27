@@ -66,6 +66,7 @@ public final class ScreenshotModule: FeatureModule {
     let storageFallbackSettings: SettingsStore
     /// One line for each clean, made of numbers only; by default it goes to the log. Tests read it.
     var storageReport: (String) -> Void = { Log.logger(category: "screenshot").info("\($0, privacy: .public)") }
+    private var markupObserver: (any NSObjectProtocol)?
 
     public convenience init() {
         self.init(
@@ -127,6 +128,7 @@ public final class ScreenshotModule: FeatureModule {
         self.context = context
         let keys = ScreenshotSettingKeys(context.settings)
         self.keys = keys
+        state.isMicrophoneEnabled = context.settings.value(keys.recordMicrophone) != MicrophoneChoice.off
         storageSettings = context.settings
         chip = CaptureChipController(presenter: chipPresenter, scheduler: context.scheduler)
         context.hotkeys.register("capture", title: "Chụp màn hình", initial: Self.captureShortcut) { [weak self] in
@@ -149,9 +151,25 @@ public final class ScreenshotModule: FeatureModule {
         }
         // Also what finds a recording that a crash cut short and rescues it.
         context.run { [weak recordings] in await recordings?.refreshList() }
+        markupObserver = NotificationCenter.default.addObserver(
+            forName: .openMarkupEditorForImage, object: nil, queue: .main
+        ) { [weak self] notification in
+            guard let self else { return }
+            let url = notification.object as? URL
+            let data = notification.object as? Data
+            Task { @MainActor in
+                if let url {
+                    await self.openEditorForImage(url: url)
+                } else if let data {
+                    await self.openEditorForImageData(data)
+                }
+            }
+        }
     }
 
     public func stop() async {
+        if let markupObserver { NotificationCenter.default.removeObserver(markupObserver) }
+        self.markupObserver = nil
         overlay.cancel()
         // A recording is closed properly, and kept; the editors of recordings close with it.
         await recording?.shutdown()
@@ -284,11 +302,15 @@ public final class ScreenshotModule: FeatureModule {
         if context.settings.value(keys.copyToClipboard), !(await pasteboard.write(image, scale: scale)) {
             showToast("Không chép được ảnh", systemImage: "exclamationmark.triangle.fill")
         }
-        guard let record, isCurrent(context), context.settings.value(keys.showCaptureChip) else { return }
+        guard let record, isCurrent(context) else { return }
+        if context.settings.value(keys.autoOpenEditor) {
+            await edit(record)
+            return
+        }
+        guard context.settings.value(keys.showCaptureChip) else { return }
         let thumbnail = await store.thumbnail(for: record.id, maxPixel: CaptureChipView.thumbnailMaxPixel)
         // Not while another capture has the screens: the chip is gone before they freeze and stays gone until it is done.
         guard isCurrent(context), !isSelecting else { return }
-        // The buttons are the only way into the editor from here: nothing opens by itself.
         chip?.show(
             thumbnail: thumbnail,
             edit: { [weak self] in self?.context?.run { await self?.edit(record) } },
@@ -358,6 +380,15 @@ public final class ScreenshotModule: FeatureModule {
         case .toast:
             showToast(message.text, systemImage: message.systemImage, duration: message == .recognizing ? .seconds(1) : .seconds(2))
         }
+    }
+
+    func toggleMicrophone() {
+        guard let context, let keys else { return }
+        let current = context.settings.value(keys.recordMicrophone)
+        let newChoice = current == MicrophoneChoice.off ? MicrophoneChoice.systemDefault : MicrophoneChoice.off
+        context.settings.set(newChoice, for: keys.recordMicrophone)
+        state.isMicrophoneEnabled = newChoice != MicrophoneChoice.off
+        showToast(state.isMicrophoneEnabled ? "Đã bật micro" : "Đã tắt micro", systemImage: state.isMicrophoneEnabled ? "mic.fill" : "mic.slash.fill")
     }
 
     // MARK: Feedback

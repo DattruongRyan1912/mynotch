@@ -184,11 +184,32 @@ struct RecordingTimelineView: View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .quaternaryLabelColor).opacity(0.5))
             ForEach(Array(model.zoomSegments.enumerated()), id: \.offset) { index, segment in block(index, segment, geometry) }
+            ForEach(Array(model.activity.clicks.enumerated()), id: \.offset) { _, click in
+                clickMarker(click, geometry)
+            }
         }
         .frame(width: geometry.width, height: Self.laneHeight, alignment: .topLeading)
         .contentShape(.rect)
         .onTapGesture { model.selectZoom(nil) }
         .accessibilityLabel("Dải zoom")
+    }
+
+    private func clickMarker(_ click: ActivityTrack.Click, _ geometry: TimelineGeometry) -> some View {
+        let x = geometry.x(for: click.t)
+        let isCovered = model.zoomSegments.contains { $0.start <= click.t && $0.end >= click.t }
+        return Button {
+            model.toggleZoom(atClick: click)
+        } label: {
+            Circle()
+                .fill(isCovered ? Color.white : Color.yellow)
+                .overlay(Circle().stroke(Color.black.opacity(0.4), lineWidth: 1))
+                .frame(width: 8, height: 8)
+                .contentShape(Rectangle().inset(by: -5))
+        }
+        .buttonStyle(.plain)
+        .offset(x: max(0, x - 4), y: 11)
+        .help(isCovered ? "Bỏ zoom tại cú bấm này (\(TimelineGeometry.label(for: click.t)))" : "Gán zoom tại cú bấm này (\(TimelineGeometry.label(for: click.t)))")
+        .accessibilityLabel("Cú bấm chuột lúc \(TimelineGeometry.label(for: click.t))")
     }
 
     private func block(_ index: Int, _ segment: ZoomSegment, _ geometry: TimelineGeometry) -> some View {

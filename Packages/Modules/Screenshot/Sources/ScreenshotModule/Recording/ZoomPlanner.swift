@@ -25,14 +25,18 @@ nonisolated enum ZoomPlanner {
             case .click:
                 reference = event.point
             case .move:
-                // The first position only says where the pointer is; after that a move counts once it is far enough from the
-                // place of the last activity, so a resting hand does not hold a zoom open.
-                if let ref = reference, let point = event.point {
-                    isActivity = hypot(point.x - ref.x, point.y - ref.y) >= rules.minimumMovement
+                // Only follow pointer movement when followPointer is enabled.
+                // Otherwise, pointer movement is not activity (so zoom can end and zoom out) and camera stays on click.
+                if rules.followPointer {
+                    if let ref = reference, let point = event.point {
+                        isActivity = hypot(point.x - ref.x, point.y - ref.y) >= rules.minimumMovement
+                    } else {
+                        isActivity = false
+                    }
+                    if isActivity || reference == nil { reference = event.point }
                 } else {
                     isActivity = false
                 }
-                if isActivity || reference == nil { reference = event.point }
             case .key:
                 break
             }
@@ -61,7 +65,7 @@ nonisolated enum ZoomPlanner {
             }
         }
         for index in segments.indices {
-            segments[index].focus = focus(for: segments[index], events: events)
+            segments[index].focus = focus(for: segments[index], events: events, rules: rules)
         }
         return segments
     }
@@ -72,7 +76,7 @@ nonisolated enum ZoomPlanner {
     ) -> ZoomSegment {
         var segment = ZoomSegment(start: time, end: time + duration, scale: scale ?? rules.scale, manual: true)
         let events = Self.events(in: activity, before: nil)
-        var focus = Self.focus(for: segment, events: events.filter { $0.kind != .key })
+        var focus = Self.focus(for: segment, events: events.filter { $0.kind != .key }, rules: rules)
         let place = pointerPlace(at: time, events: events)
             ?? CGPoint(x: Double(activity.pixelWidth) / 2, y: Double(activity.pixelHeight) / 2)
         if focus.first.map({ $0.t > time }) ?? true {
@@ -105,19 +109,22 @@ nonisolated enum ZoomPlanner {
         return events
     }
 
-    /// The clicks inside a zoom and the pointer a few times a second, sorted, one point per moment. A click is exact; a
-    /// pointer sample is kept only when `focusInterval` has passed since the last one kept.
-    private static func focus(for segment: ZoomSegment, events: [Event]) -> [ZoomSegment.Focus] {
+    /// The clicks inside a zoom and the pointer a few times a second, sorted, one point per moment.
+    /// When `rules.followPointer` is false, only clicks are included so the camera stays centered on the clicked target.
+    private static func focus(for segment: ZoomSegment, events: [Event], rules: ZoomRules = .standard) -> [ZoomSegment.Focus] {
         var points: [ZoomSegment.Focus] = []
         var lastSample = -Double.infinity
         for event in events where event.time >= segment.start && event.time <= segment.end {
             guard let point = event.point else { continue }
             if event.kind == .click {
                 points.append(.init(t: event.time, x: point.x, y: point.y))
-            } else if event.time - lastSample >= focusInterval - 1e-6 {
+            } else if rules.followPointer, event.time - lastSample >= focusInterval - 1e-6 {
                 lastSample = event.time
                 points.append(.init(t: event.time, x: point.x, y: point.y))
             }
+        }
+        if points.isEmpty, let place = pointerPlace(at: segment.start, events: events) {
+            points.append(.init(t: segment.start, x: place.x, y: place.y))
         }
         // Events are in time order and a click sorts first, so a pointer sample at a click's moment is the later one.
         var result: [ZoomSegment.Focus] = []

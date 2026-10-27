@@ -24,26 +24,49 @@ struct RecordingControlsView: View {
     var body: some View {
         switch module.state.recordingPhase {
         case .idle:
-            Menu {
-                Button("Cả màn hình", systemImage: "display") { module.beginRecording(.screen) }
-                Button("Một cửa sổ", systemImage: "macwindow") { module.beginRecording(.window) }
-                Button("Một vùng", systemImage: "rectangle.dashed") { module.beginRecording(.region) }
-            } label: {
-                Label {
-                    Text("Quay")
-                } icon: {
-                    Image(systemName: "record.circle").foregroundStyle(Color.red)
+            HStack(spacing: 4) {
+                Button {
+                    module.toggleMicrophone()
+                } label: {
+                    Image(systemName: module.state.isMicrophoneEnabled ? "mic.fill" : "mic.slash.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(module.state.isMicrophoneEnabled ? NotchTokens.primaryText : Color.red)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(module.state.isMicrophoneEnabled ? NotchTokens.fill(0.12) : Color.red.opacity(0.2)))
                 }
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(NotchTokens.primaryText)
+                .buttonStyle(.plain)
+                .help(module.state.isMicrophoneEnabled ? "Micro đang bật (Bấm để tắt)" : "Micro đang tắt (Bấm để bật)")
+                .accessibilityLabel(module.state.isMicrophoneEnabled ? "Micro đang bật" : "Micro đang tắt")
+
+                Menu {
+                    Section {
+                        Button("Cả màn hình", systemImage: "display") { module.beginRecording(.screen) }
+                        Button("Một cửa sổ", systemImage: "macwindow") { module.beginRecording(.window) }
+                        Button("Một vùng", systemImage: "rectangle.dashed") { module.beginRecording(.region) }
+                    }
+                    Section {
+                        Button(module.state.isMicrophoneEnabled ? "Tắt micro" : "Bật micro",
+                               systemImage: module.state.isMicrophoneEnabled ? "mic.slash" : "mic") {
+                            module.toggleMicrophone()
+                        }
+                    }
+                } label: {
+                    Label {
+                        Text("Quay")
+                    } icon: {
+                        Image(systemName: "record.circle").foregroundStyle(Color.red)
+                    }
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(NotchTokens.primaryText)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(NotchTokens.fill(0.12)))
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            // Outside the menu: a borderless menu draws its label and nothing around it, and already pads it a little.
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
-            .background(Capsule().fill(NotchTokens.fill(0.12)))
         case .selecting, .starting:
             status("Đang chuẩn bị…")
         case .countdown(let seconds):
@@ -61,6 +84,10 @@ struct RecordingControlsView: View {
                         .monospacedDigit()
                         .foregroundStyle(NotchTokens.primaryText)
                 }
+                Image(systemName: module.state.isMicrophoneEnabled ? "mic.fill" : "mic.slash.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(module.state.isMicrophoneEnabled ? NotchTokens.secondaryText : Color.red)
+                    .help(module.state.isMicrophoneEnabled ? "Đang thu tiếng micro" : "Không thu tiếng micro")
                 Button(module.state.recordingPhase == .paused ? "Tiếp tục" : "Tạm dừng") { module.toggleRecordingPause() }
                     .buttonStyle(RecordingCapsuleStyle())
                 Button("Dừng") { module.stopRecording() }.buttonStyle(RecordingCapsuleStyle(tint: .red))

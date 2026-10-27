@@ -82,6 +82,24 @@ struct RecordingEditorView: View {
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("Vị trí và thời lượng sau khi cắt")
             Spacer()
+            Menu {
+                Section("Tự động gán zoom theo cú bấm") {
+                    Button("Gán toàn bộ cú bấm (1,5 giây)") { model.generateZoomsFromClicks(holdDuration: 1.5) }
+                    Button("Gán toàn bộ cú bấm (1,0 giây)") { model.generateZoomsFromClicks(holdDuration: 1.0) }
+                    Button("Gán toàn bộ cú bấm (2,0 giây)") { model.generateZoomsFromClicks(holdDuration: 2.0) }
+                }
+                Section {
+                    Button(role: .destructive) { model.clearAllZooms() } label: {
+                        Label("Xoá toàn bộ zoom", systemImage: "trash")
+                    }
+                    .disabled(model.zoomSegments.isEmpty)
+                }
+            } label: {
+                Label("Tự động tạo zoom", systemImage: "wand.and.stars")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(model.isExporting || model.activity.clicks.isEmpty)
             Button { model.addZoom(at: model.playhead) } label: { Label("Thêm zoom tại đây", systemImage: "plus.magnifyingglass") }
                 .disabled(model.isExporting)
             if model.selectionIsCut {

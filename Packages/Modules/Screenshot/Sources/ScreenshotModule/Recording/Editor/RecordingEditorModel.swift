@@ -263,6 +263,44 @@ nonisolated enum RecordingExportState: Equatable, Sendable {
         if zoomSegments.indices.contains(position) { selectedZoom = position }
     }
 
+    /// Re-generates zoom segments automatically from all clicks recorded in the activity.
+    func generateZoomsFromClicks(holdDuration: TimeInterval = 1.5) {
+        var rules = project.zoomRules
+        rules.idleTimeout = holdDuration
+        rules.followPointer = false
+        let generated = ZoomPlanner.plan(activity: activity, rules: rules, duration: duration)
+        editZooms { $0 = generated }
+        selectedZoom = nil
+    }
+
+    /// Clears all zoom segments from the recording.
+    func clearAllZooms() {
+        editZooms { $0.removeAll() }
+        selectedZoom = nil
+    }
+
+    /// Toggles a zoom segment at a specific click moment.
+    /// If an existing zoom already covers this click, it is removed. Otherwise, a new zoom segment is created around it.
+    func toggleZoom(atClick click: ActivityTrack.Click, holdDuration: TimeInterval = 1.5) {
+        if let existingIndex = zoomSegments.firstIndex(where: { $0.start <= click.t && $0.end >= click.t }) {
+            removeZoom(at: existingIndex)
+            return
+        }
+        let start = min(max(click.t, 0), max(duration - Self.minimumZoom * 2, 0))
+        let end = min(start + holdDuration, duration)
+        guard end > start else { return }
+        let segment = ZoomSegment(
+            start: start, end: end, scale: project.zoomRules.scale,
+            focus: [.init(t: click.t, x: click.x, y: click.y)], manual: true
+        )
+        var position = 0
+        editZooms { list in
+            position = list.firstIndex { $0.start > segment.start } ?? list.count
+            list.insert(segment, at: position)
+        }
+        if zoomSegments.indices.contains(position) { selectedZoom = position }
+    }
+
     private func editZoom(at index: Int, _ change: (inout ZoomSegment) -> Void) {
         guard zoomSegments.indices.contains(index) else { return }
         editZooms { change(&$0[index]) }

@@ -33,6 +33,7 @@ struct ScreenshotSettingsView: View {
             }
             Toggle("Chụp cửa sổ kèm bóng đổ", isOn: settings.binding(keys.windowShadow))
             Toggle("Hiện ảnh vừa chụp kèm nút Sửa", isOn: settings.binding(keys.showCaptureChip))
+            Toggle("Tự động mở trình chỉnh sửa sau khi chụp", isOn: settings.binding(keys.autoOpenEditor))
             Picker("Nền phần mở rộng khi sửa ảnh", selection: settings.binding(keys.canvasFill)) {
                 ForEach(CanvasFill.allCases, id: \.self) { Text($0.title).tag($0) }
             }

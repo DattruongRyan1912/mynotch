@@ -7,12 +7,19 @@ final class ScreenCaptureKitService: CaptureService {
     func freezeDisplays() async throws -> [FrozenDisplay] {
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-            // MyNotch's windows (the notch) stay out of the frozen frames; the overlay is not up yet.
-            let ownApplications = content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
+            // MyNotch's floating panels (the notch, overlay, chip) stay out of the frozen frames,
+            // while regular titled workspace windows (e.g. Recording Editor, Markup Editor) remain visible and capturable.
+            let ownPID = ProcessInfo.processInfo.processIdentifier
+            let ownApplications = content.applications.filter { $0.processID == ownPID }
+            let ownWorkspaceWindows = content.windows.filter { window in
+                window.owningApplication?.processID == ownPID
+                    && window.windowLayer == 0
+                    && (window.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+            }
             var frozen: [FrozenDisplay] = []
             for display in content.displays {
                 guard let frame = Self.screenFrame(of: display) else { continue }
-                let filter = SCContentFilter(display: display, excludingApplications: ownApplications, exceptingWindows: [])
+                let filter = SCContentFilter(display: display, excludingApplications: ownApplications, exceptingWindows: ownWorkspaceWindows)
                 let image = try await Self.screenshot(of: filter, includeShadow: true)
                 // The scale comes from the image itself, so the crop maths can never disagree with its pixels.
                 let scale = CGFloat(image.width) / frame.width

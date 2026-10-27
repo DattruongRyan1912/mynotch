@@ -46,23 +46,37 @@ import Testing
         #expect(ZoomPlanner.plan(activity: activity).isEmpty)
     }
 
+    @Test func byDefaultCameraStaysOnTheClickAndMovesDoNotKeepZoom() throws {
+        let moves = walk(count: 121, from: 2, every: 1.0 / 60, step: 10, x0: 100, y: 200)
+        let plan = ZoomPlanner.plan(activity: track(clicks: [(2, 100, 200)], moves: moves))
+
+        let segment = try #require(plan.first)
+        #expect(plan.count == 1)
+        #expect(segment.start == 2 && segment.end == 3.5)
+        #expect(segment.focus == [.init(t: 2, x: 100, y: 200)])
+    }
+
     @Test func aPointerThatKeepsMovingKeepsTheZoom() throws {
+        var rules = ZoomRules.standard
+        rules.followPointer = true
         let activity = track(clicks: [(2, 100, 100)], moves: [(2, 100, 100), (3, 300, 100), (4, 500, 100)])
 
-        let plan = ZoomPlanner.plan(activity: activity)
+        let plan = ZoomPlanner.plan(activity: activity, rules: rules)
 
         #expect(plan.count == 1)
         #expect(plan.first?.start == 2 && plan.first?.end == 5.5)
     }
 
     @Test func aRestingHandDoesNotKeepTheZoomButASlowDriftThatAddsUpDoes() throws {
+        var rules = ZoomRules.standard
+        rules.followPointer = true
         // Moves of 2 px each, 4 px away from the click at most: tremor.
         let tremor = track(clicks: [(2, 100, 100)], moves: [(2.5, 102, 100), (3, 100, 102), (3.2, 103, 101)])
-        #expect(ZoomPlanner.plan(activity: tremor).first?.end == 3.5)
+        #expect(ZoomPlanner.plan(activity: tremor, rules: rules).first?.end == 3.5)
 
         // 3 px at a time: the second step is 6 px from where the last activity was, so it counts.
         let drift = track(clicks: [(2, 100, 100)], moves: [(2.3, 103, 100), (2.6, 106, 100)])
-        #expect(ZoomPlanner.plan(activity: drift).first?.end == 2.6 + 1.5)
+        #expect(ZoomPlanner.plan(activity: drift, rules: rules).first?.end == 2.6 + 1.5)
     }
 
     @Test func typingKeepsTheZoomAfterClickingIntoAField() {
@@ -109,9 +123,11 @@ import Testing
     }
 
     @Test func theCameraFollowsThePointerAndLooksAtEveryClick() throws {
+        var rules = ZoomRules.standard
+        rules.followPointer = true
         // The pointer moves along a line at 60 samples a second from 2 s to 4 s, with a click at 3 s.
         let moves = walk(count: 121, from: 2, every: 1.0 / 60, step: 10, x0: 100, y: 200)
-        let plan = ZoomPlanner.plan(activity: track(clicks: [(2, 100, 200), (3, 700, 200)], moves: moves))
+        let plan = ZoomPlanner.plan(activity: track(clicks: [(2, 100, 200), (3, 700, 200)], moves: moves), rules: rules)
 
         let segment = try #require(plan.first)
         let times = segment.focus.map(\.t)

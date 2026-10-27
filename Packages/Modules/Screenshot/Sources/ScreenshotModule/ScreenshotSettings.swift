@@ -21,6 +21,8 @@ struct ScreenshotSettingKeys {
     let ocrLanguages: SettingKey<[String]>
     /// The chip with the new capture's thumbnail, "Sửa" and "Chép" (the key keeps the name of the activity it replaced).
     let showCaptureChip: SettingKey<Bool>
+    /// Opens the markup editor immediately when a capture completes.
+    let autoOpenEditor: SettingKey<Bool>
     /// "Xong" in the editor also copies the edited image, so it can be pasted straight into a chat.
     let copyWhenDone: SettingKey<Bool>
     /// What fills the canvas where the markup editor grew it past the capture.
@@ -48,6 +50,7 @@ struct ScreenshotSettingKeys {
         windowShadow = settings.key("windowShadow", default: true)
         ocrLanguages = settings.key("ocrLanguages", default: OCRService.defaultLanguages)
         showCaptureChip = settings.key("showCapturedActivity", default: true)
+        autoOpenEditor = settings.key("autoOpenEditor", default: false)
         copyWhenDone = settings.key("copyWhenDone", default: true)
         canvasFill = settings.key("canvasFill", default: .standard)
         recordMicrophone = settings.key("recordMicrophone", default: MicrophoneChoice.systemDefault)

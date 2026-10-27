@@ -9,4 +9,6 @@ final class ScreenshotState {
     var recordingPhase = RecordingPhase.idle
     /// The recordings on disk, newest first.
     var recordings: [RecordingSummary] = []
+    /// Whether the microphone is active for recordings.
+    var isMicrophoneEnabled = true
 }

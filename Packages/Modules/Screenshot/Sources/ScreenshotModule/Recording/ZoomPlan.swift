@@ -15,6 +15,8 @@ nonisolated struct ZoomRules: Codable, Equatable, Sendable {
     var mergeGap = 2.5
     /// A pointer that moved less than this since the last activity is a resting hand, not activity.
     var minimumMovement = 6.0
+    /// Whether the camera pans to follow pointer movements while zoomed. Default is false (zoom in on click, hold, and zoom out).
+    var followPointer = false
 
     static let standard = ZoomRules()
 
@@ -30,6 +32,7 @@ nonisolated struct ZoomRules: Codable, Equatable, Sendable {
         idleTimeout = try container.decodeIfPresent(Double.self, forKey: .idleTimeout) ?? standard.idleTimeout
         mergeGap = try container.decodeIfPresent(Double.self, forKey: .mergeGap) ?? standard.mergeGap
         minimumMovement = try container.decodeIfPresent(Double.self, forKey: .minimumMovement) ?? standard.minimumMovement
+        followPointer = try container.decodeIfPresent(Bool.self, forKey: .followPointer) ?? standard.followPointer
     }
 }
 

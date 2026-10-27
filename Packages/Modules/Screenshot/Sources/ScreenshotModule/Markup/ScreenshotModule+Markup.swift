@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 
 /// What the markup editor starts from: the picture to draw on and the annotations already on it.
 struct MarkupEditorSource {
@@ -143,4 +144,48 @@ extension ScreenshotModule {
     private nonisolated static func flatten(_ image: CGImage, _ document: MarkupDocument) async -> CGImage? {
         MarkupRenderer.flatten(image, document)
     }
+
+
+    func openEditorForImage(url: URL) async {
+        guard let context, let store else { return }
+        // 1. If it's already a capture record, open it directly.
+        if let matching = store.records.first(where: { store.url(for: $0.id) == url || store.originalURL(for: $0.id) == url }) {
+            await edit(matching)
+            return
+        }
+        // 2. Otherwise load the image and add it as a new capture record to edit.
+        guard let loaded = await Self.loadImage(at: url) else {
+            showToast("Không mở được ảnh để sửa", systemImage: "exclamationmark.triangle.fill")
+            return
+        }
+        do {
+            let keepCount = keys.map { context.settings.value($0.keepCount) } ?? ScreenshotSettingKeys.defaultKeepCount
+            let record = try await store.add(loaded.image, scale: loaded.scale, keepCount: keepCount)
+            state.records = store.records
+            await edit(record)
+        } catch {
+            showToast("Không mở được ảnh để sửa", systemImage: "exclamationmark.triangle.fill")
+        }
+    }
+
+    func openEditorForImageData(_ data: Data) async {
+        guard let context, let store else { return }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            showToast("Không mở được ảnh để sửa", systemImage: "exclamationmark.triangle.fill")
+            return
+        }
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let dpi = properties?[kCGImagePropertyDPIWidth] as? Double ?? 144
+        let scale = max(CGFloat(dpi) / 72, 1)
+        do {
+            let keepCount = keys.map { context.settings.value($0.keepCount) } ?? ScreenshotSettingKeys.defaultKeepCount
+            let record = try await store.add(image, scale: scale, keepCount: keepCount)
+            state.records = store.records
+            await edit(record)
+        } catch {
+            showToast("Không mở được ảnh để sửa", systemImage: "exclamationmark.triangle.fill")
+        }
+    }
 }
+

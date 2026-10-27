@@ -68,21 +68,24 @@ struct RecordingDot: View {
         Image(systemName: isPaused ? "pause.circle.fill" : "record.circle.fill")
             .font(.system(size: size, weight: .semibold))
             .foregroundStyle(isPaused ? Color.orange : Color.red)
-            .symbolEffect(.pulse, isActive: !isPaused)
             .accessibilityHidden(true)
     }
 }
 
-/// The time recorded, advanced by the system; frozen while paused.
+/// The time recorded, advanced by the system 1 time per second; frozen while paused.
 struct RecordingTimeText: View {
     let startedAt: Date
     let pausedAt: Date?
 
     var body: some View {
-        Text(timerInterval: startedAt...startedAt.addingTimeInterval(RecordingActivity.clockSpan), pauseTime: pausedAt, countsDown: false)
-            .font(.system(size: 13, weight: .semibold, design: .rounded))
-            .monospacedDigit()
-            .foregroundStyle(NotchTokens.primaryText)
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let current = pausedAt ?? context.date
+            let elapsed = max(0, current.timeIntervalSince(startedAt))
+            Text(RecordingElapsed.text(elapsed))
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(NotchTokens.primaryText)
+        }
     }
 }
 

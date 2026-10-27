@@ -312,6 +312,54 @@ extension ScreenshotModuleTests {
         // The unredacted capture stays next to it for editing again, and is never what leaves the module.
         #expect(try pixel(ofFileAt: store.originalURL(for: record.id)) != hidden)
     }
+
+    @Test func openEditorForImageOpensMatchingExistingRecord() async throws {
+        let record = try await capturedRecord()
+        let store = try #require(module.store)
+        let fileURL = try #require(store.url(for: record.id))
+
+        await module.openEditorForImage(url: fileURL)
+
+        #expect(editors.opened.count == 1)
+        #expect(editors.opened.last?.record.id == record.id)
+    }
+
+    @Test func openEditorForImageImportsAndOpensExternalImage() async throws {
+        _ = try await capturedRecord()
+        let externalURL = temporaryRoot.appending(path: "external.png")
+        let gradient = try Self.gradient(width: 60, height: 80)
+        let destination = CGImageDestinationCreateWithURL(externalURL as CFURL, "public.png" as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, gradient, nil)
+        CGImageDestinationFinalize(destination)
+
+        await module.openEditorForImage(url: externalURL)
+
+        #expect(editors.opened.count == 1)
+        #expect(module.state.records.count == 2)
+    }
+
+    @Test func openEditorForImageDataImportsAndOpensImage() async throws {
+        _ = try await capturedRecord()
+        let gradient = try Self.gradient(width: 50, height: 50)
+        let data = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(data as CFMutableData, "public.png" as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, gradient, nil)
+        CGImageDestinationFinalize(destination)
+
+        await module.openEditorForImageData(data as Data)
+
+        #expect(editors.opened.count == 1)
+        #expect(module.state.records.count == 2)
+    }
+
+    @Test func autoOpenEditorSettingOpensEditorImmediatelyOnCapture() async throws {
+        let (settings, keys) = try self.settings()
+        settings.set(true, for: keys.autoOpenEditor)
+        let record = try await capturedRecord()
+
+        #expect(editors.opened.count == 1)
+        #expect(editors.opened.first?.record.id == record.id)
+    }
 }
 
 extension CGImageSource {
