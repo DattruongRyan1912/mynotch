@@ -1,4 +1,5 @@
 import AppKit
+import MyNotchCore
 import NotchUI
 
 /// A display's identity as CoreGraphics gives it: a UUID that stays the same when the display is unplugged and plugged in again, which a
@@ -85,6 +86,13 @@ nonisolated struct PetScreens: Equatable, Codable, Sendable {
         let current = kinds(for: display)
         if current.contains(kind) { return setting(current.filter { $0 != kind }, for: display) }
         return canAdd(to: display) ? setting(current + [kind], for: display) : self
+    }
+
+    /// The screens the pets' activity is shown on: every one but those the user set to none, so a screen plugged in for the first time, which
+    /// has a cat, has it too.
+    var activityScope: DisplayScope {
+        let none = Set(choices.filter(\.value.isEmpty).keys)
+        return none.isEmpty ? .allScreens : .allExcept(none)
     }
 
     /// Whether another character fits on `display`.

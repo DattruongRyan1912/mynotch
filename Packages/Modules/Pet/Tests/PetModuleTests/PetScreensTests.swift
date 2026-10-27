@@ -34,6 +34,17 @@ import Testing
         #expect(screens.setting([.cat], for: first).kinds(for: first) == [.cat])
     }
 
+    @Test func theActivityIsOnEveryScreenUntilOneIsSetToNone() {
+        #expect(PetScreens().activityScope == .allScreens)
+        #expect(PetScreens().setting([.cat], for: first).activityScope == .allScreens, "a choice that has a pet is not left out")
+        let scope = PetScreens().setting([], for: first).activityScope
+        #expect(!scope.includes(first), "a screen set to none has no such activity")
+        #expect(scope.includes(second), "a screen with a pet has it")
+        #expect(scope.includes("33333333-AAAA-BBBB-CCCC-000000000003"), "and so does one plugged in for the first time, which has a cat")
+        #expect(PetScreens().setting([], for: first).setting([], for: second).activityScope == .allExcept([first, second]))
+        #expect(PetScreens().setting([], for: first).setting([.cat], for: first).activityScope == .allScreens, "a choice that changed back")
+    }
+
     @Test func aChoiceIsKeptForTheScreenByItsUUIDAndTouchesNoOther() {
         let screens = PetScreens().setting([], for: first).setting([.cat], for: second)
         #expect(screens.kinds(for: first).isEmpty && screens.kinds(for: second) == [.cat])

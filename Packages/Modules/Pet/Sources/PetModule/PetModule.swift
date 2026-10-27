@@ -9,7 +9,8 @@ import SwiftUI
 /// its own, and taken back as soon as one appears, a moment before the notch would have made it a bubble. Priority alone cannot do that:
 /// there is no priority below `.low`, and among activities of one priority the one that came first keeps the notch, which would be the
 /// pets, ahead of the to-do count, an agent at work or the performance strip. The module is given the activity center to look at, and
-/// the app wires it in (`ModuleList.make(activities:)`). It is not published at all while no connected screen has a pet to show.
+/// the app wires it in (`ModuleList.make(activities:)`). It is not published at all while no connected screen has a pet to show, and it is
+/// shown on the screens that have one only: a screen the user set to none has a notch as if the module were off.
 ///
 /// The module has no tab, and the pets cost nothing while they are not seen: see `CatStage`. Each screen has a stage of its own
 /// (`CatStages`) and the pets the user chose for it (`PetScreens`).
@@ -37,6 +38,8 @@ public final class PetModule: FeatureModule {
     private var isPublished = false
     /// Where the cat was put to play when it was published, so that a change of the setting puts it somewhere else.
     private var publishedPlace: PlayPlace?
+    /// The screens it was published for, so that a change of a screen's choice puts it on the screens that have a pet now.
+    private var publishedScreens: DisplayScope?
 
     public convenience init(activities: ActivityCenter) {
         self.init(activities: activities, makeStages: { CatStages(scheduler: $0) })
@@ -107,6 +110,7 @@ public final class PetModule: FeatureModule {
         context = nil
         isPublished = false
         publishedPlace = nil
+        publishedScreens = nil
     }
 
     public func makeTab() -> NotchTab? { nil }
@@ -133,6 +137,15 @@ public final class PetModule: FeatureModule {
         context.settings.value(PetSettingsKeys(context.settings).playPlace)
     }
 
+    /// The screens the activity is for: those that have a pet. A screen set to none shows as if the module had no activity.
+    private func screens(in context: ModuleContext) -> DisplayScope {
+        context.settings.value(PetSettingsKeys(context.settings).screens).activityScope
+    }
+
+    private func activity(stages: CatStages, in context: ModuleContext) -> LiveActivity {
+        CatActivity.make(stages: stages, place: place(in: context), screens: screens(in: context))
+    }
+
     // MARK: On the notch or off it
 
     /// Puts the cat on the notch when it is wanted and the notch is free, takes it off at once when it is not, and waits `settleDelay`
@@ -147,13 +160,16 @@ public final class PetModule: FeatureModule {
                 context.activities.clear(id: Self.activityID)
                 isPublished = false
                 publishedPlace = nil
+                publishedScreens = nil
             }
             return
         }
-        // Where the cat plays is the user's to change while it is on the notch: it is put again, in its new place, at once.
-        if isPublished, let stages, publishedPlace != place(in: context) {
-            context.activities.set(CatActivity.make(stages: stages, place: place(in: context)))
+        // Where the cat plays and which screens have a pet are the user's to change while it is on the notch: it is put again, in its new
+        // place and on the screens that have one now, at once.
+        if isPublished, let stages, publishedPlace != place(in: context) || publishedScreens != screens(in: context) {
+            context.activities.set(activity(stages: stages, in: context))
             publishedPlace = place(in: context)
+            publishedScreens = screens(in: context)
         }
         guard !isPublished, pendingShow == nil else { return }
         pendingShow = context.scheduler.schedule(after: Self.settleDelay) { [weak self] in
@@ -165,9 +181,9 @@ public final class PetModule: FeatureModule {
     private func publishIfFree() {
         guard let context, let stages, !isPublished, !othersAreLive, someScreenHasAPet,
               context.settings.value(PetSettingsKeys(context.settings).show) else { return }
-        let place = place(in: context)
-        context.activities.set(CatActivity.make(stages: stages, place: place))
+        context.activities.set(activity(stages: stages, in: context))
         isPublished = true
-        publishedPlace = place
+        publishedPlace = place(in: context)
+        publishedScreens = screens(in: context)
     }
 }

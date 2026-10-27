@@ -7,13 +7,16 @@ import SwiftUI
 /// notch has room in its body, so it never gets the strip. Each display has a stage of its own (`CatStages`), with the pets the user chose
 /// for it, and the strip, which is for a hardware notch only, is shown by the stage of the display it is under.
 ///
+/// It is shown on the screens that have a pet only (`PetScreens.activityScope`): a screen the user set to none has no such activity, so its
+/// notch is as plain as if the module were off, and shows whatever else there is.
+///
 /// It is only ever published while nothing else is on the notch (see `PetModule`), so it is never the bubble beside another activity. The
 /// `minimal` view and the summary are for the moment between another activity coming and the cat stepping aside.
 enum CatActivity {
     /// How tall the strip is: the cat's picture is 24 points, with a point under its feet and one over its ears.
     static let stripHeight: CGFloat = 26
 
-    static func make(stages: CatStages, place: PlayPlace = .portal) -> LiveActivity {
+    static func make(stages: CatStages, place: PlayPlace = .portal, screens: DisplayScope = .allScreens) -> LiveActivity {
         LiveActivity(
             id: PetModule.activityID,
             priority: .low,
@@ -22,6 +25,7 @@ enum CatActivity {
             bottom: place == .strip ? AnyView(CatStripView(stages: stages).accessibilityHidden(true)) : nil,
             bottomHeight: place == .strip ? stripHeight : 0,
             bottomScope: .hardwareNotchOnly,
+            displayScope: screens,
             body: AnyView(CatBodyView(stages: stages, place: place).accessibilityHidden(true)),
             minimal: AnyView(
                 Image(systemName: "pawprint.fill")
