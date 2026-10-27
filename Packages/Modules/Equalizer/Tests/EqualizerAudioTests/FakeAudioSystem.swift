@@ -42,7 +42,11 @@ nonisolated final class FakePipeline: PipelineHandle, @unchecked Sendable {
 /// What `observeChanges` hands back: dropping it is how the manager stops listening.
 nonisolated final class FakeObservation: Sendable {
     let handler: @Sendable () -> Void
-    init(handler: @escaping @Sendable () -> Void) { self.handler = handler }
+    let volumeChanged: @Sendable () -> Void
+    init(handler: @escaping @Sendable () -> Void, volumeChanged: @escaping @Sendable () -> Void) {
+        self.handler = handler
+        self.volumeChanged = volumeChanged
+    }
 }
 
 /// A scripted `AudioSystem`: the test decides which devices are playing and which builds fail. Never touches Core Audio.
@@ -64,6 +68,8 @@ nonisolated final class FakeAudioSystem: AudioSystem, @unchecked Sendable {
         var attempts: [String] = []
         var pipelines: [FakePipeline] = []
         var queries = 0
+        var volumes: [String: Double] = [:]
+        var volumeReads = 0
         weak var observation: FakeObservation?
     }
 
@@ -80,6 +86,13 @@ nonisolated final class FakeAudioSystem: AudioSystem, @unchecked Sendable {
     }
 
     func deviceName(uid: String) -> String? { state.withLock { $0.names[uid] } }
+
+    func outputVolume(uid: String) -> Double? {
+        state.withLock {
+            $0.volumeReads += 1
+            return $0.volumes[uid]
+        }
+    }
 
     func makePipeline(deviceUID: String, chain: EQChain) throws -> any PipelineHandle {
         // Core Audio is stirred up by every tap, aggregate device and IO proc that is made or destroyed, whether or not it works.
@@ -103,8 +116,8 @@ nonisolated final class FakeAudioSystem: AudioSystem, @unchecked Sendable {
         }
     }
 
-    func observeChanges(_ handler: @escaping @Sendable () -> Void) -> AnyObject {
-        let observation = FakeObservation(handler: handler)
+    func observeChanges(_ handler: @escaping @Sendable () -> Void, volumeChanged: @escaping @Sendable () -> Void) -> AnyObject {
+        let observation = FakeObservation(handler: handler, volumeChanged: volumeChanged)
         state.withLock { $0.observation = observation }
         return observation
     }
@@ -117,6 +130,13 @@ nonisolated final class FakeAudioSystem: AudioSystem, @unchecked Sendable {
     /// Makes every `makePipeline` call end with a change notification, as the real one does.
     func echoOnEveryMake(_ echoes: Bool = true) { state.withLock { $0.echoes = echoes } }
     func setPeakForNewPipelines(_ peak: Float) { state.withLock { $0.peak = peak } }
+    /// A device without an entry has no volume.
+    func setVolume(_ volume: Double?, of uid: String) { state.withLock { $0.volumes[uid] = volume } }
+    /// Tells the manager a volume moved, as Core Audio would.
+    func fireVolumeChange() {
+        let handler = state.withLock { $0.observation?.volumeChanged }
+        handler?()
+    }
     func failBuilds(of uid: String, _ failures: [Failure]) { state.withLock { $0.failures[uid] = failures } }
 
     /// Tells the manager something changed, as Core Audio would. Does nothing once the manager dropped its token.
@@ -133,5 +153,6 @@ nonisolated final class FakeAudioSystem: AudioSystem, @unchecked Sendable {
     var attempts: [String] { state.withLock { $0.attempts } }
     var pipelines: [FakePipeline] { state.withLock { $0.pipelines } }
     var queries: Int { state.withLock { $0.queries } }
+    var volumeReads: Int { state.withLock { $0.volumeReads } }
     func pipeline(_ uid: String) -> FakePipeline? { pipelines.last { $0.deviceUID == uid } }
 }

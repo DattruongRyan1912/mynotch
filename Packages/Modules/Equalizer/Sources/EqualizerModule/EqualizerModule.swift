@@ -35,6 +35,8 @@ public final class EqualizerModule: FeatureModule {
     private var engineRunning = false
     /// The curve the engine last got, so a change that leaves it as it was does not reach the audio thread's state again.
     private var applied: EQProfile?
+    /// Likewise for loudness compensation; nil until the engine got it once.
+    private var appliedLoudness: Bool?
 
     init(state: EqualizerState, engine: any EqualizerEngine, isEqMacRunning: @escaping () -> Bool) {
         self.state = state
@@ -63,7 +65,7 @@ public final class EqualizerModule: FeatureModule {
         syncEngine()
         let state = state
         context.run { [weak self] in
-            for await _ in Observations({ state.activeProfile }) {
+            for await _ in Observations({ (state.activeProfile, state.isLoudnessEnabled) }) {
                 self?.syncEngine()
             }
         }
@@ -77,6 +79,7 @@ public final class EqualizerModule: FeatureModule {
         status.reset()
         status.eqMacRunning = false
         applied = nil
+        appliedLoudness = nil
         state.isAvailable = false
         state.openEditor = nil
         context = nil
@@ -114,6 +117,10 @@ public final class EqualizerModule: FeatureModule {
         if profile != applied {
             applied = profile
             engine.apply(profile)
+        }
+        if state.isLoudnessEnabled != appliedLoudness {
+            appliedLoudness = state.isLoudnessEnabled
+            engine.setLoudnessCompensation(state.isLoudnessEnabled)
         }
         guard !status.isPaused, !engineRunning else { return }
         engineRunning = true

@@ -16,6 +16,8 @@ nonisolated public enum EqualizerEngineEvent: Equatable, Sendable {
     func start()
     func stop()
     func apply(_ profile: EQProfile)
+    /// Bass and treble added while a device plays quietly (`LoudnessCompensation`). Off until switched on.
+    func setLoudnessCompensation(_ enabled: Bool)
 }
 
 /// Keeps one pipeline on every output device that other processes are playing to, and none anywhere else.
@@ -27,6 +29,9 @@ nonisolated public enum EqualizerEngineEvent: Equatable, Sendable {
 /// A build that fails is tried again after 1 s, then 3 s, and then given up on for as long as that device keeps playing. Building and
 /// destroying a pipeline stirs Core Audio up itself, so a notification must never restart that count: only the device leaving
 /// (or `stop`) does.
+///
+/// With loudness compensation on, each device's filters also follow its own volume. A volume change only recomputes them (the chain
+/// crosses over without a click); it never rebuilds a pipeline and is not debounced.
 @MainActor public final class PipelineManager: EqualizerEngine {
     /// Device changes arrive in bursts (a new default device often changes the sample rate too).
     static let debounce = Duration.milliseconds(300)
@@ -41,6 +46,8 @@ nonisolated public enum EqualizerEngineEvent: Equatable, Sendable {
         let name: String
         /// What the chain was computed for.
         let sampleRate: Double
+        /// The device volume the chain was computed for, in whole percent; nil for a device without one, or with compensation off.
+        var volume: Int?
     }
 
     public var onEvent: ((EqualizerEngineEvent) -> Void)?
@@ -50,6 +57,7 @@ nonisolated public enum EqualizerEngineEvent: Equatable, Sendable {
     private var isRunning = false
     private var observation: AnyObject?
     private var profile = EQProfile.flat(named: "")
+    private var loudness = false
     private var pipelines: [String: Entry] = [:]
     /// The names last sent as `.devices`.
     private var announced: [String] = []
@@ -81,10 +89,11 @@ nonisolated public enum EqualizerEngineEvent: Equatable, Sendable {
     public func start() {
         guard !isRunning else { return }
         isRunning = true
-        observation = system.observeChanges { [weak self] in
-            // Delivered on the main thread (see `AudioSystem`).
-            MainActor.assumeIsolated { self?.systemChanged() }
-        }
+        // Both delivered on the main thread (see `AudioSystem`).
+        observation = system.observeChanges(
+            { [weak self] in MainActor.assumeIsolated { self?.systemChanged() } },
+            volumeChanged: { [weak self] in MainActor.assumeIsolated { self?.volumesChanged() } }
+        )
         reconcile()
     }
 
@@ -106,11 +115,35 @@ nonisolated public enum EqualizerEngineEvent: Equatable, Sendable {
 
     public func apply(_ profile: EQProfile) {
         self.profile = profile.clamped()
-        for entry in pipelines.values { configure(entry.chain, sampleRate: entry.sampleRate) }
+        for uid in pipelines.keys { configure(uid) }
     }
 
-    private func configure(_ chain: EQChain, sampleRate: Double) {
-        chain.setParameters(gains: profile.gains, preampDB: profile.preamp, sampleRate: sampleRate)
+    public func setLoudnessCompensation(_ enabled: Bool) {
+        guard enabled != loudness else { return }
+        loudness = enabled
+        for uid in pipelines.keys { configure(uid) }
+    }
+
+    /// Reads the device's volume afresh and gives the chain the profile, compensated for it.
+    private func configure(_ uid: String) {
+        guard var entry = pipelines[uid] else { return }
+        entry.volume = currentVolume(uid)
+        pipelines[uid] = entry
+        let settings = LoudnessCompensation.apply(
+            volume: entry.volume.map { Double($0) / 100 }, gains: profile.gains, preampDB: profile.preamp, sampleRate: entry.sampleRate
+        )
+        entry.chain.setParameters(gains: settings.gains, preampDB: settings.preampDB, sampleRate: entry.sampleRate)
+    }
+
+    /// In whole percent, so a volume that only jitters does not recompute the filters.
+    private func currentVolume(_ uid: String) -> Int? {
+        guard loudness, let volume = system.outputVolume(uid: uid) else { return nil }
+        return Int((volume * 100).rounded())
+    }
+
+    private func volumesChanged() {
+        guard isRunning, loudness else { return }
+        for (uid, entry) in pipelines where currentVolume(uid) != entry.volume { configure(uid) }
     }
 
     private func systemChanged() {
@@ -141,9 +174,8 @@ nonisolated public enum EqualizerEngineEvent: Equatable, Sendable {
             let chain = EQChain(channels: Self.maxChannels)
             do {
                 let handle = try system.makePipeline(deviceUID: uid, chain: chain)
-                let rate = handle.sampleRate
-                configure(chain, sampleRate: rate)
-                pipelines[uid] = Entry(handle: handle, chain: chain, name: name, sampleRate: rate)
+                pipelines[uid] = Entry(handle: handle, chain: chain, name: name, sampleRate: handle.sampleRate)
+                configure(uid)
                 failing[uid] = nil
             } catch {
                 if let message = buildFailed(uid, name: name, error) { gaveUp.append(message) }

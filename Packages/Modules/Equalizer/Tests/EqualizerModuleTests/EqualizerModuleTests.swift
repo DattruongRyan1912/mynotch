@@ -133,7 +133,22 @@ import Testing
         #expect(engine.applied.last == state.selected)
         #expect(module.status.phase == .waiting)
         // The profile first, so the pipelines the start builds already have the right curve.
-        #expect(engine.calls == ["apply", "start"])
+        #expect(engine.calls == ["apply", "loudness", "start"])
+    }
+
+    @Test func loudnessSwitchReachesTheEngine() async {
+        await start()
+        state.isEnabled = true
+        await settle { engine.startCount == 1 }
+        #expect(engine.loudness == [false])
+        state.isLoudnessEnabled = true
+        await settle { engine.loudness.count == 2 }
+        #expect(engine.loudness == [false, true])
+        // A profile edit does not send the switch again, and the engine keeps running.
+        state.setGain(2, band: 0)
+        await settle { engine.applied.count == 2 }
+        #expect(engine.loudness == [false, true])
+        #expect(engine.startCount == 1)
     }
 
     @Test func enabledAtLaunchStartsAtOnce() async {

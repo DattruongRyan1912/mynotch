@@ -398,6 +398,90 @@ private final class Events {
 
     // MARK: Helpers
 
+    // MARK: Loudness compensation
+
+    /// A chain set up the way the manager should for `profile` on a device at `volume`.
+    private func compensated(_ profile: EQProfile, volume: Double?, sampleRate: Double = 48_000) -> (gains: [Double], preampDB: Double) {
+        LoudnessCompensation.apply(volume: volume, gains: profile.gains, preampDB: profile.preamp, sampleRate: sampleRate)
+    }
+
+    @Test func compensationFollowsTheDeviceVolume() throws {
+        let profile = bandBoost(band: 5, by: 3)
+        system.setVolume(0.25, of: "A")
+        system.play(on: ["A"])
+        manager.start()
+        manager.apply(profile)
+        manager.setLoudnessCompensation(true)
+        let pipeline = try #require(system.pipeline("A"))
+
+        let reference = EQChain(channels: 8)
+        let quiet = compensated(profile, volume: 0.25)
+        reference.setParameters(gains: quiet.gains, preampDB: quiet.preampDB, sampleRate: 48_000)
+        #expect(render(pipeline.chain, frequency: 40) == render(reference, frequency: 40))
+
+        // The volume key: the filters follow at once, with no debounce and no rebuild.
+        system.setVolume(0.1, of: "A")
+        system.fireVolumeChange()
+        let quieter = compensated(profile, volume: 0.1)
+        reference.setParameters(gains: quieter.gains, preampDB: quieter.preampDB, sampleRate: 48_000)
+        #expect(render(pipeline.chain, frequency: 40) == render(reference, frequency: 40))
+        #expect(system.attempts == ["A"])
+        #expect(pipeline.tearDownCount == 0)
+        #expect(scheduler.pendingCount <= 1)
+    }
+
+    @Test func atNormalVolumeTheProfileIsAppliedAsItIs() throws {
+        let profile = bandBoost(band: 0, by: 6)
+        system.setVolume(0.8, of: "A")
+        system.play(on: ["A"])
+        manager.start()
+        manager.apply(profile)
+        manager.setLoudnessCompensation(true)
+        let pipeline = try #require(system.pipeline("A"))
+        #expect(render(pipeline.chain, frequency: 40) == render(reference(profile, sampleRate: 48_000), frequency: 40))
+    }
+
+    @Test func aDeviceWithoutVolumeGetsNoCompensation() throws {
+        let profile = bandBoost(band: 0, by: 6)
+        system.setVolume(nil, of: "A")
+        system.play(on: ["A"])
+        manager.start()
+        manager.apply(profile)
+        manager.setLoudnessCompensation(true)
+        let pipeline = try #require(system.pipeline("A"))
+        #expect(render(pipeline.chain, frequency: 40) == render(reference(profile, sampleRate: 48_000), frequency: 40))
+    }
+
+    @Test func switchedOffIgnoresTheVolume() throws {
+        let profile = bandBoost(band: 0, by: 6)
+        system.setVolume(0.1, of: "A")
+        system.play(on: ["A"])
+        manager.start()
+        manager.apply(profile)
+        let pipeline = try #require(system.pipeline("A"))
+        let reads = system.volumeReads
+        system.fireVolumeChange()
+        // Off: the volume is not even read, and the chain has the plain profile.
+        #expect(system.volumeReads == reads)
+        #expect(render(pipeline.chain, frequency: 40) == render(reference(profile, sampleRate: 48_000), frequency: 40))
+    }
+
+    @Test func eachDeviceFollowsItsOwnVolume() throws {
+        let profile = EQProfile.flat(named: "Phẳng")
+        system.setVolume(0.1, of: "A")
+        system.setVolume(1, of: "B")
+        system.play(on: ["A", "B"])
+        manager.setLoudnessCompensation(true)
+        manager.start()
+        manager.apply(profile)
+        let quiet = try #require(system.pipeline("A"))
+        let loud = try #require(system.pipeline("B"))
+        // B at full volume is flat, so a sine comes out exactly as it went in; A is lifted in the bass.
+        let flat = EQChain(channels: 8)
+        #expect(render(loud.chain, frequency: 40) == render(flat, frequency: 40))
+        #expect(render(quiet.chain, frequency: 40) != render(EQChain(channels: 8), frequency: 40))
+    }
+
     private func bandBoost(band: Int, by gain: Double) -> EQProfile {
         var profile = EQProfile.flat(named: "Một băng")
         profile.gains[band] = gain

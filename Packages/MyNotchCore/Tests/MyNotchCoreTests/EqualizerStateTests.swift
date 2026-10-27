@@ -20,6 +20,14 @@ import MyNotchTestSupport
         #expect(state.isEnabled == false)
     }
 
+    @Test func loudnessIsOffByDefaultAndSurvivesALaunch() {
+        let launches = Launches()
+        let first = launches.launch()
+        #expect(first.isLoudnessEnabled == false)
+        first.isLoudnessEnabled = true
+        #expect(launches.launch().isLoudnessEnabled)
+    }
+
     @Test func defaultCurvesMatchTheDesign() {
         let profiles = EQProfile.defaults()
         #expect(profiles.map(\.gains) == [

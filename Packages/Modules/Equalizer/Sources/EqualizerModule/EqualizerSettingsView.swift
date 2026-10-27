@@ -28,6 +28,11 @@ struct EqualizerSettingsView: View {
         let plan = Self.plan(line: status.line, isRunning: isRunning, isEnabled: state.isEnabled)
         Group {
             Toggle("Bật EQ", isOn: Binding(get: { state.isEnabled }, set: { state.isEnabled = $0 }))
+            Toggle("Bù âm khi nghe nhỏ", isOn: Binding(get: { state.isLoudnessEnabled }, set: { state.isLoudnessEnabled = $0 }))
+                .disabled(!state.isEnabled)
+            Text("Dưới 60% âm lượng, tăng dần bass (tới +8,5 dB) và treble (tới +4 dB) theo âm lượng của từng thiết bị, đồng thời hạ preamp tương ứng để không vỡ tiếng. Từ 60% trở lên không đổi gì.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             if let line = plan.status {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(line.text)

@@ -11,6 +11,8 @@ final class FakeEngine: EqualizerEngine {
     private(set) var startCount = 0
     private(set) var stopCount = 0
     private(set) var applied: [EQProfile] = []
+    /// Every `setLoudnessCompensation` call, in order.
+    private(set) var loudness: [Bool] = []
     /// "apply", "start" and "stop" in the order they were called.
     private(set) var calls: [String] = []
     private(set) var isRunning = false
@@ -33,6 +35,11 @@ final class FakeEngine: EqualizerEngine {
     func apply(_ profile: EQProfile) {
         applied.append(profile)
         calls.append("apply")
+    }
+
+    func setLoudnessCompensation(_ enabled: Bool) {
+        loudness.append(enabled)
+        calls.append("loudness")
     }
 
     /// Sends an event as the real manager does: on the main actor, from inside whatever the manager was doing.

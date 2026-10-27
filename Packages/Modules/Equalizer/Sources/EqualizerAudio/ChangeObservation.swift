@@ -10,17 +10,21 @@ import os
 /// Watched: the default output device and the lists of processes and devices, plus, for every process, whether it is running
 /// output and which output devices it uses, and, for every device, its sample rate. Those per-object listeners are
 /// replaced whenever a process or a device comes or goes.
+///
+/// A device's volume is said apart (`volumeChanged`): it moves often, with every key press, and only changes the filters.
 nonisolated final class ChangeObservation: Sendable {
     private static let logger = Log.logger(category: "equalizer")
 
     private let deliver: @Sendable () -> Void
+    private let volumeChanged: @Sendable () -> Void
     /// The per-object listeners are replaced here, off the notification thread that asked for it.
     private let queue = DispatchQueue(label: "io.lucasvu.mynotch.equalizer.observe", qos: .utility)
     private let fixed = Mutex<[AudioPropertyListener]>([])
     private let perObject = Mutex<[AudioPropertyListener]>([])
 
-    init(deliver: @escaping @Sendable () -> Void) {
+    init(deliver: @escaping @Sendable () -> Void, volumeChanged: @escaping @Sendable () -> Void) {
         self.deliver = deliver
+        self.volumeChanged = volumeChanged
     }
 
     /// Not in `init`: the listeners refer back to `self`.
@@ -55,6 +59,7 @@ nonisolated final class ChangeObservation: Sendable {
         old.forEach { $0.remove() }
         let hardware = AudioHardwareSystem.shared
         let changed: @Sendable () -> Void = { [weak self] in self?.deliver() }
+        let volume: @Sendable () -> Void = { [weak self] in self?.volumeChanged() }
         var fresh: [AudioPropertyListener?] = []
         for process in (try? hardware.processes) ?? [] {
             fresh.append(Self.listener(process.id, kAudioProcessPropertyIsRunningOutput, onChange: changed))
@@ -62,6 +67,10 @@ nonisolated final class ChangeObservation: Sendable {
         }
         for device in (try? hardware.devices) ?? [] {
             fresh.append(Self.listener(device.id, kAudioDevicePropertyNominalSampleRate, onChange: changed))
+            var address = OutputVolume.address
+            if AudioObjectHasProperty(device.id, &address) {
+                fresh.append(Self.listener(device.id, address.mSelector, scope: address.mScope, onChange: volume))
+            }
         }
         perObject.withLock { $0 = fresh.compactMap { $0 } }
     }

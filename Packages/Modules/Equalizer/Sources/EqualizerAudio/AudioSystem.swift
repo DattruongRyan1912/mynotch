@@ -1,3 +1,4 @@
+import AudioToolbox
 import CoreAudio
 import EqualizerDSP
 import Foundation
@@ -12,9 +13,13 @@ nonisolated public protocol AudioSystem: Sendable {
     /// Builds a tap, an aggregate device and an IO proc on one device, and starts them. All or nothing: a step that fails
     /// leaves nothing of the earlier ones behind.
     func makePipeline(deviceUID: String, chain: EQChain) throws -> any PipelineHandle
+    /// The device's own volume, 0...1, or nil when it has none (HDMI, many USB DACs) or is gone. Read from the device itself, never
+    /// from the aggregate device a pipeline makes on it.
+    func outputVolume(uid: String) -> Double?
     /// Calls `handler` on the **main thread** whenever the set of playing processes or devices, or a device's sample rate, may have
-    /// changed. Bursts are normal and the handler may be called with nothing new. Dropping the token stops it.
-    func observeChanges(_ handler: @escaping @Sendable () -> Void) -> AnyObject
+    /// changed, and `volumeChanged` (also on the main thread) whenever some device's volume did. Bursts are normal and either
+    /// may be called with nothing new. Dropping the token stops both.
+    func observeChanges(_ handler: @escaping @Sendable () -> Void, volumeChanged: @escaping @Sendable () -> Void) -> AnyObject
 }
 
 /// One running pipeline on one device.
@@ -91,13 +96,38 @@ public struct CoreAudioSystem: AudioSystem {
         return try? device.name
     }
 
+    public func outputVolume(uid: String) -> Double? {
+        guard let device = try? AudioHardwareSystem.shared.device(forUID: uid) else { return nil }
+        return OutputVolume.read(device.id)
+    }
+
     public func makePipeline(deviceUID: String, chain: EQChain) throws -> any PipelineHandle {
         try DevicePipeline.make(deviceUID: deviceUID, chain: chain)
     }
 
-    public func observeChanges(_ handler: @escaping @Sendable () -> Void) -> AnyObject {
-        let observation = ChangeObservation { DispatchQueue.main.async(execute: handler) }
+    public func observeChanges(_ handler: @escaping @Sendable () -> Void, volumeChanged: @escaping @Sendable () -> Void) -> AnyObject {
+        let observation = ChangeObservation(
+            deliver: { DispatchQueue.main.async(execute: handler) },
+            volumeChanged: { DispatchQueue.main.async(execute: volumeChanged) }
+        )
         observation.start()
         return observation
+    }
+}
+
+/// A device's volume as the volume keys see it: `VirtualMainVolume` stands for the main element, or for the left and right channels
+/// of a device that has volume only per channel.
+nonisolated enum OutputVolume {
+    static let address = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume, mScope: kAudioDevicePropertyScopeOutput,
+        mElement: kAudioObjectPropertyElementMain)
+
+    static func read(_ device: AudioObjectID) -> Double? {
+        var address = address
+        guard AudioObjectHasProperty(device, &address) else { return nil }
+        var value: Float32 = 0
+        var size = UInt32(MemoryLayout<Float32>.size)
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value) == noErr, value.isFinite else { return nil }
+        return min(max(Double(value), 0), 1)
     }
 }

@@ -49,6 +49,7 @@ nonisolated final class MiniAudioSystem: AudioSystem, @unchecked Sendable {
     var ownProcessID: AudioObjectID? { 1 }
     func activeOutputDeviceUIDs() -> Set<String> { state.withLock { $0.active } }
     func deviceName(uid: String) -> String? { uid == "speakers" ? "Loa trong" : "Loa \(uid)" }
+    func outputVolume(uid: String) -> Double? { nil }
 
     func makePipeline(deviceUID: String, chain: EQChain) throws -> any PipelineHandle {
         try state.withLock { state in
@@ -59,7 +60,7 @@ nonisolated final class MiniAudioSystem: AudioSystem, @unchecked Sendable {
         }
     }
 
-    func observeChanges(_ handler: @escaping @Sendable () -> Void) -> AnyObject {
+    func observeChanges(_ handler: @escaping @Sendable () -> Void, volumeChanged: @escaping @Sendable () -> Void) -> AnyObject {
         let token = MiniToken()
         state.withLock { $0.token = token }
         return token

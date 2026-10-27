@@ -10,6 +10,8 @@ public final class EqualizerState {
     public static let profilesKey = SettingKey<[EQProfile]?>("app.equalizer.profiles", default: nil)
     public static let selectedKey = SettingKey<UUID?>("app.equalizer.selected", default: nil)
     public static let enabledKey = SettingKey<Bool>("app.equalizer.enabled", default: false)
+    /// Off by default, so turning the volume down sounds as it always has until the user asks for it.
+    public static let loudnessKey = SettingKey<Bool>("app.equalizer.loudness", default: false)
 
     /// What the pipeline applies when the switch is on and the list is empty.
     private static let flatProfile = EQProfile(
@@ -37,6 +39,12 @@ public final class EqualizerState {
     public var isEnabled: Bool {
         get { settings.value(Self.enabledKey) }
         set { settings.set(newValue, for: Self.enabledKey) }
+    }
+
+    /// More bass and treble while the device plays quietly; applies only while the EQ is on.
+    public var isLoudnessEnabled: Bool {
+        get { settings.value(Self.loudnessKey) }
+        set { settings.set(newValue, for: Self.loudnessKey) }
     }
 
     public var selected: EQProfile? { profiles.first { $0.id == selectedID } }
