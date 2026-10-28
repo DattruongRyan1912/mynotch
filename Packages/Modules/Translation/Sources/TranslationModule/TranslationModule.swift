@@ -42,6 +42,8 @@ public final class TranslationModule: FeatureModule {
     private let dictionary: any DictionaryLooking
     private let opener: any URLOpening
     private let engineSetup: EngineSetup
+    /// Its language model, for other modules to ask (`LanguageModel`); it works while the module runs.
+    public let languageModel: TranslationLanguageModel
     private let smartSelectionSetup: SmartSelectionSetup
     /// "Bôi đen là hiểu", while the module runs.
     private(set) var smartSelection: SmartSelection?
@@ -107,12 +109,14 @@ public final class TranslationModule: FeatureModule {
         self.dictionary = dictionary
         self.opener = opener
         self.engineSetup = engines
+        languageModel = TranslationLanguageModel(keys: engines.keys, transport: engines.transport)
         self.smartSelectionSetup = smartSelection
         self.shortcut = shortcut
     }
 
     public func start(_ context: ModuleContext) async throws(ModuleError) {
         self.context = context
+        languageModel.settings = context.settings
         let rates = ExchangeRateService(
             client: conversion.rates, cacheFile: context.storage.cachesDirectory.appending(path: "exchange-rates.json"),
             now: conversion.environment.now
@@ -159,6 +163,7 @@ public final class TranslationModule: FeatureModule {
     }
 
     public func stop() async {
+        languageModel.settings = nil
         smartSelection?.stop()
         smartSelection = nil
         selectionRead?.cancel()
