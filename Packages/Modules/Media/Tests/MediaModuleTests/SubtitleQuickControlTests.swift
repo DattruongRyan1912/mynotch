@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import MediaModule
 
@@ -34,5 +36,20 @@ import Testing
         #expect(SubtitleQuickControl.offsetText(delay: 0.5) == "−0.5s")
         #expect(SubtitleQuickControl.offsetText(delay: 4) == "−4s", "four seconds later than the file reads as behind")
         #expect(SubtitleQuickControl.soonerHelp == "Hiện phụ đề sớm hơn 0.5s")
+    }
+
+    /// The control's width with the film's subtitles moved by `delay`.
+    func width(delay: Double) -> CGFloat {
+        let film = state(bundle: "com.google.Chrome")
+        book.setCurrentKey(SubtitleBook.key(for: film))
+        book.load(Data("00:00:01,000 --> 00:00:02,000\nla\n".utf8), name: "film.srt")
+        book.resetDelay()
+        book.shift(by: delay)
+        return NSHostingView(rootView: SubtitleQuickControl(controls: controls, state: film)).fittingSize.width
+    }
+
+    @Test func theButtonsStayPutWhateverTheFigureSays() {
+        let widths = [0, 3, 3.5, -0.5, -12.5, 25].map(width(delay:))
+        #expect(Set(widths).count == 1, "widths \(widths)")
     }
 }

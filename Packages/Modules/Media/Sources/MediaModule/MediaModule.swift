@@ -44,6 +44,18 @@ struct MediaSettingsKeys {
     let lyricsPanelClickThrough: SettingKey<Bool>
     /// Where the panel was left on each display. Written by the panel, not by a settings row.
     let lyricsPanelFrames: SettingKey<LyricsPanelPlacement>
+    /// A film with subtitles the user loaded has them over it, as a player shows them, while its player fills a screen; the
+    /// strip under the notch leaves them out meanwhile. Off by default.
+    let fullscreenSubtitles: SettingKey<Bool>
+    /// How high above the bottom of the screen those lines sit, as a share of its height. Written by dragging them, not by a row.
+    let fullscreenSubtitlesHeight: SettingKey<Double>
+    /// The subtitles are set right again while the film plays whenever they drift (an advertisement in the video). Off by default;
+    /// the subtitle menu flips it.
+    let subtitleWatch: SettingKey<Bool>
+    /// The subtitles floating over the film all the time, fullscreen or not: flipped in the subtitle menu.
+    let floatingSubtitles: SettingKey<Bool>
+    /// How large those lines are against a player's, pinched or scrolled on them.
+    let floatingSubtitlesScale: SettingKey<Double>
 
     init(_ settings: ModuleSettings) {
         showActivity = settings.key("showActivity", default: true)
@@ -67,6 +79,13 @@ struct MediaSettingsKeys {
         )
         lyricsPanelClickThrough = settings.key("lyricsPanelClickThrough", default: false)
         lyricsPanelFrames = settings.key("lyricsPanelFrames", default: LyricsPanelPlacement())
+        fullscreenSubtitles = settings.key("fullscreenSubtitles", default: false)
+        subtitleWatch = settings.key("subtitleWatch", default: false)
+        floatingSubtitles = settings.key("floatingSubtitles", default: false)
+        floatingSubtitlesScale = settings.key("floatingSubtitlesScale", default: 1, clampedTo: FullscreenSubtitleRule.scaleRange)
+        fullscreenSubtitlesHeight = settings.key(
+            "fullscreenSubtitlesHeight", default: FullscreenSubtitleRule.bottomGap, clampedTo: FullscreenSubtitleRule.bottomGapRange
+        )
     }
 }
 
@@ -227,6 +246,25 @@ public final class MediaModule: FeatureModule {
     var lyricsPanelDisplays: @MainActor () -> [PanelDisplay] = LyricsPanelController.screens
     var lyricsPanelController: LyricsPanelController? { lyricsPanel?.controller }
     var lyricsPanelModel: LyricsPanelModel? { lyricsPanel?.model }
+    /// The subtitles over a fullscreen film, while the module runs.
+    private(set) var subtitleOverlay: FullscreenSubtitleOverlay?
+    /// Whether the settings for them are on, as last read.
+    private var fullscreenSubtitlesEnabled = false
+    private var floatingSubtitlesEnabled = false
+    /// What the overlay reads of the system and how it puts its window up; tests give their own.
+    var subtitleOverlayEnvironment = FullscreenSubtitleOverlay.Environment.system
+    var presentSubtitleOverlay: (NSPanel) -> Void = { $0.orderFrontRegardless() }
+    /// Listening to the film to move its subtitles onto the speech, while the module runs.
+    private(set) var subtitleAlignment: SubtitleAlignment?
+    /// The language model another module lends (the Translation module's LLM), asked which film a page plays when subtitles are
+    /// searched for; without one the page's title is searched for as it is. The app sets it.
+    public var languageModel: (any LanguageModel)?
+    /// Finding subtitles for the film on subtitlecat, while the module runs.
+    private(set) var subtitleFinder: SubtitleFinder?
+    /// What listens; tests give their own.
+    var makeSpeechSource: (_ watching: Bool) -> any SpeechSource = { watching in
+        DialogueListener(overlap: watching ? DialogueListener.watchingOverlap : DialogueListener.listeningOverlap)
+    }
 
     /// The app passes the bundled mediaremote-adapter script and framework; nil when the build did not include them, and the
     /// equalizer state it shares with the Âm thanh module, which the tab's EQ row switches profiles in.
@@ -376,6 +414,40 @@ public final class MediaModule: FeatureModule {
         )
         lyricsPanel = panel
         panel.apply()
+        let overlay = FullscreenSubtitleOverlay(
+            store: store, scheduler: context.scheduler, environment: subtitleOverlayEnvironment, present: presentSubtitleOverlay
+        )
+        // The strip under the notch leaves the subtitles out while they are over the film.
+        overlay.onChange = { [weak self] in self?.refreshActivity() }
+        subtitleOverlay = overlay
+        overlay.setBottomGap(settings.value(keys.fullscreenSubtitlesHeight))
+        overlay.setScale(settings.value(keys.floatingSubtitlesScale))
+        // Dragged, pinched or scrolled on the film: remembered for the next one.
+        overlay.onBottomGapChanged = { settings.set($0, for: keys.fullscreenSubtitlesHeight) }
+        overlay.onScaleChanged = { settings.set($0, for: keys.floatingSubtitlesScale) }
+        updateSubtitleOverlay()
+        let alignment = SubtitleAlignment(scheduler: context.scheduler, makeSource: makeSpeechSource)
+        alignment.watchWanted = settings.value(keys.subtitleWatch)
+        alignment.onRealigned = { [weak context] delay in
+            context?.presenter.showToast(AnyView(SubtitleAlignmentToast(text: SubtitleAlignmentToast.realignedText(delay: delay))), duration: .seconds(4))
+        }
+        alignment.onFinish = { [weak self, weak context] phase in
+            // Watching again once "Tự căn" is over, whatever it came to.
+            self?.updateSubtitleWatch()
+            guard let text = SubtitleAlignmentToast.text(for: phase) else { return }
+            context?.logger.info("Subtitle alignment: \(text, privacy: .public)")
+            context?.presenter.showToast(AnyView(SubtitleAlignmentToast(text: text)), duration: .seconds(5))
+        }
+        alignment.log = { [weak context] text in context?.logger.notice("Subtitle alignment: \(text, privacy: .public)") }
+        subtitleAlignment = alignment
+        let finder = SubtitleFinder(client: lyricsClient, model: { [weak self] in self?.languageModel }, alignment: alignment)
+        finder.log = { [weak context] text in context?.logger.notice("Subtitle search: \(text, privacy: .public)") }
+        finder.onFinish = { [weak self, weak context] text in
+            context?.logger.notice("Subtitle search: \(text, privacy: .public)")
+            context?.presenter.showToast(AnyView(SubtitleAlignmentToast(text: text)), duration: .seconds(5))
+            self?.updateSubtitleWatch()
+        }
+        subtitleFinder = finder
         context.run { [weak self] in
             let changes = Observations {
                 (
@@ -383,7 +455,10 @@ public final class MediaModule: FeatureModule {
                     settings.value(keys.hiddenApps), settings.value(keys.realSpectrum), settings.value(keys.lyrics),
                     settings.value(keys.youtubeCaptions), settings.value(keys.lyricsUnderNotch), settings.value(keys.controlButtons),
                     settings.value(keys.karaoke), settings.value(keys.tintFromArtwork), settings.value(keys.spectrumColorMode),
-                    settings.value(keys.spectrumGradientStart), settings.value(keys.spectrumGradientEnd)
+                    settings.value(keys.spectrumGradientStart), settings.value(keys.spectrumGradientEnd),
+                    settings.value(keys.fullscreenSubtitles), settings.value(keys.fullscreenSubtitlesHeight),
+                    settings.value(keys.subtitleWatch), settings.value(keys.floatingSubtitles),
+                    settings.value(keys.floatingSubtitlesScale)
                 )
             }
             for await _ in changes { self?.settingsChanged() }
@@ -446,6 +521,12 @@ public final class MediaModule: FeatureModule {
         displayStore.reset()
         lyricsPanel?.close()
         lyricsPanel = nil
+        subtitleOverlay?.close()
+        subtitleOverlay = nil
+        subtitleFinder?.cancel()
+        subtitleFinder = nil
+        subtitleAlignment?.reset()
+        subtitleAlignment = nil
         source?.stop()
         source = nil
         store.setCanLike(false)
@@ -512,6 +593,7 @@ public final class MediaModule: FeatureModule {
             lyricsPanelOpacity: environment.settings.binding(keys.lyricsPanelOpacity),
             lyricsPanelBackground: environment.settings.binding(keys.lyricsPanelBackground),
             lyricsPanelClickThrough: environment.settings.binding(keys.lyricsPanelClickThrough),
+            fullscreenSubtitles: environment.settings.binding(keys.fullscreenSubtitles),
             youtubeBridge: youtubeBridgeModel(for: environment),
             store: store,
             sources: sources.model,
@@ -839,6 +921,11 @@ public final class MediaModule: FeatureModule {
         lyricsEnabled = settings.value(keys.lyrics)
         lyricsUnderNotch = settings.value(keys.lyricsUnderNotch)
         youtubeCaptionsEnabled = settings.value(keys.youtubeCaptions)
+        fullscreenSubtitlesEnabled = settings.value(keys.fullscreenSubtitles)
+        subtitleOverlay?.setBottomGap(settings.value(keys.fullscreenSubtitlesHeight))
+        subtitleAlignment?.watchWanted = settings.value(keys.subtitleWatch)
+        floatingSubtitlesEnabled = settings.value(keys.floatingSubtitles)
+        subtitleOverlay?.setScale(settings.value(keys.floatingSubtitlesScale))
         for shown in [store, displayStore] {
             shown.setControlLayout(settings.value(keys.controlButtons))
             shown.setKaraokeEnabled(settings.value(keys.karaoke))
@@ -857,6 +944,7 @@ public final class MediaModule: FeatureModule {
 
     private func evaluate(at now: Date) {
         policy.update(store.state, at: now)
+        subtitleAlignment?.noteState(store.state, at: now)
         scheduleDeadline(from: now)
         // The lyrics first: the activity's strip depends on which track's lyrics are in the store.
         refreshLyrics()
@@ -892,6 +980,10 @@ public final class MediaModule: FeatureModule {
     /// the track has no key (an advertisement, no length) or nothing plays. Position and play-state updates leave
     /// the key as it is, so they never fetch.
     private func refreshLyrics() {
+        defer {
+            updateSubtitleOverlay()
+            updateSubtitleWatch()
+        }
         subtitles.setCurrentKey(SubtitleBook.key(for: store.state))
         updateLyricsOn()
         if let entry = subtitles.current {
@@ -1009,7 +1101,15 @@ public final class MediaModule: FeatureModule {
             load: { [weak self] url in self?.loadSubtitles(from: url) },
             shift: { [weak self] seconds in self?.shiftSubtitles(by: seconds) },
             resetDelay: { [weak self] in self?.resetSubtitleDelay() },
-            remove: { [weak self] in self?.removeSubtitles() }
+            remove: { [weak self] in self?.removeSubtitles() },
+            alignment: subtitleAlignment,
+            align: { [weak self] in self?.alignSubtitles() },
+            cancelAlign: { [weak self] in self?.subtitleAlignment?.cancel() },
+            setWatching: { [weak self] isOn in self?.setSubtitleWatching(isOn) },
+            floating: { [weak self] in self?.floatingSubtitlesEnabled ?? false },
+            setFloating: { [weak self] isOn in self?.setFloatingSubtitles(isOn) },
+            finder: subtitleFinder,
+            find: { [weak self] in self?.findSubtitles() }
         )
     }
 
@@ -1026,7 +1126,8 @@ public final class MediaModule: FeatureModule {
 
     /// Moves the subtitles of what plays now: positive shows them later.
     func shiftSubtitles(by seconds: Double) {
-        subtitles.shift(by: seconds)
+        // The part of the film playing now: what an advertisement did to the parts before it stays as it was.
+        subtitles.shift(by: seconds, at: store.position(at: Date()))
         refreshLyrics()
     }
 
@@ -1035,18 +1136,84 @@ public final class MediaModule: FeatureModule {
         refreshLyrics()
     }
 
+    /// The subtitles floating over the film all the time, or only over a fullscreen one (when that option is on).
+    func setFloatingSubtitles(_ isOn: Bool) {
+        guard let settings = context?.settings else { return }
+        settings.set(isOn, for: MediaSettingsKeys(settings).floatingSubtitles)
+        floatingSubtitlesEnabled = isOn
+        updateSubtitleOverlay()
+    }
+
+    func setSubtitleWatching(_ isOn: Bool) {
+        guard let settings = context?.settings else { return }
+        settings.set(isOn, for: MediaSettingsKeys(settings).subtitleWatch)
+        // At once, not when the settings loop gets to it: the menu's tick and the listening go together.
+        subtitleAlignment?.watchWanted = isOn
+        updateSubtitleWatch()
+    }
+
+    /// Watching for drift while the user wants it, the film plays with its subtitles shown, and "Tự căn" is not listening.
+    private func updateSubtitleWatch() {
+        guard let alignment = subtitleAlignment else { return }
+        let state = store.state
+        guard alignment.watchWanted, shownSubtitles != nil, state.isPlaying, !alignment.isListening else { return alignment.stopWatching() }
+        alignment.noteState(state)
+        alignment.watch(state: state, entry: { [weak self] in self?.subtitles.current }) { [weak self] delay, from in
+            self?.applyFoundDelay(delay, from: from)
+        }
+    }
+
+    /// Searches subtitlecat for the film playing and loads the subtitles that fit it best, moved by the delay they fit with.
+    func findSubtitles() {
+        let state = store.state
+        let names = sources.pageNames(playing: state.title)
+        context?.logger.notice("Subtitle search: the page gives \(names == nil ? "no other names" : "other names", privacy: .public)")
+        subtitleFinder?.start(state: state, pageNames: names) { [weak self] data, name, delay, from in
+            guard let self else { return }
+            subtitles.setCurrentKey(SubtitleBook.key(for: state))
+            guard subtitles.load(data, name: name) else { return }
+            subtitles.setDelay(delay, from: from, at: store.position(at: Date()) ?? from)
+            refreshLyrics()
+        }
+    }
+
+    private func applyFoundDelay(_ delay: Double, from: Double) {
+        subtitles.setDelay(delay, from: from, at: store.position(at: Date()) ?? from)
+        refreshLyrics()
+    }
+
+    /// Listens to the film for a while and moves its subtitles onto the speech it hears.
+    func alignSubtitles() {
+        subtitles.setCurrentKey(SubtitleBook.key(for: store.state))
+        guard let entry = subtitles.current else { return }
+        subtitleAlignment?.start(entry: entry, state: store.state) { [weak self] delay, from in
+            self?.applyFoundDelay(delay, from: from)
+        }
+    }
+
     func removeSubtitles() {
+        subtitleAlignment?.reset()
         subtitles.remove()
         refreshLyrics()
     }
 
     /// The user's subtitles win over captions and lyrics from the web, as captions win over the web.
+    /// The overlay is on while the setting is and the film has subtitles; the film plays in the app the state names, a browser by
+    /// its own name rather than its helper's.
+    private func updateSubtitleOverlay() {
+        let state = store.state
+        subtitleOverlay?.update(
+            enabled: fullscreenSubtitlesEnabled && shownSubtitles != nil, forced: floatingSubtitlesEnabled && shownSubtitles != nil,
+            playerBundleIDs: [state.parentApplicationBundleIdentifier, state.bundleIdentifier].compactMap { $0 }
+        )
+    }
+
     private func showSubtitles(_ entry: SubtitleBook.Entry) {
         stopLyricsLookup()
         shownCaptions = nil
         guard entry != shownSubtitles else { return }
         shownSubtitles = entry
-        show(lyrics: SubtitleParser.lines(from: entry.cues, delay: entry.delay))
+        show(lyrics: SubtitleParser.lines(for: entry))
     }
 
     // MARK: YouTube captions
@@ -1112,6 +1279,9 @@ public final class MediaModule: FeatureModule {
             return
         case .tabGone(let tab):
             sources.tabGone(tab, connection: connection)
+            return
+        case .pageNames(let page):
+            sources.receive(page, connection: connection)
             return
         default:
             break
@@ -1220,7 +1390,7 @@ public final class MediaModule: FeatureModule {
     private func updateStripHold() -> Bool {
         stripHold.update(
             LyricStripHold.Inputs(
-                enabled: lyricsUnderNotch && !store.lyricsHidden, playing: store.state.isPlaying,
+                enabled: lyricsUnderNotch && !store.lyricsHidden && !(subtitleOverlay?.isShown ?? false), playing: store.state.isPlaying,
                 hasLyrics: store.syncedLyrics?.isEmpty == false, lyricsPending: lyricsArePending
             ),
             at: Date()

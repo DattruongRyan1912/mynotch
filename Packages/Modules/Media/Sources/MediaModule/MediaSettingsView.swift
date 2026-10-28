@@ -17,6 +17,8 @@ struct MediaSettingsView: View {
     static let tintTitle = "Màu theo ảnh bìa"
     static let tintExplanation = "Lấy màu chủ đạo của ảnh bìa để nhuộm thanh tiến trình, cột sóng và vầng sáng nền trong tab Media."
     static let karaokeTitle = "Tô theo từng chữ"
+    static let fullscreenSubtitlesTitle = "Phụ đề trên phim khi xem toàn màn hình"
+    static let fullscreenSubtitlesExplanation = "Khi phim có phụ đề bạn đã nạp và trình phát đang toàn màn hình, câu đang nói hiện ở đáy màn hình như phụ đề thật, không che nút của trình phát. Kéo chữ phụ đề để đổi độ cao, chụm hai ngón hoặc cuộn trên chữ để đổi cỡ. Muốn phụ đề hiện cả khi không toàn màn hình, bật \"Hiện phụ đề nổi trên phim\" trong menu phụ đề. Trong lúc đó notch không hiện dòng phụ đề. Cần quyền Trợ năng để biết trình phát có đang toàn màn hình không."
     static let karaokeExplanation = "Khi lời có thời gian từng chữ (Apple Music, hoặc lrclib dạng nâng cao), phần đã hát của câu được tô dần ở dưới notch, trong tab Media và trong bảng lời nổi. Lời chỉ có thời gian từng câu vẫn hiện như cũ."
 
     /// One line: what could not be shown and where to allow it.
@@ -42,6 +44,7 @@ struct MediaSettingsView: View {
     @Binding var lyricsPanelOpacity: Double
     @Binding var lyricsPanelBackground: Double
     @Binding var lyricsPanelClickThrough: Bool
+    @Binding var fullscreenSubtitles: Bool
     let youtubeBridge: YouTubeBridgeModel
     /// Only for the permission hint; the module keeps the store for its whole life, running or not.
     let store: NowPlayingStore
@@ -107,6 +110,10 @@ struct MediaSettingsView: View {
                 isOn: $lyricsPanel, fontSize: $lyricsPanelFontSize, opacity: $lyricsPanelOpacity,
                 background: $lyricsPanelBackground, clickThrough: $lyricsPanelClickThrough
             )
+            Toggle(isOn: $fullscreenSubtitles) {
+                Text(Self.fullscreenSubtitlesTitle)
+                Text(Self.fullscreenSubtitlesExplanation)
+            }
             MediaControlRows(layout: $controlButtons)
         }
     }

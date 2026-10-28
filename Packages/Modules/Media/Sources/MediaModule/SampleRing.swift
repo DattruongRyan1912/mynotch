@@ -77,4 +77,19 @@ nonisolated final class SampleRing: @unchecked Sendable {
         guard written.load(ordering: .relaxed) - end < (capacity - count) / 2 else { return nil }
         return end
     }
+
+    /// Reader: the samples written since `start`, every one, in order, into `samples` (replaced). At most half the ring is
+    /// copied, the latest of them, so a reader that fell behind skips ahead rather than read slots being written: the returned
+    /// range then starts after `start`. nil when nothing new was written, or when the writer may have overwritten some of them
+    /// during the copy.
+    func copy(since start: Int, into samples: inout [Float]) -> Range<Int>? {
+        let end = written.load(ordering: .acquiring)
+        let from = max(start, end - capacity / 2)
+        guard end > from else { return nil }
+        samples.removeAll(keepingCapacity: true)
+        for index in from..<end { samples.append(storage[index % capacity]) }
+        atomicMemoryFence(ordering: .acquiring)
+        guard written.load(ordering: .relaxed) - from < capacity else { return nil }
+        return from..<end
+    }
 }

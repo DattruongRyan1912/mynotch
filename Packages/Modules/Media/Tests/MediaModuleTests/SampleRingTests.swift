@@ -74,4 +74,29 @@ import Testing
         Self.withBufferList([[(0..<10).map(Float.init)]]) { ring.write($0) }
         #expect(latest(ring, count: 9) == nil)
     }
+
+    func write(_ ring: SampleRing, _ samples: [Float]) {
+        Self.withBufferList([[samples]]) { ring.write($0) }
+    }
+
+    @Test func aReaderGetsEverySampleSinceWhereItStopped() {
+        let ring = SampleRing(capacity: 16)
+        var samples: [Float] = []
+        #expect(ring.copy(since: 0, into: &samples) == nil)
+        write(ring, [1, 2, 3])
+        #expect(ring.copy(since: 0, into: &samples) == 0..<3)
+        #expect(samples == [1, 2, 3])
+        write(ring, [4, 5])
+        #expect(ring.copy(since: 3, into: &samples) == 3..<5)
+        #expect(samples == [4, 5])
+        #expect(ring.copy(since: 5, into: &samples) == nil)
+    }
+
+    @Test func aReaderThatFellBehindSkipsToTheLatestHalfOfTheRing() {
+        let ring = SampleRing(capacity: 8)
+        write(ring, (1...10).map(Float.init))
+        var samples: [Float] = []
+        #expect(ring.copy(since: 0, into: &samples) == 6..<10)
+        #expect(samples == [7, 8, 9, 10])
+    }
 }

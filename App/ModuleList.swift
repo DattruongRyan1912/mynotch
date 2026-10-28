@@ -23,13 +23,17 @@ enum ModuleList {
     /// `activities` is the center every module publishes to; the pets read it to know when the notch is free. `equalizer` is the EQ state
     /// the Âm thanh module drives and the Media tab switches.
     static func make(activities: ActivityCenter, equalizer: EqualizerState) -> [any FeatureModule] {
-        [
+        let translation = TranslationModule()
+        let media = MediaModule(
+            adapterScript: MediaAdapterLocation.scriptURL, adapterFramework: MediaAdapterLocation.frameworkURL, equalizer: equalizer
+        )
+        // The film a page plays is asked of the LLM the user set up for translating.
+        media.languageModel = translation.languageModel
+        return [
             ClipboardModule(),
-            MediaModule(
-                adapterScript: MediaAdapterLocation.scriptURL, adapterFramework: MediaAdapterLocation.frameworkURL, equalizer: equalizer
-            ),
+            media,
             EqualizerModule(state: equalizer),
-            TranslationModule(),
+            translation,
             CalendarModule(),
             TodoModule(),
             ScreenshotModule(),

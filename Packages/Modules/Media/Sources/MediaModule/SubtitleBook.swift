@@ -6,15 +6,58 @@ import Observation
 /// the file was moved or deleted. The Media tab reads it for the video playing now (`current`).
 @Observable
 final class SubtitleBook {
+    /// From `from` seconds into the video on (until the next part), the cues are moved by `delay`: what an advertisement spliced into
+    /// the video does to everything after it.
+    struct DelayPart: Codable, Equatable {
+        var from: Double
+        var delay: Double
+    }
+
     struct Entry: Codable, Equatable {
         /// The file's name, for the tab.
         var name: String
         var cues: [SubtitleCue]
-        /// Seconds every cue is moved by: positive shows the subtitles later.
+        /// Seconds the cues are moved by before the first of `parts`, all of them without parts: positive shows them later.
         var delay: Double
         /// The oldest are let go first once there are more than `maxEntries`.
         var usedAt: Date
+        /// Later parts of the video moved by other delays, in order. None in a file written before there were parts.
+        var parts: [DelayPart] = []
+
+        init(name: String, cues: [SubtitleCue], delay: Double, usedAt: Date, parts: [DelayPart] = []) {
+            self.name = name
+            self.cues = cues
+            self.delay = delay
+            self.usedAt = usedAt
+            self.parts = parts
+        }
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            name = try container.decode(String.self, forKey: .name)
+            cues = try container.decode([SubtitleCue].self, forKey: .cues)
+            delay = try container.decode(Double.self, forKey: .delay)
+            usedAt = try container.decode(Date.self, forKey: .usedAt)
+            parts = try container.decodeIfPresent([DelayPart].self, forKey: .parts) ?? []
+        }
+
+        /// The delay of the part `position` (seconds into the video) is in; the first part's without a position.
+        func delay(at position: Double?) -> Double {
+            guard let position, let part = parts.last(where: { $0.from <= position }) else { return delay }
+            return part.delay
+        }
+
+        /// The delay a cue is shown with: that of the last part it falls in once moved by that part's delay.
+        func delay(for cue: SubtitleCue) -> Double {
+            parts.last(where: { cue.start + $0.delay >= $0.from })?.delay ?? delay
+        }
+
+        var isMoved: Bool { delay != 0 || !parts.isEmpty }
     }
+
+    /// A delay found by listening this much away from the one in force is another part of the video (an advertisement came in
+    /// between); closer, it only sets the part right.
+    static let newPartDifference = 1.0
 
     /// Films remembered; a subtitle file is some hundreds of kilobytes of cues.
     static let maxEntries = 30
@@ -84,18 +127,52 @@ final class SubtitleBook {
         return true
     }
 
-    func shift(by seconds: Double) {
+    /// Moves the part of the video `position` is in (the first part without a position), and only that part.
+    func shift(by seconds: Double, at position: Double? = nil) {
         guard let currentKey, var entry = entries[currentKey] else { return }
-        // Whole tenths, so steps of 0.5 never add up to 1.4999.
-        entry.delay = ((entry.delay + seconds) * 10).rounded() / 10
+        if let position, let index = entry.parts.lastIndex(where: { $0.from <= position }) {
+            entry.parts[index].delay = Self.tenths(entry.parts[index].delay + seconds)
+        } else {
+            entry.delay = Self.tenths(entry.delay + seconds)
+        }
         entry.usedAt = now()
         entries[currentKey] = entry
         save()
     }
 
+    /// What listening from `from` seconds into the video found, `position` being where it plays now. Far from the delay in force
+    /// there, it is a new part from `from` on, and the parts after it, worked out before the latest advertisement, are let go; close,
+    /// it sets the part in force right. Subtitles never moved before are moved all through.
+    func setDelay(_ delay: Double, from: Double, at position: Double) {
+        guard let currentKey, var entry = entries[currentKey] else { return }
+        let delay = Self.tenths(delay)
+        if !entry.isMoved {
+            entry.delay = delay
+        } else if abs(delay - entry.delay(at: position)) <= Self.newPartDifference {
+            shift(by: delay - entry.delay(at: position), at: position)
+            return
+        } else {
+            entry.parts.removeAll { $0.from >= from }
+            entry.parts.append(DelayPart(from: from, delay: delay))
+        }
+        entry.usedAt = now()
+        entries[currentKey] = entry
+        save()
+    }
+
+    /// No delay anywhere, the parts gone.
     func resetDelay() {
-        guard let delay = current?.delay, delay != 0 else { return }
-        shift(by: -delay)
+        guard let currentKey, var entry = entries[currentKey], entry.isMoved else { return }
+        entry.delay = 0
+        entry.parts = []
+        entry.usedAt = now()
+        entries[currentKey] = entry
+        save()
+    }
+
+    /// Whole tenths, so steps of 0.5 never add up to 1.4999.
+    private static func tenths(_ seconds: Double) -> Double {
+        (seconds * 10).rounded() / 10
     }
 
     func remove() {

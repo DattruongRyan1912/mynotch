@@ -27,9 +27,11 @@ final class SystemAudioTap: SpectrumSource {
             guard let self, self.sessionCount == id, self.session != nil else { return }
             onEvent(event)
         }
-        let session = SystemAudioTapSession(bandCount: bandCount) { event in
-            DispatchQueue.main.async { deliver(event) }
-        }
+        let emit: @Sendable (SpectrumEvent) -> Void = { event in DispatchQueue.main.async { deliver(event) } }
+        let session = SystemAudioTapSession(
+            name: "MyNotch spectrum", consumer: SpectrumConsumer(bandCount: bandCount, emit: emit),
+            onFailure: { emit(.failed($0)) }
+        )
         self.session = session
         session.start()
     }
@@ -40,33 +42,22 @@ final class SystemAudioTap: SpectrumSource {
     }
 }
 
-/// Everything that touches Core Audio, confined to one serial queue: setup, teardown, rebuilds after device
-/// changes, and the analysis about 30 times a second. The IO block only copies samples into a `SampleRing`.
-private nonisolated final class SystemAudioTapSession: @unchecked Sendable {
+/// What reads the tapped audio, on the session's queue: a new ring after each (re)build, then about 30 times a second.
+nonisolated protocol SystemAudioConsumer: AnyObject {
+    func begin(ring: SampleRing, sampleRate: Double)
+    func read()
+    /// The ring is gone, until the next `begin`.
+    func end()
+}
+
+/// The bars' levels: the latest frame of the ring, analysed about 30 times a second.
+private nonisolated final class SpectrumConsumer: SystemAudioConsumer {
     static let frameCount = 1024
-    static let analysisInterval = DispatchTimeInterval.nanoseconds(1_000_000_000 / 30)
-    /// About a third of a second at 48 kHz: many IO cycles fit between two analyses.
-    static let ringCapacity = 16 * frameCount
-    /// Device changes arrive in bursts (a new default device often changes the sample rate too).
-    static let rebuildDelay = DispatchTimeInterval.milliseconds(300)
 
-    static let rebuildRetryDelays: [DispatchTimeInterval] = [.seconds(1), .seconds(3)]
-
-    private let queue = DispatchQueue(label: "io.lucasvu.mynotch.media.spectrum", qos: .userInitiated)
     private let bandCount: Int
     private let emit: @Sendable (SpectrumEvent) -> Void
-    private let logger = Log.logger(category: "media")
-
-    // Everything below is only touched on `queue`.
-    private var isStopped = false
-    private var isRebuildPending = false
-    private var tap: AudioHardwareTap?
-    private var aggregate: AudioHardwareAggregateDevice?
-    private var ioProc: AudioDeviceIOProcID?
     private var ring: SampleRing?
     private var analyzer: SpectrumAnalyzer?
-    private var listeners: [AudioPropertyListener] = []
-    private var timer: DispatchSourceTimer?
     private var frame = [Float](repeating: 0, count: frameCount)
     private let silentFrame = [Float](repeating: 0, count: frameCount)
     /// Ring position after the previous analysis, to tell new samples from none.
@@ -78,6 +69,71 @@ private nonisolated final class SystemAudioTapSession: @unchecked Sendable {
     init(bandCount: Int, emit: @escaping @Sendable (SpectrumEvent) -> Void) {
         self.bandCount = bandCount
         self.emit = emit
+    }
+
+    func begin(ring: SampleRing, sampleRate: Double) {
+        self.ring = ring
+        lastWritten = 0
+        analyzer = SpectrumAnalyzer(frameCount: Self.frameCount, bandCount: bandCount, sampleRate: sampleRate)
+    }
+
+    func read() {
+        guard let ring, analyzer != nil else { return }
+        let end = ring.copyLatest(into: &frame)
+        let isFresh = end.map { $0 > lastWritten } ?? false
+        if let end { lastWritten = end }
+        let peak = isFresh ? vDSP.maximumMagnitude(frame) : nil
+        let now = Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
+        if let likelyDenied = silence.update(peak: peak, at: now) {
+            emit(.permissionLikelyDenied(likelyDenied))
+        }
+        // Without new samples the bars fall back to rest instead of freezing.
+        guard let bands = analyzer?.process(isFresh ? frame : silentFrame), bands != lastBands else { return }
+        lastBands = bands
+        emit(.bands(bands))
+    }
+
+    func end() {
+        ring = nil
+        analyzer = nil
+        lastBands = nil
+    }
+}
+
+/// Everything that touches Core Audio, confined to one serial queue: setup, teardown, rebuilds after device
+/// changes, and the consumer's reads about 30 times a second. The IO block only copies samples into a `SampleRing`.
+nonisolated final class SystemAudioTapSession: @unchecked Sendable {
+    static let frameCount = SpectrumConsumer.frameCount
+    static let analysisInterval = DispatchTimeInterval.nanoseconds(1_000_000_000 / 30)
+    /// About a third of a second at 48 kHz: many IO cycles fit between two analyses.
+    static let ringCapacity = 16 * frameCount
+    /// Device changes arrive in bursts (a new default device often changes the sample rate too).
+    static let rebuildDelay = DispatchTimeInterval.milliseconds(300)
+
+    static let rebuildRetryDelays: [DispatchTimeInterval] = [.seconds(1), .seconds(3)]
+
+    private let queue: DispatchQueue
+    /// What the tap and its aggregate device are called, for whoever looks at the audio devices.
+    private let name: String
+    private let consumer: any SystemAudioConsumer
+    private let onFailure: @Sendable (String) -> Void
+    private let logger = Log.logger(category: "media")
+
+    // Everything below is only touched on `queue`.
+    private var isStopped = false
+    private var isRebuildPending = false
+    private var tap: AudioHardwareTap?
+    private var aggregate: AudioHardwareAggregateDevice?
+    private var ioProc: AudioDeviceIOProcID?
+    private var listeners: [AudioPropertyListener] = []
+    private var timer: DispatchSourceTimer?
+
+    /// `consumer` is only called on the session's queue; `onFailure` hears why the tap could not be set up, once.
+    init(name: String, consumer: any SystemAudioConsumer, onFailure: @escaping @Sendable (String) -> Void) {
+        self.name = name
+        self.consumer = consumer
+        self.onFailure = onFailure
+        queue = DispatchQueue(label: "io.lucasvu.mynotch.media.\(name)", qos: .userInitiated)
     }
 
     func start() {
@@ -103,7 +159,7 @@ private nonisolated final class SystemAudioTapSession: @unchecked Sendable {
     private func fail(_ error: any Error) {
         tearDown()
         isStopped = true
-        emit(.failed(error.localizedDescription))
+        onFailure(error.localizedDescription)
     }
 
     /// A rebuild right after a device change can hit a device that is not ready yet, so it tries again after
@@ -126,7 +182,7 @@ private nonisolated final class SystemAudioTapSession: @unchecked Sendable {
         // MyNotch's own sounds stay out of the bars; it has no process object until it has played something.
         let ownProcess = try? system.process(for: getpid())
         let description = CATapDescription(stereoGlobalTapButExcludeProcesses: ownProcess.map { [$0.id] } ?? [])
-        description.name = "MyNotch spectrum"
+        description.name = name
         description.isPrivate = true
         description.muteBehavior = .unmuted
         guard let tap = try system.makeProcessTap(description: description) else { throw TapError("no process tap") }
@@ -139,7 +195,7 @@ private nonisolated final class SystemAudioTapSession: @unchecked Sendable {
         guard let output = try system.defaultOutputDevice else { throw TapError("no default output device") }
         let outputUID = try output.uid
         guard let aggregate = try system.makeAggregateDevice(description: [
-            kAudioAggregateDeviceNameKey: "MyNotch spectrum",
+            kAudioAggregateDeviceNameKey: name,
             kAudioAggregateDeviceUIDKey: UUID().uuidString,
             kAudioAggregateDeviceMainSubDeviceKey: outputUID,
             kAudioAggregateDeviceIsPrivateKey: true,
@@ -153,9 +209,7 @@ private nonisolated final class SystemAudioTapSession: @unchecked Sendable {
         self.aggregate = aggregate
 
         let ring = SampleRing(capacity: Self.ringCapacity)
-        self.ring = ring
-        lastWritten = 0
-        analyzer = SpectrumAnalyzer(frameCount: Self.frameCount, bandCount: bandCount, sampleRate: format.mSampleRate)
+        consumer.begin(ring: ring, sampleRate: format.mSampleRate)
         var ioProc: AudioDeviceIOProcID?
         try check(AudioDeviceCreateIOProcIDWithBlock(&ioProc, aggregate.id, nil, Self.ioBlock(writingTo: ring)), "create the IO proc")
         self.ioProc = ioProc
@@ -186,25 +240,9 @@ private nonisolated final class SystemAudioTapSession: @unchecked Sendable {
     private func startTimer() {
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + Self.analysisInterval, repeating: Self.analysisInterval, leeway: .milliseconds(5))
-        timer.setEventHandler { [weak self] in self?.analyze() }
+        timer.setEventHandler { [weak self] in self?.consumer.read() }
         timer.resume()
         self.timer = timer
-    }
-
-    private func analyze() {
-        guard let ring, analyzer != nil else { return }
-        let end = ring.copyLatest(into: &frame)
-        let isFresh = end.map { $0 > lastWritten } ?? false
-        if let end { lastWritten = end }
-        let peak = isFresh ? vDSP.maximumMagnitude(frame) : nil
-        let now = Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
-        if let likelyDenied = silence.update(peak: peak, at: now) {
-            emit(.permissionLikelyDenied(likelyDenied))
-        }
-        // Without new samples the bars fall back to rest instead of freezing.
-        guard let bands = analyzer?.process(isFresh ? frame : silentFrame), bands != lastBands else { return }
-        lastBands = bands
-        emit(.bands(bands))
     }
 
     private func scheduleRebuild() {
@@ -239,9 +277,7 @@ private nonisolated final class SystemAudioTapSession: @unchecked Sendable {
         ioProc = nil
         aggregate = nil
         tap = nil
-        ring = nil
-        analyzer = nil
-        lastBands = nil
+        consumer.end()
     }
 
     private func check(_ status: OSStatus, _ step: String) throws {

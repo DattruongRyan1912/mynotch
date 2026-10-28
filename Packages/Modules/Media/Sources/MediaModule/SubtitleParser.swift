@@ -41,14 +41,24 @@ nonisolated enum SubtitleParser {
     /// One line per cue at its start, moved by `delay` (positive: later), and a blank line at a cue's end when the next one
     /// does not follow right away, so a subtitle does not stay up through the silence after it.
     static func lines(from cues: [SubtitleCue], delay: Double) -> [LyricLine] {
+        lines(from: cues, delays: cues.map { _ in delay })
+    }
+
+    /// The same, each cue moved by the delay of the part of the video it falls in.
+    @MainActor static func lines(for entry: SubtitleBook.Entry) -> [LyricLine] {
+        lines(from: entry.cues, delays: entry.cues.map { entry.delay(for: $0) })
+    }
+
+    private static func lines(from cues: [SubtitleCue], delays: [Double]) -> [LyricLine] {
         var lines: [LyricLine] = []
         for (index, cue) in cues.enumerated() {
-            lines.append(LyricLine(time: cue.start + delay, text: cue.text))
-            if index == cues.count - 1 || cues[index + 1].start - cue.end > gapTolerance {
-                lines.append(LyricLine(time: cue.end + delay, text: ""))
+            lines.append(LyricLine(time: cue.start + delays[index], text: cue.text))
+            if index == cues.count - 1 || (cues[index + 1].start + delays[index + 1]) - (cue.end + delays[index]) > gapTolerance {
+                lines.append(LyricLine(time: cue.end + delays[index], text: ""))
             }
         }
-        return lines
+        // Where a later part starts sooner than the one before ends, the lines are put back in order.
+        return lines.enumerated().sorted { ($0.element.time, $0.offset) < ($1.element.time, $1.offset) }.map(\.element)
     }
 
     // MARK: -
