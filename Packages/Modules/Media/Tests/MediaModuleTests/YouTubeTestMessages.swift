@@ -72,6 +72,8 @@ enum YouTubeTestMessages {
             ]
         case .tabGone(let tab):
             object = ["v": 1, "type": "tabgone", "tab": tab]
+        case .pageNames(let page):
+            object = ["v": 1, "type": "pagenames", "tab": page.tab, "title": page.title, "names": page.names]
         }
         return try! JSONSerialization.data(withJSONObject: object)
     }

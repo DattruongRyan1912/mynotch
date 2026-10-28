@@ -12,6 +12,9 @@ public enum YouTubeMessage: Equatable, Sendable {
     case tab(BrowserTab)
     /// The page has no media to show any more, or its tab is closed.
     case tabGone(tab: Int)
+    /// What the top frame of a tab that makes sound, with no media the extension sees (a film site's player in a frame of another
+    /// site), calls what it shows: its title and its other names. For the search of a film's subtitles by its original title.
+    case pageNames(BrowserPageNames)
 
     /// Why a message was refused. Fixed words, so a log line holds nothing of the message.
     public enum Rejection: String, Error, Equatable, Sendable {
@@ -41,7 +44,7 @@ public enum YouTubeMessage: Equatable, Sendable {
         case .captions(let captions): captions.videoID
         case .playback(let playback): playback.videoID
         case .clear(let videoID): videoID
-        case .diag, .tab, .tabGone: nil
+        case .diag, .tab, .tabGone, .pageNames: nil
         }
     }
 
@@ -62,6 +65,7 @@ public enum YouTubeMessage: Equatable, Sendable {
         case .diag: "diag"
         case .tab: "tab"
         case .tabGone: "tabgone"
+        case .pageNames: "pagenames"
         }
     }
 
@@ -95,6 +99,9 @@ public enum YouTubeMessage: Equatable, Sendable {
             rejection = .invalidTab
         case "tabgone":
             message = (try? decoder.decode(TabGoneFields.self, from: data)).flatMap { isTabID($0.tab) ? .tabGone(tab: $0.tab) : nil }
+            rejection = .invalidTab
+        case "pagenames":
+            message = (try? decoder.decode(PageNamesFields.self, from: data)).flatMap(pageNames)
             rejection = .invalidTab
         default:
             return .failure(.unknownType)
@@ -148,10 +155,17 @@ public enum YouTubeMessage: Equatable, Sendable {
         /// Absent from an extension that predates them: an element, not heard.
         var element: Bool?
         var audible: Bool?
+        var names: String?
     }
 
     private struct TabGoneFields: Decodable {
         var tab: Int
+    }
+
+    private struct PageNamesFields: Decodable {
+        var tab: Int
+        var title: String
+        var names: String
     }
 
     private struct DiagFields: Decodable {
@@ -198,11 +212,19 @@ public enum YouTubeMessage: Equatable, Sendable {
         else { return nil }
         let artist = normalised(fields.artist ?? "", limit: BrowserTab.maxNameLength)
         let album = normalised(fields.album ?? "", limit: BrowserTab.maxNameLength)
+        let names = normalised(fields.names ?? "", limit: BrowserTab.maxNamesLength)
         return .tab(BrowserTab(
             tab: fields.tab, site: fields.site, title: title, artist: artist.isEmpty ? nil : artist, album: album.isEmpty ? nil : album,
             isPlaying: fields.state == "playing", time: fields.time, duration: fields.duration, rate: fields.rate, isLive: fields.live,
-            hasElement: fields.element ?? true, isAudible: fields.audible ?? false
+            hasElement: fields.element ?? true, isAudible: fields.audible ?? false, names: names.isEmpty ? nil : names
         ))
+    }
+
+    private static func pageNames(_ fields: PageNamesFields) -> YouTubeMessage? {
+        let title = normalised(fields.title, limit: maxTitleLength)
+        let names = normalised(fields.names, limit: BrowserTab.maxNamesLength)
+        guard isTabID(fields.tab), !title.isEmpty, !names.isEmpty else { return nil }
+        return .pageNames(BrowserPageNames(tab: fields.tab, title: title, names: names))
     }
 
     static func isTabID(_ id: Int) -> Bool { (0...BrowserTab.maxTabID).contains(id) }

@@ -6,6 +6,30 @@ import YouTubeBridgeKit
 @testable import MediaModule
 
 @Suite struct MediaSourceHubTests {
+    @Test func thePagesOtherNamesAreFoundByItsTitleElseAsTheOnlyPagePlaying() {
+        hub.receive(BrowserTab(tab: 1, site: "motchillx.ink", title: "Xem Ông Bủn Xỉn", isPlaying: true, time: 10, names: "Scrooged (1988)"), connection: 1)
+        hub.receive(BrowserTab(tab: 2, site: "news.example", title: "News", isPlaying: false, time: 0, names: "Headline"), connection: 1)
+        #expect(hub.pageNames(playing: "Xem Ông Bủn Xỉn") == "Scrooged (1988)")
+        #expect(hub.pageNames(playing: "News") == "Headline")
+        #expect(hub.pageNames(playing: "Ông Bủn Xỉn") == "Scrooged (1988)", "the system's title for the page differs: the only page playing")
+        hub.tabGone(1, connection: 1)
+        #expect(hub.pageNames(playing: "Xem Ông Bủn Xỉn") == nil)
+    }
+
+    @Test func aPageWhosePlayerIsInAFrameOfAnotherSiteGivesItsNamesByItsTitleElseAsTheOnlyOneHeard() {
+        let film = BrowserPageNames(tab: 3, title: "Xem Ông Bủn Xỉn HD - Vietsub - Tập Full - Motchill", names: "Phim Ông Bủn Xỉn - Scrooged HD - Motchill")
+        hub.receive(film, connection: 1)
+        #expect(hub.pageNames(playing: "ông bủn xỉn") == film.names, "the page's title holds the one playing")
+        #expect(hub.pageNames(playing: "Something else") == film.names, "the only page heard")
+        hub.receive(BrowserPageNames(tab: 4, title: "Radio", names: "Station"), connection: 1)
+        #expect(hub.pageNames(playing: "Ông Bủn Xỉn") == film.names)
+        #expect(hub.pageNames(playing: "Something else") == nil, "two pages heard, neither by its title")
+        hub.receive(BrowserTab(tab: 1, site: "music.example", title: "Song", isPlaying: true, time: 1, names: "Album"), connection: 1)
+        #expect(hub.pageNames(playing: "Ông Bủn Xỉn") == "Album", "a page with media playing comes first")
+        hub.connectionEnded(1)
+        #expect(hub.pageNames(playing: "Ông Bủn Xỉn") == nil)
+    }
+
     let environment = FakeAppEnvironment()
     let scheduler = ManualScheduler()
     let permissions = FakePermissionCenter()
@@ -919,4 +943,5 @@ actor Release {
         for continuation in waiting { continuation.resume() }
         waiting = []
     }
+
 }

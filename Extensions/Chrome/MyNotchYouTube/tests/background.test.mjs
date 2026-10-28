@@ -358,7 +358,7 @@ test("an invalid command from the host is reported as such and never reaches the
 
 const WEB_SENDER = (tabId, url = "https://music.example.com/album") => ({ id: OWN, url, tab: { id: tabId }, frameId: 0 });
 const REPORT = {
-  v: 1, type: "tab-report", site: "music.example.com", title: "Song", artist: "Artist", album: "", state: "playing",
+  v: 1, type: "tab-report", site: "music.example.com", title: "Song", artist: "Artist", album: "", names: "", state: "playing",
   time: 12.5, duration: 200, rate: 1, live: false, element: true
 };
 

@@ -16,7 +16,7 @@ function idFromKey(base64Key) {
 test("manifest has the expected MV3 fields", () => {
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.name, "MyNotch YouTube Bridge");
-  assert.equal(manifest.version, "0.2.2");
+  assert.equal(manifest.version, "0.2.4");
   assert.match(manifest.description, /^[\x20-\x7e]+$/, "English (ASCII) description");
   assert.ok(manifest.description.length > 20 && manifest.description.length <= 132);
   // `scripting` is for injecting the content scripts into the tabs that were open before the extension loaded;

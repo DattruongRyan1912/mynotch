@@ -27,6 +27,31 @@ import Testing
         )))
     }
 
+    @Test func aPagesNamesDecodeCleanedAndNeedATitleAndNames() {
+        let object: [String: Any] = ["v": 1, "type": "pagenames", "tab": 9, "title": " Xem  Ông Bủn Xỉn ", "names": "Scrooged\n(1988)"]
+        #expect(Self.decode(object) == .pageNames(BrowserPageNames(tab: 9, title: "Xem Ông Bủn Xỉn", names: "Scrooged (1988)")))
+        #expect(Self.decode(object)?.typeName == "pagenames")
+        for (key, value) in [("title", " " as Any), ("names", ""), ("tab", -1), ("names", 5)] {
+            var bad = object
+            bad[key] = value
+            #expect(Self.decode(bad) == nil, "\(key)")
+        }
+    }
+
+    @Test func thePagesOtherNamesComeAlongCleanedAndCut() {
+        var object = Self.tab()
+        object["names"] = "Phim Ông Bủn Xỉn - Scrooged HD |  Scrooged (1988)\n"
+        guard case .tab(let tab) = Self.decode(object) else { Issue.record("not decoded"); return }
+        #expect(tab.names == "Phim Ông Bủn Xỉn - Scrooged HD | Scrooged (1988)")
+        object["names"] = String(repeating: "a", count: 400)
+        guard case .tab(let long) = Self.decode(object) else { Issue.record("not decoded"); return }
+        #expect(long.names?.count == BrowserTab.maxNamesLength)
+        object["names"] = ""
+        guard case .tab(let none) = Self.decode(object) else { Issue.record("not decoded"); return }
+        #expect(none.names == nil)
+        #expect({ if case .tab(let old) = Self.decode(Self.tab()) { old.names == nil } else { false } }(), "an older extension sends none")
+    }
+
     @Test func pausedAndLiveAndWithoutAnArtistOrALength() {
         let message = Self.decode(Self.tab(artist: "", album: "Album", state: "paused", duration: nil, live: true))
         #expect(message == .tab(BrowserTab(

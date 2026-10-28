@@ -63,7 +63,8 @@ function makePage({ title = "Placeholder page", hostname = "music.example.com", 
     removeEventListener(type, fn, capture) {
       for (const entry of page.docListeners[type] ?? []) if (entry.fn === fn && entry.capture === capture) page.docListeners[type].delete(entry);
     },
-    querySelectorAll: () => page.media
+    querySelector: (selector) => page.meta?.[selector] ?? null,
+    querySelectorAll: (selector) => (selector === "h1, h2" ? page.headings ?? [] : page.media)
   };
   page.context = createContext({
     __now: 1000000,
@@ -169,6 +170,7 @@ const REPORT = {
   title: "Placeholder page",
   artist: "",
   album: "",
+  names: "",
   state: "playing",
   time: 30,
   duration: 200,
@@ -210,7 +212,7 @@ test("only the fields of the protocol leave the page, and the site is the host n
   page.start();
   page.emit(el, "play");
   const [message] = page.take();
-  assert.deepEqual(Object.keys(message).sort(), ["album", "artist", "duration", "element", "live", "rate", "site", "state", "time", "title", "type", "v"]);
+  assert.deepEqual(Object.keys(message).sort(), ["album", "artist", "duration", "element", "live", "names", "rate", "site", "state", "time", "title", "type", "v"]);
   assert.equal(message.site, "music.example.com");
   const text = JSON.stringify(message);
   for (const secret of ["secret", "frag", "album?", "cdn.example", "cover.png", "https"]) assert.equal(text.includes(secret), false, secret);
@@ -740,6 +742,7 @@ const SESSION_REPORT = {
   title: "Session song",
   artist: "Session artist",
   album: "",
+  names: "",
   state: "playing",
   time: 0,
   duration: null,
@@ -1112,4 +1115,35 @@ test("a session-only report says so: element is false, and an element's report s
   const other = makePage({ media: [el] });
   other.start();
   assert.equal(other.take()[0].element, true);
+});
+
+test("a page's other names for what it plays go with the report: its og:title, keywords and first headings, each once", () => {
+  const el = video();
+  const page = makePage({ media: [el], title: "Xem Bố Già Học Việc HD - Vietsub - Tập Full - Motchill" });
+  page.meta = {
+    'meta[property="og:title"]': { getAttribute: () => "Phim Bố Già Học Việc - The Intern HD - Motchill" },
+    'meta[name="keywords"]': { getAttribute: () => "Bố Già Học Việc, The Intern" }
+  };
+  page.headings = [
+    { textContent: "Bố Già Học Việc\n   -   Tập Full" }, { textContent: "The Intern      (2015)" }, { textContent: "The Intern      (2015)" }
+  ];
+  page.start();
+  page.emit(el, "play");
+  assert.equal(
+    page.take()[0].names,
+    "Phim Bố Già Học Việc - The Intern HD - Motchill | Bố Già Học Việc, The Intern | Bố Già Học Việc - Tập Full | The Intern (2015)"
+  );
+});
+
+test("a page without media of its own answers the worker's question of what it shows, and only the worker's", () => {
+  const page = makePage({ media: [], title: "Xem Ông Bủn Xỉn HD - Vietsub - Tập Full - Motchill" });
+  page.meta = { 'meta[property="og:title"]': { getAttribute: () => "Phim Ông Bủn Xỉn - Scrooged HD - Motchill" } };
+  page.headings = [{ textContent: "Scrooged (1988)" }];
+  page.start();
+  assert.deepEqual(page.command({ v: 1, type: "names" }).responses, [
+    { title: "Xem Ông Bủn Xỉn HD - Vietsub - Tập Full - Motchill", names: "Phim Ông Bủn Xỉn - Scrooged HD - Motchill | Scrooged (1988)" }
+  ]);
+  assert.deepEqual(page.command({ v: 1, type: "names" }, { id: page.runtime.id, tab: { id: 3 } }).responses, [], "not a page");
+  assert.deepEqual(page.command({ v: 1, type: "names", extra: 1 }).responses, [], "not the closed request");
+  assert.deepEqual(page.take(), [], "no report: the page has no media");
 });

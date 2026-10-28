@@ -46,6 +46,11 @@ final class MediaSourceHub {
 
     private var sessions: [String: AppPlayerSession] = [:]
     private var tabStates: [TabRef: NowPlayingState] = [:]
+    /// The other names each page gives what it plays, as it last said them; only those of tabs still here count.
+    private var tabNames: [TabRef: String] = [:]
+    /// Tabs that make sound with no media the extension sees (a player in a frame of another site): their title and other names, newest last.
+    private var heardPages: [(ref: TabRef, page: BrowserPageNames)] = []
+    static let maxHeardPages = 16
     /// When a page was last heard (what the limiter measures from), and what it said since, of which only the newest is kept.
     private var lastTabAt: [TabRef: Date] = [:]
     private var pendingTabs: [TabRef: BrowserTab] = [:]
@@ -141,11 +146,20 @@ final class MediaSourceHub {
         apply(tab, ref: ref, at: date)
     }
 
+    /// A tab that makes sound with no media the extension sees says what it shows; only kept for `pageNames(playing:)`.
+    func receive(_ page: BrowserPageNames, connection: Int) {
+        let ref = TabRef(connection: connection, tab: page.tab)
+        heardPages.removeAll { $0.ref == ref }
+        heardPages.append((ref, page))
+        if heardPages.count > Self.maxHeardPages { heardPages.removeFirst(heardPages.count - Self.maxHeardPages) }
+    }
+
     private func apply(_ tab: BrowserTab, ref: TabRef, at date: Date) {
         lastTabAt[ref] = date
         pendingTabs[ref] = nil
         let state = Self.state(of: tab, replacing: tabStates[ref], at: date)
         tabStates[ref] = state
+        tabNames[ref] = tab.names
         book.setTab(ref, state: state, site: tab.site, isBelieved: tab.isBelieved, at: date)
         publish(.other)
     }
@@ -178,10 +192,27 @@ final class MediaSourceHub {
         pendingTabs[ref] = nil
     }
 
+    /// The other names the page playing `title` gives it (see `BrowserTab.names`): the page with that title, else the only page that
+    /// plays (the system's title for a page is not always the page's own); nil when there is no such page, or it gives none.
+    func pageNames(playing title: String?) -> String? {
+        let named = tabStates.filter { tabNames[$0.key] != nil }
+        if let title, let page = named.first(where: { $0.value.title == title }) { return tabNames[page.key] }
+        let playing = named.filter { $0.value.isPlaying }
+        if playing.count == 1 { return playing.first.flatMap { tabNames[$0.key] } }
+        // A player in a frame of another site: the page that sounds whose title holds the one playing, else the only one heard.
+        if let title = title?.trimmingCharacters(in: .whitespaces), !title.isEmpty,
+           let page = heardPages.last(where: { $0.page.title.localizedCaseInsensitiveContains(title) }) {
+            return page.page.names
+        }
+        return heardPages.count == 1 ? heardPages.first?.page.names : nil
+    }
+
     /// The bridge is off: no page is heard from.
     func forgetTabs() {
         lastTabAt = [:]
         pendingTabs = [:]
+        tabNames = [:]
+        heardPages = []
         guard !tabStates.isEmpty else { return }
         tabStates = [:]
         book.removeAllTabs(at: now())
@@ -192,6 +223,8 @@ final class MediaSourceHub {
     func connectionEnded(_ connection: Int) {
         lastTabAt = lastTabAt.filter { $0.key.connection != connection }
         pendingTabs = pendingTabs.filter { $0.key.connection != connection }
+        tabNames = tabNames.filter { $0.key.connection != connection }
+        heardPages.removeAll { $0.ref.connection == connection }
         guard tabStates.keys.contains(where: { $0.connection == connection }) else { return }
         tabStates = tabStates.filter { $0.key.connection != connection }
         book.removeTabs(ofConnection: connection, at: now())

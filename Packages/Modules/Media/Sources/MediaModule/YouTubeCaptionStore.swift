@@ -47,7 +47,7 @@ nonisolated struct YouTubeCaptionStore {
         case .diag:
             // Only shows that the extension (or its page) is there.
             break
-        case .tab, .tabGone:
+        case .tab, .tabGone, .pageNames:
             // A page with media of any site: `MediaSourceHub` keeps those. They show that the extension is there, as above.
             break
         }

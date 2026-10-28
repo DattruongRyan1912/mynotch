@@ -20,6 +20,9 @@
   var SOURCE = "k9x2q7";
   var MAX_TITLE = 300;
   var MAX_NAME = 200;
+  // The other names a page gives what it plays (its og:title, keywords, headings): a film's original title on a site that shows
+  // it under a translated one.
+  var MAX_NAMES = 300;
   var MAX_RATE = 16;
   var MAX_SECONDS = 10000000;
   var MAX_TAB_ID = 2147483647;
@@ -76,6 +79,7 @@
     if (!title) return null;
     var artist = message.artist === undefined ? "" : clean(message.artist, MAX_NAME);
     var album = message.album === undefined ? "" : clean(message.album, MAX_NAME);
+    var names = message.names === undefined ? "" : clean(message.names, MAX_NAMES);
     if (typeof message.site !== "string" || (message.site !== "" && !SITE.test(message.site))) return null;
     if (message.state !== "playing" && message.state !== "paused") return null;
     if (!isNumber(message.time) || message.time < 0 || message.time > MAX_SECONDS) return null;
@@ -90,6 +94,7 @@
       title: title,
       artist: artist,
       album: album,
+      names: names,
       state: message.state,
       time: round3(message.time),
       duration: duration === null ? null : round3(duration),
@@ -111,6 +116,7 @@
       title: fields.title,
       artist: fields.artist,
       album: fields.album,
+      names: fields.names,
       state: fields.state,
       time: fields.time,
       duration: fields.duration,
@@ -142,6 +148,7 @@
       title: checked.title,
       artist: checked.artist,
       album: checked.album,
+      names: checked.names,
       state: checked.state,
       time: checked.time,
       duration: checked.duration,
@@ -155,6 +162,27 @@
   /** service worker -> app: the tab has no media any more (or is closed). */
   function buildGone(tabId) {
     return validTabId(tabId) ? { v: 1, type: "tabgone", tab: tabId } : null;
+  }
+
+  /** service worker -> content script: the worker asks the top frame of a tab that makes sound, with no media of ours in it, what it shows. */
+  function isNamesRequest(message) {
+    return isObject(message) && message.v === 1 && message.type === "names" && Object.keys(message).length === 2;
+  }
+
+  function buildNamesRequest() {
+    return { v: 1, type: "names" };
+  }
+
+  /**
+   * service worker -> app: what the top frame of a tab that makes sound calls what it shows, when the media plays in a frame of
+   * another site (a film site's player). null unless the page gives a title and other names.
+   */
+  function buildPageNames(tabId, answer) {
+    if (!validTabId(tabId) || !isObject(answer)) return null;
+    var title = clean(answer.title, MAX_TITLE);
+    var names = clean(answer.names, MAX_NAMES);
+    if (!title || !names) return null;
+    return { v: 1, type: "pagenames", tab: tabId, title: title, names: names };
   }
 
   /**
@@ -234,6 +262,7 @@
     SOURCE: SOURCE,
     MAX_TITLE: MAX_TITLE,
     MAX_NAME: MAX_NAME,
+    MAX_NAMES: MAX_NAMES,
     MAX_SECONDS: MAX_SECONDS,
     cleanSite: cleanSite,
     cleanText: clean,
@@ -242,6 +271,9 @@
     buildTab: buildTab,
     buildGone: buildGone,
     validateTabCommand: validateTabCommand,
+    isNamesRequest: isNamesRequest,
+    buildNamesRequest: buildNamesRequest,
+    buildPageNames: buildPageNames,
     acceptSessionMessage: acceptSessionMessage,
     buildInvoke: buildInvoke
   };

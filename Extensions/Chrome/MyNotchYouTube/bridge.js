@@ -331,11 +331,28 @@
       if (typeof tabId !== "number" || typeof audible !== "boolean") return;
       if (!mediaTabs.has(tabId)) {
         // Not a tab with media: what Chrome says of it is not kept (the map is bounded by the tabs the app has been told of).
+        if (audible) askNames(tabId);
         return;
       }
       if (audibleTabs.get(tabId) === audible) return;
       audibleTabs.set(tabId, audible);
       sendTab(tabId);
+    }
+
+    /**
+     * A tab that makes sound with no media of ours in it plays in a frame of another site (a film site's player): its top frame is
+     * asked what it shows, and the app is told, for a search of the film's subtitles by its original title. Nothing is kept.
+     */
+    function askNames(tabId) {
+      if (typeof deps.sendToTab !== "function") return;
+      new Promise(function (resolve) {
+        resolve(deps.sendToTab(tabId, T.buildNamesRequest()));
+      }).then(function (answer) {
+        var message = T.buildPageNames(tabId, answer);
+        if (message) deps.bridge.handle(message);
+      }, function () {
+        /* a page without the script (not http, or loading): nothing to say */
+      });
     }
 
     /** The tab has no media any more, or is closed: the app is told once, and only about a tab it was told of. */

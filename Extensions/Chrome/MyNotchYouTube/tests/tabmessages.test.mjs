@@ -23,7 +23,7 @@ const report = (overrides = {}) => ({
 test("a report is a fresh object with exactly the protocol fields, and the numbers are rounded to milliseconds", () => {
   const dirty = report({ url: "https://example.invalid/?token=secret", cookie: "x", artwork: "https://example.invalid/a.png" });
   const clean = T.validateReport(dirty);
-  assert.deepEqual(Object.keys(clean).sort(), ["album", "artist", "duration", "element", "live", "rate", "site", "state", "time", "title", "type", "v"]);
+  assert.deepEqual(Object.keys(clean).sort(), ["album", "artist", "duration", "element", "live", "names", "rate", "site", "state", "time", "title", "type", "v"]);
   assert.notEqual(clean, dirty);
   assert.equal(clean.time, 12.346);
 });
@@ -79,6 +79,7 @@ test("buildTab puts the tab id on a valid report and nothing else; a bad id or r
     title: "Song",
     artist: "Artist",
     album: "Album",
+    names: "",
     state: "playing",
     time: 12.346,
     duration: 200,
@@ -197,4 +198,18 @@ test("buildInvoke names the actions the page's handlers can do, and a seek says 
   assert.equal(T.buildInvoke("seek"), null);
   for (const bad of [-1, NaN, Infinity, "5", null, 1e9]) assert.equal(T.buildInvoke("seek", bad), null, String(bad));
   for (const action of ["toggle", "stop", "", null, undefined, "Next", "toString"]) assert.equal(T.buildInvoke(action), null, String(action));
+});
+
+test("names: the worker's request is closed, and what goes to the app is a fresh, cleaned title and names, or nothing", () => {
+  assert.equal(T.isNamesRequest(T.buildNamesRequest()), true);
+  for (const other of [null, { v: 1, type: "names", tab: 5 }, { v: 2, type: "names" }, { v: 1, type: "tabcommand" }]) {
+    assert.equal(T.isNamesRequest(other), false, JSON.stringify(other));
+  }
+  assert.deepEqual(T.buildPageNames(7, { title: " Xem  Ông Bủn Xỉn ", names: "Scrooged\n(1988)", extra: "x" }), {
+    v: 1, type: "pagenames", tab: 7, title: "Xem Ông Bủn Xỉn", names: "Scrooged (1988)"
+  });
+  for (const [tab, answer] of [[7, { title: "t", names: "" }], [7, { title: "", names: "n" }], [7, { ok: true }], [7, undefined], [-1, { title: "t", names: "n" }]]) {
+    assert.equal(T.buildPageNames(tab, answer), null, JSON.stringify([tab, answer]));
+  }
+  assert.equal(T.buildPageNames(7, { title: "t", names: "x".repeat(400) }).names.length, T.MAX_NAMES);
 });

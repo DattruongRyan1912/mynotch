@@ -207,6 +207,9 @@ final class HostRelay: Sendable {
                 if state.tabs.count > Self.maxTabs { state.tabs.removeFirst(state.tabs.count - Self.maxTabs) }
             case .tabGone(let tab):
                 state.tabs.removeAll { $0.tab == tab }
+            case .pageNames:
+                // Said live, like a diagnostic: the page is asked again the next time its tab starts to make sound.
+                break
             case .diag(let diag):
                 // Said live: a diagnostic is about now, so it is not kept for a later connection. Except the access
                 // report, which is a state the app shows until it changes.

@@ -101,6 +101,30 @@
     return T.cleanText(doc.title, T.MAX_TITLE);
   }
 
+  /**
+   * The other names the page gives what it plays: its og:title, its keywords and its first headings, each once. A Vietnamese film
+   * site titles its page "Xem Bố Già Học Việc HD - Vietsub" and names the film "The Intern (2015)" in a heading.
+   */
+  function pageNames() {
+    var doc = root.document;
+    var parts = [];
+    function add(text) {
+      var cleaned = T.cleanText(text || "", T.MAX_NAMES);
+      if (cleaned && parts.indexOf(cleaned) < 0) parts.push(cleaned);
+    }
+    try {
+      var og = doc.querySelector('meta[property="og:title"]');
+      if (og) add(og.getAttribute("content"));
+      var keywords = doc.querySelector('meta[name="keywords"]');
+      if (keywords) add(keywords.getAttribute("content"));
+      var headings = doc.querySelectorAll("h1, h2");
+      for (var index = 0; index < headings.length && index < 3; index++) add(headings[index].textContent);
+    } catch (error) {
+      return "";
+    }
+    return T.cleanText(parts.join(" | "), T.MAX_NAMES);
+  }
+
   /** What the page's Media Session says, read live; else what the page script last told us. null when the page has no title in it. */
   function readSession() {
     try {
@@ -171,6 +195,7 @@
       title: title,
       artist: session ? session.artist || "" : "",
       album: session ? session.album || "" : "",
+      names: pageNames(),
       state: isPlaying(el) ? "playing" : "paused",
       time: Math.max(finite(el.currentTime, 0), 0),
       duration: typeof duration === "number" && isFinite(duration) && duration >= 0 ? duration : null,
@@ -206,6 +231,7 @@
       title: session.title,
       artist: session.artist || "",
       album: session.album || "",
+      names: pageNames(),
       state: playback,
       time: time,
       duration: duration,
@@ -505,6 +531,14 @@
   function onRuntimeMessage(message, sender, sendResponse) {
     var own = root.chrome && root.chrome.runtime ? root.chrome.runtime.id : undefined;
     if (!own || !sender || sender.tab || sender.id !== own) return undefined;
+    if (T.isNamesRequest(message)) {
+      try {
+        if (typeof sendResponse === "function") sendResponse({ title: documentTitle(), names: pageNames() });
+      } catch (error) {
+        /* the worker stopped waiting */
+      }
+      return undefined;
+    }
     var command = T.validateTabCommand(message);
     if (!command) return undefined;
     var ok = perform(command);

@@ -1071,6 +1071,7 @@ const tabReport = (overrides = {}) => ({
   title: "Song",
   artist: "Artist",
   album: "",
+  names: "",
   state: "playing",
   time: 12.5,
   duration: 200,
@@ -1097,7 +1098,7 @@ test("tab: only the fields of the protocol leave the worker; the page cannot add
   const h = commandHarness();
   h.relay.onMessage({ ...tabReport(), url: "https://example.invalid/?token=secret", artwork: "https://example.invalid/a.png", tab: 99 }, WEB_SENDER(7));
   const [message] = h.ports[0].posted;
-  assert.deepEqual(Object.keys(message).sort(), ["album", "artist", "audible", "duration", "element", "live", "rate", "site", "state", "tab", "time", "title", "type", "v"]);
+  assert.deepEqual(Object.keys(message).sort(), ["album", "artist", "audible", "duration", "element", "live", "names", "rate", "site", "state", "tab", "time", "title", "type", "v"]);
   assert.equal(message.tab, 7, "the tab is the sender's, never the message's");
 });
 
@@ -1382,5 +1383,29 @@ test("sound: a tab Chrome cannot answer for (gone), or an answer without `audibl
     assert.doesNotThrow(() => h.relay.onMessage(tabReport(SESSION_ONLY), WEB_SENDER(7)));
     await flush();
     assert.deepEqual(h.ports[0].posted.map((message) => message.state), ["paused"]);
+  }
+});
+
+test("names: a tab that starts to make sound with no media of ours is asked what it shows, and the app is told what it answers", async () => {
+  const h = commandHarness({
+    sendToTab: (tabId, message) => {
+      h.toTabs.push({ tabId, message });
+      return Promise.resolve(tabId === 9 ? { title: "Xem Ông Bủn Xỉn", names: "Scrooged (1988)" } : { title: "Mail", names: "" });
+    }
+  });
+  h.relay.onTabAudible(9, true);
+  h.relay.onTabAudible(4, true); // a page that gives no other names
+  h.relay.onTabAudible(5, false); // no sound: not asked
+  await flush();
+  assert.deepEqual(h.toTabs, [{ tabId: 9, message: { v: 1, type: "names" } }, { tabId: 4, message: { v: 1, type: "names" } }]);
+  assert.deepEqual(h.ports[0].posted, [{ v: 1, type: "pagenames", tab: 9, title: "Xem Ông Bủn Xỉn", names: "Scrooged (1988)" }]);
+});
+
+test("names: a tab that cannot answer, or whose answer is not one, says nothing and throws nothing", async () => {
+  for (const sendToTab of [() => Promise.reject(new Error("Could not establish connection.")), () => Promise.resolve(undefined), () => { throw new Error("gone"); }]) {
+    const h = commandHarness({ sendToTab });
+    assert.doesNotThrow(() => h.relay.onTabAudible(9, true));
+    await flush();
+    assert.deepEqual(h.ports[0].posted, []);
   }
 });
