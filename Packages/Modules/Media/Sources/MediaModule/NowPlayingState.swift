@@ -1,0 +1,72 @@
+import Foundation
+
+/// What the system reports as now playing, reduced from the adapter's JSON payloads.
+nonisolated struct NowPlayingState: Equatable, Sendable {
+    var bundleIdentifier: String?
+    /// The app that owns `bundleIdentifier` when a helper process plays (e.g. a browser's media helper).
+    var parentApplicationBundleIdentifier: String?
+    var title: String?
+    var artist: String?
+    var album: String?
+    var durationSeconds: Double?
+    /// Elapsed time sampled by the player; the current position is extrapolated from it by `PlaybackClock`.
+    var elapsedAnchor: PlaybackAnchor?
+    var isPlaying = false
+    var artwork: ArtworkData?
+    var uniqueIdentifier: String?
+    var contentItemIdentifier: String?
+    var isAdvertisement = false
+    /// nil while the player reports none, which is how the row knows it has nothing to shuffle or repeat.
+    var shuffleMode: ShuffleMode?
+    var repeatMode: RepeatMode?
+    var isLiked = false
+    /// The player has a like for the track, which `isLiked` then says is set.
+    var supportsIsLiked = false
+    /// The player does not take next and previous now (an advert, the end of a queue).
+    var prohibitsSkip = false
+
+    static let empty = NowPlayingState()
+
+    /// The Apple Music catalog song id: the Music app reports it as `uniqueIdentifier`. Other players report ids of
+    /// their own, so only an all-digit one counts, and `TrackKey` keeps it for the Music app alone.
+    var catalogID: String? {
+        guard let id = uniqueIdentifier, !id.isEmpty, id.utf8.allSatisfy({ (48...57).contains($0) }) else { return nil }
+        return id
+    }
+
+    /// A player is reporting a track; the adapter treats media without a title as invalid.
+    var isActive: Bool { !(bundleIdentifier ?? "").isEmpty && !(title ?? "").isEmpty }
+
+    /// Changes only when another track starts, so views re-publish once per track instead of on every update.
+    var trackIdentity: TrackIdentity {
+        TrackIdentity(
+            bundleIdentifier: bundleIdentifier, parentApplicationBundleIdentifier: parentApplicationBundleIdentifier,
+            title: title, artist: artist, album: album,
+            uniqueIdentifier: uniqueIdentifier, contentItemIdentifier: contentItemIdentifier
+        )
+    }
+}
+
+nonisolated struct TrackIdentity: Hashable, Sendable {
+    var bundleIdentifier: String?
+    var parentApplicationBundleIdentifier: String?
+    var title: String?
+    var artist: String?
+    var album: String?
+    var uniqueIdentifier: String?
+    var contentItemIdentifier: String?
+}
+
+/// Playback position `elapsedSeconds` at `timestamp`, advancing at `rate` (0 while paused).
+nonisolated struct PlaybackAnchor: Equatable, Sendable {
+    var elapsedSeconds: Double
+    var timestamp: Date
+    var rate: Double
+}
+
+/// Raw cover image bytes; `revision` changes whenever the bytes do, so the image is decoded once per change.
+nonisolated struct ArtworkData: Equatable, Sendable {
+    var data: Data
+    var mimeType: String?
+    var revision: Int
+}

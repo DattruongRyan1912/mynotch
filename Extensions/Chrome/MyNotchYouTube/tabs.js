@@ -1,0 +1,751 @@
+/*
+ * MyNotch Web Companion: media tabs (content script, isolated world, any http or https page, every frame).
+ *
+ * Tells the service worker what the page's media is doing, so that MyNotch can show it next to the other sources that play
+ * (Music, Spotify, other tabs) and control it. A page's media is known in one of two ways:
+ *
+ *  - As an element. The script listens for the media events of the document (play, pause, seeked, ...) in the capture phase, so a
+ *    page with no media costs a few listeners and no timer. A media element counts when it plays and is not a muted or very short
+ *    clip (autoplay banners, interface sounds), unless the page has put a title in its Media Session, which is a page saying
+ *    "this is a player". It keeps counting while it is paused.
+ *  - As a Media Session, for media that is no element of the document (an `Audio` the page keeps to itself, which no event of the
+ *    document ever shows): a page whose Media Session has a title and says it plays or is paused. The page script (MAIN world)
+ *    passes on what the session says, including where it says it is, and an element, when there is one, wins.
+ *
+ * It reports the title (the Media Session's, else the document's), the artist and album the Media Session names, the site (the host
+ * name only, never a path or a URL), whether it plays, its position and length, its speed, and whether it is live. On a state
+ * change at once, then every 5 s while it plays and every 30 s while it is paused (the app keeps a tab for a few minutes without
+ * news, and expects a paused one to keep telling it so). A one-second tick runs only while something is being reported.
+ *
+ * It carries out the six commands of the app (play, pause, toggle, seek, next, previous): on the element when there is one, else
+ * through the page's own Media Session handlers, which the page script calls. Next and previous are the page's own business: the
+ * YouTube script offers its button clicks, and for any other page the page's handler is called, when the page has one.
+ *
+ * No artwork, no URL, no request of its own. Only the fields of `tab-report` (see tabmessages.js) are ever sent.
+ */
+(function (root) {
+  "use strict";
+
+  var C = root.__mynotchCaptions;
+  var T = root.__mynotchTabs;
+  var STARTED = Symbol.for("io.lucasvu.mynotch.tab.content");
+  // The YouTube script (content.js) leaves its next/previous behind here: `(action) => boolean`.
+  var SKIP = Symbol.for("io.lucasvu.mynotch.tab.skip");
+  if (!C || !T) return;
+  // Chrome can inject this again into a tab that has a copy (after the extension was updated or reloaded). A copy that is
+  // alive keeps the tab; one whose extension is gone, or that has shut down, is stopped and replaced.
+  var previous = root[STARTED];
+  if (previous && typeof previous.isAlive === "function") {
+    if (previous.isAlive()) return;
+    previous.stop();
+  }
+
+  var TICK_MS = 1000;
+  // While nothing plays and nothing is waiting, a tick only has a heartbeat to look for.
+  var PAUSED_TICK_MS = 5000;
+  // At most one report in this long from one page, forced ones too. A page chooses its own title, state and position, and without a
+  // floor it could make this script, the worker, the host and the app do work as fast as it can post; what a report finds changed
+  // in the meantime is not lost, the next tick sends the newest state.
+  var MIN_REPORT_MS = 250;
+  var PLAYING_HEARTBEAT_MS = 5000;
+  var PAUSED_HEARTBEAT_MS = 30000;
+  // A clip shorter than this is an interface sound or a loop, unless the page says it is a player.
+  var MIN_SECONDS = 5;
+  // A repeat of the same state is not sent again while the position is where it should be, within this many seconds.
+  var SAME_POSITION_SECONDS = 0.5;
+  // A player that is emptied (YouTube does it at every next video, and for adverts) is given this long to play again before the
+  // page is said to have no media: a track change is not the media going away, and the app would drop what the user pinned.
+  var EMPTIED_GRACE_MS = 2500;
+  var MEDIA_EVENTS = ["play", "playing", "pause", "ended", "emptied", "seeked", "ratechange", "loadedmetadata", "durationchange"];
+
+  var doc = root.document;
+  var state = {
+    el: null, // the element being reported
+    reported: false, // a report went out and no end since
+    last: null, // { key, time, at } of the last report
+    session: null, // what the page script last said of the Media Session, and when (see onPageMessage)
+    emptiedAt: 0, // when the element shown was emptied, until it plays again or the grace is over
+    sentAt: 0, // when the last report went out (never reset: a page cannot get round the floor by starting over)
+    dirty: false, // a report was held back by the floor, and is to go out at the next tick
+    timer: 0,
+    tickMs: 0,
+    messages: null, // chrome.runtime.onMessage, where the command listener is registered
+    stopped: false
+  };
+
+  function noop() {}
+
+  function isMedia(el) {
+    var name = el && typeof el.tagName === "string" ? el.tagName.toUpperCase() : "";
+    return (name === "VIDEO" || name === "AUDIO") && typeof el.play === "function";
+  }
+
+  function isPlaying(el) {
+    return Boolean(el) && !el.paused && !el.ended;
+  }
+
+  function isConnected(el) {
+    return el.isConnected !== false;
+  }
+
+  /**
+   * The document's title as the page shows it. On YouTube it is cleaned of the notification counter and the " - YouTube" suffix, and
+   * the shell's bare "YouTube" is no title; anywhere else it is what the page says, since the system's now playing says that too and
+   * the two must read the same for a page with no Media Session to be one source in MyNotch, not two.
+   */
+  function documentTitle() {
+    if (root.location.origin === "https://www.youtube.com") {
+      var title = C.cleanTitle(doc.title);
+      return title === "YouTube" ? "" : title;
+    }
+    return T.cleanText(doc.title, T.MAX_TITLE);
+  }
+
+  /**
+   * The other names the page gives what it plays: its og:title, its keywords and its first headings, each once. A Vietnamese film
+   * site titles its page "Xem Bố Già Học Việc HD - Vietsub" and names the film "The Intern (2015)" in a heading.
+   */
+  function pageNames() {
+    var doc = root.document;
+    var parts = [];
+    function add(text) {
+      var cleaned = T.cleanText(text || "", T.MAX_NAMES);
+      if (cleaned && parts.indexOf(cleaned) < 0) parts.push(cleaned);
+    }
+    try {
+      var og = doc.querySelector('meta[property="og:title"]');
+      if (og) add(og.getAttribute("content"));
+      var keywords = doc.querySelector('meta[name="keywords"]');
+      if (keywords) add(keywords.getAttribute("content"));
+      var headings = doc.querySelectorAll("h1, h2");
+      for (var index = 0; index < headings.length && index < 3; index++) add(headings[index].textContent);
+    } catch (error) {
+      return "";
+    }
+    return T.cleanText(parts.join(" | "), T.MAX_NAMES);
+  }
+
+  /** What the page's Media Session says, read live; else what the page script last told us. null when the page has no title in it. */
+  function readSession() {
+    try {
+      var metadata = root.navigator && root.navigator.mediaSession ? root.navigator.mediaSession.metadata : null;
+      var title = metadata ? T.cleanText(metadata.title, T.MAX_TITLE) : "";
+      if (title) {
+        return { title: title, artist: T.cleanText(metadata.artist, T.MAX_NAME), album: T.cleanText(metadata.album, T.MAX_NAME) };
+      }
+    } catch (error) {
+      /* a page whose Media Session cannot be read */
+    }
+    return state.session && state.session.title ? state.session : null;
+  }
+
+  /** What the page says its media is doing: read live when it says so, else what the page script last told us ("playing", "paused" or "none"). */
+  function sessionPlayback() {
+    try {
+      var live = root.navigator && root.navigator.mediaSession ? root.navigator.mediaSession.playbackState : "none";
+      if (live === "playing" || live === "paused") return live;
+    } catch (error) {
+      /* a page whose Media Session cannot be read from here */
+    }
+    return state.session ? state.session.playback : "none";
+  }
+
+  /** The page's media is not an element we know, and its Media Session has a title and says it plays or is paused. */
+  function isSessionActive() {
+    return !state.el && readSession() !== null && sessionPlayback() !== "none";
+  }
+
+  /** Web calls: their remote voices play in elements of the page, and are no music. Only a page that names itself is believed. */
+  var CALL_HOSTS = /^(?:.+\.)?(?:meet\.google\.com|zoom\.us|zoom\.com|teams\.microsoft\.com|teams\.live\.com|whereby\.com|webex\.com|meet\.jit\.si|gotomeeting\.com|skype\.com|chime\.aws)$/;
+
+  /** A live feed of a camera or a microphone, which is how a call's voices reach their elements (`srcObject`, not a file or a stream). */
+  function isLiveFeed(el) {
+    try {
+      return typeof root.MediaStream === "function" && el.srcObject instanceof root.MediaStream;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /** Whether a media element is one to show: see the header. */
+  function isEligible(el) {
+    if (readSession()) return true;
+    // No title of its own in a Media Session: not a call (by its site, or by what feeds the element), not silent, not a short clip.
+    if (CALL_HOSTS.test(root.location.hostname || "") || isLiveFeed(el)) return false;
+    if (el.muted === true || el.volume === 0) return false;
+    var duration = el.duration;
+    return !(typeof duration === "number" && isFinite(duration) && duration < MIN_SECONDS);
+  }
+
+  function finite(value, fallback) {
+    return typeof value === "number" && isFinite(value) ? value : fallback;
+  }
+
+  /** Whether this is the tab's top frame; a frame's report is the page's, and the worker gives it the top frame's title and site. */
+  function isTopFrame() {
+    try {
+      return root.top === root;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * The report for the element, or null while there is no title to give (the page has not set one yet). A frame's own title is
+   * not the page's (a player's frame is titled by its file): it sends none, unless its Media Session names what it plays.
+   */
+  function buildElement(el) {
+    var session = readSession();
+    var top = isTopFrame();
+    var title = session ? session.title : top ? documentTitle() : "";
+    if (!title && top) return null;
+    var duration = el.duration;
+    var rate = finite(el.playbackRate, 1);
+    return {
+      v: 1,
+      type: "tab-report",
+      site: T.cleanSite(root.location.hostname),
+      title: title,
+      artist: session ? session.artist || "" : "",
+      album: session ? session.album || "" : "",
+      names: pageNames(),
+      state: isPlaying(el) ? "playing" : "paused",
+      time: Math.max(finite(el.currentTime, 0), 0),
+      duration: typeof duration === "number" && isFinite(duration) && duration >= 0 ? duration : null,
+      rate: rate > 0 && rate <= 16 ? rate : 1,
+      live: duration === Infinity,
+      element: true
+    };
+  }
+
+  /**
+   * The report for the page's Media Session: the position it last gave, carried on at the speed it gave while it plays, since the
+   * session says it only when it changes. Without a position (many pages never set one) it is 0 of no length.
+   */
+  function buildSession() {
+    var session = readSession();
+    var playback = sessionPlayback();
+    if (!session || playback === "none") return null;
+    var given = state.session && state.session.position;
+    var rate = given ? given.rate : 1;
+    var time = 0;
+    var duration = null;
+    if (given) {
+      duration = given.duration;
+      var since = given.at !== null ? given.at : state.session.receivedAt;
+      var elapsed = playback === "playing" ? Math.min(Math.max((Date.now() - since) / 1000, 0), T.MAX_SECONDS) * rate : 0;
+      time = given.position + elapsed;
+      if (duration !== null) time = Math.min(time, duration);
+    }
+    return {
+      v: 1,
+      type: "tab-report",
+      site: T.cleanSite(root.location.hostname),
+      title: session.title,
+      artist: session.artist || "",
+      album: session.album || "",
+      names: pageNames(),
+      state: playback,
+      time: time,
+      duration: duration,
+      rate: rate,
+      live: false,
+      element: false
+    };
+  }
+
+  /** Hands a validated message to the service worker; a failure is never thrown, and a gone extension ends this copy. */
+  function transmit(clean) {
+    try {
+      var result = root.chrome.runtime.sendMessage(clean);
+      if (result && typeof result.then === "function") result.then(noop, onSendFailure);
+    } catch (error) {
+      onSendFailure(error);
+    }
+  }
+
+  function onSendFailure() {
+    // "Extension context invalidated" after a reload or an update: this copy is orphaned.
+    if (!root.chrome || !root.chrome.runtime || !root.chrome.runtime.id) shutdown();
+  }
+
+  /** What happened to a command, for the log. The only diagnostic this script sends, one per command, so it needs no rate limit. */
+  function diag(event) {
+    var message = C.buildDiag("content", event);
+    if (message) transmit(message);
+  }
+
+  function expectedTime(last, now) {
+    return last.time + (last.playing ? ((now - last.at) / 1000) * last.rate : 0);
+  }
+
+  function heartbeat(report) {
+    return report.state === "playing" ? PLAYING_HEARTBEAT_MS : PAUSED_HEARTBEAT_MS;
+  }
+
+  /** Sends the element's report when something changed, the position is not where the last report put it, or a heartbeat is due. */
+  function report(force) {
+    var now = Date.now();
+    if (state.sentAt && now >= state.sentAt && now - state.sentAt < MIN_REPORT_MS) {
+      // Too soon after the last one, whatever the page says: the tick sends what is newest by then.
+      state.dirty = true;
+      syncTimer();
+      return;
+    }
+    var el = state.el;
+    var message;
+    if (el) {
+      if (!isConnected(el)) {
+        end();
+        afterElementGone();
+        return;
+      }
+      message = buildElement(el);
+    } else if (isSessionActive()) {
+      message = buildSession();
+    } else {
+      // Nothing left to show: say so, if anything was shown.
+      if (state.reported) end();
+      else stopTimer();
+      return;
+    }
+    if (!message) return;
+    var key = [message.title, message.artist, message.album, message.site, message.state, message.duration, message.rate, message.live].join("\u0001");
+    var last = state.last;
+    // A session that never said where it is has no position to be off: only its heartbeat is news.
+    var positionKnown = Boolean(el) || Boolean(state.session && state.session.position);
+    if (!force && !state.dirty && last && last.key === key && now - last.at < heartbeat(message)) {
+      if (!positionKnown || Math.abs(message.time - expectedTime(last, now)) < SAME_POSITION_SECONDS) return;
+    }
+    var clean = T.validateReport(message, !isTopFrame());
+    if (!clean) return;
+    state.last = { key: key, time: message.time, at: now, playing: message.state === "playing", rate: message.rate };
+    state.reported = true;
+    state.sentAt = now;
+    state.dirty = false;
+    transmit(clean);
+    syncTimer();
+  }
+
+  /** The page has no media to show any more: say so once, and stop ticking. */
+  function end() {
+    var reported = state.reported;
+    state.el = null;
+    state.emptiedAt = 0;
+    state.last = null;
+    state.reported = false;
+    state.dirty = false;
+    stopTimer();
+    if (reported) transmit(T.validateEnd({ v: 1, type: "tab-end" }));
+  }
+
+  /** The element is gone, and the page's Media Session may still say that it plays: then that is what the page shows now. */
+  function afterElementGone() {
+    if (!isSessionActive()) return;
+    startTimer();
+    report(true);
+  }
+
+  /** A second while something plays or waits (a held-back report, an emptied player); every few seconds while it is paused. */
+  function wantedTickMs() {
+    return state.dirty || state.emptiedAt || !state.last || state.last.playing ? TICK_MS : PAUSED_TICK_MS;
+  }
+
+  /** Starts the tick, or sets it to the pace it should have now; only while something is being reported. */
+  function syncTimer() {
+    if (state.stopped || !state.timer) return;
+    var ms = wantedTickMs();
+    if (state.tickMs === ms) return;
+    root.clearInterval(state.timer);
+    state.timer = root.setInterval(tick, ms);
+    state.tickMs = ms;
+  }
+
+  function startTimer() {
+    if (state.timer || state.stopped) return;
+    state.tickMs = wantedTickMs();
+    state.timer = root.setInterval(tick, state.tickMs);
+  }
+
+  function stopTimer() {
+    if (state.timer) root.clearInterval(state.timer);
+    state.timer = 0;
+    state.tickMs = 0;
+  }
+
+  function claim(el) {
+    state.el = el;
+    state.emptiedAt = 0;
+    startTimer();
+    report(true);
+  }
+
+  function tick() {
+    try {
+      var el = state.el;
+      if (el && state.emptiedAt && Date.now() - state.emptiedAt >= EMPTIED_GRACE_MS && !isPlaying(el)) {
+        end();
+        afterElementGone();
+        return;
+      }
+      report(false);
+      syncTimer();
+    } catch (error) {
+      /* the next tick tries again */
+    }
+  }
+
+  function onMedia(event) {
+    try {
+      var el = event && event.target;
+      if (!isMedia(el)) return;
+      if (event.type === "play" || event.type === "playing") {
+        // The latest to play is the one shown, and a player that was already shown keeps its place.
+        if (el === state.el) {
+          state.emptiedAt = 0;
+          report(false);
+          syncTimer();
+        } else if (isEligible(el)) {
+          claim(el);
+        }
+        return;
+      }
+      if (el !== state.el) return;
+      if (event.type === "emptied") {
+        // Not yet the end: it is most likely the next video loading into the same element. The tick ends it if nothing plays.
+        state.emptiedAt = Date.now();
+        report(false);
+        syncTimer();
+      } else if ((event.type === "durationchange" || event.type === "loadedmetadata") && !isEligible(el)) {
+        end();
+        afterElementGone();
+      } else {
+        // What the report left out of a change, it sends only when it is one: a repeat of the same state is not sent again.
+        report(false);
+      }
+    } catch (error) {
+      /* a failing handler must not reach the page */
+    }
+  }
+
+  /** What the page script told us about the Media Session. */
+  function onPageMessage(event) {
+    var message = T.acceptSessionMessage(event, root, root.location.origin);
+    if (!message) return;
+    message.receivedAt = Date.now();
+    state.session = message;
+    try {
+      if (state.el) {
+        report(false);
+      } else if (isSessionActive()) {
+        startTimer();
+        report(false);
+      } else if (state.reported) {
+        end();
+      }
+    } catch (error) {
+      /* the next tick tries again */
+    }
+  }
+
+  function onPageHide() {
+    end();
+  }
+
+  // ---- commands from the service worker --------------------------------------------------------------------
+
+  function play(el) {
+    var result = el.play();
+    if (result && typeof result.then === "function") result.then(noop, noop);
+  }
+
+  /** Next or previous: the YouTube script's button clicks, or the page's own Media Session handler when it has one. */
+  function skip(action) {
+    var hook = root[SKIP];
+    if (typeof hook === "function") {
+      try {
+        return hook(action) === true;
+      } catch (error) {
+        return false;
+      }
+    }
+    var known = state.session ? (action === "next" ? state.session.next : state.session.previous) : false;
+    return known && invoke(action);
+  }
+
+  /** Asks the page script to call the page's own handler for the action; false when there is nothing valid to ask. */
+  function invoke(action, seconds) {
+    var request = T.buildInvoke(action, seconds);
+    if (!request) return false;
+    root.postMessage(request, root.location.origin);
+    return true;
+  }
+
+  /** The same six commands through the page's Media Session handlers, for media that is no element of ours. */
+  function performThroughSession(command) {
+    var session = state.session;
+    switch (command.action) {
+      case "play":
+        return session.play && invoke("play");
+      case "pause":
+        return session.pause && invoke("pause");
+      case "toggle":
+        return sessionPlayback() === "playing" ? session.pause && invoke("pause") : session.play && invoke("play");
+      case "seek":
+        return session.seek && invoke("seek", command.seconds);
+      case "next":
+      case "previous":
+        return skip(command.action);
+      default:
+        return false;
+    }
+  }
+
+  function applyVolume(command, activeEl) {
+    var vol = typeof command.volume === "number" ? Math.max(0, Math.min(1, command.volume)) : null;
+    var muted = typeof command.muted === "boolean" ? command.muted : null;
+    var changed = false;
+
+    if (activeEl) {
+      if (vol !== null) activeEl.volume = vol;
+      if (muted !== null) activeEl.muted = muted;
+      changed = true;
+    }
+
+    try {
+      var allMedia = doc && typeof doc.querySelectorAll === "function" ? doc.querySelectorAll("video, audio") : [];
+      for (var i = 0; i < allMedia.length; i++) {
+        var m = allMedia[i];
+        if (m && m !== activeEl) {
+          if (vol !== null) m.volume = vol;
+          if (muted !== null) m.muted = muted;
+          changed = true;
+        }
+      }
+    } catch (e) {}
+
+    return changed;
+  }
+
+  /** Whether the command could be carried out. Never throws: a page that changed under us is "unavailable". */
+  function perform(command) {
+    try {
+      if (command.action === "volume") {
+        var activeEl = state.el && isConnected(state.el) ? state.el : null;
+        return applyVolume(command, activeEl);
+      }
+      var el = state.el;
+      if (!el && isSessionActive()) return performThroughSession(command) === true;
+      if (!el || !isConnected(el)) return false;
+      switch (command.action) {
+        case "play":
+          play(el);
+          return true;
+        case "pause":
+          el.pause();
+          return true;
+        case "toggle":
+          if (el.paused || el.ended) play(el);
+          else el.pause();
+          return true;
+        case "seek": {
+          var seconds = command.seconds;
+          var duration = el.duration;
+          if (typeof duration === "number" && isFinite(duration)) seconds = Math.min(seconds, duration);
+          el.currentTime = seconds;
+          return true;
+        }
+        case "next":
+        case "previous":
+          return skip(command.action);
+        default:
+          return false;
+      }
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * chrome.runtime.onMessage: the service worker passes on a command of the app. Only the extension's own worker (a sender
+   * without a tab) is listened to, and only the closed command set; anything else is ignored. The answer is sent at once, so
+   * the worker's send always resolves.
+   */
+  function onRuntimeMessage(message, sender, sendResponse) {
+    var own = root.chrome && root.chrome.runtime ? root.chrome.runtime.id : undefined;
+    if (!own || !sender || sender.tab || sender.id !== own) return undefined;
+    var line = T.validateSubtitle(message);
+    if (line) {
+      showSubtitle(line);
+      try {
+        if (typeof sendResponse === "function") sendResponse({ ok: true });
+      } catch (error) {
+        /* the worker stopped waiting */
+      }
+      return undefined;
+    }
+    if (T.isNamesRequest(message)) {
+      try {
+        if (typeof sendResponse === "function") {
+          sendResponse({ title: documentTitle(), names: pageNames(), site: T.cleanSite(root.location.hostname) });
+        }
+      } catch (error) {
+        /* the worker stopped waiting */
+      }
+      return undefined;
+    }
+    var command = T.validateTabCommand(message);
+    if (!command) return undefined;
+    var ok = perform(command);
+    diag("content-tabcommand " + command.action + " " + (ok ? "ok" : "unavailable"));
+    try {
+      if (typeof sendResponse === "function") sendResponse({ ok: ok });
+    } catch (error) {
+      /* the worker stopped waiting */
+    }
+    return undefined;
+  }
+
+  // ---- the app's subtitles, drawn on the player ------------------------------------------------------------------------------------
+
+  // As the app's window over a fullscreen film: a share of the height for the letters, at least this many pixels, 80 % of the width.
+  var SUBTITLE_SIZE = 0.045;
+  var SUBTITLE_MIN_PX = 14;
+  var subtitle = { host: null, box: null, line: null, timer: 0, listening: false };
+
+  /** The line goes up over the player at once, and comes down by itself after `until` unless a newer one comes. Text only. */
+  function showSubtitle(line) {
+    if (subtitle.timer) root.clearTimeout(subtitle.timer);
+    subtitle.timer = 0;
+    if (!line.text) {
+      removeSubtitle();
+      return;
+    }
+    subtitle.line = line;
+    placeSubtitle();
+    subtitle.timer = root.setTimeout(removeSubtitle, Math.max(line.until, 0) * 1000);
+  }
+
+  function removeSubtitle() {
+    if (subtitle.timer) root.clearTimeout(subtitle.timer);
+    subtitle.timer = 0;
+    subtitle.line = null;
+    if (subtitle.host && subtitle.host.parentNode) subtitle.host.parentNode.removeChild(subtitle.host);
+    listenForPlace(false);
+  }
+
+  /** The player the line is drawn on: the one reported, else the largest video of the document. */
+  function subtitleVideo() {
+    if (state.el && isConnected(state.el)) return state.el;
+    var best = null;
+    var list = doc.querySelectorAll ? doc.querySelectorAll("video") : [];
+    for (var i = 0; i < list.length; i++) {
+      var rect = list[i].getBoundingClientRect();
+      if (!best || rect.width * rect.height > best.area) best = { el: list[i], area: rect.width * rect.height };
+    }
+    return best ? best.el : null;
+  }
+
+  /**
+   * Over the video, in the fullscreen element when the player is fullscreen (only that element is drawn then). A video that is itself
+   * the fullscreen element cannot have anything over it: the line waits for it to leave fullscreen.
+   */
+  function placeSubtitle() {
+    var line = subtitle.line;
+    var video = subtitleVideo();
+    var full = doc.fullscreenElement || null;
+    if (!line || !video || full === video) {
+      if (subtitle.host && subtitle.host.parentNode) subtitle.host.parentNode.removeChild(subtitle.host);
+      listenForPlace(Boolean(line));
+      return;
+    }
+    if (!subtitle.host) {
+      subtitle.host = doc.createElement("mynotch-subtitle");
+      var shadow = subtitle.host.attachShadow({ mode: "closed" });
+      subtitle.box = doc.createElement("div");
+      shadow.appendChild(subtitle.box);
+    }
+    var parent = full && full.contains(video) ? full : doc.documentElement;
+    if (subtitle.host.parentNode !== parent) parent.appendChild(subtitle.host);
+    var rect = video.getBoundingClientRect();
+    var size = Math.max(rect.height * SUBTITLE_SIZE, SUBTITLE_MIN_PX) * line.scale;
+    var host = subtitle.host.style;
+    host.cssText =
+      "all:initial;position:fixed;z-index:2147483647;pointer-events:none;display:flex;align-items:flex-end;justify-content:center;" +
+      "left:" + rect.left + "px;top:" + rect.top + "px;width:" + rect.width + "px;height:" + rect.height + "px;" +
+      "padding-bottom:" + rect.height * line.gap + "px;box-sizing:border-box;";
+    subtitle.box.style.cssText =
+      "max-width:80%;color:#fff;text-align:center;white-space:pre-line;font:600 " + size + "px -apple-system,BlinkMacSystemFont,sans-serif;" +
+      "line-height:1.25;text-shadow:0 0 1px #000,0 0 2px #000,0 0 4px rgba(0,0,0,.6);";
+    subtitle.box.textContent = line.text;
+    listenForPlace(true);
+  }
+
+  function onPlaceChange() {
+    if (subtitle.line) placeSubtitle();
+  }
+
+  /** While a line is up it follows the player: a resize, a scroll, fullscreen in or out. */
+  function listenForPlace(on) {
+    if (on === subtitle.listening) return;
+    subtitle.listening = on;
+    var method = on ? "addEventListener" : "removeEventListener";
+    root[method]("resize", onPlaceChange, false);
+    root[method]("scroll", onPlaceChange, true);
+    doc[method]("fullscreenchange", onPlaceChange, false);
+  }
+
+  function runtimeMessages() {
+    var runtime = root.chrome && root.chrome.runtime;
+    return runtime && runtime.onMessage && typeof runtime.onMessage.addListener === "function" ? runtime.onMessage : null;
+  }
+
+  function isAlive() {
+    return !state.stopped && Boolean(root.chrome && root.chrome.runtime && root.chrome.runtime.id);
+  }
+
+  function shutdown() {
+    state.stopped = true;
+    stopTimer();
+    for (var i = 0; i < MEDIA_EVENTS.length; i++) doc.removeEventListener(MEDIA_EVENTS[i], onMedia, true);
+    root.removeEventListener("message", onPageMessage, false);
+    root.removeEventListener("pagehide", onPageHide, false);
+    try {
+      if (state.messages) state.messages.removeListener(onRuntimeMessage);
+    } catch (error) {
+      /* the extension context is gone, and the listener with it */
+    }
+    state.messages = null;
+    removeSubtitle();
+    state.el = null;
+  }
+
+  /** A page whose media was already playing when this script came (an injection after an install or an update). */
+  function claimPlaying() {
+    var list = doc.querySelectorAll ? doc.querySelectorAll("video, audio") : [];
+    for (var i = 0; i < list.length; i++) {
+      var el = list[i];
+      if (isMedia(el) && isPlaying(el) && isEligible(el)) {
+        claim(el);
+        return;
+      }
+    }
+  }
+
+  root[STARTED] = { isAlive: isAlive, stop: shutdown };
+  for (var i = 0; i < MEDIA_EVENTS.length; i++) doc.addEventListener(MEDIA_EVENTS[i], onMedia, true);
+  root.addEventListener("message", onPageMessage, false);
+  root.addEventListener("pagehide", onPageHide, false);
+  state.messages = runtimeMessages();
+  if (state.messages) state.messages.addListener(onRuntimeMessage);
+  try {
+    claimPlaying();
+    // A page that was already playing through its Media Session alone (no element of the document) when the script came.
+    if (!state.el && isSessionActive()) {
+      startTimer();
+      report(true);
+    }
+  } catch (error) {
+    /* the first media event finds it */
+  }
+})(typeof globalThis !== "undefined" ? globalThis : self);

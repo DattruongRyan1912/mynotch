@@ -1,0 +1,134 @@
+import AgentHookKit
+import Foundation
+import MyNotchTestSupport
+import Testing
+@testable import AIAgentsModule
+
+@Suite struct AgentEventServerTests {
+    let directory: URL
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    init() {
+        // Unix socket paths are limited to 104 bytes, so the directory is short and outside the sandboxed temp dir.
+        directory = ScratchFolders.shared.reserveShort()
+    }
+
+    func payload(_ event: String = "Stop") -> HookPayload {
+        HookPayload(source: "claude", event: event, sessionID: "s1", timestamp: now)
+    }
+
+    /// Waits on the main actor, where the callback runs, until `condition` holds.
+    func waitUntil(_ condition: () -> Bool) async {
+        for _ in 0..<200 where !condition() { try? await Task.sleep(for: .milliseconds(10)) }
+    }
+
+    @Test func aDatagramReachesTheCallbackAndStopRemovesTheSocket() async throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var received: [HookPayload] = []
+        let server = AgentEventServer(directory: directory) { received.append($0) }
+        try server.start()
+        #expect(FileManager.default.fileExists(atPath: server.socketPath))
+        let permissions = try FileManager.default.attributesOfItem(atPath: directory.path)[.posixPermissions] as? Int
+        #expect(permissions == 0o700)
+
+        HookDatagramSender.send(try #require(payload("PreToolUse").encodedDatagram()), to: server.socketPath)
+        await waitUntil { !received.isEmpty }
+        #expect(received == [payload("PreToolUse")])
+
+        server.stop()
+        #expect(!FileManager.default.fileExists(atPath: server.socketPath))
+    }
+
+    @Test func garbageDatagramsAreIgnored() async throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var received: [HookPayload] = []
+        let server = AgentEventServer(directory: directory) { received.append($0) }
+        try server.start()
+        defer { server.stop() }
+        HookDatagramSender.send(Data("not json".utf8), to: server.socketPath)
+        HookDatagramSender.send(try #require(payload().encodedDatagram()), to: server.socketPath)
+        await waitUntil { !received.isEmpty }
+        #expect(received == [payload()])
+    }
+
+    @Test func aStaleSocketFileIsReplaced() async throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("stale".utf8).write(to: directory.appending(path: "agent.sock"))
+        var received: [HookPayload] = []
+        let server = AgentEventServer(directory: directory) { received.append($0) }
+        try server.start()
+        defer { server.stop() }
+        HookDatagramSender.send(try #require(payload().encodedDatagram()), to: server.socketPath)
+        await waitUntil { !received.isEmpty }
+        #expect(received.count == 1)
+    }
+
+    @Test func anExistingDirectoryIsMadePrivateToo() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        let server = AgentEventServer(directory: directory) { _ in }
+        try server.start()
+        defer { server.stop() }
+        #expect(try FileManager.default.attributesOfItem(atPath: directory.path)[.posixPermissions] as? Int == 0o700)
+    }
+
+    @Test func theReceiveBufferIsLargeEnoughForABurstOfHelpers() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let server = AgentEventServer(directory: directory) { _ in }
+        #expect(server.receiveBufferSize == nil)
+        try server.start()
+        // The default of a few KB holds only a handful of datagrams.
+        #expect((server.receiveBufferSize ?? 0) >= 256 * 1024)
+        server.stop()
+        #expect(server.receiveBufferSize == nil)
+    }
+
+    /// A folder of another user, as when someone made `/tmp/mynotch-<uid>` before the app did. `/Library` is the
+    /// system's; the check comes before anything is changed or created there.
+    @Test(.enabled(if: geteuid() != 0)) func aDirectoryOfAnotherUserIsRefused() {
+        let foreign = URL(filePath: "/Library", directoryHint: .isDirectory)
+        let server = AgentEventServer(directory: foreign) { _ in }
+        #expect(throws: AgentEventServer.StartError.directoryNotOwned) { try server.start() }
+        #expect(server.receiveBufferSize == nil)
+    }
+
+    @Test(.enabled(if: geteuid() != 0)) func aLinkToADirectoryOfAnotherUserIsRefusedToo() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createSymbolicLink(at: directory, withDestinationURL: URL(filePath: "/Library", directoryHint: .isDirectory))
+        let server = AgentEventServer(directory: directory) { _ in }
+        #expect(throws: AgentEventServer.StartError.directoryNotOwned) { try server.start() }
+    }
+
+    @Test func callbacksQueuedBeforeStopAreDropped() async throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var received: [HookPayload] = []
+        let server = AgentEventServer(directory: directory) { received.append($0) }
+        try server.start()
+        HookDatagramSender.send(try #require(payload().encodedDatagram()), to: server.socketPath)
+        // Blocks the main thread, so the datagram is read and handed to the main queue but not yet delivered.
+        usleep(300_000)
+        server.stop()
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(received.isEmpty)
+    }
+
+    @Test func aServerThatIsDroppedWithoutStopRemovesItsSocket() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var path = ""
+        do {
+            let server = AgentEventServer(directory: directory) { _ in }
+            try server.start()
+            path = server.socketPath
+            #expect(FileManager.default.fileExists(atPath: path))
+        }
+        #expect(!FileManager.default.fileExists(atPath: path))
+    }
+
+    @Test func aPathThatDoesNotFitIsATypedError() {
+        let long = URL(filePath: "/tmp/" + String(repeating: "d", count: 120), directoryHint: .isDirectory)
+        let server = AgentEventServer(directory: long) { _ in }
+        #expect(throws: AgentEventServer.StartError.pathTooLong) { try server.start() }
+        #expect(!FileManager.default.fileExists(atPath: long.path))
+    }
+}

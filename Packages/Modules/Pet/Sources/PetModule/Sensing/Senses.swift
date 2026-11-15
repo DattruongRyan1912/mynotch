@@ -1,0 +1,141 @@
+import AppKit
+import CoreAudio
+import CoreGraphics
+import Darwin
+import Foundation
+
+/// Everything the cat reads from the Mac. Each is read only while the cat is on the notch, and each is a protocol so that a test never
+/// touches the real thing.
+protocol IdleTimeSource {
+    /// Seconds since the user last used the keyboard or the pointer.
+    func secondsSinceLastInput() -> TimeInterval
+}
+
+protocol CPULoadSource {
+    /// How busy the processors have been since the last call, 0 to 1; nil for the first call, which has nothing to compare with.
+    func load() -> Double?
+}
+
+protocol PointerSource {
+    /// Where the pointer is, in screen coordinates.
+    func location() -> CGPoint
+}
+
+protocol AudioPlaybackSource {
+    /// Whether the Mac is playing sound.
+    func isPlaying() -> Bool
+}
+
+/// How long since the user's last input, as the window server counts it: any event of the session, so the pointer moving counts.
+struct SystemIdleTime: IdleTimeSource {
+    func secondsSinceLastInput() -> TimeInterval {
+        CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+    }
+}
+
+/// The processors' load from the kernel's tick counters: the share of ticks that were not idle since the last read.
+final class HostCPULoad: CPULoadSource {
+    /// One send right for the life of the process; `mach_host_self()` adds a reference to it at every call.
+    private static let host = mach_host_self()
+    private var previous: host_cpu_load_info?
+
+    func load() -> Double? {
+        var info = host_cpu_load_info()
+        var count = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info>.size / MemoryLayout<integer_t>.size)
+        let status = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics(Self.host, HOST_CPU_LOAD_INFO, $0, &count)
+            }
+        }
+        guard status == KERN_SUCCESS else { return nil }
+        defer { previous = info }
+        guard let previous else { return nil }
+        func ticks(_ info: host_cpu_load_info) -> (busy: UInt64, total: UInt64) {
+            let user = UInt64(info.cpu_ticks.0), system = UInt64(info.cpu_ticks.1)
+            let idle = UInt64(info.cpu_ticks.2), nice = UInt64(info.cpu_ticks.3)
+            return (user + system + nice, user + system + nice + idle)
+        }
+        let (now, before) = (ticks(info), ticks(previous))
+        let total = now.total &- before.total
+        guard total > 0 else { return nil }
+        return min(max(Double(now.busy &- before.busy) / Double(total), 0), 1)
+    }
+}
+
+struct SystemPointer: PointerSource {
+    func location() -> CGPoint { NSEvent.mouseLocation }
+}
+
+/// Whether the default output device is running for anyone: any app's music, a video, a call. It is not the music alone, which only
+/// the Media module can tell, and a module may not read another's state; the cat dances to what it hears.
+struct AudioOutputProbe: AudioPlaybackSource {
+    func isPlaying() -> Bool {
+        var defaultDevice = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice, mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var device = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &defaultDevice, 0, nil, &size, &device) == noErr,
+              device != kAudioObjectUnknown else { return false }
+        var running = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere, mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var value: UInt32 = 0
+        size = UInt32(MemoryLayout<UInt32>.size)
+        return AudioObjectGetPropertyData(device, &running, 0, nil, &size, &value) == noErr && value != 0
+    }
+}
+
+/// How the pointer looks to the cat.
+nonisolated enum PointerLook {
+    /// How far from the strip counts as near, in points: the cat pounces. In the menu bar's own row, where the pointer is all the time on
+    /// its way to something, only so far.
+    static let nearMargin: CGFloat = 40
+    static let bandNearMargin: CGFloat = 20
+    /// How far it can see, to the side and up or down.
+    static let sightX: CGFloat = 170
+    static let sightY: CGFloat = 110
+
+    /// What the cat makes of `point` (in screen coordinates) with its strip at `strip`, nil for a pointer out of sight. `lane` is the
+    /// cat's, in the strip's own coordinates, and the share it is given is that of the cat's centre.
+    static func reading(
+        of point: CGPoint, strip: CGRect, lane: WalkLane, spriteWidth: CGFloat, origin: CGFloat = 0, nearMargin: CGFloat = nearMargin
+    ) -> PointerReading? {
+        let isNear = strip.insetBy(dx: -nearMargin, dy: -nearMargin).contains(point)
+        let isInRange = strip.insetBy(dx: -sightX, dy: -sightY).contains(point)
+        guard isNear || isInRange else { return nil }
+        // `origin` is where the view's left edge is on the line the cat walks along, which is its own for a view that is one of two.
+        let share = lane.travel > 0 ? Double((point.x - strip.minX + origin - spriteWidth / 2 - lane.minX) / lane.travel) : 0.5
+        return PointerReading(share: share, isNear: isNear, isInRange: isInRange, isAbove: point.y >= strip.maxY - 1)
+    }
+}
+
+/// Whether the pointer has stopped near the cat: near, and not moved more than a few points since it was last asked, for a while. A pointer
+/// that is only passing (on its way along the menu bar to a menu) is not.
+nonisolated struct PointerDwell: Sendable {
+    /// How far the pointer may move between two looks and still be at rest, in points, and how long it must be at rest, in seconds.
+    static let restWithin: CGFloat = 8
+    static let hold: TimeInterval = 0.75
+
+    private var since: TimeInterval?
+    private var last: CGPoint?
+
+    /// Whether the pointer, at `point` at `now`, is near and has been at rest for the hold.
+    mutating func isSettled(near: Bool, at point: CGPoint, now: TimeInterval) -> Bool {
+        guard near else {
+            since = nil
+            last = nil
+            return false
+        }
+        if let last, hypot(point.x - last.x, point.y - last.y) > Self.restWithin { since = now }
+        since = since ?? now
+        last = point
+        return now - (since ?? now) >= Self.hold
+    }
+
+    /// The cat's gone: nothing is held.
+    mutating func reset() {
+        since = nil
+        last = nil
+    }
+}

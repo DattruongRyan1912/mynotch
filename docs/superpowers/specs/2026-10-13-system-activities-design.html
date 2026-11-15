@@ -1,0 +1,69 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MyNotch — Live activity hệ thống + HUD âm lượng (dự án con 7)</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-mục-tiêu">1. Mục tiêu</a><a class="h2" href="#2-thiết-kế">2. Thiết kế</a><a class="h3" href="#2-1-cài-đặt-module-systemactivities">2.1 Cài đặt (<code>module.systemactivities.*</code>)</a><a class="h2" href="#3-kiểm-thử">3. Kiểm thử</a></nav><main><h1 id="mynotch-live-activity-hệ-thống-hud-âm-lượng-dự-án-con-7">MyNotch — Live activity hệ thống + HUD âm lượng (dự án con 7)</h1>
+<ul>
+<li><strong>Ngày:</strong> 2026-10-13</li>
+<li><strong>Trạng thái:</strong> Thiết kế</li>
+<li><strong>Nguồn:</strong> SDK macOS 26.5. Các API công khai đã được kiểm tra trên máy; API riêng chỉ ghi nhận, không dùng mặc định.</li>
+</ul>
+<h2 id="1-mục-tiêu">1. Mục tiêu</h2>
+<p>Một module "Hệ thống". Mỗi loại sự kiện bật/tắt riêng và hiện thành live activity ngắn (2–3 giây) bên cạnh notch. Activity cập nhật tại chỗ theo quy ước B1.</p>
+<table><thead><tr><th>Sự kiện</th><th>API</th><th>Quyền</th><th>Mặc định</th></tr></thead><tbody>
+<tr><td>Thiết bị Bluetooth kết nối/ngắt</td><td><code>IOBluetoothDevice.register(forConnectNotifications:selector:)</code> + đăng ký ngắt cho từng thiết bị</td><td>Bluetooth (<code>NSBluetoothAlwaysUsageDescription</code>, đã có)</td><td>bật</td></tr>
+<tr><td>Pin tai nghe/AirPods</td><td>Selector riêng <code>batteryPercentSingle/Left/Right/Case</code> của <code>IOBluetoothDevice</code>, chỉ gọi sau khi <code>responds(to:)</code></td><td>như trên</td><td>bật; không có số liệu thì chỉ hiện tên thiết bị</td></tr>
+<tr><td>Mạng có/mất, Wi-Fi ↔ dây</td><td><code>NWPathMonitor</code></td><td>không</td><td>bật</td></tr>
+<tr><td>Caps Lock bật/tắt</td><td>Poll <code>CGEventSource.flagsState(.combinedSessionState)</code> 4 lần/giây qua <code>context.scheduler</code> (không cần quyền; theo dõi phím toàn cục thì cần Accessibility)</td><td>không</td><td>bật</td></tr>
+<tr><td>Tải xuống xong (<code>~/Downloads</code>)</td><td>FSEvents theo file. Xong khi: file tạm <code>.download</code>/<code>.crdownload</code>/<code>.part</code> biến mất, file đích tồn tại với kích thước &gt; 0, kích thước đứng yên 1 giây</td><td>Files &amp; Folders → <code>NSDownloadsFolderUsageDescription</code></td><td>bật</td></tr>
+<tr><td>Âm lượng</td><td>Listener CoreAudio trên thiết bị ra mặc định (<code>VirtualMainVolume</code>, <code>Mute</code>), gắn lại khi đổi thiết bị</td><td>không</td><td>bật</td></tr>
+</tbody></table>
+<p><strong>HUD âm lượng:</strong> chỉ hiện song song với HUD hệ thống (activity có thanh mức âm lượng), không chặn HUD hệ thống. Muốn chặn thì phải nuốt phím media bằng event tap, cần Accessibility và có rủi ro kẹt bàn phím, nên không làm.</p>
+<p><strong>Ngoài phạm vi:</strong></p>
+<ul>
+<li>Focus: không có API công khai. Sau này có thể làm qua App Intents <code>SetFocusFilterIntent</code>.</li>
+<li>Tên Wi-Fi: cần quyền Vị trí.</li>
+<li>Độ sáng màn hình: chỉ có API riêng.</li>
+<li>Thay thế hoàn toàn HUD hệ thống.</li>
+</ul>
+<h2 id="2-thiết-kế">2. Thiết kế</h2>
+<p>Package <code>Packages/Modules/SystemActivities</code>, product <code>SystemActivitiesModule</code>. Quyền bắt buộc: không có. Quyền tuỳ chọn: <code>.bluetooth</code>, <code>.downloadsFolder</code> (thêm case mới vào <code>Permission</code>, trạng thái kiểm tra bằng cách thử liệt kê thư mục).</p>
+<table><thead><tr><th>Thành phần</th><th>Vai trò</th></tr></thead><tbody>
+<tr><td><code>BluetoothMonitor</code></td><td>Kết nối/ngắt kết nối, loại thiết bị (tai nghe, bàn phím…), pin nếu có</td></tr>
+<tr><td><code>NetworkMonitor</code></td><td>Trạng thái và loại kết nối; bỏ qua lần báo đầu tiên lúc khởi động</td></tr>
+<tr><td><code>CapsLockMonitor</code></td><td>Poll; chỉ phát khi trạng thái đổi</td></tr>
+<tr><td><code>DownloadsWatcher</code> + <code>DownloadCompletionRule</code> (thuần)</td><td>Theo quy tắc ở trên, gom 300 ms, bỏ file ẩn</td></tr>
+<tr><td><code>VolumeMonitor</code></td><td>Mức 0–1, tắt tiếng; bỏ qua thiết bị không có điều khiển âm lượng</td></tr>
+<tr><td><code>SystemActivitiesModule</code></td><td>Tạo activity: icon + chữ ngắn, hoặc thanh mức cho âm lượng; mỗi loại một <code>id</code> cố định để cập nhật tại chỗ</td></tr>
+</tbody></table>
+<p>Mỗi monitor ẩn sau một protocol để test bằng nguồn giả.</p>
+<h3 id="2-1-cài-đặt-module-systemactivities">2.1 Cài đặt (<code>module.systemactivities.*</code>)</h3>
+<p>Mỗi loại một toggle: <code>bluetooth</code>, <code>network</code>, <code>capsLock</code>, <code>downloads</code>, <code>volume</code>. Thêm <code>durationSeconds</code> (2.5, khoảng 1…6).</p>
+<h2 id="3-kiểm-thử">3. Kiểm thử</h2>
+<table><thead><tr><th>Phần</th><th>Test tự động</th></tr></thead><tbody>
+<tr><td><code>DownloadCompletionRule</code></td><td>Safari, Chrome, Firefox (file giữ chỗ 0 byte), file ẩn, kích thước còn thay đổi</td></tr>
+<tr><td><code>CapsLockMonitor</code></td><td>Nguồn cờ giả + ManualScheduler: chỉ phát khi đổi</td></tr>
+<tr><td><code>NetworkMonitor</code></td><td>Chuỗi trạng thái giả: bỏ lần đầu, phát khi đổi</td></tr>
+<tr><td>Module</td><td>Mỗi nguồn giả → đúng activity id, nội dung, thời gian hết hạn; toggle tắt thì không phát</td></tr>
+</tbody></table>
+<p><strong>Kiểm thử tay:</strong> AirPods/tai nghe Bluetooth; rút cáp mạng hoặc tắt Wi-Fi; Caps Lock; tải file bằng Safari và Chrome; chỉnh âm lượng bằng phím.</p></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>

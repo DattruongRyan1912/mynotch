@@ -1,0 +1,55 @@
+import Foundation
+import SwiftUI
+@testable import MyNotchCore
+import MyNotchTestSupport
+
+final class FakeModule: FeatureModule {
+    let descriptor: ModuleDescriptor
+    var startError: ModuleError?
+    var activityOnStart: LiveActivity?
+    var lockScreenOnStart: AnyView?
+    /// Scheduled one second after `start` through the context's scheduler.
+    var actionOnStart: (@MainActor () -> Void)?
+    /// Service name registered on `start`; texts it receives go to `serviceTexts`.
+    var serviceOnStart: String?
+    private(set) var serviceTexts: [String] = []
+    var menuItems: [ModuleMenuItem] = []
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
+    private(set) var context: ModuleContext?
+    /// Environment passed to the latest `makeSettingsView` call.
+    private(set) var settingsEnvironment: ModuleSettingsEnvironment?
+
+    init(
+        _ id: ModuleID, order: Int = 0, defaultEnabled: Bool = true,
+        permissions: [Permission] = [], optionalPermissions: [Permission] = [], permissionReasons: [Permission: String] = [:]
+    ) {
+        descriptor = ModuleDescriptor(
+            id: id, displayName: id.rawValue, systemImage: "circle", defaultEnabled: defaultEnabled,
+            permissions: permissions, optionalPermissions: optionalPermissions, permissionReasons: permissionReasons, order: order
+        )
+    }
+
+    func start(_ context: ModuleContext) async throws(ModuleError) {
+        startCount += 1
+        self.context = context
+        if let activityOnStart { context.activities.set(activityOnStart) }
+        if let lockScreenOnStart { context.lockScreen.set(lockScreenOnStart) }
+        if let actionOnStart { context.scheduler.schedule(after: .seconds(1), actionOnStart) }
+        if let serviceOnStart { context.services.register(serviceOnStart) { [weak self] in self?.serviceTexts.append($0) } }
+        if let startError { throw startError }
+    }
+
+    func stop() async { stopCount += 1 }
+
+    func makeTab() -> NotchTab? {
+        NotchTab(id: descriptor.id, title: descriptor.displayName, systemImage: "circle", content: AnyView(EmptyView()))
+    }
+
+    func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? {
+        settingsEnvironment = environment
+        return AnyView(EmptyView())
+    }
+}
+
+typealias Harness = RegistryHarness

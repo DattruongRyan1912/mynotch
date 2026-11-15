@@ -1,0 +1,316 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MyNotch — Kế hoạch EQ</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#global-constraints">Global Constraints</a><a class="h2" href="#review-focus">Review Focus</a><a class="h3" href="#task-1-eqprofile-và-equalizerstate-trong-mynotchcore">Task 1: <code>EQProfile</code> và <code>EqualizerState</code> trong MyNotchCore</a><a class="h3" href="#task-2-equalizerdsp-gồm-bộ-lọc-và-chuỗi-xử-lý">Task 2: <code>EqualizerDSP</code>, gồm bộ lọc và chuỗi xử lý</a><a class="h3" href="#task-3-equalizeraudio-mỗi-thiết-bị-đầu-ra-một-đường-ống">Task 3: <code>EqualizerAudio</code>, mỗi thiết bị đầu ra một đường ống</a><a class="h3" href="#task-4-equalizermodule-gồm-tab-âm-thanh-và-cài-đặt">Task 4: <code>EqualizerModule</code>, gồm tab "Âm thanh" và cài đặt</a><a class="h3" href="#task-5-dòng-eq-trong-tab-nhạc">Task 5: Dòng EQ trong tab Nhạc</a><a class="h3" href="#task-6-nối-vào-app-người-điều-phối-làm">Task 6: Nối vào app (người điều phối làm)</a><a class="h2" href="#thứ-tự">Thứ tự</a></nav><main><h1 id="bộ-chỉnh-âm-eq-cho-cả-máy-kế-hoạch-triển-khai">Bộ chỉnh âm (EQ) cho cả máy: Kế hoạch triển khai</h1>
+<blockquote><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</blockquote>
+<p><strong>Goal:</strong> EQ 10 băng có preamp, áp lên mọi âm thanh của máy theo từng thiết bị đầu ra. Hồ sơ dạng danh sách thả xuống, đổi nhanh trong tab Nhạc, chỉnh trong tab "Âm thanh".</p>
+<p><strong>Architecture:</strong></p>
+<ul><li><strong>Trạng thái dùng chung:</strong> <code>EqualizerState</code> (<code>@Observable</code>, trong MyNotchCore) giữ hồ sơ, hồ sơ đang chọn và công tắc. AppDelegate tạo nó, rồi đưa cho <code>EqualizerModule</code> và <code>MediaModule</code> qua <code>ModuleList.make</code>, giống tiền lệ <code>ActivityCenter</code>.
+</li><li><strong>Gói mới <code>Packages/Modules/Equalizer</code></strong>, ba target:
+<ul><li><code>EqualizerDSP</code>: biquad thuần, không cấp phát khi xử lý;
+</li><li><code>EqualizerAudio</code>: process tap theo từng thiết bị, kèm aggregate device và IOProc;
+</li><li><code>EqualizerModule</code>: module, các view, cài đặt.
+</li></ul>
+</li></ul>
+<p><strong>Tech Stack:</strong> Swift 6.2 tools, macOS 26, SwiftUI kết hợp AppKit, Core Audio (<code>CATapDescription</code>, <code>AudioHardwareSystem</code>), Swift Testing.</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-10-18-equalizer-design.md</code></p>
+<h2 id="global-constraints">Global Constraints</h2>
+<ul><li><strong>Băng:</strong> 32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000 Hz. Mỗi băng ±12 dB, preamp ±12 dB.
+</li><li><strong>Hồ sơ mặc định:</strong> Nhạc, Phim, Họp. Thêm, đổi tên, xoá được, và xoá hết cũng được (khi đó EQ phẳng). Kéo thanh là lưu ngay vào hồ sơ đang chọn.
+</li><li><strong>Cùng một hồ sơ</strong> áp lên mọi thiết bị đang có tiếng. Âm thanh ra đúng thiết bị app đã gửi tới.
+</li><li><strong>Tắt EQ</strong> thì dỡ hết tap, không còn xử lý gì.
+</li><li>MyNotch thoát hoặc crash thì tiếng gốc tự trở lại, nên dùng <code>muteBehavior = .mutedWhenTapped</code>.
+</li><li><strong>Module không import nhau.</strong> <code>ModuleSettings</code> chỉ đọc được khoá <code>module.&lt;id&gt;.</code>, nên khoá dùng chung đặt dưới <code>app.equalizer.*</code> qua <code>SettingsStore</code>.
+</li><li><strong>Luồng âm thanh thời gian thực</strong> không cấp phát, không khoá, không gọi Swift runtime có thể cấp phát. Tiền lệ là <code>SampleRing</code>.
+</li><li>Giao diện tiếng Việt, viết hoa đầu câu. Dùng <code>NotchTokens</code> và tuân theo <code>NotchTab.heightRange</code> (120…240).
+</li><li>Mỗi gói: <code>xcrun swift test</code> ×3, không cảnh báo. Không ghi vào thiết bị âm thanh thật trong test.
+</li></ul>
+<h2 id="review-focus">Review Focus</h2>
+<ul><li><strong>Thiết bị đổi giữa lúc phát</strong> (AirPods kết nối, đổi thiết bị mặc định, rút tai nghe): tiếng tiếp tục trên thiết bị mới và vẫn có EQ, không im quá khoảng 1 s. Đặt test ở Task 3.
+</li><li><strong>Đổi tần số lấy mẫu</strong> (44,1 sang 48 kHz): hệ số lọc tính lại theo tần số mới. Đặt test ở Task 2 và Task 3.
+</li><li><strong>Xoá hồ sơ đang chọn hoặc xoá hồ sơ cuối cùng; đổi tên thành chuỗi rỗng</strong>: EQ phẳng, không crash, tên rỗng bị từ chối. Đặt test ở Task 1.
+</li><li><strong>Mọi băng +12 dB và preamp 0</strong>: đầu ra không vượt ±1,0, không nổ loa. Đặt test ở Task 2.
+</li><li><strong>Dựng đường ống thất bại một phần</strong> (tạo được tap, hỏng aggregate): dỡ sạch phần đã tạo và thử lại theo lịch. Đặt test ở Task 3.
+</li></ul>
+<p>---</p>
+<h3 id="task-1-eqprofile-và-equalizerstate-trong-mynotchcore">Task 1: <code>EQProfile</code> và <code>EqualizerState</code> trong MyNotchCore</h3>
+<p><strong>Files:</strong></p>
+<ul><li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Equalizer/EQProfile.swift</code>
+</li><li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Equalizer/EqualizerState.swift</code>
+</li><li>Modify: <code>Packages/MyNotchCore/Sources/MyNotchCore/Permission/Permission.swift</code>. Đổi <code>summary</code> và <code>hint</code> của <code>.systemAudio</code> cho nói cả hai việc: vẽ phổ nhạc và chỉnh âm (EQ).
+</li><li>Test: <code>Packages/MyNotchCore/Tests/MyNotchCoreTests/EqualizerStateTests.swift</code>
+</li></ul>
+<p><strong>Interfaces:</strong></p>
+<ul><li>Produces:
+<pre><code>nonisolated public struct EQProfile: Codable, Equatable, Identifiable, Sendable {
+    public static let frequencies: [Double]          // 10 tần số ở trên
+    public static let gainRange: ClosedRange&lt;Double&gt; // -12...12
+    public var id: UUID
+    public var name: String
+    public var gains: [Double]                       // luôn đúng 10 phần tử
+    public var preamp: Double
+    public static func flat(named: String) -&gt; EQProfile
+    public static func defaults() -&gt; [EQProfile]     // Nhạc, Phim, Họp
+    public func clamped() -&gt; EQProfile               // 10 băng, mọi giá trị trong gainRange
+}
+
+@Observable public final class EqualizerState {      // MainActor (mặc định của gói)
+    public init(settings: SettingsStore)
+    public private(set) var profiles: [EQProfile]
+    public private(set) var selectedID: UUID?
+    public var isEnabled: Bool                       // lưu ngay
+    public var isAvailable: Bool                     // module Âm thanh đặt khi chạy; không lưu
+    public var openEditor: (() -&gt; Void)?             // module Âm thanh đặt; tab Nhạc gọi
+    public var selected: EQProfile? { get }
+    /// Thứ đường ống cần áp: nil khi tắt; hồ sơ đang chọn, hoặc phẳng khi không có hồ sơ nào.
+    public var activeProfile: EQProfile? { get }
+    public func select(_ id: UUID)
+    @discardableResult public func addProfile(named: String) -&gt; EQProfile?  // bản sao của hồ sơ đang chọn (hoặc phẳng); chọn luôn
+    @discardableResult public func rename(_ id: UUID, to name: String) -&gt; Bool
+    public func delete(_ id: UUID)                   // xoá hồ sơ đang chọn thì chọn hồ sơ đầu tiên còn lại, hoặc nil
+    public func setGain(_ value: Double, band: Int)  // kẹp vào gainRange; lưu ngay
+    public func setPreamp(_ value: Double)
+    public func resetSelectedToFlat()
+}</code></pre>
+</li></ul>
+<p><strong>Giá trị đã chốt:</strong></p>
+<ul><li>Khoá <code>app.equalizer.profiles</code> (<code>[EQProfile]?</code>, mặc định nil). Nil nghĩa là chưa từng tạo, khi đó gieo <code>defaults()</code>. Mảng rỗng nghĩa là người dùng đã xoá hết.
+</li><li>Khoá <code>app.equalizer.selected</code> (<code>UUID?</code>) và <code>app.equalizer.enabled</code> (<code>Bool</code>, mặc định <code>false</code>).
+</li><li>Tên được cắt khoảng trắng hai đầu, dài 1…40 ký tự.
+</li><li>Đường cong mặc định, theo thứ tự 32 Hz … 16 kHz:
+</li></ul>
+<table><thead><tr><th>Hồ sơ</th><th>Các băng (dB)</th><th>Preamp</th></tr></thead><tbody><tr><td>Nhạc</td><td><code>[4, 3, 1.5, 0, -1, -1, 0, 1.5, 3, 4]</code></td><td>-4</td></tr><tr><td>Phim</td><td><code>[5, 4, 2, 0, 0, 1.5, 2.5, 2, 1, 0]</code></td><td>-4</td></tr><tr><td>Họp</td><td><code>[-6, -4, -2, 0, 1, 2.5, 4, 3.5, 1, 0]</code></td><td>-2</td></tr></tbody></table>
+<ul><li>☐ <strong>Step 1: Viết test hỏng.</strong> Các test và khẳng định:
+<ul><li><code>seedsThreeDefaultsOnFirstRun</code>: tên <code>["Nhạc","Phim","Họp"]</code>, đã chọn "Nhạc", <code>isEnabled == false</code>.
+</li><li><code>emptyListStaysEmptyAfterReload</code>: xoá hết, tạo lại <code>EqualizerState</code> cùng store, <code>profiles.isEmpty</code>, <code>activeProfile</code> là hồ sơ phẳng khi bật.
+</li><li><code>deletingSelectedSelectsFirstRemaining</code>.
+</li><li><code>renameRejectsBlankAndOverlong</code>: <code>rename(id, to: "  ")</code> và tên 41 ký tự đều trả <code>false</code>, tên giữ nguyên.
+</li><li><code>setGainClampsAndPersists</code>: 15 thành 12, -20 thành -12, đọc lại sau khi tạo state mới.
+</li><li><code>activeProfileIsNilWhenDisabled</code>.
+</li><li><code>addProfileCopiesSelectedAndSelectsIt</code>.
+</li><li><code>clampedFixesWrongBandCount</code>: 7 băng thì đệm số 0 thành 10, 12 băng thì cắt còn 10.
+</li></ul>
+</li><li>☐ <strong>Step 2: Chạy và xác nhận hỏng.</strong> <code>cd Packages/MyNotchCore &amp;&amp; xcrun swift test --filter EqualizerStateTests</code>. Kết quả mong đợi: FAIL vì chưa có type.
+</li><li>☐ <strong>Step 3: Viết hai file.</strong> Dùng API khoá cấp app của <code>SettingsStore</code> như <code>app.tabOverflow</code>. Đọc và ghi bằng <code>SettingKey</code>, không dùng <code>UserDefaults</code> trực tiếp.
+</li><li>☐ <strong>Step 4: Chạy lại.</strong> Cùng lệnh, rồi chạy cả gói ×3. Kết quả mong đợi: PASS, không cảnh báo.
+</li><li>☐ <strong>Step 5: Commit.</strong> <code>git add &lt;các file trên&gt; &amp;&amp; git commit -m "feat(core): shared equalizer profiles and switch" -- &lt;các file trên&gt;</code>
+</li></ul>
+<h3 id="task-2-equalizerdsp-gồm-bộ-lọc-và-chuỗi-xử-lý">Task 2: <code>EqualizerDSP</code>, gồm bộ lọc và chuỗi xử lý</h3>
+<p><strong>Files:</strong></p>
+<ul><li>Create: <code>Packages/Modules/Equalizer/Package.swift</code>. Ba target <code>EqualizerDSP</code>, <code>EqualizerAudio</code>, <code>EqualizerModule</code>, kèm các test target. Chỉ <code>EqualizerModule</code> dùng <code>.defaultIsolation(MainActor.self)</code>. Mẫu là <code>Packages/Modules/Performance/Package.swift</code>, gói đó có target helper không mặc định MainActor. Trong task này chỉ tạo <code>EqualizerDSP</code> và <code>EqualizerDSPTests</code>; khai báo hai target kia ở task của chúng.
+</li><li>Create: <code>Packages/Modules/Equalizer/Sources/EqualizerDSP/Biquad.swift</code>
+</li><li>Create: <code>Packages/Modules/Equalizer/Sources/EqualizerDSP/EQChain.swift</code>
+</li><li>Test: <code>Packages/Modules/Equalizer/Tests/EqualizerDSPTests/EQChainTests.swift</code>
+</li></ul>
+<p><strong>Interfaces:</strong></p>
+<ul><li>Produces:
+<pre><code>nonisolated public struct BiquadCoefficients: Equatable, Sendable {
+    public var b0, b1, b2, a1, a2: Float
+    public static let identity: BiquadCoefficients
+    /// Bộ lọc peaking theo RBJ Audio EQ Cookbook.
+    public static func peaking(frequency: Double, gainDB: Double, q: Double, sampleRate: Double) -&gt; BiquadCoefficients
+    public func magnitudeDB(at frequency: Double, sampleRate: Double) -&gt; Double   // cho test
+}
+nonisolated public final class EQChain: @unchecked Sendable {
+    public static let q = 1.41                       // một quãng tám; lựa chọn của kế hoạch
+    public init(channels: Int)                       // cấp phát mọi thứ ở đây
+    /// Gọi từ bất kỳ luồng nào; công bố bộ hệ số mới không khoá (đổi qua lại hai bộ đặt sẵn bằng chỉ số atomic).
+    public func setParameters(gains: [Double], preampDB: Double, sampleRate: Double)
+    /// Luồng thời gian thực. Xử lý tại chỗ, không cấp phát, không khoá. Kẹp đầu ra vào [-1, 1].
+    public func process(_ buffers: UnsafeMutableAudioBufferListPointer, frames: Int)
+}</code></pre>
+</li></ul>
+<p><strong>Đã chốt:</strong></p>
+<ul><li>Băng nào 0 dB thì bỏ qua.
+</li><li>Hồ sơ phẳng (mọi băng 0 và preamp 0) thì đi thẳng, đầu ra giống hệt đầu vào từng bit.
+</li><li>Đổi tham số giữa chừng: chuyển dần từ bộ cũ sang bộ mới trong khoảng một buffer, để không nghe tiếng "tách". Cách chuyển do người làm chọn.
+</li><li>Đầu vào NaN hoặc vô cực thì đặt lại trạng thái bộ lọc và xuất 0.
+</li><li>☐ <strong>Step 1: Viết test hỏng.</strong>
+<ul><li><code>peakingHitsGainAtCentre</code>: với 48 kHz, cả 10 tần số, +12 và -12 dB, <code>magnitudeDB</code> ở tâm sai không quá 0,5 dB.
+</li><li><code>flatIsBitExact</code>: nhiễu ngẫu nhiên 2 kênh × 512 mẫu, đầu ra bằng đầu vào.
+</li><li><code>preampMinus6Halves</code>: sin 1 kHz biên độ 0,5, đỉnh còn khoảng 0,25 (±0,01).
+</li><li><code>allBandsMaxNeverExceedsUnity</code>: mọi băng +12, preamp 0, nhiễu biên độ 0,9, <code>max(abs) &lt;= 1.0</code>.
+</li><li><code>sampleRateChangeRecomputes</code>: đặt 44,1 kHz rồi 48 kHz, tâm 1 kHz vẫn khoảng +12 dB.
+</li><li><code>parameterChangeHasNoJump</code>: sin 1 kHz biên độ 0,5, đổi từ phẳng sang +12 ở 1 kHz giữa hai buffer, bước nhảy lớn nhất giữa hai mẫu liền nhau ≤ 0,1.
+</li><li><code>nonFiniteInputResets</code>.
+</li><li><code>processDoesNotAllocate</code>: so <code>malloc_zone_statistics(nil, &amp;stats).blocks_in_use</code> trước và sau 10.000 lần gọi <code>process</code>, chênh lệch 0.
+</li></ul>
+</li><li>☐ <strong>Step 2: Chạy và xác nhận hỏng.</strong> <code>cd Packages/Modules/Equalizer &amp;&amp; xcrun swift test --filter EqualizerDSPTests</code>. Kết quả mong đợi: FAIL.
+</li><li>☐ <strong>Step 3: Viết code.</strong> Viết <code>peaking</code> theo cookbook. Trạng thái bộ lọc ở dạng Direct Form II transposed, mỗi kênh một bộ, cấp phát sẵn. Không dùng <code>for … in</code> trên luồng âm thanh, dùng con trỏ như <code>SampleRing</code>.
+</li><li>☐ <strong>Step 4: Chạy lại.</strong> <code>xcrun swift test</code> ×3. Kết quả mong đợi: PASS, không cảnh báo.
+</li><li>☐ <strong>Step 5: Commit.</strong> <code>feat(equalizer): a ten-band filter chain that never allocates on the audio thread</code>
+</li></ul>
+<h3 id="task-3-equalizeraudio-mỗi-thiết-bị-đầu-ra-một-đường-ống">Task 3: <code>EqualizerAudio</code>, mỗi thiết bị đầu ra một đường ống</h3>
+<p><strong>Files:</strong></p>
+<ul><li>Modify: <code>Packages/Modules/Equalizer/Package.swift</code>. Thêm <code>EqualizerAudio</code> (phụ thuộc <code>EqualizerDSP</code> và <code>MyNotchCore</code>, không mặc định MainActor) và <code>EqualizerAudioTests</code>.
+</li><li>Create trong <code>Sources/EqualizerAudio/</code>:
+<ul><li><code>AudioSystem.swift</code>: protocol và bản thật trên <code>AudioHardwareSystem</code>.
+</li><li><code>TapRecipe.swift</code>: hàm thuần dựng <code>CATapDescription</code> và dictionary aggregate.
+</li><li><code>DevicePipeline.swift</code>: tap, aggregate, IOProc và một <code>EQChain</code>.
+</li><li><code>PipelineManager.swift</code>
+</li><li><code>AudioPropertyListener.swift</code>: <strong>chép</strong> từ <code>SystemAudioTap.swift</code> của module Nhạc (registry token và mutex). Module không import nhau nên chép, và ghi trong commit là một bản sao có chủ ý.
+</li></ul>
+</li><li>Test: <code>Tests/EqualizerAudioTests/PipelineManagerTests.swift</code>, <code>TapRecipeTests.swift</code>, <code>FakeAudioSystem.swift</code>
+</li></ul>
+<p><strong>Interfaces:</strong></p>
+<ul><li>Consumes: <code>EQChain</code> (Task 2) và <code>EQProfile</code> (Task 1).
+</li><li>Produces:
+<pre><code>nonisolated public enum EqualizerEngineEvent: Equatable, Sendable {
+    case devices([String])            // tên các thiết bị đang được xử lý
+    case permissionLikelyDenied
+    case failed(String)
+}
+@MainActor public protocol EqualizerEngine: AnyObject {
+    var onEvent: ((EqualizerEngineEvent) -&gt; Void)? { get set }
+    func start()
+    func stop()
+    func apply(_ profile: EQProfile)
+}
+nonisolated public protocol AudioSystem: Sendable {
+    var ownProcessID: AudioObjectID? { get }
+    /// UID của mọi thiết bị đầu ra đang có tiến trình **khác MyNotch** phát ra (theo thiết bị và isRunningOutput của từng tiến trình).
+    func activeOutputDeviceUIDs() -&gt; Set&lt;String&gt;
+    func deviceName(uid: String) -&gt; String?
+    func makePipeline(deviceUID: String, chain: EQChain) throws -&gt; any PipelineHandle
+    func observeChanges(_ handler: @escaping @Sendable () -&gt; Void) -&gt; AnyObject  // token; bỏ token là ngừng nghe
+}
+nonisolated public protocol PipelineHandle: AnyObject, Sendable { func tearDown() }
+@MainActor public final class PipelineManager: EqualizerEngine {
+    public init(system: any AudioSystem = CoreAudioSystem(), scheduler: any Scheduler)
+}</code></pre>
+</li></ul>
+<p><strong>Đã chốt:</strong></p>
+<ul><li><strong><code>TapRecipe.tapDescription(deviceUID:excluding:)</code></strong>:
+<ul><li><code>CATapDescription(excludingProcesses: [own], deviceUID: uid, stream: 0)</code>;
+</li><li><code>isPrivate = true</code>;
+</li><li><code>muteBehavior = .mutedWhenTapped</code>;
+</li><li>tên là <code>"MyNotch EQ &lt;uid&gt;"</code>.
+</li></ul>
+</li><li><strong><code>TapRecipe.aggregate(deviceUID:tapUID:)</code></strong>: private, không stacked. Main subdevice và danh sách subdevice đều là <code>uid</code>. Tap list gồm <code>kAudioSubTapUIDKey</code> và <code>kAudioSubTapDriftCompensationKey: true</code>, đặt <code>kAudioAggregateDeviceTapAutoStartKey: false</code>. Giống <code>SystemAudioTap.swift:139-153</code>, chỉ khác thiết bị.
+</li><li><strong>IOProc:</strong> chép buffer đầu vào của tap sang buffer đầu ra, rồi gọi <code>chain.process(output, frames:)</code>. Kiểm định dạng như <code>SystemAudioTap.swift:134-138</code> (linear PCM, float 32-bit, tần số lấy mẫu dương). Đổi tần số lấy mẫu thì gọi <code>setParameters</code> lại với tần số mới, hoặc dựng lại đường ống.
+</li><li><strong>Thứ tự dỡ:</strong> <code>AudioDeviceStop</code>, huỷ IOProc, huỷ aggregate, huỷ tap. Dỡ được cả sau khi dựng dở.
+</li><li><strong>Thay đổi</strong> (thiết bị, tiến trình, tần số lấy mẫu): gom lại 300 ms rồi đối chiếu tập thiết bị đang phát với tập đường ống. Thiết bị mới thì tạo đường ống, thiết bị hết tiếng thì dỡ. Tạo hỏng thì thử lại sau 1 s rồi 3 s.
+</li><li><strong>Phát hiện chưa có quyền:</strong> chép <code>SilenceDetector</code>. Ra tuyệt đối 0 quá 10 s trong khi vẫn có tiến trình đang phát thì phát sự kiện <code>.permissionLikelyDenied</code>.
+</li><li>☐ <strong>Step 1: Viết test hỏng</strong>, dùng <code>FakeAudioSystem</code> và <code>ManualScheduler</code>:
+<ul><li><code>oneActiveDeviceMakesOnePipeline</code>.
+</li><li><code>secondDeviceAddsPipelineAfterDebounce</code>: chưa có trước 300 ms, có sau 300 ms.
+</li><li><code>silentDeviceIsTornDown</code>.
+</li><li><code>defaultDeviceSwitchMovesPipeline</code>: tập đổi từ {A} sang {B} thì A bị dỡ, B được tạo, trong một lần đối chiếu.
+</li><li><code>stopTearsDownEverything</code>: mọi handle nhận <code>tearDown()</code> đúng một lần.
+</li><li><code>applyReachesEveryPipelineChain</code>.
+</li><li><code>failedMakeRetriesAt1sThen3s</code>.
+</li><li><code>partialSetupIsTornDown</code>: fake ném lỗi sau khi "tạo tap", và tap đó được dỡ.
+</li><li><code>tapRecipeMutesWhenTappedAndExcludesSelf</code>.
+</li><li><code>noActiveDeviceMeansNoPipeline</code>.
+</li></ul>
+</li><li>☐ <strong>Step 2: Chạy và xác nhận hỏng.</strong> <code>xcrun swift test --filter EqualizerAudioTests</code>. Kết quả mong đợi: FAIL.
+</li><li>☐ <strong>Step 3: Viết code.</strong> <code>CoreAudioSystem</code> lấy thiết bị của từng tiến trình qua <code>AudioHardwareSystem.shared.processes</code>, thiết bị của tiến trình và cờ <code>isRunningOutput</code>. Chỉ bản thật chạm Core Audio; test không chạm.
+</li><li>☐ <strong>Step 4: Chạy lại.</strong> <code>xcrun swift test</code> ×3. Kết quả mong đợi: PASS, không cảnh báo.
+</li><li>☐ <strong>Step 5: Commit.</strong> <code>feat(equalizer): one tap and replay per output device that is playing</code>
+</li></ul>
+<h3 id="task-4-equalizermodule-gồm-tab-âm-thanh-và-cài-đặt">Task 4: <code>EqualizerModule</code>, gồm tab "Âm thanh" và cài đặt</h3>
+<p><strong>Files:</strong></p>
+<ul><li>Modify: <code>Packages/Modules/Equalizer/Package.swift</code>. Thêm <code>EqualizerModule</code> (MainActor; phụ thuộc <code>EqualizerAudio</code>, <code>MyNotchCore</code>, <code>NotchUI</code>) và <code>EqualizerModuleTests</code> (cùng <code>MyNotchTestSupport</code>).
+</li><li>Create: <code>Sources/EqualizerModule/EqualizerModule.swift</code>, <code>EqualizerTabView.swift</code>, <code>EQSliders.swift</code>, <code>EqualizerSettingsView.swift</code>, <code>EqMacDetector.swift</code>
+</li><li>Test: <code>Tests/EqualizerModuleTests/EqualizerModuleTests.swift</code>, <code>FakeEngine.swift</code>
+</li></ul>
+<p><strong>Interfaces:</strong></p>
+<ul><li>Consumes: <code>EqualizerState</code> (Task 1), <code>EqualizerEngine</code> và <code>PipelineManager</code> (Task 3).
+</li><li>Produces: <code>public final class EqualizerModule: FeatureModule</code> với <code>public convenience init(state: EqualizerState)</code> và <code>init(state:engine:isEqMacRunning:)</code>.
+</li></ul>
+<p><strong>Đã chốt:</strong></p>
+<ul><li><strong>Descriptor:</strong> id <code>"equalizer"</code>, <code>displayName</code> "Âm thanh", <code>systemImage</code> <code>"slider.vertical.3"</code>, <code>order: 210</code>, <code>optionalPermissions: [.systemAudio]</code>, lý do "Để chỉnh âm thanh của cả máy".
+</li><li><strong>Khi module chạy:</strong>
+<ul><li><code>start</code> đặt <code>state.isAvailable = true</code> và <code>state.openEditor = { context.presenter.open() }</code>;
+</li><li>quan sát <code>state.activeProfile</code>: nil thì <code>engine.stop()</code>; có giá trị thì <code>engine.start()</code> một lần và <code>engine.apply(profile)</code> mỗi khi đổi;
+</li><li><code>stop</code> gọi <code>engine.stop()</code>, rồi đặt <code>isAvailable = false</code> và <code>openEditor = nil</code>.
+</li></ul>
+</li><li><strong>Tab</strong> (<code>preferredHeight</code> ≤ 240):
+<ul><li>Hàng trên: <code>Menu</code> thả xuống các hồ sơ, các nút ＋ ✎ − và công tắc "EQ". ✎ mở ô đổi tên tại chỗ. − hỏi xác nhận "Xoá hồ sơ “…”?".
+</li><li>Thanh Preamp: −12 … +12, bước 0,5 dB, hiện "+1,5 dB".
+</li><li>10 thanh dọc, nhãn 32 · 64 · 125 · 250 · 500 · 1k · 2k · 4k · 8k · 16k, bước 0,5 dB. Kéo thì gọi <code>notch.setDragging(true/false)</code> như <code>VolumeRow</code>. Bấm đúp vào thanh thì về 0.
+</li><li>Nút "Về phẳng".
+</li><li>Dòng trạng thái: "Đang chỉnh: &lt;tên thiết bị&gt;", hoặc gợi ý cấp quyền kèm nút "Mở System Settings", hoặc cảnh báo eqMac.
+</li></ul>
+</li><li><strong>Cảnh báo eqMac:</strong> khi đang chạy app có bundle id <code>com.bitgapp.eqmac</code>, hiện "eqMac đang chạy: hai bộ EQ sẽ chồng lên nhau. Thoát eqMac để dùng EQ của MyNotch."
+</li><li><strong>Cài đặt:</strong> công tắc "Bật EQ" (cùng <code>state.isEnabled</code>), dòng quyền "Ghi âm thanh hệ thống" kèm link mở Privacy_AudioCapture, và chú thích về độ trễ Bluetooth.
+</li><li>☐ <strong>Step 1: Viết test hỏng</strong>, dùng <code>RegistryHarness([module])</code> và <code>FakeEngine</code>:
+<ul><li><code>enablingStartsAndApplies</code>.
+</li><li><code>disablingStops</code>.
+</li><li><code>selectingProfileApplies</code>.
+</li><li><code>deletingAllAppliesFlat</code>.
+</li><li><code>moduleStopStopsEngineAndClearsAvailability</code>.
+</li><li><code>openEditorOpensOwnTab</code>: dùng <code>FakePresenter</code>.
+</li><li><code>eqMacWarningShowsWhenRunning</code>.
+</li><li><code>tabFitsHeightRange</code>: <code>harness.oversizedTabs.reports</code> rỗng.
+</li></ul>
+</li><li>☐ <strong>Step 2: Chạy và xác nhận hỏng.</strong> Kết quả mong đợi: FAIL.
+</li><li>☐ <strong>Step 3: Viết code</strong> theo đúng mục "Đã chốt".
+</li><li>☐ <strong>Step 4: Chạy lại.</strong> <code>xcrun swift test</code> ×3 trong gói Equalizer. Kết quả mong đợi: PASS, không cảnh báo.
+</li><li>☐ <strong>Step 5: Commit.</strong> <code>feat(equalizer): the Âm thanh tab, profiles and settings</code>
+</li></ul>
+<h3 id="task-5-dòng-eq-trong-tab-nhạc">Task 5: Dòng EQ trong tab Nhạc</h3>
+<p><strong>Files:</strong></p>
+<ul><li>Modify: <code>Packages/Modules/Media/Sources/MediaModule/MediaModule.swift</code>. Thêm <code>public init(adapterScript:adapterFramework:equalizer: EqualizerState? = nil)</code> và truyền <code>equalizer</code> vào view ở chỗ dựng <code>MediaTabView</code> (<code>:456-464</code>).
+</li><li>Modify: <code>Packages/Modules/Media/Sources/MediaModule/MediaTabView.swift</code>
+</li><li>Create: <code>Packages/Modules/Media/Sources/MediaModule/EQQuickControl.swift</code>
+</li><li>Test: <code>Packages/Modules/Media/Tests/MediaModuleTests/EQQuickControlTests.swift</code>
+</li></ul>
+<p><strong>Interfaces:</strong></p>
+<ul><li>Consumes: <code>EqualizerState</code> (Task 1).
+</li></ul>
+<p><strong>Đã chốt:</strong></p>
+<ul><li><code>EQQuickControl</code> gồm chữ "EQ", một <code>Menu</code> các hồ sơ (dấu ✓ ở hồ sơ đang chọn), công tắc nhỏ, và nút "Chỉnh…" gọi <code>equalizer.openEditor?()</code>.
+</li><li>Chỉ hiện khi <code>equalizer?.isAvailable == true</code>.
+</li><li>Nằm ở <strong>cuối hàng chip nguồn phát</strong>. Khi không có chip, hàng đó vẫn hiện, chỉ có <code>EQQuickControl</code>, và bìa thu nhỏ (<code>compactArtworkSize</code>) như khi có chip.
+</li><li><code>preferredHeight</code> <strong>giữ 160</strong>. Các test chiều cao hiện có không đổi.
+</li><li>☐ <strong>Step 1: Viết test hỏng.</strong>
+<ul><li><code>hiddenWithoutEqualizer</code>.
+</li><li><code>hiddenWhenUnavailable</code>.
+</li><li><code>menuSelectionSelectsProfile</code>.
+</li><li><code>toggleFlipsEnabled</code>.
+</li><li><code>editCallsOpenEditor</code>.
+</li><li><code>rowWithoutChipsUsesCompactCover</code>.
+</li><li><code>preferredHeightUnchanged</code>: vẫn 160.
+</li></ul>
+</li><li>☐ <strong>Step 2: Chạy và xác nhận hỏng.</strong> Kết quả mong đợi: FAIL.
+</li><li>☐ <strong>Step 3: Viết code.</strong>
+</li><li>☐ <strong>Step 4: Chạy lại.</strong> <code>xcrun swift test</code> ×3 trong gói Media. Kết quả mong đợi: PASS, không cảnh báo. Mọi test cũ vẫn qua.
+</li><li>☐ <strong>Step 5: Commit.</strong> <code>feat(media): switch the EQ profile from the player</code>
+</li></ul>
+<h3 id="task-6-nối-vào-app-người-điều-phối-làm">Task 6: Nối vào app (người điều phối làm)</h3>
+<p><strong>Files:</strong> <code>project.yml</code>, <code>App/ModuleList.swift</code>, <code>App/AppDelegate.swift</code></p>
+<ul><li>☐ <strong>Bước 1:</strong> Trong <code>project.yml</code>, thêm gói <code>EqualizerModule: path: Packages/Modules/Equalizer</code> và <code>- package: EqualizerModule</code> vào target MyNotch. Đổi <code>NSAudioCaptureUsageDescription</code> thành "MyNotch dùng âm thanh hệ thống để vẽ phổ nhạc và để chỉnh âm (EQ)."
+</li><li>☐ <strong>Bước 2:</strong> AppDelegate tạo <code>let equalizer = EqualizerState(settings: settings)</code>.
+</li><li>☐ <strong>Bước 3:</strong> Đổi <code>ModuleList.make(activities:)</code> thành <code>make(activities:equalizer:)</code>, thêm <code>EqualizerModule(state: equalizer)</code> và truyền <code>equalizer:</code> cho <code>MediaModule</code>.
+</li><li>☐ <strong>Bước 4:</strong> Chạy gate, cài lên máy, rồi kiểm tra theo spec §8 trên máy thật: loa trong, loa Bluetooth, app họp ra thiết bị riêng, ngủ rồi thức, thoát giữa chừng, CPU và RAM.
+</li><li>☐ <strong>Bước 5:</strong> Commit <code>feat(app): add the equalizer module</code>.
+</li></ul>
+<h2 id="thứ-tự">Thứ tự</h2>
+<ul><li>Task 1 và Task 2 chạy song song, vì khác gói.
+</li><li>Task 3 cần Task 2.
+</li><li>Task 4 cần Task 1 và Task 3.
+</li><li>Task 5 cần Task 1, chạy song song với Task 3 và Task 4 được.
+</li><li>Task 6 làm sau cùng.
+</li></ul></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>

@@ -1,0 +1,107 @@
+import SwiftUI
+
+nonisolated public enum ActivityPriority: Int, Comparable, Sendable {
+    case low, normal, high, critical
+
+    public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+}
+
+/// Which screens an activity's strip is for.
+nonisolated public enum BottomScope: Sendable {
+    /// Every screen: the notch grows by the strip's height wherever the activity is shown. What every strip does.
+    case allScreens
+    /// Only a screen with a hardware notch. A display without one shows the activity with no strip (and does not grow).
+    case hardwareNotchOnly
+}
+
+/// Which screens an activity is shown on, by the UUID CoreGraphics gives a display (`CGDisplayCreateUUIDFromDisplayID`), which stays the same
+/// when the display is unplugged and plugged in again. A screen an activity is not shown on behaves as if the activity did not exist: it is
+/// never that screen's primary activity, nor a bubble beside its notch, nor a row of its list, and the next activity takes its place.
+nonisolated public enum DisplayScope: Equatable, Sendable {
+    /// Every screen, also one plugged in later. What every activity has unless it says otherwise.
+    case allScreens
+    /// Only the screens listed.
+    case only(Set<String>)
+    /// Every screen but the ones listed, so that a screen nobody has said anything about, one plugged in later for instance, has it.
+    case allExcept(Set<String>)
+
+    public func includes(_ display: String) -> Bool {
+        switch self {
+        case .allScreens: true
+        case .only(let displays): displays.contains(display)
+        case .allExcept(let displays): !displays.contains(display)
+        }
+    }
+}
+
+/// Small content shown beside the notch while it is closed, and optionally a strip under it. The activity that is
+/// not the primary one shows only as a bubble (`minimal`) and as a row in a list of all of them (`summary`).
+public struct LiveActivity: Identifiable {
+    public let id: String
+    public let priority: ActivityPriority
+    public let leading: AnyView
+    public let trailing: AnyView
+    /// Content for a strip under the closed notch, shown while this is the current activity. The notch grows
+    /// downward by `bottomHeight` to hold it; nil leaves the notch as it is.
+    public let bottom: AnyView?
+    /// How tall the strip is, in points. 0 whenever there is no `bottom`, so the two can never disagree.
+    public let bottomHeight: CGFloat
+    /// Which screens the strip is for; a screen it is not for shows the activity as if it had none.
+    public let bottomScope: BottomScope
+    /// Which screens show the activity at all, strip or no strip; on a screen it is not for there is no such activity (see `DisplayScope`).
+    public let displayScope: DisplayScope
+    /// A view drawn over the whole top row of the collapsed notch while this is the current activity: as wide as the notch is (which it asks
+    /// for with `View.notchBodyWidth`, if it wants the notch wider) and as tall as the notch's body, from edge to edge of it between the
+    /// ears, over what `leading` and `trailing` draw. It is not scaled with them (the notch draws them bigger on a tall pill), and it takes a
+    /// click only where it says so: a view that answers nil to a hit test leaves the notch's own tap and hover as they were. Nil, which is
+    /// what every activity has but one that draws across the notch, changes nothing.
+    public let body: AnyView?
+    /// The small icon of the bubble this activity gets beside the notch when another one is the primary. Nil lets
+    /// the notch use `leading`, clipped to a circle.
+    public let minimal: AnyView?
+    /// One line saying what the activity is, for its row in a list and for VoiceOver. Nil when it is not given or
+    /// is blank; the notch then falls back to the module's name.
+    public let summary: String?
+    public let expiresAfter: Duration?
+
+    /// Whether the notch has a strip to make room for: there is a view and it has a height.
+    public var hasBottom: Bool { bottom != nil && bottomHeight > 0 }
+
+    /// How far the notch grows for the strip on a screen with (`onHardwareNotch`) or without a hardware notch: the strip's height where it
+    /// is for that screen, and 0 where it is not.
+    public func bottomHeight(onHardwareNotch: Bool) -> CGFloat {
+        guard hasBottom, bottomScope == .allScreens || onHardwareNotch else { return 0 }
+        return bottomHeight
+    }
+
+    /// Whether the activity draws across the top row of the collapsed notch.
+    public var hasBody: Bool { body != nil }
+
+    public init(
+        id: String,
+        priority: ActivityPriority = .normal,
+        expiresAfter: Duration? = nil,
+        leading: AnyView,
+        trailing: AnyView,
+        bottom: AnyView? = nil,
+        bottomHeight: CGFloat = 0,
+        bottomScope: BottomScope = .allScreens,
+        displayScope: DisplayScope = .allScreens,
+        body: AnyView? = nil,
+        minimal: AnyView? = nil,
+        summary: String? = nil
+    ) {
+        self.id = id
+        self.priority = priority
+        self.expiresAfter = expiresAfter
+        self.leading = leading
+        self.trailing = trailing
+        self.bottom = bottom
+        self.bottomHeight = bottom == nil ? 0 : max(bottomHeight, 0)
+        self.bottomScope = bottomScope
+        self.displayScope = displayScope
+        self.body = body
+        self.minimal = minimal
+        self.summary = summary?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true ? nil : summary
+    }
+}

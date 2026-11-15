@@ -1,0 +1,250 @@
+import SwiftUI
+
+/// The clipboard library window: a sidebar of boards, kinds and apps, and the cards beside it.
+struct ClipboardLibraryView: View {
+    let module: ClipboardModule
+    @Bindable var model: ClipboardLibraryModel
+
+    @State private var visibility = NavigationSplitViewVisibility.all
+    @State private var naming: ClipboardLibraryBoardNaming?
+    @State private var boardName = ""
+    /// The form that locks a board, or the confirmation of taking its lock off or deleting it, in a sheet.
+    @State private var vaultPrompt: ClipboardVaultPrompt?
+    /// Bumped by ⌘F to give the search field the keyboard.
+    @State private var searchFocusRequest = 0
+
+    var body: some View {
+        NavigationSplitView(columnVisibility: $visibility) {
+            ClipboardLibrarySidebar(module: module, model: model, requestName: startNaming, requestVault: { vaultPrompt = $0 })
+                .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 320)
+        } detail: {
+            HStack(spacing: 0) {
+                ClipboardLibraryContentView(module: module, model: model, requestName: startNaming, requestVault: { vaultPrompt = $0 })
+                    .safeAreaInset(edge: .top, spacing: 0) { topStrips }
+                if model.isInspectorVisible {
+                    Divider()
+                    ClipboardInspectorView(module: module, model: model, requestName: startNaming)
+                }
+            }
+            // Under the toolbar, where the search field is: at the window's edge, beside the inspector when it is shown.
+            .overlay(alignment: .topTrailing) { suggestionList }
+            .navigationSubtitle("\(model.title) · \(model.items.count) mục")
+        }
+        // The toolbar of a window hosted like this showed no sidebar toggle when inspected off screen, so it gets its
+        // own, and the split view's is removed in case it does appear, so there are never two.
+        .toolbar(removing: .sidebarToggle)
+        .toolbar { toolbarContent }
+        .background { shortcuts }
+        .frame(minWidth: 760, minHeight: 480)
+        // While the window is open: when it appears, then every 2 s, so the hint goes by itself once it is allowed.
+        .task {
+            while !Task.isCancelled {
+                module.refreshAccessibility()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+        // The alerts' own dismissal is ignored: their buttons change the state they show, so the answer is never
+        // lost to the order in which SwiftUI runs a button and dismisses the alert.
+        .alert(namingTitle, isPresented: Binding(get: { naming != nil }, set: { _ in })) {
+            TextField("Tên board", text: $boardName)
+            Button(namingButton, action: commitNaming)
+            Button("Huỷ", role: .cancel) { naming = nil }
+        }
+        .sheet(item: $vaultPrompt) { prompt in
+            if let board = model.history.boards.first(where: { $0.id == prompt.boardID }) {
+                ClipboardBoardVaultView(
+                    module: module, look: .library, mode: mode(of: prompt), board: board,
+                    onDone: { vaultPrompt = nil }, onCancel: { vaultPrompt = nil }
+                )
+                .padding(20)
+                .frame(width: 520)
+            }
+        }
+        .alert("Xoá cả mục đã ghim?", isPresented: Binding(get: { model.pendingDeletion != nil }, set: { _ in })) {
+            Button("Xoá", role: .destructive) { model.confirmDelete() }
+            Button("Huỷ", role: .cancel) { model.cancelDelete() }
+        } message: {
+            Text("\(model.pendingDeletion?.count ?? 0) mục sẽ bị xoá khỏi lịch sử và khỏi mọi board.")
+        }
+    }
+
+    /// Under the toolbar: the search's `@` filters as chips, and, while a click would paste without Accessibility, how to allow it.
+    private var topStrips: some View {
+        VStack(spacing: 0) {
+            chips
+            accessibilityHint
+        }
+    }
+
+    @ViewBuilder private var chips: some View {
+        if !model.chips.isEmpty {
+            strip {
+                ClipboardSearchChips(look: .library, tokens: model.chips) { model.removeChip($0) }
+            }
+        }
+    }
+
+    @ViewBuilder private var accessibilityHint: some View {
+        if module.state.needsAccessibility {
+            strip {
+                ClipboardAccessibilityHint(look: .library) { module.requestAccessibility() }
+            }
+        }
+    }
+
+    private func strip<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(spacing: 0) {
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 8)
+            Divider()
+        }
+        .background(.bar)
+    }
+
+    @ViewBuilder private var suggestionList: some View {
+        if model.suggestions.isOpen {
+            ClipboardSuggestionListView(look: .library, list: model.suggestions) { model.acceptSuggestion(at: $0) }
+                .padding(.top, 6)
+                .padding(.trailing, 14)
+        }
+    }
+
+    /// ⌘F, which `.searchable` used to provide, and ⌘[, ⌘] and ⌘I. Buttons nobody sees, so they work whatever has the keyboard; the
+    /// toolbar's own buttons carry the same shortcuts in their help text.
+    private var shortcuts: some View {
+        Group {
+            Button("Tìm kiếm") { searchFocusRequest += 1 }
+                .keyboardShortcut("f", modifiers: .command)
+            Button("Quay lại") { model.goBack() }
+                .keyboardShortcut("[", modifiers: .command)
+                .disabled(!model.canGoBack)
+            Button("Tiến tới") { model.goForward() }
+                .keyboardShortcut("]", modifiers: .command)
+                .disabled(!model.canGoForward)
+            Button("Hiện hoặc ẩn chi tiết") { model.toggleInspector() }
+                .keyboardShortcut("i", modifiers: .command)
+        }
+        .opacity(0)
+        .accessibilityHidden(true)
+    }
+
+    // MARK: Toolbar
+
+    @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            Button {
+                withAnimation { visibility = visibility == .detailOnly ? .all : .detailOnly }
+            } label: {
+                Label("Thanh bên", systemImage: "sidebar.left")
+            }
+            .help("Ẩn hoặc hiện thanh bên")
+        }
+        ToolbarItemGroup(placement: .navigation) {
+            Button { model.goBack() } label: {
+                Label("Quay lại", systemImage: "chevron.left")
+            }
+            .disabled(!model.canGoBack)
+            .help("Quay lại (⌘[)")
+            Button { model.goForward() } label: {
+                Label("Tiến tới", systemImage: "chevron.right")
+            }
+            .disabled(!model.canGoForward)
+            .help("Tiến tới (⌘])")
+        }
+        ToolbarItemGroup {
+            Menu {
+                Picker("Sắp xếp", selection: $model.sort) {
+                    ForEach(ClipboardLibrarySort.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } label: {
+                Label("Sắp xếp", systemImage: "arrow.up.arrow.down")
+            }
+            .help("Sắp xếp")
+
+            Menu {
+                Picker("Loại", selection: $model.kindFilter) {
+                    Text("Tất cả loại").tag(ClipboardKind?.none)
+                    ForEach(ClipboardKind.libraryOrder, id: \.self) { kind in
+                        Label(kind.title, systemImage: kind.systemImage).tag(ClipboardKind?.some(kind))
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } label: {
+                Label("Lọc theo loại", systemImage: model.kindFilter == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+            }
+            .help("Lọc theo loại")
+        }
+        ToolbarItem {
+            Button { model.isViewOptionsOpen.toggle() } label: {
+                Label("Cỡ thẻ và kiểu xem", systemImage: "slider.horizontal.3")
+            }
+            .help("Cỡ thẻ và kiểu xem")
+            // Made when it opens, so the slider and the switch do not exist while it is closed.
+            .popover(isPresented: $model.isViewOptionsOpen, arrowEdge: .bottom) {
+                ClipboardLibraryViewOptions(model: model)
+            }
+        }
+        ToolbarItem {
+            Button {
+                startNaming(.create(pinning: []))
+            } label: {
+                Label("Board mới", systemImage: "folder.badge.plus")
+            }
+            .help("Board mới")
+        }
+        ToolbarItem {
+            Button { model.toggleInspector() } label: {
+                Label("Chi tiết", systemImage: "sidebar.right")
+            }
+            .help("Hiện hoặc ẩn chi tiết (⌘I)")
+        }
+        ToolbarItem {
+            ClipboardSearchField(
+                text: $model.searchText, look: .library, takesFocus: true, focusRequest: searchFocusRequest,
+                onCommand: { model.handleSearchKey($0) }
+            )
+            .frame(width: 200)
+        }
+    }
+
+    private func mode(of prompt: ClipboardVaultPrompt) -> ClipboardBoardVaultView.Mode {
+        switch prompt {
+        case .lock: .setUp
+        case .removeLock: .removeLock
+        case .deleteData: .deleteData
+        }
+    }
+
+    // MARK: Naming a board
+
+    private var namingTitle: String {
+        if case .rename = naming { "Đổi tên board" } else { "Board mới" }
+    }
+
+    private var namingButton: String {
+        if case .rename = naming { "Lưu" } else { "Tạo" }
+    }
+
+    private func startNaming(_ request: ClipboardLibraryBoardNaming) {
+        if case .rename(let id) = request {
+            boardName = model.history.boards.first { $0.id == id }?.name ?? ""
+        } else {
+            boardName = ""
+        }
+        naming = request
+    }
+
+    private func commitNaming() {
+        guard let request = naming else { return }
+        naming = nil
+        switch request {
+        case .create(let ids): model.createBoard(named: boardName, pinning: ids)
+        case .rename(let id): module.renameBoard(id, to: boardName)
+        }
+    }
+}

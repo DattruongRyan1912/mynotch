@@ -1,0 +1,303 @@
+name: MyNotch
+options:
+  bundleIdPrefix: io.lucasvu
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+settingGroups:
+  # Shared by the app and the frameworks it embeds, so both always sign the same way.
+  signing:
+    CODE_SIGN_STYLE: Automatic
+    # Apple Development keeps the designated requirement stable across builds, so macOS remembers granted permissions.
+    # Needs the Apple WWDR G3 intermediate certificate in the keychain; without it, switch back to ad-hoc ("-").
+    CODE_SIGN_IDENTITY: "Apple Development"
+    DEVELOPMENT_TEAM: B394MAY4QN
+packages:
+  MyNotchCore:
+    path: Packages/MyNotchCore
+  NotchUI:
+    path: Packages/NotchUI
+  DebugTools:
+    path: Packages/DebugTools
+  AIAgentsModule:
+    path: Packages/Modules/AIAgents
+  BatteryModule:
+    path: Packages/Modules/Battery
+  CalendarModule:
+    path: Packages/Modules/Calendar
+  ClipboardModule:
+    path: Packages/Modules/Clipboard
+  EqualizerModule:
+    path: Packages/Modules/Equalizer
+  LockScreenModule:
+    path: Packages/Modules/LockScreen
+  MediaModule:
+    path: Packages/Modules/Media
+  PerformanceModule:
+    path: Packages/Modules/Performance
+  PetModule:
+    path: Packages/Modules/Pet
+  PortsModule:
+    path: Packages/Modules/Ports
+  ScreenshotModule:
+    path: Packages/Modules/Screenshot
+  ShelfModule:
+    path: Packages/Modules/Shelf
+  ShortcutsModule:
+    path: Packages/Modules/Shortcuts
+  SystemActivitiesModule:
+    path: Packages/Modules/SystemActivities
+  TimerModule:
+    path: Packages/Modules/Timer
+  TodoModule:
+    path: Packages/Modules/Todo
+  HabitModule:
+    path: Packages/Modules/Habit
+  TranslationModule:
+    path: Packages/Modules/Translation
+  CleanerModule:
+    path: Packages/Modules/Cleaner
+  WindowLayoutModule:
+    path: Packages/Modules/WindowLayout
+  KeyboardShortcuts:
+    url: https://github.com/sindresorhus/KeyboardShortcuts
+    exactVersion: 3.1.0
+targets:
+  MyNotch:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+      # Run by /usr/bin/perl, which loads the embedded MediaRemoteAdapter.framework.
+      - path: Vendor/mediaremote-adapter/bin/mediaremote-adapter.pl
+        buildPhase: resources
+      # The Chrome extension without its tests, in Contents/Resources/ChromeExtension: Media's installer copies it out
+      # of the app, and the user loads that copy unpacked.
+      - path: Extensions/Chrome/MyNotchYouTube
+        excludes: ["tests/**"]
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: ChromeExtension
+      # The launchd job of the fan helper, in Contents/Library/LaunchDaemons, which is where SMAppService.daemon looks for it.
+      - path: Tools/mynotch-fan-helper/Daemon/io.lucasvu.mynotch.fanhelper.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchDaemons
+    dependencies:
+      - package: MyNotchCore
+      - package: NotchUI
+      - package: DebugTools
+      - package: AIAgentsModule
+      - package: BatteryModule
+      - package: CalendarModule
+      - package: ClipboardModule
+      - package: EqualizerModule
+      - package: LockScreenModule
+      - package: MediaModule
+      - package: PerformanceModule
+      - package: PetModule
+      - package: PortsModule
+      - package: ScreenshotModule
+      - package: ShelfModule
+      - package: ShortcutsModule
+      - package: SystemActivitiesModule
+      - package: TimerModule
+      - package: TodoModule
+      - package: HabitModule
+      - package: TranslationModule
+      - package: CleanerModule
+      - package: WindowLayoutModule
+      - package: KeyboardShortcuts
+      # Copied into Contents/Frameworks for perl to load; the app binary never links it.
+      - target: MediaRemoteAdapter
+        embed: true
+        link: false
+        codeSign: true
+      # Copied into Contents/MacOS, where AIAgentsModule's HookSetup looks for the helper.
+      - target: mynotch-hook
+        embed: true
+        link: false
+        codeSign: true
+        copy:
+          destination: executables
+      # Copied into Contents/MacOS, where MediaModule's YouTubeBridgeInstaller looks for the helper.
+      - target: mynotch-youtube-host
+        embed: true
+        link: false
+        codeSign: true
+        copy:
+          destination: executables
+      # Copied into Contents/MacOS, where ClipboardModule's ClipboardMCPHelperFile looks for the helper that AI agents run.
+      - target: mynotch-clipboard-mcp
+        embed: true
+        link: false
+        codeSign: true
+        copy:
+          destination: executables
+      # Copied into Contents/MacOS, where the plist above says it is (BundleProgram); launchd runs it as root when the app connects.
+      - target: mynotch-fan-helper
+        embed: true
+        link: false
+        codeSign: false
+        copy:
+          destination: executables
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: MyNotch
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSUIElement: true
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        NSHumanReadableCopyright: "MyNotch — personal build"
+        # Asking for a permission without its usage description crashes the app.
+        NSCalendarsFullAccessUsageDescription: "MyNotch hiển thị lịch sắp tới trong notch."
+        NSRemindersFullAccessUsageDescription: "MyNotch hiển thị, thêm và đánh dấu xong lời nhắc trong notch."
+        NSBluetoothAlwaysUsageDescription: "MyNotch hiển thị pin của thiết bị Bluetooth trong notch."
+        NSAppleEventsUsageDescription: "MyNotch điều khiển ứng dụng khác từ notch, ví dụ trình phát nhạc, hoặc Terminal và iTerm để mở đúng tab của một phiên AI."
+        NSMicrophoneUsageDescription: "MyNotch dùng micro cho các tính năng ghi âm trong notch."
+        NSAudioCaptureUsageDescription: "MyNotch dùng âm thanh hệ thống để vẽ phổ nhạc và để chỉnh âm (EQ)."
+        NSDesktopFolderUsageDescription: "MyNotch lưu ảnh chụp màn hình vào Desktop khi bạn chọn."
+        NSDownloadsFolderUsageDescription: "MyNotch lưu ảnh chụp và theo dõi file tải xong trong Downloads khi bạn bật."
+        # Each NSMessage is a method of App/ServicesProvider.swift.
+        NSServices:
+          - NSMenuItem:
+              default: "Dịch bằng MyNotch"
+            NSMessage: translateWithMyNotch
+            NSPortName: MyNotch
+            NSSendTypes: [public.utf8-plain-text]
+            NSRequiredContext: {}
+    entitlements:
+      path: App/MyNotch.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+        # Hardened Runtime blocks calendars, Apple Events and audio input without these entitlements.
+        # The Bluetooth one is an App Sandbox entitlement: harmless without the sandbox, ready if it is enabled.
+        com.apple.security.personal-information.calendars: true
+        com.apple.security.personal-information.reminders: true
+        com.apple.security.automation.apple-events: true
+        com.apple.security.device.audio-input: true
+        com.apple.security.device.bluetooth: true
+    settings:
+      groups: [signing]
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch
+        PRODUCT_NAME: MyNotch
+        ENABLE_HARDENED_RUNTIME: YES
+        COMBINE_HIDPI_IMAGES: YES
+        # App/Icon/MyNotch.icon (Icon Composer): XcodeGen adds it to Resources, actool emits Assets.car and MyNotch.icns.
+        ASSETCATALOG_COMPILER_APPICON_NAME: MyNotch
+  # Vendored ungive/mediaremote-adapter (see Vendor/mediaremote-adapter/VENDORED.md); the test client is not built.
+  MediaRemoteAdapter:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Vendor/mediaremote-adapter/src/adapter
+        headerVisibility: project
+      - path: Vendor/mediaremote-adapter/src/private
+        headerVisibility: project
+      - path: Vendor/mediaremote-adapter/src/utility
+        headerVisibility: project
+      - path: Vendor/mediaremote-adapter/include/MediaRemoteAdapter.h
+        headerVisibility: project
+    dependencies:
+      - sdk: Foundation.framework
+      - sdk: CoreFoundation.framework
+      - sdk: AppKit.framework
+      - sdk: CoreServices.framework
+      - sdk: ImageIO.framework
+      - sdk: UniformTypeIdentifiers.framework
+    settings:
+      groups: [signing]
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch.MediaRemoteAdapter
+        GENERATE_INFOPLIST_FILE: YES
+        CLANG_ENABLE_OBJC_ARC: YES
+        # perl looks the adapter_* functions up by name, so every symbol must stay exported.
+        GCC_SYMBOLS_PRIVATE_EXTERN: NO
+        OTHER_CFLAGS: ["$(inherited)", "-fvisibility=default"]
+        HEADER_SEARCH_PATHS: ["$(SRCROOT)/Vendor/mediaremote-adapter/src", "$(SRCROOT)/Vendor/mediaremote-adapter/include"]
+        # Upstream declares its C functions as `void f();`, which floods the build log with one warning per use.
+        CLANG_WARN_STRICT_PROTOTYPES: NO
+        # get.m has an unused variable; the vendored sources stay as upstream wrote them.
+        GCC_WARN_UNUSED_VARIABLE: NO
+        DEFINES_MODULE: NO
+        SKIP_INSTALL: YES
+        ENABLE_HARDENED_RUNTIME: YES
+  # The hook helper Claude Code and Codex run (see AIAgents' HookSetup); it only sends a datagram to the app.
+  mynotch-hook:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Tools/mynotch-hook
+    dependencies:
+      - package: AIAgentsModule
+        product: AgentHookKit
+    settings:
+      groups: [signing]
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch.hook
+        SKIP_INSTALL: YES
+        ENABLE_HARDENED_RUNTIME: YES
+  # The MCP server AI agents run to search the clipboard history (see Clipboard's ClipboardMCPHelperFile); it asks the running app
+  # over a socket in the user's private folder, and only while the user has turned it on.
+  mynotch-clipboard-mcp:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Tools/mynotch-clipboard-mcp
+    dependencies:
+      - package: ClipboardModule
+        product: ClipboardMCPKit
+    settings:
+      groups: [signing]
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch.clipboard-mcp
+        SKIP_INSTALL: YES
+        ENABLE_HARDENED_RUNTIME: YES
+  # The helper Chrome starts for the YouTube captions extension (see Media's YouTubeBridgeInstaller); it only passes
+  # the extension's messages to the app over a socket.
+  mynotch-youtube-host:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Tools/mynotch-youtube-host
+    dependencies:
+      - package: MediaModule
+        product: YouTubeBridgeKit
+    settings:
+      groups: [signing]
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch.youtube-host
+        SKIP_INSTALL: YES
+        ENABLE_HARDENED_RUNTIME: YES
+  # The privileged helper for the fans, registered with SMAppService.daemon from Performance's settings (see FanHelperManager). It
+  # answers over XPC to a connection signed by the team, and sets a fan only through FanHelperDaemon's controller: a lease, a heat
+  # guard, the fan's own range. FanHelperDaemon is the only code that writes to the SMC, and the app does not link it.
+  mynotch-fan-helper:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Tools/mynotch-fan-helper
+        excludes: ["Daemon/**"]
+    dependencies:
+      - package: PerformanceModule
+        product: FanHelperKit
+      - package: PerformanceModule
+        product: FanHelperDaemon
+    settings:
+      groups: [signing]
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: mynotch-fan-helper
+        SKIP_INSTALL: YES
+        ENABLE_HARDENED_RUNTIME: YES
+        OTHER_CODE_SIGN_FLAGS: "--identifier mynotch-fan-helper"

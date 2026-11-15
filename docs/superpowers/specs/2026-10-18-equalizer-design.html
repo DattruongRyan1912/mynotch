@@ -1,0 +1,134 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MyNotch — Bộ chỉnh âm (EQ) cho cả máy</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-ý-định">1. Ý định</a><a class="h2" href="#2-mục-tiêu">2. Mục tiêu</a><a class="h2" href="#3-không-làm-đợt-này">3. Không làm (đợt này)</a><a class="h2" href="#4-không-được-xảy-ra-lựa-chọn-của-người-viết-người-dùng-chưa-nêu-điều-gì">4. Không được xảy ra (lựa chọn của người viết; người dùng chưa nêu điều gì)</a><a class="h2" href="#5-ràng-buộc">5. Ràng buộc</a><a class="h2" href="#6-cách-làm-đã-chọn">6. Cách làm (đã chọn)</a><a class="h2" href="#7-để-người-làm-tự-quyết">7. Để người làm tự quyết</a><a class="h2" href="#8-kiểm-chứng">8. Kiểm chứng</a></nav><main><h1 id="mynotch-bộ-chỉnh-âm-eq-cho-cả-máy">MyNotch: bộ chỉnh âm (EQ) cho cả máy</h1>
+<ul><li><strong>Ngày:</strong> 2026-10-18
+</li><li><strong>Trạng thái:</strong> Thiết kế, chờ duyệt
+</li><li><strong>Thay cho:</strong> eqMac. Người dùng chỉ dùng phần EQ, không dùng App Mixer.
+</li></ul>
+<h2 id="1-ý-định">1. Ý định</h2>
+<p>Người dùng đang dùng eqMac. Mỗi lần chuyển giữa nghe nhạc, xem phim và họp, họ <strong>tự bấm đổi</strong> sang hồ sơ EQ hợp với việc đó. Thỉnh thoảng họ mới kéo lại từng thanh EQ.</p>
+<p>Họ muốn làm việc này ngay trên notch của MyNotch để bỏ được eqMac. Phần chỉnh âm lượng riêng cho từng app thì họ ít dùng nên để sau.</p>
+<p>Thành công nghĩa là người dùng tắt eqMac, mỗi ngày đổi hồ sơ trên notch mà không nghĩ tới nó, âm thanh không rè, không trễ thấy rõ, và máy không nặng hơn.</p>
+<h2 id="2-mục-tiêu">2. Mục tiêu</h2>
+<ul><li>Một EQ 10 băng (32, 64, 125, 250, 500 Hz, 1, 2, 4, 8, 16 kHz; mỗi băng ±12 dB) kèm preamp (±12 dB), áp lên <strong>toàn bộ âm thanh phát ra của máy</strong>.
+</li><li>Mỗi <strong>hồ sơ</strong> gồm tên, 10 mức băng và preamp.
+<ul><li>Lần đầu có sẵn ba hồ sơ: <strong>Nhạc</strong>, <strong>Phim</strong>, <strong>Họp</strong>.
+</li><li>Người dùng thêm, đổi tên và xoá được. Xoá hết cũng được, khi đó EQ phẳng.
+</li></ul>
+</li><li>Một <strong>công tắc EQ</strong> dùng chung cho cả máy. Tắt là âm thanh đi thẳng, không qua MyNotch.
+</li><li><strong>Đổi hồ sơ nhanh</strong> trong tab Nhạc: một dòng dưới trình phát, gồm:
+<ul><li>chữ "EQ";
+</li><li>danh sách hồ sơ dạng thả xuống;
+</li><li>công tắc EQ;
+</li><li>nút "Chỉnh…" để mở tab Âm thanh.
+</li></ul>
+</li><li><strong>Tab "Âm thanh"</strong>, mặc định nằm trong mục "Khác" như mọi module mới (theo TB1), gồm:
+<ul><li>danh sách hồ sơ thả xuống, kèm các nút thêm (＋), đổi tên (✎) và xoá (－);
+</li><li>công tắc EQ;
+</li><li>thanh Preamp;
+</li><li>10 thanh EQ;
+</li><li>nút "Về phẳng".
+</li></ul>
+</li><li>Mọi âm thanh vẫn ra <strong>đúng thiết bị nó vốn được gửi tới</strong>, và EQ áp lên từng thiết bị đó. Có hai trường hợp:
+<ul><li>thiết bị đầu ra hệ thống (loa trong, tai nghe, loa Bluetooth), đi theo khi người dùng đổi thiết bị;
+</li><li><strong>thiết bị riêng mà app tự chọn</strong>. Người dùng xác nhận khi họp, Zoom, Meet hay Teams của họ chọn loa hoặc tai nghe riêng, khác thiết bị hệ thống. Hồ sơ "Họp" phải có tác dụng lên âm thanh đó.
+</li></ul>
+</li><li>Cùng một hồ sơ đang chọn áp lên mọi thiết bị đang có tiếng (lựa chọn của người viết). Không có hồ sơ riêng cho từng thiết bị.
+</li><li>Phím âm lượng của máy vẫn chỉnh thiết bị thật như bình thường.
+</li></ul>
+<h2 id="3-không-làm-đợt-này">3. Không làm (đợt này)</h2>
+<ul><li>App Mixer, tức âm lượng riêng cho từng app.
+</li><li>Spatial Audio, Extra Effects.
+</li><li>Boost và Balance. Ảnh eqMac của người dùng để Boost 0% và Balance 100/100. Làm sau nếu cần, vì dễ.
+</li><li>Tự đổi hồ sơ theo app hay theo cuộc họp. Người dùng muốn bấm tay.
+</li><li>Hồ sơ tự đổi theo thiết bị.
+</li><li>Expert EQ (nhiều băng hơn, tham số tự chỉnh).
+</li><li>Driver âm thanh ảo (HAL plug-in) hoặc bất cứ thứ gì cần mật khẩu admin.
+</li></ul>
+<h2 id="4-không-được-xảy-ra-lựa-chọn-của-người-viết-người-dùng-chưa-nêu-điều-gì">4. Không được xảy ra (lựa chọn của người viết; người dùng chưa nêu điều gì)</h2>
+<ul><li><strong>Rè, lụp bụp hay ngắt tiếng</strong> khi phát lâu, khi đổi thiết bị, khi máy ngủ rồi thức, khi đổi hồ sơ hay kéo thanh EQ.
+</li><li><strong>Trễ thấy rõ</strong>, nhất là khi họp hay xem phim. Mục tiêu là trễ thêm không quá khoảng 20 ms trên loa trong.
+</li><li><strong>Mất tiếng.</strong> MyNotch thoát, crash hay bị kill thì âm thanh phải tự trở lại bình thường: hệ điều hành huỷ tap riêng của tiến trình, và người làm chọn chế độ tắt tiếng sao cho tiếng gốc trở lại khi không còn ai đọc tap. Treo luồng chính không sao, vì luồng âm thanh thời gian thực vẫn chạy. Trường hợp cả tiến trình bị đóng băng hẳn (SIGSTOP, debugger) <strong>không</strong> cần một watchdog bên ngoài (lựa chọn của người viết). Tắt EQ thì không còn xử lý gì, không tốn gì.
+</li><li><strong>Đưa âm thanh sang nhầm thiết bị</strong>, ví dụ tiếng cuộc họp đáng lẽ ra tai nghe lại phát ra loa.
+</li><li><strong>Nặng máy.</strong> Người dùng hay theo dõi RAM và CPU. Khi EQ bật và đang có tiếng, CPU phải ở mức thấp. Khi im lặng hoặc EQ tắt, gần như bằng không.
+</li><li><strong>Hai EQ chồng lên nhau mà không biết.</strong> Khi eqMac đang chạy, nói cho người dùng biết.
+</li><li><strong>Làm hỏng phổ âm thanh thật</strong> của module Nhạc.
+</li></ul>
+<h2 id="5-ràng-buộc">5. Ràng buộc</h2>
+<ul><li>macOS 26.5, Swift 6, SwiftUI kết hợp AppKit, một gói SwiftPM cho mỗi module. Module không phụ thuộc lẫn nhau, như mọi module khác của MyNotch.
+</li><li>Ứng dụng không chạy trong sandbox, ký bằng Apple Development (team B394MAY4QN), không cần entitlement riêng.
+</li><li>Quyền "Ghi âm thanh hệ thống" (System Audio Recording) đã được xin cho phổ âm thanh thật của module Nhạc. EQ cần cùng quyền đó.
+</li><li>Không cài gì cần quyền admin.
+</li><li>Giao diện tiếng Việt, viết hoa đầu câu. Theo glass và màu chữ hiện có của notch, đọc rõ trên cả nền sáng và nền tối.
+</li></ul>
+<h2 id="6-cách-làm-đã-chọn">6. Cách làm (đã chọn)</h2>
+<ul><li><strong>Đường ống:</strong> dùng Core Audio process tap, cùng họ API với <code>SystemAudioTap</code> của module Nhạc. EQ cần thêm ba việc:
+<ul><li>tắt tiếng bản gốc trong lúc tap (<code>muteBehavior</code> khác <code>.unmuted</code>);
+</li><li>loại chính MyNotch ra khỏi tap;
+</li><li>phát lại bản đã qua EQ ra <strong>đúng thiết bị đó</strong>.
+<p>Vì app có thể chọn thiết bị riêng, đường ống phải <strong>gắn với từng thiết bị đầu ra</strong> (tap theo stream của thiết bị), mỗi thiết bị đang có tiếng một đường ống. Một tap toàn cục phát lại về một thiết bị thì không được. Thường chỉ có một hoặc hai thiết bị cùng lúc. Thiết bị nào im lặng hay biến mất thì đường ống của nó được dỡ đi.</p>
+</li></ul>
+</li><li><strong>Chọn hồ sơ:</strong> danh sách thả xuống, không dùng nút chip, vì danh sách hồ sơ do người dùng tự thêm bớt.
+</li><li><strong>Lưu hồ sơ:</strong> kéo thanh nào là lưu ngay vào hồ sơ đang chọn, không có nút Lưu và không có trạng thái "Manual" riêng. Đây là lựa chọn của người viết, người dùng không phản đối.
+</li><li><strong>Đường cong mặc định</strong> (lựa chọn của người viết, người dùng chỉnh được):
+<ul><li>Nhạc: hình chữ V nhẹ;
+</li><li>Phim: thêm bass và vùng thoại;
+</li><li>Họp: hạ bass, nâng vùng giọng nói khoảng 1–4 kHz.
+</li></ul>
+</li><li><strong>Dùng chung trạng thái giữa hai module:</strong> dòng EQ trong tab Nhạc và module Âm thanh dùng chung trạng thái (danh sách hồ sơ, hồ sơ đang chọn, công tắc) qua MyNotchCore, không để module này import module kia. Công tắc ở hai nơi là một.
+</li></ul>
+<h2 id="7-để-người-làm-tự-quyết">7. Để người làm tự quyết</h2>
+<ul><li>Kiến trúc đường ống chi tiết, miễn là gắn theo từng thiết bị như mục 6:
+<ul><li>dùng aggregate device hay một IOProc riêng;
+</li><li>cách phát hiện thiết bị nào đang có tiếng;
+</li><li>cách bù lệch nhịp giữa tap và thiết bị ra;
+</li><li>kích thước buffer và cách đạt độ trễ mục tiêu.
+</li></ul>
+</li><li>Bộ lọc: biquad của vDSP, <code>AVAudioUnitEQ</code>, hay tự viết. Điều kiện là luồng âm thanh thời gian thực không cấp phát bộ nhớ và không khoá.
+</li><li>Cách chuyển êm khi đổi hồ sơ hay kéo thanh, để không nghe tiếng "tách".
+</li><li>Xử lý khi đổi thiết bị, khi đổi tần số lấy mẫu, khi ngủ hoặc thức, và khi chưa có quyền.
+</li><li>Cách phát hiện eqMac đang chạy và câu chữ thông báo.
+</li><li>Tên module, mã định danh, biểu tượng, và cách lưu hồ sơ (settings hay file trong ModuleStorage).
+</li><li>Thứ tự các phần và cách chia việc.
+</li></ul>
+<h2 id="8-kiểm-chứng">8. Kiểm chứng</h2>
+<ul><li><strong>Test:</strong>
+<ul><li>Toán của bộ lọc: đáp ứng tần số của từng băng ở ±12 dB; preamp; hồ sơ phẳng thì tín hiệu đi qua không đổi.
+</li><li>Hồ sơ: thêm, đổi tên, xoá, xoá hết, lưu rồi đọc lại.
+</li><li>Trạng thái dùng chung giữa tab Nhạc và tab Âm thanh.
+</li><li>Luồng âm thanh thời gian thực không cấp phát (dùng bộ đếm cấp phát trong test).
+</li><li>Các trường hợp đổi thiết bị, dùng thiết bị giả.
+</li></ul>
+</li><li><strong>Kiểm tra trên máy thật</strong> (người điều phối làm sau khi cài):
+<ul><li>phát nhạc trên YouTube và Music qua loa trong và qua loa Bluetooth;
+</li><li>đặt app họp (hoặc một app phát thử) ra một thiết bị khác thiết bị hệ thống: tiếng vẫn ra đúng thiết bị đó và có EQ;
+</li><li>đổi hồ sơ trong lúc phát;
+</li><li>cắm và rút tai nghe;
+</li><li>cho máy ngủ rồi thức;
+</li><li>thoát MyNotch giữa chừng: tiếng phải trở lại ngay;
+</li><li>đo CPU và RAM bằng <code>perf/measure.sh</code>;
+</li><li>nghe xem có rè không.
+</li></ul>
+</li></ul></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>

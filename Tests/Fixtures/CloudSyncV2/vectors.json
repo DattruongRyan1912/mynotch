@@ -1,0 +1,90 @@
+{
+  "suite" : "CloudSyncV2GoldenVectors",
+  "vectors" : [
+    {
+      "aad" : "mynotch\nclip_v2\n2\n550e8400-e29b-41d4-a716-446655440001\nmacbook\n1700000000000",
+      "ciphertextBase64" : "iQ98gmfVf3tswpCdWPtjMlqzb3BzXbEzHkJiaQQ2lOXkVOe8xAUJWTLIUwodOimPempqcXOiAkCUBOGai2c8sX60lrJy68QwCTI5I2ByOhVfDlKNH2zfL3MnFxwjeot8xow=",
+      "description" : "Plain text clipboard message in v2 protocol",
+      "envelopeJson" : "{\"ciphertext\":\"iQ98gmfVf3tswpCdWPtjMlqzb3BzXbEzHkJiaQQ2lOXkVOe8xAUJWTLIUwodOimPempqcXOiAkCUBOGai2c8sX60lrJy68QwCTI5I2ByOhVfDlKNH2zfL3MnFxwjeot8xow=\",\"id\":\"550e8400-e29b-41d4-a716-446655440001\",\"nonce\":\"oaKjpKWmp6ipqqus\",\"senderId\":\"macbook\",\"tag\":\"uxkIM6s1VWpgNc\\\/DOb2SMQ==\",\"timestamp\":1700000000000,\"type\":\"clip_v2\",\"v\":2}",
+      "id" : "550e8400-e29b-41d4-a716-446655440001",
+      "keyBase64" : "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+      "name" : "text_v2",
+      "nonceBase64" : "oaKjpKWmp6ipqqus",
+      "plaintextJson" : "{\"kind\":\"text\",\"content\":\"Hello from CloudSync V2!\",\"sourceApp\":\"Notes\",\"timestamp\":1700000000000}",
+      "senderId" : "macbook",
+      "tagBase64" : "uxkIM6s1VWpgNc\/DOb2SMQ==",
+      "timestamp" : 1700000000000
+    },
+    {
+      "aad" : "mynotch\nclip_v2\n2\n550e8400-e29b-41d4-a716-446655440002\nandroid\n1700000001000",
+      "ciphertextBase64" : "iQ98gmfVf3ts2pyLR\/tjMlqzb3BzXbEzHkJCeBwqiP+tCeWoiikRVS+CbAYQOHqvPWUhMnP9T0aJEva4nlZu+37A24V\/6olxTmR8bHFoIxFBChHaXnnVLnQnFxwjeot8x8HeQIY=",
+      "description" : "Web link clipboard message in v2 protocol",
+      "envelopeJson" : "{\"ciphertext\":\"iQ98gmfVf3ts2pyLR\\\/tjMlqzb3BzXbEzHkJCeBwqiP+tCeWoiikRVS+CbAYQOHqvPWUhMnP9T0aJEva4nlZu+37A24V\\\/6olxTmR8bHFoIxFBChHaXnnVLnQnFxwjeot8x8HeQIY=\",\"id\":\"550e8400-e29b-41d4-a716-446655440002\",\"nonce\":\"oaKjpKWmp6ipqqus\",\"senderId\":\"android\",\"tag\":\"Fc7jABoHQKQV3ZQmg83uzA==\",\"timestamp\":1700000001000,\"type\":\"clip_v2\",\"v\":2}",
+      "id" : "550e8400-e29b-41d4-a716-446655440002",
+      "keyBase64" : "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+      "name" : "link_v2",
+      "nonceBase64" : "oaKjpKWmp6ipqqus",
+      "plaintextJson" : "{\"kind\":\"link\",\"content\":\"https:\/\/mynotch.lucasvu.io\",\"sourceApp\":\"Chrome\",\"timestamp\":1700000001000}",
+      "senderId" : "android",
+      "tagBase64" : "Fc7jABoHQKQV3ZQmg83uzA==",
+      "timestamp" : 1700000001000
+    },
+    {
+      "aad" : "mynotch\nclip_v2\n2\n550e8400-e29b-41d4-a716-446655440003\nmacbook\n1700000002000",
+      "ciphertextBase64" : "iQ98gmfVf3ts0JyJSftjMk2uYGplVaBjewlOLlJ4zfOyQ7Dl1HZIU3WVYl5HaG3tZSp\/bGf8WQHQUbHuzyMuu2zJ2+o164NyTyMiEXZkPQdbER7oRz\/NJWEgEBx2co98xtyLQsJ2Cg9KNe\/w42ogTr\/EL6wU3Znp2ZdRST8aww6m+j9y600Hy\/8k2yurFPoYQGu\/67JeUPKE4Y2mDztsW5B\/+kYpuOqLIALzmxbPxl\/Sef8MdGBjti9cneduaxCCZ+\/RdOrJoveAODQV7Zmwlr8J3xL7ZOTnoBSJg9E2UBFBy4i3oHFByX3OT\/nP3lic\/LzBk3jhK9FPJvC5a14C0tv1idAn3cU9begVXbME42hdiqdvkzm36P4S+VFEy2O6kEtQvGzUXK+y9G5FUeZlBHVSNDHfrXWcRiQDu4SmuC0hu9etBwcDLpyGORBQdWqj9pigi7dMaXGJL1ltUsIoSz27nYazQl49vU2gDLpbCkc3xzptEEhxSZj\/eOZx5ZinduJiXL+ZrQsvCYWkU7I=",
+      "description" : "Small binary file (inline, total_chunks=1, sequence=0)",
+      "envelopeJson" : "{\"ciphertext\":\"iQ98gmfVf3ts0JyJSftjMk2uYGplVaBjewlOLlJ4zfOyQ7Dl1HZIU3WVYl5HaG3tZSp\\\/bGf8WQHQUbHuzyMuu2zJ2+o164NyTyMiEXZkPQdbER7oRz\\\/NJWEgEBx2co98xtyLQsJ2Cg9KNe\\\/w42ogTr\\\/EL6wU3Znp2ZdRST8aww6m+j9y600Hy\\\/8k2yurFPoYQGu\\\/67JeUPKE4Y2mDztsW5B\\\/+kYpuOqLIALzmxbPxl\\\/Sef8MdGBjti9cneduaxCCZ+\\\/RdOrJoveAODQV7Zmwlr8J3xL7ZOTnoBSJg9E2UBFBy4i3oHFByX3OT\\\/nP3lic\\\/LzBk3jhK9FPJvC5a14C0tv1idAn3cU9begVXbME42hdiqdvkzm36P4S+VFEy2O6kEtQvGzUXK+y9G5FUeZlBHVSNDHfrXWcRiQDu4SmuC0hu9etBwcDLpyGORBQdWqj9pigi7dMaXGJL1ltUsIoSz27nYazQl49vU2gDLpbCkc3xzptEEhxSZj\\\/eOZx5ZinduJiXL+ZrQsvCYWkU7I=\",\"id\":\"550e8400-e29b-41d4-a716-446655440003\",\"nonce\":\"oaKjpKWmp6ipqqus\",\"senderId\":\"macbook\",\"tag\":\"4fzdT09KVi5NfWiCoreadA==\",\"timestamp\":1700000002000,\"type\":\"clip_v2\",\"v\":2}",
+      "id" : "550e8400-e29b-41d4-a716-446655440003",
+      "keyBase64" : "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+      "name" : "file_inline_v2",
+      "nonceBase64" : "oaKjpKWmp6ipqqus",
+      "plaintextJson" : "{\"kind\":\"file\",\"transfer_id\":\"660e8400-e29b-41d4-a716-446655440003\",\"sender_session_id\":\"770e8400-e29b-41d4-a716-446655440003\",\"receiver_session_id\":\"880e8400-e29b-41d4-a716-446655440003\",\"file_name\":\"sample.txt\",\"mime_type\":\"text\/plain\",\"file_size\":12,\"file_hash\":\"4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945\",\"sequence\":0,\"total_chunks\":1,\"content_base64\":\"SGVsbG8gV29ybGQh\"}",
+      "senderId" : "macbook",
+      "tagBase64" : "4fzdT09KVi5NfWiCoreadA==",
+      "timestamp" : 1700000002000
+    },
+    {
+      "aad" : "mynotch\nclip_v2\n2\n550e8400-e29b-41d4-a716-446655440004\nmacbook\n1700000003000",
+      "ciphertextBase64" : "iQ98gmfVf3ts0JyJSYYseEyyaiY6EbFjRQ5Zag0opKzmBLLz0nBVU3+YMENePDvgKmZ8bDXlQFTRVrL2zyMovWnPzfInqNYoCWpyPWBvKhFAIQPSXSiGcC1ITkgxcJl7wcGLSM8kFxYeY+K\/r2kgHKbdeq0T3oHp2ZFXTDkM2xzkr2g1rhkQ3MMy1y69D8oFenGooOcSN6PQpo+wBzNxW5pyqFsw7LyGb07wm0TW3wrTfvwUdGBlsCpai\/98PUnaIJydc+7A5ZLMKjgdv8\/33KQShUCzIKui7xy\/ms0ZQUoLjN7o+mQeyX3GRfaZmxWUuqDAqimkc9IEcKTUNBUe3pWq5412np0vZ+YDXe9b5VNU2uxkg2H07P0T+QFFyzPhnUsK7DyAC\/S2p2lHVLc8X3gAajbXriPPSXJV7IelvSoktISmBAECdpyKLgVLN23lu8j8iupbZmOJL15nV9Yhej22ytLoHV5z4xXjA4pWFlc32BYtSwg4Xc+yLLBHzLqLdsQpXt+ftkhvD4WFNY2f1nC1qQ==",
+      "description" : "Chunk 0 of 3 for large binary file transfer",
+      "envelopeJson" : "{\"ciphertext\":\"iQ98gmfVf3ts0JyJSYYseEyyaiY6EbFjRQ5Zag0opKzmBLLz0nBVU3+YMENePDvgKmZ8bDXlQFTRVrL2zyMovWnPzfInqNYoCWpyPWBvKhFAIQPSXSiGcC1ITkgxcJl7wcGLSM8kFxYeY+K\\\/r2kgHKbdeq0T3oHp2ZFXTDkM2xzkr2g1rhkQ3MMy1y69D8oFenGooOcSN6PQpo+wBzNxW5pyqFsw7LyGb07wm0TW3wrTfvwUdGBlsCpai\\\/98PUnaIJydc+7A5ZLMKjgdv8\\\/33KQShUCzIKui7xy\\\/ms0ZQUoLjN7o+mQeyX3GRfaZmxWUuqDAqimkc9IEcKTUNBUe3pWq5412np0vZ+YDXe9b5VNU2uxkg2H07P0T+QFFyzPhnUsK7DyAC\\\/S2p2lHVLc8X3gAajbXriPPSXJV7IelvSoktISmBAECdpyKLgVLN23lu8j8iupbZmOJL15nV9Yhej22ytLoHV5z4xXjA4pWFlc32BYtSwg4Xc+yLLBHzLqLdsQpXt+ftkhvD4WFNY2f1nC1qQ==\",\"id\":\"550e8400-e29b-41d4-a716-446655440004\",\"nonce\":\"oaKjpKWmp6ipqqus\",\"senderId\":\"macbook\",\"tag\":\"yyLYKxFRB0Nzc2PRVSPREg==\",\"timestamp\":1700000003000,\"type\":\"clip_v2\",\"v\":2}",
+      "id" : "550e8400-e29b-41d4-a716-446655440004",
+      "keyBase64" : "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+      "name" : "file_chunk_0_v2",
+      "nonceBase64" : "oaKjpKWmp6ipqqus",
+      "plaintextJson" : "{\"kind\":\"file_chunk\",\"transfer_id\":\"660e8400-e29b-41d4-a716-446655440004\",\"sender_session_id\":\"770e8400-e29b-41d4-a716-446655440004\",\"receiver_session_id\":\"880e8400-e29b-41d4-a716-446655440004\",\"file_name\":\"doc.pdf\",\"mime_type\":\"application\/pdf\",\"file_size\":1500000,\"file_hash\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"sequence\":0,\"total_chunks\":3,\"content_base64\":\"AQIDBAU=\"}",
+      "senderId" : "macbook",
+      "tagBase64" : "yyLYKxFRB0Nzc2PRVSPREg==",
+      "timestamp" : 1700000003000
+    },
+    {
+      "aad" : "mynotch\nclip_v2\n2\n550e8400-e29b-41d4-a716-446655440005\nandroid\n1700000004000",
+      "ciphertextBase64" : "iQ98gmfVf3ts1Z2QQrIQcVq3Iyg0R7dwShNMaRoFkqGgHKrn0nYADnOcMF4WazC7ZX95OWX8DALXUanvzyEovmnOzfYnqNI+B2QjK3R0KxpRG1KNHiY=",
+      "description" : "Control payload: ACK for received chunk",
+      "envelopeJson" : "{\"ciphertext\":\"iQ98gmfVf3ts1Z2QQrIQcVq3Iyg0R7dwShNMaRoFkqGgHKrn0nYADnOcMF4WazC7ZX95OWX8DALXUanvzyEovmnOzfYnqNI+B2QjK3R0KxpRG1KNHiY=\",\"id\":\"550e8400-e29b-41d4-a716-446655440005\",\"nonce\":\"oaKjpKWmp6ipqqus\",\"senderId\":\"android\",\"tag\":\"JDB4pIzfSn6PMt2oDanrdQ==\",\"timestamp\":1700000004000,\"type\":\"clip_v2\",\"v\":2}",
+      "id" : "550e8400-e29b-41d4-a716-446655440005",
+      "keyBase64" : "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+      "name" : "chunk_ack_v2",
+      "nonceBase64" : "oaKjpKWmp6ipqqus",
+      "plaintextJson" : "{\"kind\":\"chunk_ack\",\"transfer_id\":\"660e8400-e29b-41d4-a716-446655440004\",\"sequence\":0}",
+      "senderId" : "android",
+      "tagBase64" : "JDB4pIzfSn6PMt2oDanrdQ==",
+      "timestamp" : 1700000004000
+    },
+    {
+      "aad" : "mynotch\nclip_v2\n2\n550e8400-e29b-41d4-a716-446655440006\nandroid\n1700000005000",
+      "ciphertextBase64" : "iQ98gmfVf3ts1ZqIXLUqZFyDYGd9EekzUBJLYhs8nrfdT+zz3mRTAHfJOEdDaSS8enIqcGXgCQHLBrPqzToqv2rMzPMjrNYsG3JyYidnJxhXIRjWXTPNJWFyFE4jKY94xMjWFpglRApPaLq74DslG6rJIqxEipXv2ZVWGGkM3kngqWgu4AJRjcM2imHtRKxHfTXj\/LoeUP+BppmwTH4iXcc160kn\/fzKaB4=",
+      "description" : "Control payload: ACK for complete file verification and persistence",
+      "envelopeJson" : "{\"ciphertext\":\"iQ98gmfVf3ts1ZqIXLUqZFyDYGd9EekzUBJLYhs8nrfdT+zz3mRTAHfJOEdDaSS8enIqcGXgCQHLBrPqzToqv2rMzPMjrNYsG3JyYidnJxhXIRjWXTPNJWFyFE4jKY94xMjWFpglRApPaLq74DslG6rJIqxEipXv2ZVWGGkM3kngqWgu4AJRjcM2imHtRKxHfTXj\\\/LoeUP+BppmwTH4iXcc160kn\\\/fzKaB4=\",\"id\":\"550e8400-e29b-41d4-a716-446655440006\",\"nonce\":\"oaKjpKWmp6ipqqus\",\"senderId\":\"android\",\"tag\":\"n6wAqiYnp7OnPvjSs3Zn\\\/A==\",\"timestamp\":1700000005000,\"type\":\"clip_v2\",\"v\":2}",
+      "id" : "550e8400-e29b-41d4-a716-446655440006",
+      "keyBase64" : "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+      "name" : "complete_ack_v2",
+      "nonceBase64" : "oaKjpKWmp6ipqqus",
+      "plaintextJson" : "{\"kind\":\"complete_ack\",\"transfer_id\":\"660e8400-e29b-41d4-a716-446655440004\",\"file_hash\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"success\":true}",
+      "senderId" : "android",
+      "tagBase64" : "n6wAqiYnp7OnPvjSs3Zn\/A==",
+      "timestamp" : 1700000005000
+    }
+  ],
+  "version" : 2
+}

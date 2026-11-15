@@ -1,0 +1,185 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MyNotch — Điểm nối nền tảng (dự án con 0.5)</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-mục-tiêu">1. Mục tiêu</a><a class="h2" href="#2-notchui">2. NotchUI</a><a class="h3" href="#a1-đóng-khi-click-ra-ngoài">A1. Đóng khi click ra ngoài</a><a class="h3" href="#a2-tab-nhận-bàn-phím">A2. Tab nhận bàn phím</a><a class="h3" href="#a3-toast-khi-tab-đang-mở">A3. Toast khi tab đang mở</a><a class="h3" href="#a4-notchhandle-trong-environment">A4. <code>NotchHandle</code> trong environment</a><a class="h3" href="#sửa-nhỏ-đi-kèm">Sửa nhỏ đi kèm</a><a class="h2" href="#3-mynotchcore">3. MyNotchCore</a><a class="h3" href="#b1-live-activity-cập-nhật-tại-chỗ">B1. Live activity cập nhật tại chỗ</a><a class="h3" href="#b2-modulestorage">B2. <code>ModuleStorage</code></a><a class="h3" href="#b3-cài-đặt-khi-module-tắt">B3. Cài đặt khi module tắt</a><a class="h3" href="#b4-xin-quyền">B4. Xin quyền</a><a class="h3" href="#b5-scheduler-cho-module">B5. Scheduler cho module</a><a class="h3" href="#b6-thoát-app">B6. Thoát app</a><a class="h2" href="#4-khung-ứng-dụng">4. Khung ứng dụng</a><a class="h2" href="#5-kiểm-thử">5. Kiểm thử</a><a class="h2" href="#6-ghi-chú-triển-khai">6. Ghi chú triển khai</a><a class="h3" href="#notchui">NotchUI</a><a class="h3" href="#mynotchcore">MyNotchCore</a><a class="h3" href="#khung-ứng-dụng-và-công-cụ">Khung ứng dụng và công cụ</a></nav><main><h1 id="mynotch-điểm-nối-nền-tảng-dự-án-con-0-5">MyNotch — Điểm nối nền tảng (dự án con 0.5)</h1>
+<ul>
+<li><strong>Ngày:</strong> 2026-10-13</li>
+<li><strong>Trạng thái:</strong> Đã triển khai trên nhánh <code>feat/modules</code> (nối tiếp <code>feat/foundation</code>)</li>
+<li><strong>Nguồn:</strong> review cuối toàn nhánh nền tảng. Các module tiếp theo cần những điểm nối mà nền tảng còn thiếu.</li>
+</ul>
+<h2 id="1-mục-tiêu">1. Mục tiêu</h2>
+<p>Bổ sung đúng các API mà Clipboard và các module sau cần, không làm lại kiến trúc. Mọi thay đổi giữ nguyên quy tắc phụ thuộc: module chỉ thấy <code>MyNotchCore</code> và <code>NotchUI</code>.</p>
+<table><thead><tr><th>#</th><th>Nhu cầu</th><th>Module cần đầu tiên</th></tr></thead><tbody>
+<tr><td>A1</td><td>Notch mở bằng phím tắt phải đóng được khi click ra ngoài</td><td>Clipboard</td></tr>
+<tr><td>A2</td><td>Tab nhận bàn phím (ô tìm kiếm, phím mũi tên, Esc)</td><td>Clipboard</td></tr>
+<tr><td>A3</td><td>Toast xuất hiện khi tab đang mở không được phá tab</td><td>Clipboard, Screenshot</td></tr>
+<tr><td>A4</td><td>Nội dung tab ghim notch / báo đang kéo / tự đóng notch</td><td>Clipboard, Shelf</td></tr>
+<tr><td>B1</td><td>Live activity cập nhật liên tục không nhảy thứ tự</td><td>Media, Timer</td></tr>
+<tr><td>B2</td><td>Thư mục dữ liệu riêng cho module</td><td>Clipboard</td></tr>
+<tr><td>B3</td><td>Cài đặt module dùng được cả khi module đang tắt</td><td>Clipboard, Translation, AI</td></tr>
+<tr><td>B4</td><td>Xin quyền hệ thống (không chỉ mở System Settings)</td><td>Clipboard (Accessibility), Calendar</td></tr>
+<tr><td>B5</td><td><code>Scheduler</code> cho module (polling, debounce, timer)</td><td>Clipboard</td></tr>
+<tr><td>B6</td><td>Thoát app có dừng module để lưu dữ liệu</td><td>Clipboard, Shelf</td></tr>
+</tbody></table>
+<h2 id="2-notchui">2. NotchUI</h2>
+<h3 id="a1-đóng-khi-click-ra-ngoài">A1. Đóng khi click ra ngoài</h3>
+<ul>
+<li><code>NotchHoverTracker</code> theo dõi thêm <code>.leftMouseDown</code> và <code>.rightMouseDown</code> (global + local). Mouse monitor không cần quyền Accessibility.</li>
+<li><code>ScreenManager</code> chuyển sự kiện tới từng controller: <code>mouseDown(at:)</code>.</li>
+<li>Controller đóng notch khi <strong>cả ba</strong> điều kiện đúng: notch đang mở rộng (<code>open</code> hoặc <code>toast</code>), điểm click nằm ngoài <code>hitRect</code> hiện tại, và notch không bị ghim (<code>isPinned == false</code>).</li>
+<li>Ghim (<code>isPinned</code>) dùng khi module mở menu ngữ cảnh hoặc popover, vì click vào menu nằm ngoài vùng notch.</li>
+</ul>
+<h3 id="a2-tab-nhận-bàn-phím">A2. Tab nhận bàn phím</h3>
+<ul>
+<li><code>NotchTab</code> thêm tham số <code>acceptsKeyboard: Bool = false</code>.</li>
+<li>Khi <code>displayState == .open(id)</code> và tab <code>id</code> có <code>acceptsKeyboard</code>, panel được phép thành key window (<code>allowsKeyStatus = true</code>, <code>makeKey()</code>). Panel vẫn là <code>nonactivatingPanel</code> nên app đang dùng vẫn active, giống Spotlight.</li>
+<li>Khi rời tab đó hoặc notch đóng: <code>allowsKeyStatus = false</code>; nếu panel đang key thì <code>orderOut</code> rồi <code>orderFrontRegardless</code> để trả bàn phím về app trước.</li>
+<li>Esc (<code>cancelOperation(_:)</code>) đóng notch.</li>
+<li>Khi panel mất key (người dùng click sang app khác) và notch không bị ghim thì notch đóng.</li>
+<li>Module tự đặt focus bằng <code>@FocusState</code> trong view của mình.</li>
+</ul>
+<h3 id="a3-toast-khi-tab-đang-mở">A3. Toast khi tab đang mở</h3>
+<ul>
+<li><code>showToast</code> khi state là <code>.open(tab)</code> ghi nhớ state đó. Toast hết hạn thì quay lại <code>.open(tab)</code> thay vì đóng; sau đó áp dụng quy tắc đóng thông thường (con trỏ ở ngoài thì hẹn giờ đóng).</li>
+<li>Toast khi notch đóng giữ hành vi cũ.</li>
+<li>Thông báo nhỏ kiểu HUD dùng <code>LiveActivity</code> với <code>expiresAfter</code>, không dùng toast (toast có kích thước của tab mặc định).</li>
+</ul>
+<h3 id="a4-notchhandle-trong-environment">A4. <code>NotchHandle</code> trong environment</h3>
+<pre><code class="language-swift">public struct NotchHandle {
+    public func setPinned(_ pinned: Bool)
+    public func setDragging(_ dragging: Bool)
+    public func close()
+}
+extension EnvironmentValues { public var notch: NotchHandle }   // mặc định: handle không làm gì</code></pre>
+<p><code>NotchRootView</code> gắn <code>.environment(\.notch, …)</code> cho nội dung tab và toast. Handle giữ tham chiếu yếu tới <code>NotchViewModel</code>.</p>
+<h3 id="sửa-nhỏ-đi-kèm">Sửa nhỏ đi kèm</h3>
+<ul>
+<li>Gesture tap mở notch chỉ hoạt động khi notch chưa mở (<code>including: .subviews</code> khi đang mở), để không tranh gesture với nội dung tab.</li>
+<li><code>ScreenManager</code> cache khung các màn hình khi đồng bộ màn hình, không gọi <code>NSScreen.screens</code> ở mỗi lần rê chuột.</li>
+</ul>
+<h2 id="3-mynotchcore">3. MyNotchCore</h2>
+<h3 id="b1-live-activity-cập-nhật-tại-chỗ">B1. Live activity cập nhật tại chỗ</h3>
+<ul>
+<li><code>ActivityCenter.set</code> với id đã tồn tại: <strong>thay nội dung tại chỗ, giữ nguyên thứ tự</strong> (không tăng <code>sequence</code>). Hạn <code>expiresAfter</code> tính lại từ lần <code>set</code> mới.</li>
+<li>Thêm <code>raise(id:)</code> (và <code>ActivityPublisher.raise(id:)</code>) để chủ động đưa activity lên trên các activity cùng mức ưu tiên.</li>
+<li><code>Entry</code> có <code>revision</code> tăng ở mỗi lần <code>set</code>; <code>current</code> chỉ được gán lại khi entry thắng thay đổi (id, sequence hoặc revision), nên xoá một activity không phải <code>current</code> không làm view vẽ lại.</li>
+<li>Quy ước: nội dung đổi liên tục (tiến độ phát nhạc, đếm ngược) do model <code>@Observable</code> của module điều khiển bên trong view của activity. Gọi <code>set</code> tối đa khoảng 1 lần/giây.</li>
+</ul>
+<h3 id="b2-modulestorage">B2. <code>ModuleStorage</code></h3>
+<pre><code class="language-swift">nonisolated public struct ModuleStorage: Sendable {
+    public let directory: URL        // ~/Library/Application Support/io.lucasvu.mynotch/Modules/&lt;id&gt;/
+    public let cachesDirectory: URL  // ~/Library/Caches/io.lucasvu.mynotch/Modules/&lt;id&gt;/
+    public func ensureDirectories() throws   // tạo nếu chưa có
+}
+nonisolated public struct StorageRoot: Sendable {
+    public let applicationSupport: URL
+    public let caches: URL
+    public static func standard(bundleID: String) -&gt; StorageRoot
+    public func storage(for id: ModuleID) -&gt; ModuleStorage
+}</code></pre>
+<ul>
+<li><code>ModuleRegistry.init</code> nhận thêm <code>storageRoot: StorageRoot</code>. <code>RegistryHarness</code> dùng thư mục tạm riêng cho mỗi harness.</li>
+<li>Dữ liệu lớn (lịch sử clipboard, ảnh chụp) không lưu trong <code>SettingsStore</code>/UserDefaults.</li>
+</ul>
+<h3 id="b3-cài-đặt-khi-module-tắt">B3. Cài đặt khi module tắt</h3>
+<p><code>FeatureModule.makeSettingsView()</code> đổi thành:</p>
+<pre><code class="language-swift">func makeSettingsView(_ environment: ModuleSettingsEnvironment) -&gt; AnyView?
+
+public struct ModuleSettingsEnvironment {
+    public let settings: ModuleSettings
+    public let storage: ModuleStorage
+    public let permissions: any PermissionCenter
+    public let isRunning: Bool
+}</code></pre>
+<ul>
+<li>Registry tạo một <code>ModuleSettings</code> cho mỗi module ngay khi khởi tạo và dùng chung cho context lẫn trang Settings.</li>
+<li>Battery bỏ dòng "Cài đặt hiện khi module đang chạy" và luôn hiện các dòng cài đặt.</li>
+</ul>
+<h3 id="b4-xin-quyền">B4. Xin quyền</h3>
+<ul>
+<li><code>PermissionCenter</code> thêm <code>func request(_ permission: Permission) async -&gt; PermissionStatus</code>.</li>
+<li><code>SystemPermissionCenter.request</code>:</li>
+</ul>
+<table><thead><tr><th>Quyền</th><th>Cách xin</th></tr></thead><tbody>
+<tr><td>Accessibility</td><td><code>AXIsProcessTrustedWithOptions</code> với prompt; trả trạng thái hiện tại (người dùng bật trong System Settings)</td></tr>
+<tr><td>Screen Recording</td><td><code>CGRequestScreenCaptureAccess()</code></td></tr>
+<tr><td>Calendars / Reminders</td><td><code>EKEventStore.requestFullAccessToEvents/Reminders()</code></td></tr>
+<tr><td>Bluetooth</td><td>Tạo <code>CBCentralManager</code>, chờ callback trạng thái đầu tiên rồi đọc <code>CBManager.authorization</code></td></tr>
+<tr><td>Automation</td><td><code>AEDeterminePermissionToAutomateTarget(…, askUserIfNeeded: true)</code> chạy ngoài main thread</td></tr>
+<tr><td>Microphone</td><td><code>AVCaptureDevice.requestAccess(for: .audio)</code></td></tr>
+</tbody></table>
+<ul>
+<li><code>ModuleDescriptor</code> thêm <code>optionalPermissions: [Permission] = []</code>: hiện trong Settings kèm trạng thái và nút cấp quyền, không chặn module khởi động. Module tự kiểm tra trước khi dùng.</li>
+<li><code>ModuleRegistry.grant(_ permission:) async</code>: nếu <code>.notDetermined</code> thì <code>request</code>, còn lại mở System Settings; sau đó <code>refreshPermissions()</code>.</li>
+<li>Trang Settings của module dùng <code>grant</code> cho cả quyền bắt buộc lẫn tuỳ chọn và tự làm mới trạng thái mỗi 2 giây khi đang hiện (TCC không gửi thông báo khi quyền đổi).</li>
+<li>App theo dõi <code>registry.states</code>: khi có module <code>.needsPermission</code>, gọi <code>refreshPermissions()</code> mỗi 2 giây cho tới khi không còn.</li>
+<li><code>project.yml</code> khai báo sẵn usage description (Calendars, Reminders, Bluetooth, Apple Events, Microphone) và entitlement Hardened Runtime tương ứng (<code>com.apple.security.personal-information.calendars</code>, <code>com.apple.security.automation.apple-events</code>, <code>com.apple.security.device.audio-input</code>, <code>com.apple.security.device.bluetooth</code>). Thiếu usage description thì app crash khi xin quyền.</li>
+</ul>
+<h3 id="b5-scheduler-cho-module">B5. Scheduler cho module</h3>
+<p><code>ModuleContext</code> thêm <code>public let scheduler: any Scheduler</code>. <code>ModuleRegistry.init</code> nhận <code>scheduler</code>. App truyền <code>TaskScheduler</code>, test truyền <code>ManualScheduler</code>.</p>
+<h3 id="b6-thoát-app">B6. Thoát app</h3>
+<ul>
+<li><code>ModuleRegistry.shutdown() async</code>: dừng mọi module đang chạy, không đổi cờ <code>enabled</code>, sau đó không khởi động lại module nào.</li>
+<li><code>AppDelegate.applicationShouldTerminate</code> trả <code>.terminateLater</code>, chờ <code>shutdown()</code> tối đa 3 giây rồi <code>reply(toApplicationShouldTerminate: true)</code>.</li>
+</ul>
+<h2 id="4-khung-ứng-dụng">4. Khung ứng dụng</h2>
+<ul>
+<li>Khi cửa sổ Settings mở, app chuyển sang <code>.regular</code> (có icon Dock và ⌘Tab); khi đóng, quay lại <code>.accessory</code>.</li>
+<li>README: mục "Thêm một module" thêm bước khai báo usage description/entitlement khi module cần quyền mới.</li>
+</ul>
+<h2 id="5-kiểm-thử">5. Kiểm thử</h2>
+<table><thead><tr><th>Phần</th><th>Test tự động</th></tr></thead><tbody>
+<tr><td>A1</td><td><code>NotchViewModel</code>/controller: click ngoài khi mở → đóng; khi ghim → giữ; khi đóng → bỏ qua</td></tr>
+<tr><td>A3</td><td>Toast trên tab đang mở hết hạn → quay lại đúng tab; toast khi đóng → đóng như cũ</td></tr>
+<tr><td>B1</td><td><code>set</code> lặp lại giữ thứ tự; <code>raise</code> đưa lên; xoá entry không phải current không đổi <code>current</code>; hết hạn tính lại</td></tr>
+<tr><td>B2</td><td>Đường dẫn đúng namespace; <code>ensureDirectories</code> tạo thư mục; harness dùng thư mục tạm</td></tr>
+<tr><td>B3</td><td>Settings view có được khi module tắt; settings dùng chung với context</td></tr>
+<tr><td>B4</td><td><code>grant</code>: <code>.notDetermined</code> → gọi <code>request</code>; <code>.denied</code> → mở System Settings; sau đó module khởi động lại</td></tr>
+<tr><td>B5</td><td>Module dùng <code>context.scheduler</code> (fake module)</td></tr>
+<tr><td>B6</td><td><code>shutdown</code> dừng module đang chạy, không đổi <code>enabled</code>, <code>bootstrap</code>/<code>setEnabled</code> sau đó không khởi động</td></tr>
+</tbody></table>
+<p>A2 và A4 phụ thuộc AppKit key window, kiểm thử tay trong checklist của Clipboard.</p>
+<h2 id="6-ghi-chú-triển-khai">6. Ghi chú triển khai</h2>
+<p>Các điểm dưới đây khác hoặc chi tiết hơn thiết kế ở mục 2–4.</p>
+<h3 id="notchui">NotchUI</h3>
+<ul>
+<li><strong>A1.</strong> Click vào bất kỳ cửa sổ nào khác của MyNotch (Settings, alert, menu) cũng tính là "ngoài notch". Module phải ghim notch khi mở UI phụ.</li>
+<li><strong>A2, khi nào nhận bàn phím.</strong> Notch chỉ chiếm bàn phím khi được mở có chủ ý: click, phím tắt, hoặc module gọi <code>open(tab:)</code>. Mở do rê chuột thì không; tab mở do rê chuột nhận bàn phím khi người dùng click vào.</li>
+<li><strong>A2, toast.</strong> Toast che tab nhận bàn phím vẫn giữ bàn phím. Khi toast che tab, notch giữ chiều cao của tab.</li>
+<li><strong>A2, đóng.</strong> Mất key window thì đóng notch theo cùng quy tắc với click ra ngoài (trừ khi ghim hoặc đang kéo). Esc đóng notch qua cả <code>cancelOperation</code> và <code>.onExitCommand</code>.</li>
+<li><strong>A3.</strong> Toast hết hạn quay lại tab qua cùng logic chọn tab như <code>open(tab:)</code>. Tab bị che vẫn được giữ trong cây view (ẩn) để không mất trạng thái.</li>
+</ul>
+<h3 id="mynotchcore">MyNotchCore</h3>
+<ul>
+<li><strong>B1.</strong> <code>set</code> với id đã có giữ nguyên thứ tự (<code>sequence</code>); thêm <code>raise(id:)</code>; <code>Entry</code> có <code>revision</code>. Hết hạn được bảo vệ bằng <code>revision</code>: hẹn hết hạn của lần <code>set</code> cũ không xoá activity đã được <code>set</code> lại.</li>
+<li><strong>B2/B5.</strong> <code>context.scheduler</code> là scheduler riêng của module: mọi việc đã hẹn bị huỷ khi module dừng, kể cả khi <code>start</code> lỗi.</li>
+<li><strong>B3.</strong> <code>ModuleSettingsEnvironment</code> không có init public. Test của package module lấy nó qua <code>RegistryHarness.settingsEnvironment(for:)</code>.</li>
+<li><strong>B4.</strong> Accessibility và Screen Recording có <code>Permission.isSettingsOnly</code>. Với hai quyền này, <code>grant</code> luôn gọi <code>request</code> trước (để app có trong danh sách của System Settings) rồi mới mở System Settings nếu vẫn chưa có quyền. Nút "Cấp quyền" bị khoá khi đang xin.</li>
+<li><strong>B6.</strong> Sau <code>shutdown()</code>, mọi đường khởi động module đều bị chặn: <code>bootstrap</code>, <code>setEnabled</code>, retry, <code>resumeAll</code>, <code>refreshPermissions</code>, <code>grant</code>.</li>
+</ul>
+<h3 id="khung-ứng-dụng-và-công-cụ">Khung ứng dụng và công cụ</h3>
+<ul>
+<li>Settings: <code>show()</code> đặt <code>.regular</code> trước <code>NSApp.activate()</code>; <code>windowWillClose</code> (cửa sổ có delegate là controller, đặt một lần) trả về <code>.accessory</code>. Thu nhỏ cửa sổ vẫn giữ icon Dock.</li>
+<li><code>verify.sh</code> dọn thư mục tạm <code>MyNotchTests-*</code> của harness, và tự xoá <code>.build</code> của package phụ thuộc khi danh sách file của MyNotchCore/NotchUI đổi.</li>
+</ul></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>

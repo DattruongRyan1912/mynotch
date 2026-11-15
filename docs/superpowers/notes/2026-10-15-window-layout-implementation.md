@@ -1,0 +1,86 @@
+# Ghi chú triển khai: Chia cửa sổ (WindowLayout)
+
+- **Ngày:** 2026-10-15
+- **Spec:** không có spec thiết kế riêng; yêu cầu nằm trong brief R2e (kéo một cửa sổ lên notch rồi thả vào một ô để xếp nó vào bố cục). Tài liệu này là nguồn mô tả kiến trúc.
+- **Package:** `Packages/Modules/WindowLayout`, product `WindowLayoutModule`. Module id `windows` ("Chia cửa sổ", **order 950**), **tắt mặc định**, không có tab, quyền **tuỳ chọn** Accessibility (module không cần quyền để khởi động: nó đứng yên cho tới khi được cấp và có hiệu lực ngay, không cần chạy lại app). Cần thêm hai chỗ ghép: `project.yml` và `App/ModuleList.swift`.
+- **Commit:** `480c470` (module + móc NotchUI), `e45493e` (panel màn hình khoá theo cài đặt ẩn khỏi quay), `17fa6f7` (cửa sổ từ chối cỡ vẫn nằm trên màn hình), `302e735` (WL1: xếp cạnh hàng xóm, log), `f2b8b75` (sửa WL1: một lần hỏi, bỏ qua cửa sổ ẩn), `3c48d9c` (theo màu nhấn, rung), `964c4e7` (WL2: tạm dừng chế độ trợ năng nâng cao của app khi đặt cửa sổ).
+- **Test tự động:** 205 test ở `964c4e7`, ba lần chạy, 0 cảnh báo (95 ở `480c470`, 111 sau `17fa6f7`, 121 sau `3c48d9c`, 188 sau `302e735`, 198 sau `f2b8b75`). Mọi test dùng cửa sổ giả, không cửa sổ thật nào bị di chuyển, không sự kiện thật nào được gửi. Các lệnh Accessibility thật, bộ theo dõi chuột và phím thật và cửa sổ khung xem trước thật **chỉ được biên dịch, chưa chạy**.
+- **Kiểm thử tay:** [nhóm Chia cửa sổ trong checklist gộp](../../manual-test-checklist-all.html#window-layout). Cần quyền Accessibility.
+- **Cập nhật sau `034e40d` (2026-10-16):** đọc được trên kính sáng và tối: ba chỗ `.white` của khung ô (S2 `bff89e7`; mục 9). WindowLayout 208 test. Cổ điển giữ nguyên từng điểm ảnh; các commit này nằm trong cổng `verify.sh` xanh ở `6077497` (17 package cộng app). Chưa ai thấy trên kính thật.
+
+## 1. Đã xây gì
+
+- **Phát hiện một cửa sổ đang bị kéo** (`WindowDragDetector`): bộ theo dõi chuột toàn cục (nhấn, kéo, nhả; không cần quyền). Khi nhấn, chỉ "lên cò" nếu Accessibility đã cấp (đọc ở mỗi lần nhấn nên cấp xong dùng được luôn). Khi đã lên cò, mỗi 30 ms (`sampleInterval`) nhìn cửa sổ đang focus của app phía trước; cửa sổ được coi là bị kéo khi **chính cửa sổ đó** dịch ít nhất 1 pt mà **kích thước không đổi** giữa hai lần nhìn (kéo góc để đổi cỡ làm kích thước đổi nên không bị nhầm). Tối đa 8 lần nhìn mỗi lần nhấn (`maxSamples`) và hai lần nhìn hỏng (app treo, không có cửa sổ) thì dừng (`maxMisses`), nên bôi chữ hay kéo file chỉ tốn vài lệnh AX rồi không còn. `SystemWindowProbe` không trả cửa sổ nào khi chính MyNotch đang ở phía trước, nên không bao giờ hỏi AX về tiến trình của chính nó từ main thread.
+- **Các ô** (`SnapLayout`): **Nửa trái**, **Nửa phải**, **Toàn màn hình**, **Chia bốn** (bốn vùng theo góc), **Chia ba** (ba cột), **Giữa** (hai phần ba chiều rộng ở giữa, cao hết). Khi kéo cửa sổ và con trỏ vào trong **40 pt** quanh notch (`dragHitPadding` của hình học NotchUI, vùng thả của notch đóng), notch mở ở trạng thái **toast** với một hàng ô. Ô có nhiều vùng thì chọn vùng dưới con trỏ như hình vẽ của ô. Hàng ô ở yên khi con trỏ còn trên notch, trên ô, hay trong vùng đệm 24 pt (`keepOpenMargin`); nó đóng khi con trỏ rời đi, khi nhả, khi nhấn **Esc** hoặc khi module dừng.
+- **Khung xem trước** (`SnapPreviewOverlay`): cửa sổ không viền, xuyên chuột, không kích hoạt, level `.floating` (dưới panel của notch), ở đúng khung đích của vùng đang rê, tô và viền theo **màu nhấn** (qua `NotchInterface.accentRGB`) và theo cài đặt ẩn khỏi quay màn hình (`CaptureHidingFollower` với `.toast`).
+- **Thả:** nhả chuột trên một ô (quyết định theo điểm nhả) thì cửa sổ được đặt vào vùng của ô theo `NSScreen.visibleFrame` của màn hình đó (đã trừ menu bar và Dock) qua `kAXSizeAttribute` và `kAXPositionAttribute`, đổi sang toạ độ Accessibility (gốc ở góc trên trái của màn chính). Việc đặt xảy ra **80 ms sau khi nhả** (`settleDelay`): app sở hữu cửa sổ vẫn còn đang theo dõi phiên kéo khi nút chuột vừa lên, và một lần di chuyển làm trước đó sẽ bị nó hoàn tác. Nhả ở chỗ khác thì không làm gì; Esc huỷ phần còn lại của lần kéo (bộ theo dõi phím chỉ tồn tại khi có cửa sổ đang bị kéo).
+- **Cài đặt** (hàng riêng của module; công tắc bật/tắt là của mục module trong nhóm "Mô-đun" ở thanh bên): sáu công tắc "ô nào có tile" (công tắc cuối cùng còn bật bị làm mờ, không tắt được: không còn ô nào thì module không làm gì và không nói vì sao) và "Khoảng cách giữa các cửa sổ": Không (mặc định), 8 pt, 16 pt. Hai cài đặt được đọc khi dùng, nên đổi có hiệu lực ở lần kéo sau. Khoảng cách là khoảng giữa các cửa sổ **và** giữa cửa sổ với mép vùng nhìn thấy; cạnh quay về ô của cửa sổ khác lùi vào nửa khoảng, nên hai cửa sổ đặt lần lượt cách nhau đúng một khoảng; vùng "Giữa" không có hàng xóm nên chỉ giữ khoảng ở trên và dưới.
+- **Rung:** sau khi cửa sổ thật sự đã được di chuyển (sau 80 ms), `NotchInterface.feel(.alignment)` cho một cú chạm trackpad nhẹ (tôn trọng "Rung nhẹ khi vuốt"). Không rung khi app từ chối di chuyển, khi huỷ, khi nhả ngoài ô hay khi module dừng giữa chừng.
+
+## 2. Hạ tầng nằm ở NotchUI (không phải trong module)
+
+- Ô nằm trong **toast** của notch, không có `NotchState` mới: không đụng chính sách bàn phím, luật ẩn quay màn hình hay luật rê của notch; toast đã sống sót khi con trỏ rời notch (tuổi thọ 30 giây chỉ để chặn một lần kéo không bao giờ kết thúc, `tilesLifetime`). `close()` đóng mọi notch (đúng việc của `NotchPresenter.close`), nên một notch người dùng đang mở bị đóng bởi một lần kéo cửa sổ mở ô.
+- `NotchGeometry.contentFrame(height:in:)` và `NotchInterface` (`notches`, `captureHiding`, `accent`, `feel`): xem mục 14 của [ghi chú Nền tảng](2026-10-14-platform-foundation-implementation.html). `notches` giữ module khỏi mở ô trên màn không có notch (chế độ màn hình "chính" hay "đang dùng", ẩn, fullscreen).
+
+## 3. Đặt cửa sổ thế nào (`WindowPlacer`, `SnapPlacement`)
+
+- Giữa module và AX có một đường nối `WindowAttributes` (vị trí, kích thước, đặt vị trí, đặt kích thước, `enhancedUserInterface`). Dãy việc nằm ở hàm thuần `WindowPlacer.place(_:on:)`: đặt kích thước, **đọc lại kích thước thật** của cửa sổ, đặt vị trí từ kích thước đó, và chỉ khi app nhận kích thước nhưng không đúng cái đã xin thì đặt kích thước một lần nữa rồi chỉnh vị trí.
+- **Neo (`SnapZone.anchor`)** suy ra từ chính ô: cạnh trái và trên là mốc mặc định; ô chạm cạnh phải thì neo phải (nửa phải, một phần ba phải, các góc phải); chạm cạnh dưới thì neo dưới; không chạm cạnh nào thì căn giữa; ô phủ cả chiều rộng tính là neo trái. Cửa sổ lớn hơn ô (cỡ tối thiểu) vẫn nằm **trong vùng nhìn thấy**, dính vào mép neo; cửa sổ quá lớn cho cả vùng thì bắt đầu ở góc trên trái, nơi có thanh tiêu đề. Cửa sổ nhỏ hơn ô (cỡ tối đa) cũng căn theo cách đó, nên nửa phải ở sát mép phải. (Lỗi gốc của vòng sửa 1: cửa sổ 715 pt đặt vào một phần ba phải của màn 1512 pt kết thúc ở x = 1723, tức ngoài màn hình.)
+- App từ chối di chuyển thì không bị gọi lại (trước đó một lần ghi thất bại vẫn tốn nốt các lệnh còn lại, tới 2,5 giây với timeout 0,5 giây); cửa sổ cỡ cố định không bị hỏi kích thước hai lần.
+- **`AXEnhancedUserInterface` (WL2).** Khi chế độ này của app đang bật (Chrome bật nó khi một tính năng trợ năng đang đọc trang, ví dụ cài đặt "Đọc vùng chọn trong Chrome và app Electron" của Dịch), app nhận lệnh di chuyển nhưng **không làm gì**, đúng thứ Chrome vẫn làm. `WindowPlacer.place` đọc thuộc tính này trên phần tử app; chỉ khi nó đang `true` thì đặt `false`, đặt cửa sổ rồi **đặt lại `true` trong `defer`** để mọi đường thoát (từ chối di chuyển, cỡ cố định, kích thước không đọc được, cỡ tối thiểu) đều khôi phục. Tắt hay app không có thuộc tính thì không bao giờ ghi vào. `AXManualAccessibility` không bị đụng tới. Dòng log đặt cửa sổ có thêm ` enhancedUI=1` chỉ ở trường hợp app đang bật chế độ này.
+
+## 4. Không để cửa sổ đè nhau (WL1)
+
+Ca gốc người dùng gặp: CleanMyMac giữ chiều rộng tối thiểu 1040 pt. Thả vào "Nửa trái" (756 pt) nó giữ 1040 pt neo ở mép trái. Music thả vào "Nửa phải" rồi nhận đúng nửa phải (756 đến 1512 pt) và **đè 284 pt lên CleanMyMac**. Bộ đặt của R2e đúng cho một cửa sổ; không có gì biết đến cửa sổ kia.
+
+- **`PlacedWindows`:** sổ trong bộ nhớ, tối đa 8 cửa sổ (cũ nhất ra trước, `capacity`), xoá khi module dừng. Một cửa sổ chỉ được ghi **sau khi app đồng ý di chuyển**, với khung nó trả lời sau đó (không phải khung đã xin). Khi dùng, mỗi mục được đọc lại một lần: không trả lời (đã đóng) hay khung lệch quá 2 pt (`tolerance`, người dùng đã tự đổi) thì **bỏ hẳn**. Cửa sổ đang đặt không bao giờ là hàng xóm của chính nó.
+- **Họ (`SnapLayout.family`):** nửa (hai nửa tính là một họ), ba phần, bốn góc. Toàn màn hình và "Giữa" không có họ. Hàng xóm là cửa sổ đã đặt ở một vùng khác cùng họ; cùng vùng (cố ý xếp chồng) và họ khác thì bỏ qua.
+- **`SnapPlacement.room(beside:gap:)`** cho phần còn trống của vùng: khung thật của từng hàng xóm được nới thêm khoảng cách rồi cắt đi; khi hàng xóm chia đôi vùng thì phần lớn nhất trong bốn phần còn lại được giữ. Mép làm tròn **ra xa** hàng xóm (hàng xóm ở 1040,4 thì còn lại từ 1041, không bao giờ dư phân số chồng). Chồng 0,5 pt trở xuống bỏ qua (app làm tròn). Kết quả: `whole`, `part(placement)` hay `crowded` (còn dưới 25 % chiều rộng hay cao của vùng, `smallestShare`: không xin một mảnh vụn, cửa sổ lấy vùng của nó như cũ và log ghi `decision=crowded`).
+- **Hỏi một lần (vòng sửa 1):** có phần trống thì xin đúng phần đó và **giữ kết quả**. Cửa sổ không nhỏ được đến thế thì nằm sát mép ngoài của phần trống ở cỡ nó giữ, tức đè ít nhất có thể. (Bản đầu hỏi lại cả vùng khi thất bại: ca Music với tối thiểu 600 pt cạnh CleanMyMac đè 284 pt, giờ đè 128 pt và chỉ một lệnh `place` vào app.) Hàng xóm **không bao giờ bị dời**.
+- **Cửa sổ ẩn hoặc thu nhỏ** (`SnapWindow.isOutOfSight`: app bị ẩn, hoặc `kAXMinimizedAttribute` true): bị **bỏ qua** cho lần đặt này, không bị quên (khi nó quay lại thì lại là hàng xóm). Chỉ hỏi cửa sổ liền kề có khung chạm vào vùng. **Cửa sổ ở Space khác** không phân biệt được (không có tín hiệu công khai rẻ), nên vẫn tính là hàng xóm khi khung chưa đổi.
+- **Một lần nhìn thứ hai:** app áp kích thước chậm (đọc ra kích thước cũ) bị coi là sai (thông báo giả, khung cũ trong sổ rồi bị bỏ ở lần sau). `put` nhìn thêm một lần khi kích thước khác cái đã xin hơn 2 pt trước khi phán; cỡ tối thiểu vẫn đọc giống nhau, cỡ trễ thì khác. Tốn hai lần đọc AX, chỉ cho cửa sổ có kích thước không như đã xin; là một lượt vòng thêm, không đảm bảo cho app chậm hơn thế.
+- **Làm tròn điểm ảnh:** `NSScreen.visibleFrame` có mép phân số (Dock cao 60,5 hay 69,5 pt khi cỡ Dock không nguyên) làm mép vùng làm tròn rơi tới nửa điểm ra ngoài vùng, bộ đặt đẩy cửa sổ vào lại và hai nửa chồng nhau 0,5 pt (một điểm ảnh Retina). Sửa: `SnapLayout.frame` kéo vùng vào số nguyên điểm trước (cạnh nhỏ làm tròn lên, cạnh lớn làm tròn xuống: `CGRect.insideWholePoints`) và phiên đưa cùng vùng đó cho bộ đặt.
+- **Thông báo** (`SnapReport.notice`, `SnapNoticeView`, qua toast 4 giây `noticeLifetime`): khi cửa sổ vẫn thò ra ngoài phần được giao quá 2 pt, tức vẫn đè hàng xóm: "<App> không thu nhỏ được tới ô này (tối thiểu 1040 pt)" (chỉ cao: "(tối thiểu 700 pt chiều cao)"; cả hai: "(tối thiểu 1040 × 700 pt)"; không biết tên: "Cửa sổ này không thu nhỏ được tới ô này (...)"). Không hiện khi vừa, khi app từ chối di chuyển hay khi `crowded`. Cửa sổ thứ hai từ chối (vùng của nó trống nhưng nó tràn qua hàng xóm đã đăng ký): không có gì được tự động dời, chỉ có thông báo và dòng `overlaps`.
+
+## 5. Log
+
+Một dòng mỗi bước, hệ thống log thống nhất, subsystem `io.lucasvu.mynotch`, category `window-layout`, mức notice, cả dòng là public. Dòng chỉ chứa bundle id, id bố cục và con số (test kiểm mọi token đều là `key=value` không có chữ tự do, và tên app nhận ra được không bao giờ xuất hiện); không có tiêu đề cửa sổ. Khung ở toạ độ Accessibility.
+
+```text
+neighbours app=<bundle> layout=rightHalf zone=0 known=1 adjacent=<bundle> hidden=none decision=part free=1040,37,472,945
+placed app=<bundle> layout=rightHalf zone=0 ask=part frame=1040,37,472,945 requested=472x945 actual=472x945 origin=1040,37 landed=1040,37 oversize=no refused=no
+overlaps app=<bundle> with=<bundle> layout=rightHalf zone=0 by=284x945 neighbour-moved=no
+```
+
+`known` là số cửa sổ đã đặt còn nằm đúng chỗ, `adjacent` là cái ở vùng liền kề cùng họ, `hidden` là hàng xóm bị bỏ qua vì không ai thấy (thu nhỏ hay app bị ẩn), `decision` là `whole`, `part free=…` (kèm phần trống) hay `crowded`; `ask` là `zone` hay `part`; `origin` là chỗ MyNotch chọn theo kích thước app thật có, `landed` là chỗ cửa sổ thật sự nằm sau đó (khác nhau khi macOS dời nó); `oversize=yes` khi cửa sổ giữ hơn 2 pt so với cái đã xin; `refused=yes` khi app không chịu di chuyển; `?` là app không nói. Xem bằng `log stream --predicate 'subsystem == "io.lucasvu.mynotch" && category == "window-layout"'`.
+
+## 6. Quyết định và Ruling (kèm chi phí nếu sai)
+
+- **Ô dùng trạng thái toast thay vì `NotchState` mới.** Không động vào chính sách bàn phím, luật ẩn quay màn hình hay luật rê. Chi phí: toast của module khác (Clipboard 1,2 giây, Ảnh chụp 2 giây) hay tuổi thọ 30 giây có thể thay hàng ô giữa lần kéo mà phiên vẫn nghĩ ô còn mở, nên nhả đúng chỗ ô cũ vẫn xếp cửa sổ (xác suất thấp, Minor M6 của review R2e).
+- **Khoảng cách mặc định 0** (cửa sổ thả vào nửa lấp đầy nó đúng); brief không đưa mặc định.
+- **Bộ theo dõi chuột chạy suốt khi module chạy, không chỉ khi Accessibility đã cấp** (lệch so với brief). Không có bộ quan sát quyền để cài bộ theo dõi lúc cấp; bộ dò đọc quyền ở mỗi lần nhấn (một `return` sớm cho mỗi sự kiện chuột khi chưa có quyền), đó cũng là lý do cấp xong dùng được không cần chạy lại.
+- **Độ trễ 80 ms, ngưỡng dò 30 ms và 8 lần nhìn, thứ tự "kích thước, vị trí, kích thước"** là những phỏng đoán rủi ro nhất: chưa chạy với Accessibility thật. Nếu một app hoàn tác việc đặt thì tăng `SnapSession.settleDelay`.
+- **`crowded` (còn dưới một phần tư), 25 %, ngưỡng 2 pt, sổ 8 cửa sổ** là lựa chọn của người làm, mỗi cái là một hằng có tên (`SnapPlacement.smallestShare`, `oversizeTolerance`, `overlapTolerance`, `PlacedWindows.tolerance`, `capacity`).
+- **Hai bước hỏi đã bị thay bằng một** (review WL1 I1): bản đầu hỏi phần trống rồi hỏi lại cả vùng khi thất bại, làm chồng nặng hơn (128 thành 284 pt). Chi phí nếu sai: cửa sổ không vừa nằm lệch hơn so với ô người dùng thấy ở khung xem trước.
+- **Cửa sổ ở Space khác vẫn tính là hàng xóm** (xem mục 4). Chi phí: hiếm; chỉ ảnh hưởng khi nó lớn hơn vùng của chính nó.
+
+## 7. Giới hạn đã chấp nhận và khoảng trống
+
+- **Chưa chạy với app thật.** Việc kiểm cần: Finder, Safari, Terminal, iTerm2 (làm tròn theo ô ký tự: nếu nó làm tròn lên thì nâng `oversizeTolerance` cho riêng thông báo), một cửa sổ Chrome hay Electron, và một cửa sổ không đổi cỡ được (nó phải di chuyển nhưng giữ cỡ).
+- **Minor của review R2e hoãn:** M3 (dung sai kích thước của bộ chặn đổi cỡ trong `WindowDragDetector`: nên 0,01 pt cùng một test bước 0,6 pt), M4 và M5 (`NotchInterface` có setter, ba cơ chế ẩn quay màn hình, chú thích Settings), M8 (một lần nhấn mới trong 80 ms: bỏ qua, vì huỷ sẽ làm mất một lần thả thật).
+- **Minor của review WL1 hoãn:** dung sai lớn hơn cho app làm tròn theo ô; một dòng log cho mỗi mục sổ bị bỏ; chỉ đọc các mục của vùng liền kề chạm tới nó (sổ vẫn đọc cả 8); số không hữu hạn trong chữ báo cáo.
+- **Sổ đọc từng cửa sổ nhớ được** (hai lệnh AX mỗi cái, timeout 0,1 giây) trước mỗi lần thả, tối đa 8 cửa sổ, trên main thread, 80 ms sau khi nhả.
+- Thuộc tính `kAXMinimizedAttribute`, `isHidden` và `AXEnhancedUserInterface` thật chưa chạy với cửa sổ thật.
+
+## 8. Cần kiểm thử tay
+
+Xem [nhóm Chia cửa sổ trong checklist gộp](../../manual-test-checklist-all.html#window-layout): bật module và cấp Accessibility; kéo cửa sổ lên notch (ô hiện trong vòng khoảng 40 pt; không hiện khi kéo chữ hay file, hay chưa có quyền); rê từng ô; thả; Esc; khoảng cách 8 và 16; hai màn hình; ẩn khỏi quay màn hình; thả cặp CleanMyMac và Music; ẩn hay thu nhỏ hàng xóm; Chrome với "Đọc vùng chọn trong Chrome và app Electron"; **rung (cần trackpad Force Touch)**. Quyền: Accessibility (đặt lại bằng `tccutil reset Accessibility io.lucasvu.mynotch`).
+
+## 9. Đọc được trên kính sáng và tối (S2 `bff89e7`, 2026-10-16)
+
+Quy tắc chung và hai thứ S2 thêm vào NotchUI (`NotchTokens.fill(_:)` và `View.notchColorScheme()`): ghi chú Nền tảng, mục 16.5.
+
+- **Thay:** 3 chỗ `.white` của các ô xếp (`SnapTilesView`) thành `NotchTokens.fill(_:)`. Khung xem trước trên màn hình (`SnapPreviewOverlay`) vẽ bằng màu nhấn, không có trắng nên không đổi.
+- **Test:** `WindowLayoutGlassTests` (kính sáng, kính tối, Cổ điển; ô sáng ở một fixture là một trong hai "tâm trạng" của bộ vẽ ngoài màn hình, nên băm được so theo tập). WindowLayout **208 test** (S2). Cổ điển **giống từng điểm ảnh** (băm toàn bộ bitmap trước và sau, hai appearance, bốn lần chạy). Kính do WindowServer vẽ nên không test nào thấy nó: test dựng view trên nền sáng hay tối và đọc màu của chính view.
+- **Ghi chú commit:** phạm vi trong tiêu đề là `windowlayout`, lịch sử của package dùng `windows` (đã commit trước khi nhận ra, không amend).
+- **Cần người kiểm:** hàng "Chữ trên kính" cuối nhóm [Chia cửa sổ](../../manual-test-checklist-all.html#window-layout) của checklist (hình nền sáng, giao diện sáng của macOS, Liquid Glass).

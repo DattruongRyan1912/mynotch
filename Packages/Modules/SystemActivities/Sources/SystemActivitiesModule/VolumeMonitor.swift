@@ -1,0 +1,78 @@
+import AudioToolbox
+import CoreAudio
+
+/// Output volume as the user sees it.
+nonisolated struct VolumeState: Equatable, Sendable {
+    /// 0...1.
+    var level: Float
+    var muted: Bool
+}
+
+/// Source of output volume changes; faked in tests.
+protocol VolumeMonitoring: AnyObject {
+    /// Calls `onChange` whenever the default output device's volume or mute changes, until `stop()`.
+    /// A device without a volume control (many HDMI and aggregate devices) produces no events.
+    func start(_ onChange: @escaping @MainActor (VolumeState) -> Void)
+    func stop()
+}
+
+/// Listens to the default output device through CoreAudio and re-binds when the default device changes.
+final class VolumeMonitor: VolumeMonitoring {
+    private typealias Listener = (object: AudioObjectID, address: AudioObjectPropertyAddress, block: AudioObjectPropertyListenerBlock)
+
+    private var onChange: (@MainActor (VolumeState) -> Void)?
+    private var systemListener: Listener?
+    private var deviceListeners: [Listener] = []
+    /// The mute property of the bound device, nil when it has none.
+    private var muteAddress: AudioObjectPropertyAddress?
+
+    init() {}
+
+    isolated deinit { stop() }
+
+    func start(_ onChange: @escaping @MainActor (VolumeState) -> Void) {
+        stop()
+        self.onChange = onChange
+        systemListener = add(AudioObjectID(kAudioObjectSystemObject), CoreAudioOutput.defaultDevice) { [weak self] in self?.bind() }
+        bind()
+    }
+
+    func stop() {
+        ([systemListener].compactMap { $0 } + deviceListeners).forEach(remove)
+        systemListener = nil
+        deviceListeners = []
+        muteAddress = nil
+        onChange = nil
+    }
+
+    private func bind() {
+        deviceListeners.forEach(remove)
+        deviceListeners = []
+        muteAddress = nil
+        guard let device = CoreAudioOutput.defaultDeviceID(), CoreAudioOutput.has(device, CoreAudioOutput.volume) else { return }
+        muteAddress = CoreAudioOutput.muteAddresses(of: device).first
+        for address in [CoreAudioOutput.volume] + [muteAddress].compactMap({ $0 }) {
+            if let listener = add(device, address, { [weak self] in self?.report(device) }) {
+                deviceListeners.append(listener)
+            }
+        }
+    }
+
+    private func report(_ device: AudioObjectID) {
+        guard let level = CoreAudioOutput.read(Float32.self, device, CoreAudioOutput.volume) else { return }
+        let muted = muteAddress.flatMap { CoreAudioOutput.read(UInt32.self, device, $0) }.map { $0 != 0 } ?? false
+        onChange?(VolumeState(level: min(max(level, 0), 1), muted: muted))
+    }
+
+    private func add(_ object: AudioObjectID, _ address: AudioObjectPropertyAddress, _ action: @escaping @MainActor () -> Void) -> Listener? {
+        let block: AudioObjectPropertyListenerBlock = { _, _ in MainActor.assumeIsolated { action() } }
+        var address = address
+        guard AudioObjectAddPropertyListenerBlock(object, &address, .main, block) == noErr else { return nil }
+        return (object, address, block)
+    }
+
+    private func remove(_ listener: Listener) {
+        var address = listener.address
+        AudioObjectRemovePropertyListenerBlock(listener.object, &address, .main, listener.block)
+    }
+}

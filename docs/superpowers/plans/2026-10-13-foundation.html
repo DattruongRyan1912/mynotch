@@ -1,0 +1,3808 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MyNotch Nền tảng (dự án con 0): Kế hoạch triển khai</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#quy-ước">Quy ước</a><a class="h2" href="#sơ-đồ-file">Sơ đồ file</a><a class="h2" href="#task-0-kiểm-tra-công-cụ">Task 0: Kiểm tra công cụ</a><a class="h2" href="#task-1-khởi-tạo-package-mynotchcore-và-scheduler">Task 1: Khởi tạo package MyNotchCore và Scheduler</a><a class="h2" href="#task-2-settingkey-và-settingsstore">Task 2: SettingKey và SettingsStore</a><a class="h2" href="#task-3-kiểu-dữ-liệu-lõi-của-module">Task 3: Kiểu dữ liệu lõi của module</a><a class="h2" href="#task-4-activitycenter">Task 4: ActivityCenter</a><a class="h2" href="#task-5-hợp-đồng-module-quyền-cài-đặt-module-phím-tắt-context">Task 5: Hợp đồng module: quyền, cài đặt module, phím tắt, context</a><a class="h2" href="#task-6-moduleregistry">Task 6: ModuleRegistry</a><a class="h2" href="#task-7-package-notchui-hình-học-notch">Task 7: Package NotchUI: hình học notch</a><a class="h2" href="#task-8-notchviewmodel-state-machine">Task 8: NotchViewModel (state machine)</a><a class="h2" href="#task-9-nhận-diện-fullscreen">Task 9: Nhận diện fullscreen</a><a class="h2" href="#task-10-giao-diện-notch">Task 10: Giao diện notch</a><a class="h2" href="#task-11-cửa-sổ-notch-và-quản-lý-màn-hình">Task 11: Cửa sổ notch và quản lý màn hình</a><a class="h2" href="#task-12-package-battery-đọc-thông-tin-pin">Task 12: Package Battery: đọc thông tin pin</a><a class="h2" href="#task-13-chính-sách-live-activity-của-pin">Task 13: Chính sách live activity của pin</a><a class="h2" href="#task-14-batterymodule">Task 14: BatteryModule</a><a class="h2" href="#task-15-target-app-menu-bar-và-settings">Task 15: Target app, menu bar và Settings</a><a class="h2" href="#task-16-script-kiểm-chứng-và-tài-liệu">Task 16: Script kiểm chứng và tài liệu</a><a class="h2" href="#task-17-kiểm-thử-tay-trên-máy-thật">Task 17: Kiểm thử tay trên máy thật</a><a class="h2" href="#đối-chiếu-với-tiêu-chí-hoàn-thành-spec-mục-10">Đối chiếu với tiêu chí hoàn thành (spec mục 10)</a></nav><main><h1 id="mynotch-nền-tảng-dự-án-con-0-kế-hoạch-triển-khai">MyNotch Nền tảng (dự án con 0): Kế hoạch triển khai</h1>
+<p>&gt; <strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+<p><strong>Goal:</strong> Dựng khung app MyNotch: cửa sổ notch trên mọi màn hình, hệ thống module bật/tắt độc lập, Settings, menu bar, và module mẫu Battery.</p>
+<p><strong>Architecture:</strong> Ba Swift package local (<code>MyNotchCore</code> → <code>NotchUI</code> → <code>Modules/Battery</code>) và một target app mỏng sinh bằng XcodeGen. Module chỉ phụ thuộc <code>MyNotchCore</code> + <code>NotchUI</code> và chỉ được ghép trong <code>App/ModuleList.swift</code>. Mọi package dùng <code>.defaultIsolation(MainActor.self)</code>; thời gian được inject qua <code>Scheduler</code> để test hover, toast và hết hạn activity mà không phải chờ thật.</p>
+<p><strong>Tech Stack:</strong> Swift 6.3 (Xcode 26.6), macOS 26 SDK, SwiftUI + AppKit, Swift Testing, XcodeGen 2.46, KeyboardShortcuts 3.1.0, IOKit.</p>
+<p><strong>Spec:</strong> <a href="../specs/2026-10-13-foundation-design.md"><code>docs/superpowers/specs/2026-10-13-foundation-design.md</code></a></p>
+<p><strong>Đã kiểm chứng trước:</strong> toàn bộ code trong kế hoạch được chạy lại tuần tự từ thư mục trống (2026-10-13). Ở mọi task, bước "phải fail" fail đúng lỗi biên dịch dự kiến, bước "phải pass" pass; tổng cộng 47 unit test và <code>xcodebuild</code> thành công.</p>
+<p>---</p>
+<h2 id="quy-ước">Quy ước</h2>
+<ul>
+<li>Mọi lệnh chạy từ thư mục gốc repo <code>~/Project/MyNotch</code>.</li>
+<li>Chép <strong>nguyên văn</strong> nội dung file trong từng bước. Không đổi tên kiểu hay hàm: các task sau dựa vào đúng tên đó.</li>
+<li>Commit sau mỗi task với đúng message đã ghi. Không thêm dòng ghi công AI vào commit.</li>
+<li>Nếu <code>swift test</code> báo <code>cannot find &#x27;&lt;Tên&gt;&#x27; in scope</code> cho một symbol nằm ở <strong>package local khác</strong> dù file đã có: xoá thư mục <code>.build</code> của package đang test (ví dụ <code>rm -rf Packages/NotchUI/.build</code>) rồi chạy lại. SwiftPM đôi khi giữ danh sách file cũ của dependency dạng đường dẫn.</li>
+</ul>
+<h2 id="sơ-đồ-file">Sơ đồ file</h2>
+<table><thead><tr><th>File</th><th>Trách nhiệm</th></tr></thead><tbody>
+<tr><td><code>Packages/MyNotchCore/Sources/MyNotchCore/Scheduling/Scheduler.swift</code></td><td><code>Scheduler</code>, <code>ScheduledAction</code>, <code>TaskScheduler</code></td></tr>
+<tr><td><code>…/MyNotchCore/Settings/*</code></td><td><code>SettingKey</code>, <code>SettingsStore</code>, <code>ModuleSettings</code></td></tr>
+<tr><td><code>…/MyNotchCore/Module/*</code></td><td><code>ModuleID</code>, <code>ModuleDescriptor</code>, <code>ModuleError</code>, <code>ModuleState</code>, <code>NotchTab</code>, <code>FeatureModule</code>, <code>NotchPresenter</code>, <code>ModuleContext</code>, <code>ModuleRegistry</code>, <code>Log</code></td></tr>
+<tr><td><code>…/MyNotchCore/Activity/*</code></td><td><code>LiveActivity</code>, <code>ActivityPriority</code>, <code>ActivityCenter</code>, <code>ActivityPublisher</code></td></tr>
+<tr><td><code>…/MyNotchCore/Permissions/*</code></td><td><code>Permission</code>, <code>PermissionStatus</code>, <code>PermissionCenter</code>, <code>SystemPermissionCenter</code></td></tr>
+<tr><td><code>…/MyNotchCore/Hotkeys/HotkeyRegistry.swift</code></td><td><code>HotkeyRegistry</code>, <code>ModuleHotkeys</code></td></tr>
+<tr><td><code>Packages/MyNotchCore/Sources/MyNotchTestSupport/*</code></td><td><code>ManualScheduler</code>, <code>makeIsolatedDefaults</code>, <code>FakePermissionCenter</code>, <code>FakePresenter</code>, <code>RegistryHarness</code></td></tr>
+<tr><td><code>Packages/NotchUI/Sources/NotchUI/Geometry/*</code></td><td><code>ScreenDescriptor</code>, <code>NotchLayoutConfig</code>, <code>InterfaceSettings</code>, <code>DisplayMode</code>, <code>NotchGeometry</code></td></tr>
+<tr><td><code>…/NotchUI/State/*</code></td><td><code>NotchState</code>, <code>NotchViewModel</code></td></tr>
+<tr><td><code>…/NotchUI/Fullscreen/*</code></td><td><code>WindowInfo</code>, <code>FullscreenRule</code>, <code>FullscreenDetector</code></td></tr>
+<tr><td><code>…/NotchUI/Views/*</code></td><td><code>NotchTokens</code>, <code>NotchShape</code>, <code>TabBar</code>, <code>NotchRootView</code></td></tr>
+<tr><td><code>…/NotchUI/Window/*</code></td><td><code>NotchPanel</code>, <code>FirstMouseHostingView</code>, <code>NotchHoverTracker</code>, <code>NotchWindowController</code></td></tr>
+<tr><td><code>…/NotchUI/Screens/*</code></td><td><code>NSScreen.displayID/displayUUID</code>, <code>ScreenManager</code>, <code>NotchCoordinator</code></td></tr>
+<tr><td><code>Packages/Modules/Battery/Sources/BatteryModule/*</code></td><td><code>PowerSourceSnapshot</code>, <code>PowerSourceParser</code>, <code>PowerSourceReading</code>, <code>IOKitPowerSource</code>, <code>BatteryActivityPolicy</code>, các view, <code>BatteryModule</code></td></tr>
+<tr><td><code>App/*</code></td><td><code>main.swift</code>, <code>AppDelegate</code>, <code>ModuleList</code>, <code>AppSettings</code>, <code>LaunchAtLogin</code>, <code>StatusItemController</code>, <code>Settings/*</code></td></tr>
+<tr><td><code>project.yml</code></td><td>Sinh <code>MyNotch.xcodeproj</code> (không commit) cùng <code>App/Info.plist</code>, <code>App/MyNotch.entitlements</code></td></tr>
+<tr><td><code>scripts/verify.sh</code></td><td>Cổng kiểm tra cục bộ</td></tr>
+</tbody></table>
+<h2 id="task-0-kiểm-tra-công-cụ">Task 0: Kiểm tra công cụ</h2>
+<ul>
+<li>[ ] <strong>Step 1: Xác nhận Xcode và XcodeGen</strong></li>
+</ul>
+<pre><code class="language-bash">xcode-select -p &amp;&amp; xcodebuild -version &amp;&amp; xcodegen --version</code></pre>
+<p>Expected: <code>/Applications/Xcode-26.6.0.app/Contents/Developer</code>, <code>Xcode 26.6</code>, <code>Version: 2.46.0</code>. Nếu thiếu XcodeGen: <code>brew install xcodegen</code>.</p>
+<ul>
+<li>[ ] <strong>Step 2: Xác nhận repo sạch</strong></li>
+</ul>
+<pre><code class="language-bash">git status --short</code></pre>
+<p>Expected: không có dòng nào.</p>
+<h2 id="task-1-khởi-tạo-package-mynotchcore-và-scheduler">Task 1: Khởi tạo package MyNotchCore và Scheduler</h2>
+<p>Tạo package lõi cùng target <code>MyNotchTestSupport</code>. <code>Scheduler</code> là cách duy nhất các thành phần chờ theo thời gian, để test điều khiển được thời gian bằng <code>ManualScheduler</code>. Lần đầu chạy, SwiftPM sẽ tải KeyboardShortcuts 3.1.0.</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>Packages/MyNotchCore/Package.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Scheduling/Scheduler.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchTestSupport/ManualScheduler.swift</code></li>
+<li>Test: <code>Packages/MyNotchCore/Tests/MyNotchCoreTests/ManualSchedulerTests.swift</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Tạo khung package</strong></li>
+</ul>
+<p><code>Packages/MyNotchCore/Package.swift</code>:</p>
+<pre><code class="language-swift">// swift-tools-version: 6.2
+import PackageDescription
+
+let package = Package(
+    name: &quot;MyNotchCore&quot;,
+    platforms: [.macOS(.v26)],
+    products: [
+        .library(name: &quot;MyNotchCore&quot;, targets: [&quot;MyNotchCore&quot;]),
+        .library(name: &quot;MyNotchTestSupport&quot;, targets: [&quot;MyNotchTestSupport&quot;]),
+    ],
+    dependencies: [
+        .package(url: &quot;https://github.com/sindresorhus/KeyboardShortcuts&quot;, exact: &quot;3.1.0&quot;),
+    ],
+    targets: [
+        .target(
+            name: &quot;MyNotchCore&quot;,
+            dependencies: [&quot;KeyboardShortcuts&quot;],
+            swiftSettings: [.defaultIsolation(MainActor.self)]
+        ),
+        .target(
+            name: &quot;MyNotchTestSupport&quot;,
+            dependencies: [&quot;MyNotchCore&quot;],
+            swiftSettings: [.defaultIsolation(MainActor.self)]
+        ),
+        .testTarget(
+            name: &quot;MyNotchCoreTests&quot;,
+            dependencies: [&quot;MyNotchCore&quot;, &quot;MyNotchTestSupport&quot;],
+            swiftSettings: [.defaultIsolation(MainActor.self)]
+        ),
+    ]
+)</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Scheduling/Scheduler.swift</code>:</p>
+<pre><code class="language-swift">/// Handle to a scheduled action; cancelling prevents it from running.
+public final class ScheduledAction {
+    public private(set) var isCancelled = false
+    private let onCancel: () -&gt; Void
+
+    public init(onCancel: @escaping () -&gt; Void = {}) { self.onCancel = onCancel }
+
+    public func cancel() {
+        guard !isCancelled else { return }
+        isCancelled = true
+        onCancel()
+    }
+}
+
+/// Runs an action after a delay. Injected so delays are testable.
+public protocol Scheduler: AnyObject {
+    @discardableResult
+    func schedule(after delay: Duration, _ action: @escaping @MainActor () -&gt; Void) -&gt; ScheduledAction
+}
+
+/// Production scheduler backed by `Task.sleep`.
+public final class TaskScheduler: Scheduler {
+    public init() {}
+
+    @discardableResult
+    public func schedule(after delay: Duration, _ action: @escaping @MainActor () -&gt; Void) -&gt; ScheduledAction {
+        var task: Task&lt;Void, Never&gt;?
+        let handle = ScheduledAction { task?.cancel() }
+        task = Task {
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, !handle.isCancelled else { return }
+            action()
+        }
+        return handle
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Viết test (chưa có code nên phải fail)</strong></li>
+</ul>
+<p><code>Packages/MyNotchCore/Tests/MyNotchCoreTests/ManualSchedulerTests.swift</code>:</p>
+<pre><code class="language-swift">import Testing
+@testable import MyNotchCore
+import MyNotchTestSupport
+
+@Suite struct ManualSchedulerTests {
+    @Test func runsDueActionsInOrderAndSkipsCancelled() {
+        let scheduler = ManualScheduler()
+        var log: [String] = []
+        scheduler.schedule(after: .milliseconds(200)) { log.append(&quot;b&quot;) }
+        scheduler.schedule(after: .milliseconds(100)) { log.append(&quot;a&quot;) }
+        let cancelled = scheduler.schedule(after: .milliseconds(150)) { log.append(&quot;x&quot;) }
+        cancelled.cancel()
+        scheduler.advance(by: .milliseconds(150))
+        #expect(log == [&quot;a&quot;])
+        scheduler.advance(by: .milliseconds(50))
+        #expect(log == [&quot;a&quot;, &quot;b&quot;])
+        #expect(scheduler.pendingCount == 0)
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Chạy test, xác nhận fail</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/MyNotchCore --filter &#x27;ManualSchedulerTests&#x27;</code></pre>
+<p>Expected: FAIL, lỗi biên dịch <code>cannot find &#x27;ManualScheduler&#x27; in scope</code> (hoặc <code>no such module &#x27;MyNotchTestSupport&#x27;</code>).</p>
+<ul>
+<li>[ ] <strong>Step 4: Viết code</strong></li>
+</ul>
+<p><code>Packages/MyNotchCore/Sources/MyNotchTestSupport/ManualScheduler.swift</code>:</p>
+<pre><code class="language-swift">import MyNotchCore
+
+/// Deterministic scheduler for tests: time only moves when `advance(by:)` is called.
+public final class ManualScheduler: Scheduler {
+    private struct Entry {
+        let id: Int
+        let fireAt: Duration
+        let action: @MainActor () -&gt; Void
+        let handle: ScheduledAction
+    }
+
+    public private(set) var now: Duration = .zero
+    private var entries: [Entry] = []
+    private var nextID = 0
+
+    public init() {}
+
+    @discardableResult
+    public func schedule(after delay: Duration, _ action: @escaping @MainActor () -&gt; Void) -&gt; ScheduledAction {
+        let handle = ScheduledAction()
+        entries.append(Entry(id: nextID, fireAt: now + delay, action: action, handle: handle))
+        nextID += 1
+        return handle
+    }
+
+    /// Moves time forward, running due actions in time order (ties in scheduling order).
+    public func advance(by duration: Duration) {
+        let target = now + duration
+        while let next = entries
+            .filter({ $0.fireAt &lt;= target &amp;&amp; !$0.handle.isCancelled })
+            .min(by: { ($0.fireAt, $0.id) &lt; ($1.fireAt, $1.id) }) {
+            entries.removeAll { $0.id == next.id }
+            now = next.fireAt
+            next.action()
+        }
+        entries.removeAll { $0.handle.isCancelled }
+        now = target
+    }
+
+    /// Number of scheduled actions that have neither fired nor been cancelled.
+    public var pendingCount: Int { entries.filter { !$0.handle.isCancelled }.count }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Chạy test, xác nhận pass</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/MyNotchCore --filter &#x27;ManualSchedulerTests&#x27;</code></pre>
+<p>Expected: <code>✔ Test run with 1 test in 1 suite passed</code>.</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Packages/MyNotchCore/Package.swift Packages/MyNotchCore/Sources/MyNotchCore/Scheduling/Scheduler.swift Packages/MyNotchCore/Tests/MyNotchCoreTests/ManualSchedulerTests.swift Packages/MyNotchCore/Sources/MyNotchTestSupport/ManualScheduler.swift
+git commit -m &quot;feat(core): add Scheduler and ManualScheduler test support&quot;</code></pre>
+<h2 id="task-2-settingkey-và-settingsstore">Task 2: SettingKey và SettingsStore</h2>
+<p>Lưu cài đặt có kiểu trên <code>UserDefaults</code> dạng JSON, có giá trị mặc định và kẹp khoảng. <code>SettingsStore</code> là <code>@Observable</code>: mỗi lần ghi tăng <code>revision</code> để mọi view đang đọc cài đặt được vẽ lại.</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchTestSupport/IsolatedDefaults.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Settings/SettingKey.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Settings/SettingsStore.swift</code></li>
+<li>Test: <code>Packages/MyNotchCore/Tests/MyNotchCoreTests/SettingsStoreTests.swift</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Viết test (chưa có code nên phải fail)</strong></li>
+</ul>
+<p><code>Packages/MyNotchCore/Tests/MyNotchCoreTests/SettingsStoreTests.swift</code>:</p>
+<pre><code class="language-swift">import Testing
+@testable import MyNotchCore
+import MyNotchTestSupport
+
+@Suite struct SettingsStoreTests {
+    @Test func returnsDefaultUntilSet() {
+        let store = SettingsStore(defaults: makeIsolatedDefaults())
+        let key = SettingKey(&quot;interface.openDelayMs&quot;, default: 150)
+        #expect(store.value(key) == 150)
+        store.set(400, for: key)
+        #expect(store.value(key) == 400)
+        store.reset(key)
+        #expect(store.value(key) == 150)
+    }
+
+    @Test func clampsOutOfRangeValues() {
+        let store = SettingsStore(defaults: makeIsolatedDefaults())
+        let key = SettingKey(&quot;interface.closeDelayMs&quot;, default: 300, clampedTo: 0...1000)
+        store.set(5_000, for: key)
+        #expect(store.value(key) == 1000)
+    }
+
+    @Test func roundTripsCodableValues() {
+        let store = SettingsStore(defaults: makeIsolatedDefaults())
+        let key = SettingKey&lt;[String]&gt;(&quot;app.recent&quot;, default: [])
+        store.set([&quot;a&quot;, &quot;b&quot;], for: key)
+        #expect(store.value(key) == [&quot;a&quot;, &quot;b&quot;])
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Chạy test, xác nhận fail</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/MyNotchCore --filter &#x27;SettingsStoreTests&#x27;</code></pre>
+<p>Expected: FAIL, lỗi biên dịch <code>cannot find &#x27;SettingsStore&#x27; in scope</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Viết code</strong></li>
+</ul>
+<p><code>Packages/MyNotchCore/Sources/MyNotchTestSupport/IsolatedDefaults.swift</code>:</p>
+<pre><code class="language-swift">import Foundation
+
+/// A fresh, empty UserDefaults suite per call.
+public func makeIsolatedDefaults() -&gt; UserDefaults {
+    let suite = &quot;MyNotchTests.\(UUID().uuidString)&quot;
+    let defaults = UserDefaults(suiteName: suite)!
+    defaults.removePersistentDomain(forName: suite)
+    return defaults
+}</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Settings/SettingKey.swift</code>:</p>
+<pre><code class="language-swift">/// Typed settings key with a default value and an optional normalization (e.g. clamping).
+nonisolated public struct SettingKey&lt;Value: Codable &amp; Sendable&gt;: Sendable {
+    public let name: String
+    public let defaultValue: Value
+    let normalize: @Sendable (Value) -&gt; Value
+
+    public init(_ name: String, default defaultValue: Value) {
+        self.name = name
+        self.defaultValue = defaultValue
+        self.normalize = { $0 }
+    }
+}
+
+extension SettingKey where Value: Comparable {
+    /// A key whose stored value is clamped into `range` when read.
+    public init(_ name: String, default defaultValue: Value, clampedTo range: ClosedRange&lt;Value&gt;) {
+        self.name = name
+        self.defaultValue = defaultValue
+        self.normalize = { min(max($0, range.lowerBound), range.upperBound) }
+    }
+}</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Settings/SettingsStore.swift</code>:</p>
+<pre><code class="language-swift">import Foundation
+import Observation
+import SwiftUI
+
+/// JSON-encoded settings on top of `UserDefaults`, observable by SwiftUI.
+@Observable
+public final class SettingsStore {
+    @ObservationIgnored private let defaults: UserDefaults
+    /// Bumped on every write so views reading any setting refresh.
+    private var revision = 0
+
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    public func value&lt;Value&gt;(_ key: SettingKey&lt;Value&gt;) -&gt; Value {
+        _ = revision
+        guard let data = defaults.data(forKey: key.name),
+              let decoded = try? JSONDecoder().decode(Value.self, from: data) else {
+            return key.defaultValue
+        }
+        return key.normalize(decoded)
+    }
+
+    public func set&lt;Value&gt;(_ value: Value, for key: SettingKey&lt;Value&gt;) {
+        guard let data = try? JSONEncoder().encode(key.normalize(value)) else { return }
+        defaults.set(data, forKey: key.name)
+        revision += 1
+    }
+
+    public func reset&lt;Value&gt;(_ key: SettingKey&lt;Value&gt;) {
+        defaults.removeObject(forKey: key.name)
+        revision += 1
+    }
+
+    public func binding&lt;Value&gt;(_ key: SettingKey&lt;Value&gt;) -&gt; Binding&lt;Value&gt; {
+        Binding(get: { self.value(key) }, set: { self.set($0, for: key) })
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Chạy test, xác nhận pass</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/MyNotchCore --filter &#x27;SettingsStoreTests&#x27;</code></pre>
+<p>Expected: <code>✔ Test run with 3 tests in 1 suite passed</code>.</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Packages/MyNotchCore/Tests/MyNotchCoreTests/SettingsStoreTests.swift Packages/MyNotchCore/Sources/MyNotchTestSupport/IsolatedDefaults.swift Packages/MyNotchCore/Sources/MyNotchCore/Settings/SettingKey.swift Packages/MyNotchCore/Sources/MyNotchCore/Settings/SettingsStore.swift
+git commit -m &quot;feat(core): add typed SettingsStore&quot;</code></pre>
+<h2 id="task-3-kiểu-dữ-liệu-lõi-của-module">Task 3: Kiểu dữ liệu lõi của module</h2>
+<p>Các kiểu giá trị dùng chung. Kiểu dữ liệu thuần được đánh dấu <code>nonisolated</code> vì package dùng <code>defaultIsolation(MainActor)</code>; thiếu chữ này, conformance <code>Equatable</code> sẽ bị cô lập vào MainActor và không dùng được ở ngữ cảnh khác.</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleID.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Permissions/Permission.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleDescriptor.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleError.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleState.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Module/NotchTab.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Activity/LiveActivity.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Module/Log.swift</code></li>
+<li>Test: <code>Packages/MyNotchCore/Tests/MyNotchCoreTests/CoreTypesTests.swift</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Viết test (chưa có code nên phải fail)</strong></li>
+</ul>
+<p><code>Packages/MyNotchCore/Tests/MyNotchCoreTests/CoreTypesTests.swift</code>:</p>
+<pre><code class="language-swift">import CoreGraphics
+import SwiftUI
+import Testing
+@testable import MyNotchCore
+
+@Suite struct CoreTypesTests {
+    @Test func tabHeightIsClampedWithDefault() {
+        func tab(_ height: CGFloat?) -&gt; NotchTab {
+            NotchTab(id: &quot;x&quot;, title: &quot;X&quot;, systemImage: &quot;circle&quot;, preferredHeight: height, content: AnyView(EmptyView()))
+        }
+        #expect(tab(nil).contentHeight == 190)
+        #expect(tab(50).contentHeight == 120)
+        #expect(tab(500).contentHeight == 300)
+    }
+
+    @Test func moduleErrorsMapToStates() {
+        #expect(ModuleState(.needsPermission(.accessibility)) == .needsPermission(.accessibility))
+        #expect(ModuleState(.unavailable(reason: &quot;r&quot;)) == .unavailable(reason: &quot;r&quot;))
+        #expect(ModuleState(.failed(reason: &quot;f&quot;)) == .failed(reason: &quot;f&quot;))
+    }
+
+    @Test func permissionsDeepLinkToPrivacyPanes() {
+        #expect(Permission.accessibility.settingsURL.hasSuffix(&quot;?Privacy_Accessibility&quot;))
+        #expect(Permission.automation(bundleID: &quot;com.spotify.client&quot;).settingsURL.hasSuffix(&quot;?Privacy_Automation&quot;))
+    }
+
+    @Test func priorityOrdering() {
+        #expect(ActivityPriority.low &lt; .normal &amp;&amp; .normal &lt; .high &amp;&amp; .high &lt; .critical)
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Chạy test, xác nhận fail</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/MyNotchCore --filter &#x27;CoreTypesTests&#x27;</code></pre>
+<p>Expected: FAIL, lỗi biên dịch <code>cannot find &#x27;NotchTab&#x27; in scope</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Viết code</strong></li>
+</ul>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleID.swift</code>:</p>
+<pre><code class="language-swift">/// Stable identifier of a feature module, e.g. &quot;battery&quot;. Lowercase ASCII letters and digits only.
+nonisolated public struct ModuleID: Hashable, Sendable, Codable, ExpressibleByStringLiteral, CustomStringConvertible {
+    public let rawValue: String
+
+    public init(_ rawValue: String) {
+        precondition(
+            !rawValue.isEmpty &amp;&amp; rawValue.allSatisfy { $0.isASCII &amp;&amp; ($0.isLowercase || $0.isNumber) },
+            &quot;ModuleID must be non-empty lowercase ASCII letters or digits: \(rawValue)&quot;
+        )
+        self.rawValue = rawValue
+    }
+
+    public init(stringLiteral value: String) { self.init(value) }
+
+    public var description: String { rawValue }
+}</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Permissions/Permission.swift</code>:</p>
+<pre><code class="language-swift">/// System permissions a module can require.
+nonisolated public enum Permission: Hashable, Sendable, Codable {
+    case accessibility
+    case screenRecording
+    case calendars
+    case reminders
+    case bluetooth
+    case automation(bundleID: String)
+    case microphone
+
+    public var displayName: String {
+        switch self {
+        case .accessibility: &quot;Accessibility&quot;
+        case .screenRecording: &quot;Screen Recording&quot;
+        case .calendars: &quot;Calendars&quot;
+        case .reminders: &quot;Reminders&quot;
+        case .bluetooth: &quot;Bluetooth&quot;
+        case .automation(let bundleID): &quot;Automation (\(bundleID))&quot;
+        case .microphone: &quot;Microphone&quot;
+        }
+    }
+
+    /// Deep link into the matching System Settings privacy pane.
+    public var settingsURL: String {
+        let base = &quot;x-apple.systempreferences:com.apple.preference.security?&quot;
+        return switch self {
+        case .accessibility: base + &quot;Privacy_Accessibility&quot;
+        case .screenRecording: base + &quot;Privacy_ScreenCapture&quot;
+        case .calendars: base + &quot;Privacy_Calendars&quot;
+        case .reminders: base + &quot;Privacy_Reminders&quot;
+        case .bluetooth: base + &quot;Privacy_Bluetooth&quot;
+        case .automation: base + &quot;Privacy_Automation&quot;
+        case .microphone: base + &quot;Privacy_Microphone&quot;
+        }
+    }
+}
+
+nonisolated public enum PermissionStatus: Sendable, Equatable {
+    case granted
+    case denied
+    case notDetermined
+}</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleDescriptor.swift</code>:</p>
+<pre><code class="language-swift">/// Static facts about a module, shown in Settings and used by the registry.
+nonisolated public struct ModuleDescriptor: Sendable {
+    public let id: ModuleID
+    public let displayName: String
+    public let systemImage: String
+    public let defaultEnabled: Bool
+    public let permissions: [Permission]
+    public let order: Int
+
+    public init(
+        id: ModuleID,
+        displayName: String,
+        systemImage: String,
+        defaultEnabled: Bool,
+        permissions: [Permission] = [],
+        order: Int
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.systemImage = systemImage
+        self.defaultEnabled = defaultEnabled
+        self.permissions = permissions
+        self.order = order
+    }
+}</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleError.swift</code>:</p>
+<pre><code class="language-swift">/// The only errors a module may report. The registry maps them to `ModuleState`.
+nonisolated public enum ModuleError: Error, Sendable, Equatable {
+    case needsPermission(Permission)
+    case unavailable(reason: String)
+    case failed(reason: String)
+}</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleState.swift</code>:</p>
+<pre><code class="language-swift">/// Lifecycle state of a module, owned by `ModuleRegistry`.
+nonisolated public enum ModuleState: Equatable, Sendable {
+    case disabled
+    case starting
+    case running
+    case stopping
+    case needsPermission(Permission)
+    case unavailable(reason: String)
+    case failed(reason: String)
+
+    init(_ error: ModuleError) {
+        switch error {
+        case .needsPermission(let permission): self = .needsPermission(permission)
+        case .unavailable(let reason): self = .unavailable(reason: reason)
+        case .failed(let reason): self = .failed(reason: reason)
+        }
+    }
+}</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Module/NotchTab.swift</code>:</p>
+<pre><code class="language-swift">import SwiftUI
+
+/// Content a running module shows when the notch is open.
+public struct NotchTab: Identifiable {
+    nonisolated public static let defaultHeight: CGFloat = 190
+    nonisolated public static let heightRange: ClosedRange&lt;CGFloat&gt; = 120...300
+
+    public let id: ModuleID
+    public let title: String
+    public let systemImage: String
+    public let preferredHeight: CGFloat?
+    public let content: AnyView
+
+    public init(id: ModuleID, title: String, systemImage: String, preferredHeight: CGFloat? = nil, content: AnyView) {
+        self.id = id
+        self.title = title
+        self.systemImage = systemImage
+        self.preferredHeight = preferredHeight
+        self.content = content
+    }
+
+    /// Content height after applying the default and the allowed range.
+    public var contentHeight: CGFloat {
+        min(max(preferredHeight ?? Self.defaultHeight, Self.heightRange.lowerBound), Self.heightRange.upperBound)
+    }
+}</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Activity/LiveActivity.swift</code>:</p>
+<pre><code class="language-swift">import SwiftUI
+
+nonisolated public enum ActivityPriority: Int, Comparable, Sendable {
+    case low, normal, high, critical
+
+    public static func &lt; (lhs: Self, rhs: Self) -&gt; Bool { lhs.rawValue &lt; rhs.rawValue }
+}
+
+/// Small content shown beside the notch while it is closed.
+public struct LiveActivity: Identifiable {
+    public let id: String
+    public let priority: ActivityPriority
+    public let leading: AnyView
+    public let trailing: AnyView
+    public let expiresAfter: Duration?
+
+    public init(
+        id: String,
+        priority: ActivityPriority = .normal,
+        expiresAfter: Duration? = nil,
+        leading: AnyView,
+        trailing: AnyView
+    ) {
+        self.id = id
+        self.priority = priority
+        self.expiresAfter = expiresAfter
+        self.leading = leading
+        self.trailing = trailing
+    }
+}</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Module/Log.swift</code>:</p>
+<pre><code class="language-swift">import os
+
+/// Central `os.Logger` factory. Never log user content.
+public enum Log {
+    public static let subsystem = &quot;io.lucasvu.mynotch&quot;
+
+    public static func logger(category: String) -&gt; Logger {
+        Logger(subsystem: subsystem, category: category)
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Chạy test, xác nhận pass</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/MyNotchCore --filter &#x27;CoreTypesTests&#x27;</code></pre>
+<p>Expected: <code>✔ Test run with 4 tests in 1 suite passed</code>.</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Packages/MyNotchCore/Tests/MyNotchCoreTests/CoreTypesTests.swift Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleID.swift Packages/MyNotchCore/Sources/MyNotchCore/Permissions/Permission.swift Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleDescriptor.swift Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleError.swift Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleState.swift Packages/MyNotchCore/Sources/MyNotchCore/Module/NotchTab.swift Packages/MyNotchCore/Sources/MyNotchCore/Activity/LiveActivity.swift Packages/MyNotchCore/Sources/MyNotchCore/Module/Log.swift
+git commit -m &quot;feat(core): add module, permission and activity value types&quot;</code></pre>
+<h2 id="task-4-activitycenter">Task 4: ActivityCenter</h2>
+<p>Giữ live activity của mọi module, chọn activity có ưu tiên cao nhất (bằng nhau thì cái mới nhất), tự gỡ activity hết hạn. <code>ActivityPublisher</code> là mặt tiền theo từng module, nên module không thể gỡ activity của module khác.</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Activity/ActivityCenter.swift</code></li>
+<li>Test: <code>Packages/MyNotchCore/Tests/MyNotchCoreTests/TestHelpers.swift</code></li>
+<li>Test: <code>Packages/MyNotchCore/Tests/MyNotchCoreTests/ActivityCenterTests.swift</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Viết test (chưa có code nên phải fail)</strong></li>
+</ul>
+<p><code>Packages/MyNotchCore/Tests/MyNotchCoreTests/TestHelpers.swift</code>:</p>
+<pre><code class="language-swift">import SwiftUI
+@testable import MyNotchCore
+
+func activity(_ id: String, _ priority: ActivityPriority = .normal, expiresAfter: Duration? = nil) -&gt; LiveActivity {
+    LiveActivity(id: id, priority: priority, expiresAfter: expiresAfter, leading: AnyView(EmptyView()), trailing: AnyView(EmptyView()))
+}</code></pre>
+<p><code>Packages/MyNotchCore/Tests/MyNotchCoreTests/ActivityCenterTests.swift</code>:</p>
+<pre><code class="language-swift">import Testing
+@testable import MyNotchCore
+import MyNotchTestSupport
+
+@Suite struct ActivityCenterTests {
+    @Test func highestPriorityWinsThenMostRecent() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        center.set(activity(&quot;a&quot;, .normal), from: &quot;one&quot;)
+        center.set(activity(&quot;b&quot;, .high), from: &quot;two&quot;)
+        #expect(center.current?.id == &quot;two/b&quot;)
+        center.set(activity(&quot;c&quot;, .high), from: &quot;one&quot;)
+        #expect(center.current?.id == &quot;one/c&quot;)
+        center.clear(id: &quot;c&quot;, from: &quot;one&quot;)
+        #expect(center.current?.id == &quot;two/b&quot;)
+    }
+
+    @Test func expiresAfterLifetime() {
+        let scheduler = ManualScheduler()
+        let center = ActivityCenter(scheduler: scheduler)
+        center.set(activity(&quot;charging&quot;, expiresAfter: .seconds(4)), from: &quot;battery&quot;)
+        scheduler.advance(by: .seconds(3))
+        #expect(center.current?.id == &quot;battery/charging&quot;)
+        scheduler.advance(by: .seconds(1))
+        #expect(center.current == nil)
+    }
+
+    @Test func replacingAnActivityRestartsItsLifetime() {
+        let scheduler = ManualScheduler()
+        let center = ActivityCenter(scheduler: scheduler)
+        center.set(activity(&quot;x&quot;, expiresAfter: .seconds(4)), from: &quot;m&quot;)
+        scheduler.advance(by: .seconds(3))
+        center.set(activity(&quot;x&quot;, expiresAfter: .seconds(4)), from: &quot;m&quot;)
+        scheduler.advance(by: .seconds(3))
+        #expect(center.current?.id == &quot;m/x&quot;)
+    }
+
+    @Test func clearAllRemovesOnlyThatModule() {
+        let center = ActivityCenter(scheduler: ManualScheduler())
+        center.set(activity(&quot;a&quot;), from: &quot;one&quot;)
+        center.set(activity(&quot;b&quot;), from: &quot;two&quot;)
+        center.clearAll(from: &quot;two&quot;)
+        #expect(center.entries.map(\.id) == [&quot;one/a&quot;])
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Chạy test, xác nhận fail</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/MyNotchCore --filter &#x27;ActivityCenterTests&#x27;</code></pre>
+<p>Expected: FAIL, lỗi biên dịch <code>cannot find &#x27;ActivityCenter&#x27; in scope</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Viết code</strong></li>
+</ul>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Activity/ActivityCenter.swift</code>:</p>
+<pre><code class="language-swift">import Observation
+
+/// Holds every module&#x27;s live activities and exposes the one to display.
+@Observable
+public final class ActivityCenter {
+    public struct Entry: Identifiable {
+        public let module: ModuleID
+        public let activity: LiveActivity
+        let sequence: Int
+        public var id: String { &quot;\(module.rawValue)/\(activity.id)&quot; }
+    }
+
+    /// Highest priority entry; ties go to the most recently set.
+    public private(set) var current: Entry?
+    public private(set) var entries: [Entry] = []
+
+    @ObservationIgnored private let scheduler: any Scheduler
+    @ObservationIgnored private var expiries: [String: ScheduledAction] = [:]
+    @ObservationIgnored private var sequence = 0
+
+    public init(scheduler: any Scheduler) {
+        self.scheduler = scheduler
+    }
+
+    public func set(_ activity: LiveActivity, from module: ModuleID) {
+        sequence += 1
+        let entry = Entry(module: module, activity: activity, sequence: sequence)
+        entries.removeAll { $0.id == entry.id }
+        entries.append(entry)
+        expiries.removeValue(forKey: entry.id)?.cancel()
+        if let lifetime = activity.expiresAfter {
+            let expectedSequence = entry.sequence
+            expiries[entry.id] = scheduler.schedule(after: lifetime) { [weak self] in
+                guard let self, self.entries.contains(where: { $0.id == entry.id &amp;&amp; $0.sequence == expectedSequence }) else { return }
+                self.clear(id: activity.id, from: module)
+            }
+        }
+        recompute()
+    }
+
+    public func clear(id: String, from module: ModuleID) {
+        let key = &quot;\(module.rawValue)/\(id)&quot;
+        expiries.removeValue(forKey: key)?.cancel()
+        entries.removeAll { $0.id == key }
+        recompute()
+    }
+
+    public func clearAll(from module: ModuleID) {
+        for entry in entries where entry.module == module {
+            expiries.removeValue(forKey: entry.id)?.cancel()
+        }
+        entries.removeAll { $0.module == module }
+        recompute()
+    }
+
+    private func recompute() {
+        current = entries.max { ($0.activity.priority, $0.sequence) &lt; ($1.activity.priority, $1.sequence) }
+    }
+}
+
+/// Module-scoped facade over `ActivityCenter`.
+public final class ActivityPublisher {
+    private let center: ActivityCenter
+    private let module: ModuleID
+
+    init(center: ActivityCenter, module: ModuleID) {
+        self.center = center
+        self.module = module
+    }
+
+    public func set(_ activity: LiveActivity) { center.set(activity, from: module) }
+    public func clear(id: String) { center.clear(id: id, from: module) }
+    public func clearAll() { center.clearAll(from: module) }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Chạy test, xác nhận pass</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/MyNotchCore --filter &#x27;ActivityCenterTests&#x27;</code></pre>
+<p>Expected: <code>✔ Test run with 4 tests in 1 suite passed</code>.</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Packages/MyNotchCore/Tests/MyNotchCoreTests/TestHelpers.swift Packages/MyNotchCore/Tests/MyNotchCoreTests/ActivityCenterTests.swift Packages/MyNotchCore/Sources/MyNotchCore/Activity/ActivityCenter.swift
+git commit -m &quot;feat(core): add ActivityCenter with priority and expiry&quot;</code></pre>
+<h2 id="task-5-hợp-đồng-module-quyền-cài-đặt-module-phím-tắt-context">Task 5: Hợp đồng module: quyền, cài đặt module, phím tắt, context</h2>
+<p>Mọi thứ module nhận qua <code>ModuleContext</code>. <code>ModuleSettings</code> chặn key ngoài namespace <code>module.&lt;id&gt;.</code>. <code>HotkeyRegistry</code> đặt tên phím tắt dạng <code>&lt;owner&gt;_&lt;name&gt;</code> vì KeyboardShortcuts cấm dấu chấm. <code>SystemPermissionCenter</code> chỉ kiểm tra, không bao giờ bật hộp thoại xin quyền.</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Permissions/PermissionCenter.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Permissions/SystemPermissionCenter.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Settings/ModuleSettings.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Hotkeys/HotkeyRegistry.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Module/NotchPresenter.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Module/FeatureModule.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleContext.swift</code></li>
+<li>Test: <code>Packages/MyNotchCore/Tests/MyNotchCoreTests/ModuleSettingsTests.swift</code></li>
+<li>Test: <code>Packages/MyNotchCore/Tests/MyNotchCoreTests/HotkeyRegistryTests.swift</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Viết test (chưa có code nên phải fail)</strong></li>
+</ul>
+<p><code>Packages/MyNotchCore/Tests/MyNotchCoreTests/ModuleSettingsTests.swift</code>:</p>
+<pre><code class="language-swift">import Testing
+@testable import MyNotchCore
+import MyNotchTestSupport
+
+@Suite struct ModuleSettingsTests {
+    @Test func moduleSettingsArePrefixed() {
+        let store = SettingsStore(defaults: makeIsolatedDefaults())
+        let battery = ModuleSettings(store: store, module: &quot;battery&quot;)
+        let key = battery.key(&quot;lowThreshold&quot;, default: 20, clampedTo: 5...50)
+        #expect(key.name == &quot;module.battery.lowThreshold&quot;)
+        battery.set(80, for: key)
+        #expect(battery.value(key) == 50)
+    }
+}</code></pre>
+<p><code>Packages/MyNotchCore/Tests/MyNotchCoreTests/HotkeyRegistryTests.swift</code>:</p>
+<pre><code class="language-swift">import Testing
+@testable import MyNotchCore
+
+@Suite struct HotkeyRegistryTests {
+    @Test func namesAreScopedByOwner() {
+        #expect(HotkeyRegistry.qualifiedName(&quot;toggleNotch&quot;, owner: nil) == &quot;app_toggleNotch&quot;)
+        #expect(HotkeyRegistry.qualifiedName(&quot;openTab&quot;, owner: &quot;battery&quot;) == &quot;battery_openTab&quot;)
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Chạy test, xác nhận fail</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/MyNotchCore --filter &#x27;ModuleSettingsTests|HotkeyRegistryTests&#x27;</code></pre>
+<p>Expected: FAIL, lỗi biên dịch <code>cannot find &#x27;ModuleSettings&#x27; in scope</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Viết code</strong></li>
+</ul>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Permissions/PermissionCenter.swift</code>:</p>
+<pre><code class="language-swift">/// Checks permission status without prompting, and opens System Settings.
+public protocol PermissionCenter: AnyObject {
+    func status(of permission: Permission) -&gt; PermissionStatus
+    func openSystemSettings(for permission: Permission)
+}</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Permissions/SystemPermissionCenter.swift</code>:</p>
+<pre><code class="language-swift">import AppKit
+import ApplicationServices
+import AVFoundation
+import CoreBluetooth
+import CoreGraphics
+import EventKit
+
+/// Real permission checks backed by the system frameworks. Never prompts.
+public final class SystemPermissionCenter: PermissionCenter {
+    public init() {}
+
+    public func status(of permission: Permission) -&gt; PermissionStatus {
+        switch permission {
+        case .accessibility:
+            return AXIsProcessTrusted() ? .granted : .denied
+        case .screenRecording:
+            return CGPreflightScreenCaptureAccess() ? .granted : .denied
+        case .calendars:
+            return Self.map(EKEventStore.authorizationStatus(for: .event))
+        case .reminders:
+            return Self.map(EKEventStore.authorizationStatus(for: .reminder))
+        case .bluetooth:
+            switch CBManager.authorization {
+            case .allowedAlways: return .granted
+            case .notDetermined: return .notDetermined
+            default: return .denied
+            }
+        case .automation(let bundleID):
+            return Self.automationStatus(bundleID: bundleID)
+        case .microphone:
+            switch AVCaptureDevice.authorizationStatus(for: .audio) {
+            case .authorized: return .granted
+            case .notDetermined: return .notDetermined
+            default: return .denied
+            }
+        }
+    }
+
+    public func openSystemSettings(for permission: Permission) {
+        guard let url = URL(string: permission.settingsURL) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private static func map(_ status: EKAuthorizationStatus) -&gt; PermissionStatus {
+        switch status {
+        case .fullAccess: .granted
+        case .notDetermined: .notDetermined
+        default: .denied
+        }
+    }
+
+    private static func automationStatus(bundleID: String) -&gt; PermissionStatus {
+        var target = AEAddressDesc()
+        let created = bundleID.withCString { pointer in
+            AECreateDesc(DescType(typeApplicationBundleID), pointer, strlen(pointer), &amp;target)
+        }
+        guard created == noErr else { return .notDetermined }
+        defer { AEDisposeDesc(&amp;target) }
+        let result = AEDeterminePermissionToAutomateTarget(&amp;target, AEEventClass(typeWildCard), AEEventID(typeWildCard), false)
+        switch result {
+        case noErr: return .granted
+        case OSStatus(errAEEventNotPermitted): return .denied
+        default: return .notDetermined   // not running yet, or consent not requested
+        }
+    }
+}</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Settings/ModuleSettings.swift</code>:</p>
+<pre><code class="language-swift">import SwiftUI
+
+/// Settings access confined to the `module.&lt;id&gt;.` namespace.
+public struct ModuleSettings {
+    private let store: SettingsStore
+    private let module: ModuleID
+
+    init(store: SettingsStore, module: ModuleID) {
+        self.store = store
+        self.module = module
+    }
+
+    public func key&lt;Value&gt;(_ name: String, default defaultValue: Value) -&gt; SettingKey&lt;Value&gt; {
+        SettingKey(Self.qualifiedName(name, module: module), default: defaultValue)
+    }
+
+    public func key&lt;Value: Comparable&gt;(_ name: String, default defaultValue: Value, clampedTo range: ClosedRange&lt;Value&gt;) -&gt; SettingKey&lt;Value&gt; {
+        SettingKey(Self.qualifiedName(name, module: module), default: defaultValue, clampedTo: range)
+    }
+
+    public func value&lt;Value&gt;(_ key: SettingKey&lt;Value&gt;) -&gt; Value { store.value(checked(key)) }
+    public func set&lt;Value&gt;(_ value: Value, for key: SettingKey&lt;Value&gt;) { store.set(value, for: checked(key)) }
+    public func binding&lt;Value&gt;(_ key: SettingKey&lt;Value&gt;) -&gt; Binding&lt;Value&gt; { store.binding(checked(key)) }
+
+    static func qualifiedName(_ name: String, module: ModuleID) -&gt; String {
+        &quot;module.\(module.rawValue).\(name)&quot;
+    }
+
+    private func checked&lt;Value&gt;(_ key: SettingKey&lt;Value&gt;) -&gt; SettingKey&lt;Value&gt; {
+        precondition(key.name.hasPrefix(&quot;module.\(module.rawValue).&quot;), &quot;Key \(key.name) is outside module \(module)&quot;)
+        return key
+    }
+}</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Hotkeys/HotkeyRegistry.swift</code>:</p>
+<pre><code class="language-swift">import KeyboardShortcuts
+import Observation
+import SwiftUI
+
+/// All global shortcuts of the app and its modules, backed by KeyboardShortcuts.
+@Observable
+public final class HotkeyRegistry {
+    public struct Registration: Identifiable {
+        public let name: KeyboardShortcuts.Name
+        public let title: String
+        public let owner: ModuleID?
+        public var id: String { name.rawValue }
+    }
+
+    public private(set) var registrations: [Registration] = []
+
+    public init() {}
+
+    /// Registers a shortcut. `localName` must not contain &quot;.&quot; (a KeyboardShortcuts rule).
+    public func register(
+        _ localName: String,
+        title: String,
+        owner: ModuleID?,
+        initial: KeyboardShortcuts.Shortcut? = nil,
+        action: @escaping @MainActor () -&gt; Void
+    ) {
+        let name = KeyboardShortcuts.Name(Self.qualifiedName(localName, owner: owner), initial: initial)
+        unregister(name)
+        KeyboardShortcuts.onKeyUp(for: name) { MainActor.assumeIsolated { action() } }
+        registrations.append(Registration(name: name, title: title, owner: owner))
+    }
+
+    public func unregisterAll(owner: ModuleID) {
+        for registration in registrations where registration.owner == owner {
+            unregister(registration.name)
+        }
+    }
+
+    /// Groups of registrations that share the same key combination.
+    public func conflicts() -&gt; [[Registration]] {
+        let assigned = registrations.compactMap { registration in
+            KeyboardShortcuts.getShortcut(for: registration.name).map { ($0, registration) }
+        }
+        return Dictionary(grouping: assigned, by: \.0)
+            .values
+            .filter { $0.count &gt; 1 }
+            .map { $0.map(\.1) }
+    }
+
+    static func qualifiedName(_ localName: String, owner: ModuleID?) -&gt; String {
+        precondition(!localName.contains(&quot;.&quot;), &quot;Shortcut names must not contain &#x27;.&#x27;: \(localName)&quot;)
+        return &quot;\(owner?.rawValue ?? &quot;app&quot;)_\(localName)&quot;
+    }
+
+    private func unregister(_ name: KeyboardShortcuts.Name) {
+        KeyboardShortcuts.removeHandler(for: name)
+        registrations.removeAll { $0.name == name }
+    }
+}
+
+/// Module-scoped facade over `HotkeyRegistry`; shortcuts are removed when the module stops.
+public final class ModuleHotkeys {
+    private let registry: HotkeyRegistry
+    private let module: ModuleID
+
+    init(registry: HotkeyRegistry, module: ModuleID) {
+        self.registry = registry
+        self.module = module
+    }
+
+    public func register(
+        _ localName: String,
+        title: String,
+        initial: KeyboardShortcuts.Shortcut? = nil,
+        action: @escaping @MainActor () -&gt; Void
+    ) {
+        registry.register(localName, title: title, owner: module, initial: initial, action: action)
+    }
+}</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Module/NotchPresenter.swift</code>:</p>
+<pre><code class="language-swift">import SwiftUI
+
+/// Lets modules drive the notch without knowing about windows or screens.
+public protocol NotchPresenter: AnyObject {
+    func open(tab: ModuleID)
+    func showToast(_ content: AnyView, duration: Duration)
+    func close()
+}</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Module/FeatureModule.swift</code>:</p>
+<pre><code class="language-swift">import SwiftUI
+
+/// Contract every feature module implements. Modules depend only on MyNotchCore and NotchUI.
+public protocol FeatureModule: AnyObject {
+    var descriptor: ModuleDescriptor { get }
+    func start(_ context: ModuleContext) async throws(ModuleError)
+    func stop() async
+    func makeTab() -&gt; NotchTab?
+    func makeSettingsView() -&gt; AnyView?
+}</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleContext.swift</code>:</p>
+<pre><code class="language-swift">import os
+
+/// Everything a module receives from the app. Owned by the registry for one start/stop cycle.
+public final class ModuleContext {
+    public let id: ModuleID
+    public let settings: ModuleSettings
+    public let activities: ActivityPublisher
+    public let presenter: any NotchPresenter
+    public let hotkeys: ModuleHotkeys
+    public let permissions: any PermissionCenter
+    public let logger: Logger
+
+    private var tasks: [Task&lt;Void, Never&gt;] = []
+
+    init(
+        id: ModuleID,
+        settings: ModuleSettings,
+        activities: ActivityPublisher,
+        presenter: any NotchPresenter,
+        hotkeys: ModuleHotkeys,
+        permissions: any PermissionCenter
+    ) {
+        self.id = id
+        self.settings = settings
+        self.activities = activities
+        self.presenter = presenter
+        self.hotkeys = hotkeys
+        self.permissions = permissions
+        self.logger = Log.logger(category: id.rawValue)
+    }
+
+    /// Runs work that is cancelled automatically when the module stops.
+    public func run(_ operation: @escaping @MainActor () async -&gt; Void) {
+        tasks.append(Task { await operation() })
+    }
+
+    func cancelAll() {
+        tasks.forEach { $0.cancel() }
+        tasks.removeAll()
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Chạy test, xác nhận pass</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/MyNotchCore --filter &#x27;ModuleSettingsTests|HotkeyRegistryTests&#x27;</code></pre>
+<p>Expected: <code>✔ Test run with 2 tests in 2 suites passed</code>.</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Packages/MyNotchCore/Tests/MyNotchCoreTests/ModuleSettingsTests.swift Packages/MyNotchCore/Tests/MyNotchCoreTests/HotkeyRegistryTests.swift Packages/MyNotchCore/Sources/MyNotchCore/Permissions/PermissionCenter.swift Packages/MyNotchCore/Sources/MyNotchCore/Permissions/SystemPermissionCenter.swift Packages/MyNotchCore/Sources/MyNotchCore/Settings/ModuleSettings.swift Packages/MyNotchCore/Sources/MyNotchCore/Hotkeys/HotkeyRegistry.swift Packages/MyNotchCore/Sources/MyNotchCore/Module/NotchPresenter.swift Packages/MyNotchCore/Sources/MyNotchCore/Module/FeatureModule.swift Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleContext.swift
+git commit -m &quot;feat(core): add FeatureModule contract and ModuleContext&quot;</code></pre>
+<h2 id="task-6-moduleregistry">Task 6: ModuleRegistry</h2>
+<p>Điều khiển vòng đời module: kiểm quyền trước khi <code>start</code>, cô lập lỗi, gỡ activity/phím tắt/tab khi dừng, <code>retry</code>, tạm dừng toàn bộ. <code>RegistryHarness</code> trong <code>MyNotchTestSupport</code> ghép registry với các bản giả để test của mọi package dùng chung.</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchTestSupport/Fakes.swift</code></li>
+<li>Create: <code>Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleRegistry.swift</code></li>
+<li>Test: <code>Packages/MyNotchCore/Tests/MyNotchCoreTests/FakeModule.swift</code></li>
+<li>Test: <code>Packages/MyNotchCore/Tests/MyNotchCoreTests/ModuleRegistryTests.swift</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Viết test (chưa có code nên phải fail)</strong></li>
+</ul>
+<p><code>Packages/MyNotchCore/Tests/MyNotchCoreTests/FakeModule.swift</code>:</p>
+<pre><code class="language-swift">import Foundation
+import SwiftUI
+@testable import MyNotchCore
+import MyNotchTestSupport
+
+final class FakeModule: FeatureModule {
+    let descriptor: ModuleDescriptor
+    var startError: ModuleError?
+    var activityOnStart: LiveActivity?
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
+    private(set) var context: ModuleContext?
+
+    init(_ id: ModuleID, order: Int = 0, defaultEnabled: Bool = true, permissions: [Permission] = []) {
+        descriptor = ModuleDescriptor(
+            id: id, displayName: id.rawValue, systemImage: &quot;circle&quot;,
+            defaultEnabled: defaultEnabled, permissions: permissions, order: order
+        )
+    }
+
+    func start(_ context: ModuleContext) async throws(ModuleError) {
+        startCount += 1
+        self.context = context
+        if let activityOnStart { context.activities.set(activityOnStart) }
+        if let startError { throw startError }
+    }
+
+    func stop() async { stopCount += 1 }
+
+    func makeTab() -&gt; NotchTab? {
+        NotchTab(id: descriptor.id, title: descriptor.displayName, systemImage: &quot;circle&quot;, content: AnyView(EmptyView()))
+    }
+
+    func makeSettingsView() -&gt; AnyView? { nil }
+}
+
+typealias Harness = RegistryHarness</code></pre>
+<p><code>Packages/MyNotchCore/Tests/MyNotchCoreTests/ModuleRegistryTests.swift</code>:</p>
+<pre><code class="language-swift">import Testing
+@testable import MyNotchCore
+import MyNotchTestSupport
+
+@Suite struct ModuleRegistryTests {
+    @Test func bootstrapStartsOnlyEnabledModules() async {
+        let on = FakeModule(&quot;on&quot;, order: 1)
+        let off = FakeModule(&quot;off&quot;, order: 2, defaultEnabled: false)
+        let harness = Harness([off, on])
+        await harness.registry.bootstrap()
+        #expect(harness.registry.state(of: &quot;on&quot;) == .running)
+        #expect(harness.registry.state(of: &quot;off&quot;) == .disabled)
+        #expect(harness.registry.tabs.map(\.id) == [&quot;on&quot;])
+        #expect(harness.registry.modules.map(\.descriptor.id) == [&quot;on&quot;, &quot;off&quot;])
+    }
+
+    @Test func failingModuleIsIsolatedAndCleanedUp() async {
+        let broken = FakeModule(&quot;broken&quot;, order: 1)
+        broken.startError = .failed(reason: &quot;boom&quot;)
+        broken.activityOnStart = activity(&quot;x&quot;)
+        let healthy = FakeModule(&quot;healthy&quot;, order: 2)
+        let harness = Harness([broken, healthy])
+        await harness.registry.bootstrap()
+        #expect(harness.registry.state(of: &quot;broken&quot;) == .failed(reason: &quot;boom&quot;))
+        #expect(harness.registry.state(of: &quot;healthy&quot;) == .running)
+        #expect(harness.activities.entries.isEmpty)
+        #expect(harness.registry.tabs.map(\.id) == [&quot;healthy&quot;])
+    }
+
+    @Test func missingPermissionSkipsStartUntilGranted() async {
+        let module = FakeModule(&quot;needy&quot;, permissions: [.accessibility])
+        let harness = Harness([module])
+        await harness.registry.bootstrap()
+        #expect(harness.registry.state(of: &quot;needy&quot;) == .needsPermission(.accessibility))
+        #expect(module.startCount == 0)
+        harness.permissions.statuses[.accessibility] = .granted
+        await harness.registry.refreshPermissions()
+        #expect(harness.registry.state(of: &quot;needy&quot;) == .running)
+    }
+
+    @Test func disablingStopsAndRemovesActivitiesAndTab() async {
+        let module = FakeModule(&quot;m&quot;)
+        module.activityOnStart = activity(&quot;live&quot;)
+        let harness = Harness([module])
+        await harness.registry.bootstrap()
+        #expect(harness.activities.current?.id == &quot;m/live&quot;)
+        await harness.registry.setEnabled(false, for: &quot;m&quot;)
+        #expect(module.stopCount == 1)
+        #expect(harness.registry.state(of: &quot;m&quot;) == .disabled)
+        #expect(harness.activities.current == nil)
+        #expect(harness.registry.tabs.isEmpty)
+        #expect(harness.registry.isEnabled(&quot;m&quot;) == false)
+    }
+
+    @Test func retryRestartsAFailedModule() async {
+        let module = FakeModule(&quot;m&quot;)
+        module.startError = .unavailable(reason: &quot;nope&quot;)
+        let harness = Harness([module])
+        await harness.registry.bootstrap()
+        module.startError = nil
+        await harness.registry.retry(&quot;m&quot;)
+        #expect(harness.registry.state(of: &quot;m&quot;) == .running)
+        #expect(module.startCount == 2)
+    }
+
+    @Test func pauseStopsEverythingWithoutChangingEnabledSetting() async {
+        let module = FakeModule(&quot;m&quot;)
+        let harness = Harness([module])
+        await harness.registry.bootstrap()
+        await harness.registry.pauseAll()
+        #expect(harness.registry.state(of: &quot;m&quot;) == .disabled)
+        #expect(harness.registry.isEnabled(&quot;m&quot;))
+        await harness.registry.resumeAll()
+        #expect(harness.registry.state(of: &quot;m&quot;) == .running)
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Chạy test, xác nhận fail</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/MyNotchCore</code></pre>
+<p>Expected: FAIL, lỗi biên dịch <code>cannot find &#x27;ModuleRegistry&#x27; in scope</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Viết code</strong></li>
+</ul>
+<p><code>Packages/MyNotchCore/Sources/MyNotchTestSupport/Fakes.swift</code>:</p>
+<pre><code class="language-swift">import MyNotchCore
+import SwiftUI
+
+/// Permission center whose answers tests set directly. Unknown permissions are denied.
+public final class FakePermissionCenter: PermissionCenter {
+    public var statuses: [Permission: PermissionStatus] = [:]
+    public init() {}
+    public func status(of permission: Permission) -&gt; PermissionStatus { statuses[permission] ?? .denied }
+    public func openSystemSettings(for permission: Permission) {}
+}
+
+/// Presenter that records requests.
+public final class FakePresenter: NotchPresenter {
+    public private(set) var openedTabs: [ModuleID] = []
+    public private(set) var toastCount = 0
+    public init() {}
+    public func open(tab: ModuleID) { openedTabs.append(tab) }
+    public func showToast(_ content: AnyView, duration: Duration) { toastCount += 1 }
+    public func close() {}
+}
+
+/// Wires a `ModuleRegistry` with in-memory collaborators.
+public struct RegistryHarness {
+    public let settings = SettingsStore(defaults: makeIsolatedDefaults())
+    public let scheduler = ManualScheduler()
+    public let permissions = FakePermissionCenter()
+    public let presenter = FakePresenter()
+    public let activities: ActivityCenter
+    public let registry: ModuleRegistry
+
+    public init(_ modules: [any FeatureModule]) {
+        activities = ActivityCenter(scheduler: scheduler)
+        registry = ModuleRegistry(
+            modules: modules, settings: settings, activities: activities,
+            permissions: permissions, hotkeys: HotkeyRegistry(), presenter: presenter
+        )
+    }
+}</code></pre>
+<p><code>Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleRegistry.swift</code>:</p>
+<pre><code class="language-swift">import Observation
+import SwiftUI
+
+/// Owns module lifecycles. A failing module never affects the others.
+@Observable
+public final class ModuleRegistry {
+    public let modules: [any FeatureModule]
+    public private(set) var states: [ModuleID: ModuleState] = [:]
+    public private(set) var tabs: [NotchTab] = []
+    public private(set) var isPaused = false
+
+    @ObservationIgnored private let settings: SettingsStore
+    @ObservationIgnored private let activities: ActivityCenter
+    @ObservationIgnored private let permissions: any PermissionCenter
+    @ObservationIgnored private let hotkeys: HotkeyRegistry
+    @ObservationIgnored private let presenter: any NotchPresenter
+    @ObservationIgnored private var contexts: [ModuleID: ModuleContext] = [:]
+    @ObservationIgnored private var tabCache: [ModuleID: NotchTab] = [:]
+
+    public init(
+        modules: [any FeatureModule],
+        settings: SettingsStore,
+        activities: ActivityCenter,
+        permissions: any PermissionCenter,
+        hotkeys: HotkeyRegistry,
+        presenter: any NotchPresenter
+    ) {
+        let sorted = modules.sorted { $0.descriptor.order &lt; $1.descriptor.order }
+        precondition(Set(sorted.map(\.descriptor.id)).count == sorted.count, &quot;Duplicate ModuleID&quot;)
+        self.modules = sorted
+        self.settings = settings
+        self.activities = activities
+        self.permissions = permissions
+        self.hotkeys = hotkeys
+        self.presenter = presenter
+        for module in sorted { states[module.descriptor.id] = .disabled }
+    }
+
+    public static func enabledKey(for descriptor: ModuleDescriptor) -&gt; SettingKey&lt;Bool&gt; {
+        SettingKey(&quot;module.\(descriptor.id.rawValue).enabled&quot;, default: descriptor.defaultEnabled)
+    }
+
+    public func isEnabled(_ id: ModuleID) -&gt; Bool {
+        guard let module = module(id) else { return false }
+        return settings.value(Self.enabledKey(for: module.descriptor))
+    }
+
+    public func state(of id: ModuleID) -&gt; ModuleState { states[id] ?? .disabled }
+
+    /// Starts every enabled module. Call once at launch.
+    public func bootstrap() async {
+        for module in modules where isEnabled(module.descriptor.id) {
+            await start(module)
+        }
+    }
+
+    public func setEnabled(_ enabled: Bool, for id: ModuleID) async {
+        guard let module = module(id) else { return }
+        settings.set(enabled, for: Self.enabledKey(for: module.descriptor))
+        if enabled, !isPaused {
+            await start(module)
+        } else if !enabled {
+            await stop(module)
+        }
+    }
+
+    /// Stops then starts a module again, e.g. after a failure.
+    public func retry(_ id: ModuleID) async {
+        guard let module = module(id), isEnabled(id), !isPaused else { return }
+        await stop(module)
+        await start(module)
+    }
+
+    /// Restarts enabled modules that were waiting for a permission that is now granted.
+    public func refreshPermissions() async {
+        guard !isPaused else { return }
+        for module in modules {
+            guard case .needsPermission = state(of: module.descriptor.id), isEnabled(module.descriptor.id) else { continue }
+            await start(module)
+        }
+    }
+
+    public func pauseAll() async {
+        isPaused = true
+        for module in modules { await stop(module) }
+    }
+
+    public func resumeAll() async {
+        isPaused = false
+        await bootstrap()
+    }
+
+    public func settingsView(for id: ModuleID) -&gt; AnyView? {
+        module(id)?.makeSettingsView()
+    }
+
+    private func module(_ id: ModuleID) -&gt; (any FeatureModule)? {
+        modules.first { $0.descriptor.id == id }
+    }
+
+    private func start(_ module: any FeatureModule) async {
+        let descriptor = module.descriptor
+        let id = descriptor.id
+        guard state(of: id) != .running, state(of: id) != .starting else { return }
+        if let missing = descriptor.permissions.first(where: { permissions.status(of: $0) != .granted }) {
+            states[id] = .needsPermission(missing)
+            return
+        }
+        states[id] = .starting
+        let context = ModuleContext(
+            id: id,
+            settings: ModuleSettings(store: settings, module: id),
+            activities: ActivityPublisher(center: activities, module: id),
+            presenter: presenter,
+            hotkeys: ModuleHotkeys(registry: hotkeys, module: id),
+            permissions: permissions
+        )
+        contexts[id] = context
+        do {
+            try await module.start(context)
+            states[id] = .running
+            tabCache[id] = module.makeTab()
+        } catch {
+            tearDown(id)
+            states[id] = ModuleState(error)
+            context.logger.error(&quot;Module failed to start: \(String(describing: error), privacy: .public)&quot;)
+        }
+        rebuildTabs()
+    }
+
+    private func stop(_ module: any FeatureModule) async {
+        let id = module.descriptor.id
+        if state(of: id) == .running {
+            states[id] = .stopping
+            await module.stop()
+        }
+        tearDown(id)
+        states[id] = .disabled
+        rebuildTabs()
+    }
+
+    private func tearDown(_ id: ModuleID) {
+        contexts.removeValue(forKey: id)?.cancelAll()
+        activities.clearAll(from: id)
+        hotkeys.unregisterAll(owner: id)
+        tabCache[id] = nil
+    }
+
+    private func rebuildTabs() {
+        tabs = modules.compactMap { tabCache[$0.descriptor.id] }
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Chạy test, xác nhận pass</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/MyNotchCore</code></pre>
+<p>Expected: <code>✔ Test run with 20 tests in 7 suites passed</code>.</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Packages/MyNotchCore/Tests/MyNotchCoreTests/FakeModule.swift Packages/MyNotchCore/Tests/MyNotchCoreTests/ModuleRegistryTests.swift Packages/MyNotchCore/Sources/MyNotchTestSupport/Fakes.swift Packages/MyNotchCore/Sources/MyNotchCore/Module/ModuleRegistry.swift
+git commit -m &quot;feat(core): add ModuleRegistry with failure isolation&quot;</code></pre>
+<h2 id="task-7-package-notchui-hình-học-notch">Task 7: Package NotchUI: hình học notch</h2>
+<p><code>NotchGeometry</code> là phép tính thuần: notch thật lấy từ hai vùng auxiliary của <code>NSScreen</code>, notch ảo lấy từ cài đặt. Panel luôn có kích thước lớn nhất và neo giữa cạnh trên; <code>hitRect</code> là vùng con trỏ được tính là "ở trong notch".</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>Packages/NotchUI/Package.swift</code></li>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/Geometry/ScreenDescriptor.swift</code></li>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/Geometry/InterfaceSettings.swift</code></li>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/State/NotchState.swift</code></li>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/Geometry/NotchGeometry.swift</code></li>
+<li>Test: <code>Packages/NotchUI/Tests/NotchUITests/NotchGeometryTests.swift</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Tạo khung package</strong></li>
+</ul>
+<p><code>Packages/NotchUI/Package.swift</code>:</p>
+<pre><code class="language-swift">// swift-tools-version: 6.2
+import PackageDescription
+
+let package = Package(
+    name: &quot;NotchUI&quot;,
+    platforms: [.macOS(.v26)],
+    products: [.library(name: &quot;NotchUI&quot;, targets: [&quot;NotchUI&quot;])],
+    dependencies: [.package(path: &quot;../MyNotchCore&quot;)],
+    targets: [
+        .target(
+            name: &quot;NotchUI&quot;,
+            dependencies: [&quot;MyNotchCore&quot;],
+            swiftSettings: [.defaultIsolation(MainActor.self)]
+        ),
+        .testTarget(
+            name: &quot;NotchUITests&quot;,
+            dependencies: [&quot;NotchUI&quot;, .product(name: &quot;MyNotchTestSupport&quot;, package: &quot;MyNotchCore&quot;)],
+            swiftSettings: [.defaultIsolation(MainActor.self)]
+        ),
+    ]
+)</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Viết test (chưa có code nên phải fail)</strong></li>
+</ul>
+<p><code>Packages/NotchUI/Tests/NotchUITests/NotchGeometryTests.swift</code>:</p>
+<pre><code class="language-swift">import CoreGraphics
+import Testing
+@testable import NotchUI
+
+@Suite struct NotchGeometryTests {
+    static let macBook14 = ScreenDescriptor(
+        frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+        safeAreaTop: 32, auxiliaryTopLeftWidth: 662, auxiliaryTopRightWidth: 665, menuBarHeight: 37
+    )
+    static let external = ScreenDescriptor(
+        frame: CGRect(x: 1512, y: 0, width: 1920, height: 1080),
+        safeAreaTop: 0, auxiliaryTopLeftWidth: nil, auxiliaryTopRightWidth: nil, menuBarHeight: 25
+    )
+
+    @Test func hardwareNotchUsesAuxiliaryAreas() {
+        let geometry = NotchGeometry(screen: Self.macBook14, config: NotchLayoutConfig())
+        #expect(geometry.kind == .hardware)
+        #expect(geometry.notchSize == CGSize(width: 185, height: 32))
+    }
+
+    @Test func virtualNotchFallsBackToMenuBarHeight() {
+        let geometry = NotchGeometry(screen: Self.external, config: NotchLayoutConfig())
+        #expect(geometry.kind == .virtual)
+        #expect(geometry.notchSize == CGSize(width: 185, height: 25))
+    }
+
+    @Test func virtualNotchClampsConfiguredSize() {
+        let config = NotchLayoutConfig(virtualNotchWidth: 999, virtualNotchHeight: 10)
+        let geometry = NotchGeometry(screen: Self.external, config: config)
+        #expect(geometry.notchSize == CGSize(width: 300, height: 24))
+    }
+
+    @Test func shapeSizesPerState() {
+        let geometry = NotchGeometry(screen: Self.macBook14, config: NotchLayoutConfig())
+        #expect(geometry.shapeSize(for: .closed) == CGSize(width: 197, height: 32))
+        #expect(geometry.shapeSize(for: .compact) == CGSize(width: 325, height: 32))
+        #expect(geometry.shapeSize(for: .open(nil), contentHeight: 190) == CGSize(width: 600, height: 222))
+        #expect(geometry.shapeSize(for: .open(nil), contentHeight: 900) == CGSize(width: 600, height: 332))
+    }
+
+    @Test func panelIsTopCentredAndMaxSized() {
+        let geometry = NotchGeometry(screen: Self.external, config: NotchLayoutConfig())
+        let frame = geometry.panelFrame(in: Self.external.frame)
+        #expect(frame == CGRect(x: 1512 + 960 - 360, y: 1080 - 325, width: 720, height: 325))
+    }
+
+    @Test func hitRectIsShapePlusPadding() {
+        let geometry = NotchGeometry(screen: Self.macBook14, config: NotchLayoutConfig())
+        let rect = geometry.hitRect(for: .closed, in: Self.macBook14.frame)
+        #expect(rect == CGRect(x: 756 - 98.5 - 8, y: 982 - 32 - 8, width: 197 + 16, height: 32 + 16))
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Chạy test, xác nhận fail</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/NotchUI --filter &#x27;NotchGeometryTests&#x27;</code></pre>
+<p>Expected: FAIL, lỗi biên dịch <code>cannot find &#x27;ScreenDescriptor&#x27; in scope</code>.</p>
+<ul>
+<li>[ ] <strong>Step 4: Viết code</strong></li>
+</ul>
+<p><code>Packages/NotchUI/Sources/NotchUI/Geometry/ScreenDescriptor.swift</code>:</p>
+<pre><code class="language-swift">import AppKit
+
+/// The screen facts geometry needs, decoupled from `NSScreen` for testing.
+nonisolated public struct ScreenDescriptor: Equatable, Sendable {
+    public var frame: CGRect
+    public var safeAreaTop: CGFloat
+    public var auxiliaryTopLeftWidth: CGFloat?
+    public var auxiliaryTopRightWidth: CGFloat?
+    public var menuBarHeight: CGFloat
+
+    public init(frame: CGRect, safeAreaTop: CGFloat, auxiliaryTopLeftWidth: CGFloat?, auxiliaryTopRightWidth: CGFloat?, menuBarHeight: CGFloat) {
+        self.frame = frame
+        self.safeAreaTop = safeAreaTop
+        self.auxiliaryTopLeftWidth = auxiliaryTopLeftWidth
+        self.auxiliaryTopRightWidth = auxiliaryTopRightWidth
+        self.menuBarHeight = menuBarHeight
+    }
+}
+
+extension ScreenDescriptor {
+    public init(_ screen: NSScreen) {
+        self.init(
+            frame: screen.frame,
+            safeAreaTop: screen.safeAreaInsets.top,
+            auxiliaryTopLeftWidth: screen.auxiliaryTopLeftArea?.width,
+            auxiliaryTopRightWidth: screen.auxiliaryTopRightArea?.width,
+            // Auto-hidden menu bars report 0; fall back to the standard height.
+            menuBarHeight: max(screen.frame.maxY - screen.visibleFrame.maxY, 24)
+        )
+    }
+}</code></pre>
+<p><code>Packages/NotchUI/Sources/NotchUI/Geometry/InterfaceSettings.swift</code>:</p>
+<pre><code class="language-swift">import CoreGraphics
+import MyNotchCore
+
+nonisolated public enum DisplayMode: String, Codable, Sendable, CaseIterable {
+    case all, main, cursor
+}
+
+/// Global interface settings (`interface.*`).
+public enum InterfaceSettings {
+    public static let displayMode = SettingKey(&quot;interface.displayMode&quot;, default: DisplayMode.all)
+    public static let virtualNotchWidth = SettingKey(&quot;interface.virtualNotchWidth&quot;, default: 185.0, clampedTo: 120...300)
+    /// 0 means &quot;same as the menu bar&quot;.
+    public static let virtualNotchHeight = SettingKey(&quot;interface.virtualNotchHeight&quot;, default: 0.0, clampedTo: 0...40)
+    public static let openWidth = SettingKey(&quot;interface.openWidth&quot;, default: 600.0, clampedTo: 480...720)
+    public static let openDelayMs = SettingKey(&quot;interface.openDelayMs&quot;, default: 150, clampedTo: 0...1000)
+    public static let closeDelayMs = SettingKey(&quot;interface.closeDelayMs&quot;, default: 300, clampedTo: 0...1000)
+    public static let hideInFullscreen = SettingKey(&quot;interface.hideInFullscreen&quot;, default: true)
+}
+
+/// Geometry inputs read from settings.
+nonisolated public struct NotchLayoutConfig: Equatable, Sendable {
+    public var virtualNotchWidth: CGFloat = 185
+    /// nil = menu bar height.
+    public var virtualNotchHeight: CGFloat?
+    public var compactSideWidth: CGFloat = 64
+    public var openWidth: CGFloat = 600
+
+    public init(virtualNotchWidth: CGFloat = 185, virtualNotchHeight: CGFloat? = nil, compactSideWidth: CGFloat = 64, openWidth: CGFloat = 600) {
+        self.virtualNotchWidth = virtualNotchWidth
+        self.virtualNotchHeight = virtualNotchHeight
+        self.compactSideWidth = compactSideWidth
+        self.openWidth = openWidth
+    }
+}
+
+extension NotchLayoutConfig {
+    public init(settings: SettingsStore) {
+        let height = settings.value(InterfaceSettings.virtualNotchHeight)
+        self.init(
+            virtualNotchWidth: settings.value(InterfaceSettings.virtualNotchWidth),
+            virtualNotchHeight: height == 0 ? nil : max(height, 24),
+            openWidth: settings.value(InterfaceSettings.openWidth)
+        )
+    }
+}</code></pre>
+<p><code>Packages/NotchUI/Sources/NotchUI/State/NotchState.swift</code>:</p>
+<pre><code class="language-swift">import MyNotchCore
+
+nonisolated public enum NotchState: Equatable, Sendable {
+    case closed
+    case compact
+    case open(ModuleID?)
+    case toast
+
+    public var isExpanded: Bool {
+        switch self {
+        case .open, .toast: true
+        case .closed, .compact: false
+        }
+    }
+}</code></pre>
+<p><code>Packages/NotchUI/Sources/NotchUI/Geometry/NotchGeometry.swift</code>:</p>
+<pre><code class="language-swift">import CoreGraphics
+import MyNotchCore
+
+nonisolated public enum NotchKind: Equatable, Sendable { case hardware, virtual }
+
+/// Pure size and placement math for one screen&#x27;s notch.
+nonisolated public struct NotchGeometry: Equatable, Sendable {
+    public static let maxOpenWidth: CGFloat = 720
+    public static let hitPadding: CGFloat = 8
+
+    public let kind: NotchKind
+    /// Size of the physical (or virtual) notch body.
+    public let notchSize: CGSize
+    public let config: NotchLayoutConfig
+
+    public init(screen: ScreenDescriptor, config: NotchLayoutConfig) {
+        self.config = config
+        if screen.safeAreaTop &gt; 0, let left = screen.auxiliaryTopLeftWidth, let right = screen.auxiliaryTopRightWidth {
+            kind = .hardware
+            notchSize = CGSize(width: screen.frame.width - left - right, height: screen.safeAreaTop)
+        } else {
+            kind = .virtual
+            let width = min(max(config.virtualNotchWidth, 120), 300)
+            let height = min(max(config.virtualNotchHeight ?? screen.menuBarHeight, 24), 40)
+            notchSize = CGSize(width: width, height: height)
+        }
+    }
+
+    public func cornerRadii(for state: NotchState) -&gt; (top: CGFloat, bottom: CGFloat) {
+        state.isExpanded ? (8, 24) : (6, 10)
+    }
+
+    /// Full shape size, including the top &quot;ears&quot; that blend into the menu bar.
+    public func shapeSize(for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight) -&gt; CGSize {
+        let ears = 2 * cornerRadii(for: state).top
+        switch state {
+        case .closed:
+            return CGSize(width: notchSize.width + ears, height: notchSize.height)
+        case .compact:
+            return CGSize(width: notchSize.width + ears + 2 * config.compactSideWidth, height: notchSize.height)
+        case .open, .toast:
+            let width = min(max(config.openWidth, 480), Self.maxOpenWidth)
+            let content = min(max(contentHeight, NotchTab.heightRange.lowerBound), NotchTab.heightRange.upperBound)
+            return CGSize(width: width, height: notchSize.height + content)
+        }
+    }
+
+    /// Fixed panel size: the largest the notch can ever get.
+    public var panelSize: CGSize {
+        CGSize(width: Self.maxOpenWidth, height: notchSize.height + NotchTab.heightRange.upperBound)
+    }
+
+    /// Panel frame anchored to the top centre of `screenFrame` (AppKit coordinates).
+    public func panelFrame(in screenFrame: CGRect) -&gt; CGRect {
+        CGRect(
+            x: screenFrame.midX - panelSize.width / 2,
+            y: screenFrame.maxY - panelSize.height,
+            width: panelSize.width,
+            height: panelSize.height
+        )
+    }
+
+    /// Area (screen coordinates) where the pointer counts as &quot;inside&quot; the notch.
+    public func hitRect(for state: NotchState, contentHeight: CGFloat = NotchTab.defaultHeight, in screenFrame: CGRect) -&gt; CGRect {
+        let size = shapeSize(for: state, contentHeight: contentHeight)
+        return CGRect(
+            x: screenFrame.midX - size.width / 2,
+            y: screenFrame.maxY - size.height,
+            width: size.width,
+            height: size.height
+        ).insetBy(dx: -Self.hitPadding, dy: -Self.hitPadding)
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Chạy test, xác nhận pass</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/NotchUI --filter &#x27;NotchGeometryTests&#x27;</code></pre>
+<p>Expected: <code>✔ Test run with 6 tests in 1 suite passed</code>.</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Packages/NotchUI/Package.swift Packages/NotchUI/Tests/NotchUITests/NotchGeometryTests.swift Packages/NotchUI/Sources/NotchUI/Geometry/ScreenDescriptor.swift Packages/NotchUI/Sources/NotchUI/Geometry/InterfaceSettings.swift Packages/NotchUI/Sources/NotchUI/State/NotchState.swift Packages/NotchUI/Sources/NotchUI/Geometry/NotchGeometry.swift
+git commit -m &quot;feat(notch-ui): add notch geometry&quot;</code></pre>
+<h2 id="task-8-notchviewmodel-state-machine">Task 8: NotchViewModel (state machine)</h2>
+<p>State machine của một màn hình. <code>compact</code> không được lưu: <code>displayState</code> trả về <code>compact</code> khi đang đóng mà có activity. Ghim và kéo-thả huỷ lệnh đóng đang chờ.</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/State/NotchViewModel.swift</code></li>
+<li>Test: <code>Packages/NotchUI/Tests/NotchUITests/NotchViewModelTests.swift</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Viết test (chưa có code nên phải fail)</strong></li>
+</ul>
+<p><code>Packages/NotchUI/Tests/NotchUITests/NotchViewModelTests.swift</code>:</p>
+<pre><code class="language-swift">import MyNotchCore
+import MyNotchTestSupport
+import SwiftUI
+import Testing
+@testable import NotchUI
+
+@Suite struct NotchViewModelTests {
+    let scheduler = ManualScheduler()
+
+    func makeModel(tabs: [ModuleID] = [&quot;battery&quot;, &quot;clipboard&quot;]) -&gt; NotchViewModel {
+        NotchViewModel(scheduler: scheduler, availableTabs: { tabs }, delays: { (.milliseconds(150), .milliseconds(300)) })
+    }
+
+    @Test func hoverOpensAfterDelay() {
+        let model = makeModel()
+        model.pointerEntered()
+        scheduler.advance(by: .milliseconds(149))
+        #expect(model.state == .closed)
+        scheduler.advance(by: .milliseconds(1))
+        #expect(model.state == .open(&quot;battery&quot;))
+    }
+
+    @Test func leavingBeforeDelayCancelsOpen() {
+        let model = makeModel()
+        model.pointerEntered()
+        scheduler.advance(by: .milliseconds(100))
+        model.pointerExited()
+        scheduler.advance(by: .seconds(1))
+        #expect(model.state == .closed)
+    }
+
+    @Test func leavingClosesAfterDelayUnlessReentered() {
+        let model = makeModel()
+        model.click()
+        model.pointerExited()
+        scheduler.advance(by: .milliseconds(200))
+        model.pointerEntered()
+        scheduler.advance(by: .seconds(1))
+        #expect(model.state.isExpanded)
+        model.pointerExited()
+        scheduler.advance(by: .milliseconds(300))
+        #expect(model.state == .closed)
+    }
+
+    @Test func pinnedAndDraggingKeepItOpen() {
+        let model = makeModel()
+        model.click()
+        model.isPinned = true
+        model.pointerExited()
+        scheduler.advance(by: .seconds(1))
+        #expect(model.state.isExpanded)
+        model.isPinned = false
+        model.setDragging(true)
+        scheduler.advance(by: .seconds(1))
+        #expect(model.state.isExpanded)
+        model.setDragging(false)
+        scheduler.advance(by: .milliseconds(300))
+        #expect(model.state == .closed)
+    }
+
+    @Test func remembersLastTab() {
+        let model = makeModel()
+        model.open(tab: &quot;clipboard&quot;)
+        model.close()
+        model.click()
+        #expect(model.state == .open(&quot;clipboard&quot;))
+    }
+
+    @Test func unknownTabFallsBackToFirst() {
+        let model = makeModel()
+        model.open(tab: &quot;missing&quot;)
+        #expect(model.state == .open(&quot;battery&quot;))
+    }
+
+    @Test func toggleOpensAndCloses() {
+        let model = makeModel()
+        model.toggle()
+        #expect(model.state.isExpanded)
+        model.toggle()
+        #expect(model.state == .closed)
+    }
+
+    @Test func activityTurnsClosedIntoCompact() {
+        let model = makeModel()
+        model.hasActivity = true
+        #expect(model.displayState == .compact)
+        model.click()
+        #expect(model.displayState == .open(&quot;battery&quot;))
+        model.close()
+        #expect(model.displayState == .compact)
+    }
+
+    @Test func toastClosesAfterDurationUnlessPointerInside() {
+        let model = makeModel()
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        #expect(model.state == .toast)
+        scheduler.advance(by: .seconds(2))
+        #expect(model.state == .closed)
+
+        model.showToast(AnyView(EmptyView()), duration: .seconds(2))
+        model.pointerEntered()
+        scheduler.advance(by: .seconds(2))
+        #expect(model.state == .toast)
+        model.pointerExited()
+        scheduler.advance(by: .milliseconds(300))
+        #expect(model.state == .closed)
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Chạy test, xác nhận fail</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/NotchUI --filter &#x27;NotchViewModelTests&#x27;</code></pre>
+<p>Expected: FAIL, lỗi biên dịch <code>cannot find &#x27;NotchViewModel&#x27; in scope</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Viết code</strong></li>
+</ul>
+<p><code>Packages/NotchUI/Sources/NotchUI/State/NotchViewModel.swift</code>:</p>
+<pre><code class="language-swift">import MyNotchCore
+import Observation
+import SwiftUI
+
+/// Per-screen notch state machine. Time is injected through `Scheduler`.
+@Observable
+public final class NotchViewModel {
+    public private(set) var state: NotchState = .closed
+    public private(set) var toastContent: AnyView?
+    public private(set) var lastTab: ModuleID?
+    public private(set) var isPointerInside = false
+    /// Set by the owner when the activity center has something to show.
+    public var hasActivity = false
+    public var isPinned = false {
+        didSet { isPinned ? pendingClose?.cancel() : scheduleCloseIfPointerOutside() }
+    }
+    public private(set) var isDragging = false
+
+    /// What the view should render: `closed` becomes `compact` while an activity is live.
+    public var displayState: NotchState {
+        state == .closed &amp;&amp; hasActivity ? .compact : state
+    }
+
+    @ObservationIgnored private let scheduler: any Scheduler
+    @ObservationIgnored private let availableTabs: () -&gt; [ModuleID]
+    @ObservationIgnored private let delays: () -&gt; (open: Duration, close: Duration)
+    @ObservationIgnored private var pendingOpen: ScheduledAction?
+    @ObservationIgnored private var pendingClose: ScheduledAction?
+
+    public init(
+        scheduler: any Scheduler,
+        availableTabs: @escaping () -&gt; [ModuleID],
+        delays: @escaping () -&gt; (open: Duration, close: Duration)
+    ) {
+        self.scheduler = scheduler
+        self.availableTabs = availableTabs
+        self.delays = delays
+    }
+
+    public func pointerEntered() {
+        isPointerInside = true
+        pendingClose?.cancel()
+        guard !state.isExpanded, pendingOpen == nil else { return }
+        pendingOpen = scheduler.schedule(after: delays().open) { [weak self] in
+            self?.pendingOpen = nil
+            self?.open(tab: nil)
+        }
+    }
+
+    public func pointerExited() {
+        isPointerInside = false
+        pendingOpen?.cancel()
+        pendingOpen = nil
+        scheduleCloseIfPointerOutside()
+    }
+
+    public func click() {
+        if !state.isExpanded { open(tab: nil) }
+    }
+
+    public func toggle() {
+        state.isExpanded ? close() : open(tab: nil)
+    }
+
+    /// Opens `tab`, or the last used tab, or the first available one.
+    public func open(tab: ModuleID?) {
+        pendingOpen?.cancel()
+        pendingOpen = nil
+        pendingClose?.cancel()
+        let tabs = availableTabs()
+        let resolved = [tab, lastTab].compactMap { $0 }.first(where: tabs.contains) ?? tabs.first
+        lastTab = resolved ?? lastTab
+        toastContent = nil
+        state = .open(resolved)
+    }
+
+    public func showToast(_ content: AnyView, duration: Duration) {
+        pendingClose?.cancel()
+        toastContent = content
+        state = .toast
+        pendingClose = scheduler.schedule(after: duration) { [weak self] in
+            guard let self, !self.isPointerInside, !self.isPinned else { return }
+            self.close()
+        }
+    }
+
+    public func close() {
+        pendingOpen?.cancel()
+        pendingOpen = nil
+        pendingClose?.cancel()
+        toastContent = nil
+        state = .closed
+    }
+
+    public func setDragging(_ dragging: Bool) {
+        isDragging = dragging
+        dragging ? pendingClose?.cancel() : scheduleCloseIfPointerOutside()
+    }
+
+    private func scheduleCloseIfPointerOutside() {
+        guard state.isExpanded, !isPointerInside, !isPinned, !isDragging else { return }
+        pendingClose?.cancel()
+        pendingClose = scheduler.schedule(after: delays().close) { [weak self] in
+            self?.close()
+        }
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Chạy test, xác nhận pass</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/NotchUI --filter &#x27;NotchViewModelTests&#x27;</code></pre>
+<p>Expected: <code>✔ Test run with 9 tests in 1 suite passed</code>.</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Packages/NotchUI/Tests/NotchUITests/NotchViewModelTests.swift Packages/NotchUI/Sources/NotchUI/State/NotchViewModel.swift
+git commit -m &quot;feat(notch-ui): add notch state machine&quot;</code></pre>
+<h2 id="task-9-nhận-diện-fullscreen">Task 9: Nhận diện fullscreen</h2>
+<p>Quy tắc thuần <code>FullscreenRule</code> được test riêng; <code>FullscreenDetector</code> đọc danh sách cửa sổ thật (chỉ bounds, không cần quyền Screen Recording) mỗi khi đổi Space hoặc đổi app, và đọc lại sau 500ms.</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/Fullscreen/FullscreenRule.swift</code></li>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/Screens/DisplayIdentity.swift</code></li>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/Fullscreen/FullscreenDetector.swift</code></li>
+<li>Test: <code>Packages/NotchUI/Tests/NotchUITests/FullscreenRuleTests.swift</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Viết test (chưa có code nên phải fail)</strong></li>
+</ul>
+<p><code>Packages/NotchUI/Tests/NotchUITests/FullscreenRuleTests.swift</code>:</p>
+<pre><code class="language-swift">import CoreGraphics
+import Testing
+@testable import NotchUI
+
+@Suite struct FullscreenRuleTests {
+    let display = CGRect(x: 0, y: 0, width: 1512, height: 982)
+
+    @Test func frontmostWindowCoveringDisplayIsFullscreen() {
+        let windows = [WindowInfo(ownerPID: 42, layer: 0, bounds: display)]
+        #expect(FullscreenRule.isFullscreen(windows: windows, frontmostPID: 42, displayBounds: display))
+    }
+
+    @Test func otherAppsOrLayersDoNotCount() {
+        let windows = [
+            WindowInfo(ownerPID: 7, layer: 0, bounds: display),
+            WindowInfo(ownerPID: 42, layer: 25, bounds: display),
+        ]
+        #expect(!FullscreenRule.isFullscreen(windows: windows, frontmostPID: 42, displayBounds: display))
+    }
+
+    @Test func maximisedButNotFullscreenWindowDoesNotCount() {
+        let windows = [WindowInfo(ownerPID: 42, layer: 0, bounds: CGRect(x: 0, y: 37, width: 1512, height: 945))]
+        #expect(!FullscreenRule.isFullscreen(windows: windows, frontmostPID: 42, displayBounds: display))
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Chạy test, xác nhận fail</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/NotchUI --filter &#x27;FullscreenRuleTests&#x27;</code></pre>
+<p>Expected: FAIL, lỗi biên dịch <code>cannot find &#x27;WindowInfo&#x27; in scope</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Viết code</strong></li>
+</ul>
+<p><code>Packages/NotchUI/Sources/NotchUI/Fullscreen/FullscreenRule.swift</code>:</p>
+<pre><code class="language-swift">import CoreGraphics
+
+/// One on-screen window, as reported by `CGWindowListCopyWindowInfo` (global top-left coordinates).
+nonisolated public struct WindowInfo: Equatable, Sendable {
+    public var ownerPID: pid_t
+    public var layer: Int
+    public var bounds: CGRect
+
+    public init(ownerPID: pid_t, layer: Int, bounds: CGRect) {
+        self.ownerPID = ownerPID
+        self.layer = layer
+        self.bounds = bounds
+    }
+}
+
+nonisolated public enum FullscreenRule {
+    /// True when the frontmost app has a normal-layer window covering the whole display.
+    public static func isFullscreen(windows: [WindowInfo], frontmostPID: pid_t, displayBounds: CGRect) -&gt; Bool {
+        windows.contains { window in
+            window.ownerPID == frontmostPID
+                &amp;&amp; window.layer == 0
+                &amp;&amp; abs(window.bounds.minX - displayBounds.minX) &lt;= 1
+                &amp;&amp; abs(window.bounds.minY - displayBounds.minY) &lt;= 1
+                &amp;&amp; abs(window.bounds.width - displayBounds.width) &lt;= 1
+                &amp;&amp; abs(window.bounds.height - displayBounds.height) &lt;= 1
+        }
+    }
+}</code></pre>
+<p><code>Packages/NotchUI/Sources/NotchUI/Screens/DisplayIdentity.swift</code>:</p>
+<pre><code class="language-swift">import AppKit
+
+extension NSScreen {
+    var displayID: CGDirectDisplayID? {
+        (deviceDescription[NSDeviceDescriptionKey(&quot;NSScreenNumber&quot;)] as? NSNumber)?.uint32Value
+    }
+
+    /// Stable across reconnects, unlike screen order or display IDs.
+    var displayUUID: String? {
+        guard let displayID, let uuid = CGDisplayCreateUUIDFromDisplayID(displayID)?.takeRetainedValue() else { return nil }
+        return CFUUIDCreateString(nil, uuid) as String
+    }
+}</code></pre>
+<p><code>Packages/NotchUI/Sources/NotchUI/Fullscreen/FullscreenDetector.swift</code>:</p>
+<pre><code class="language-swift">import AppKit
+
+/// Watches Space and app changes and reports which displays are covered by a fullscreen app.
+final class FullscreenDetector {
+    private var observers: [NSObjectProtocol] = []
+    private var recheck: Task&lt;Void, Never&gt;?
+    private let onChange: (Set&lt;CGDirectDisplayID&gt;) -&gt; Void
+
+    init(onChange: @escaping (Set&lt;CGDirectDisplayID&gt;) -&gt; Void) {
+        self.onChange = onChange
+    }
+
+    func start() {
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.evaluateSoon() }
+            })
+        }
+        evaluate()
+    }
+
+    func stop() {
+        observers.forEach(NSWorkspace.shared.notificationCenter.removeObserver)
+        observers.removeAll()
+        recheck?.cancel()
+    }
+
+    /// Evaluate now and again after the Space transition animation settles.
+    private func evaluateSoon() {
+        evaluate()
+        recheck?.cancel()
+        recheck = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            self?.evaluate()
+        }
+    }
+
+    private func evaluate() {
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else {
+            onChange([])
+            return
+        }
+        let windows = Self.onScreenWindows()
+        let covered = NSScreen.screens.compactMap(\.displayID).filter { displayID in
+            FullscreenRule.isFullscreen(windows: windows, frontmostPID: pid, displayBounds: CGDisplayBounds(displayID))
+        }
+        onChange(Set(covered))
+    }
+
+    private static func onScreenWindows() -&gt; [WindowInfo] {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+        return list.compactMap { info in
+            guard let pid = info[kCGWindowOwnerPID as String] as? pid_t,
+                  let layer = info[kCGWindowLayer as String] as? Int,
+                  let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict) else { return nil }
+            return WindowInfo(ownerPID: pid, layer: layer, bounds: bounds)
+        }
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Chạy test, xác nhận pass</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/NotchUI --filter &#x27;FullscreenRuleTests&#x27;</code></pre>
+<p>Expected: <code>✔ Test run with 3 tests in 1 suite passed</code>.</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Packages/NotchUI/Tests/NotchUITests/FullscreenRuleTests.swift Packages/NotchUI/Sources/NotchUI/Fullscreen/FullscreenRule.swift Packages/NotchUI/Sources/NotchUI/Screens/DisplayIdentity.swift Packages/NotchUI/Sources/NotchUI/Fullscreen/FullscreenDetector.swift
+git commit -m &quot;feat(notch-ui): detect fullscreen apps per display&quot;</code></pre>
+<h2 id="task-10-giao-diện-notch">Task 10: Giao diện notch</h2>
+<p>Hình notch, thanh tab và view gốc. Phần này là SwiftUI nên kiểm chứng bằng build; hành vi hiển thị được kiểm tra tay ở Task 17.</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/Views/NotchTokens.swift</code></li>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/Views/NotchShape.swift</code></li>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/Views/TabBar.swift</code></li>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/Views/NotchRootView.swift</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Viết code</strong></li>
+</ul>
+<p><code>Packages/NotchUI/Sources/NotchUI/Views/NotchTokens.swift</code>:</p>
+<pre><code class="language-swift">import SwiftUI
+
+/// Shared look of the notch. Modules use these instead of hard-coded values.
+public enum NotchTokens {
+    public static let background = Color.black
+    public static let accent = Color(red: 0.49, green: 0.36, blue: 1.0)
+    public static let primaryText = Color.white
+    public static let secondaryText = Color.white.opacity(0.6)
+    public static let padding: CGFloat = 14
+    public static let spring = Animation.spring(response: 0.38, dampingFraction: 0.8)
+}</code></pre>
+<p><code>Packages/NotchUI/Sources/NotchUI/Views/NotchShape.swift</code>:</p>
+<pre><code class="language-swift">import SwiftUI
+
+/// Notch outline: concave &quot;ears&quot; at the top that blend into the menu bar, rounded bottom corners.
+public struct NotchShape: Shape {
+    public var topRadius: CGFloat
+    public var bottomRadius: CGFloat
+
+    public init(topRadius: CGFloat, bottomRadius: CGFloat) {
+        self.topRadius = topRadius
+        self.bottomRadius = bottomRadius
+    }
+
+    public var animatableData: AnimatablePair&lt;CGFloat, CGFloat&gt; {
+        get { AnimatablePair(topRadius, bottomRadius) }
+        set { topRadius = newValue.first; bottomRadius = newValue.second }
+    }
+
+    public func path(in rect: CGRect) -&gt; Path {
+        let top = min(topRadius, rect.width / 4)
+        let bottom = min(bottomRadius, rect.height / 2, (rect.width - 2 * top) / 2)
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addQuadCurve(to: CGPoint(x: rect.minX + top, y: rect.minY + top), control: CGPoint(x: rect.minX + top, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX + top, y: rect.maxY - bottom))
+        path.addQuadCurve(to: CGPoint(x: rect.minX + top + bottom, y: rect.maxY), control: CGPoint(x: rect.minX + top, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX - top - bottom, y: rect.maxY))
+        path.addQuadCurve(to: CGPoint(x: rect.maxX - top, y: rect.maxY - bottom), control: CGPoint(x: rect.maxX - top, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX - top, y: rect.minY + top))
+        path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY), control: CGPoint(x: rect.maxX - top, y: rect.minY))
+        path.closeSubpath()
+        return path
+    }
+}</code></pre>
+<p><code>Packages/NotchUI/Sources/NotchUI/Views/TabBar.swift</code>:</p>
+<pre><code class="language-swift">import MyNotchCore
+import SwiftUI
+
+struct TabBar: View {
+    let tabs: [NotchTab]
+    let selected: ModuleID?
+    let onSelect: (ModuleID) -&gt; Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(tabs) { tab in
+                Button { onSelect(tab.id) } label: {
+                    Label(tab.title, systemImage: tab.systemImage)
+                        .labelStyle(.iconOnly)
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 30, height: 24)
+                        .foregroundStyle(tab.id == selected ? NotchTokens.primaryText : NotchTokens.secondaryText)
+                        .background(tab.id == selected ? Color.white.opacity(0.14) : .clear, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help(tab.title)
+            }
+        }
+    }
+}</code></pre>
+<p><code>Packages/NotchUI/Sources/NotchUI/Views/NotchRootView.swift</code>:</p>
+<pre><code class="language-swift">import MyNotchCore
+import SwiftUI
+
+/// Root SwiftUI view hosted in each notch panel.
+struct NotchRootView: View {
+    let model: NotchViewModel
+    let activities: ActivityCenter
+    let registry: ModuleRegistry
+    let geometry: NotchGeometry
+
+    private var state: NotchState { model.displayState }
+
+    private var selectedTab: NotchTab? {
+        guard case .open(let id) = state, let id else { return nil }
+        return registry.tabs.first { $0.id == id }
+    }
+
+    private var contentHeight: CGFloat { selectedTab?.contentHeight ?? NotchTab.defaultHeight }
+
+    var body: some View {
+        let size = geometry.shapeSize(for: state, contentHeight: contentHeight)
+        let radii = geometry.cornerRadii(for: state)
+        ZStack(alignment: .top) {
+            NotchShape(topRadius: radii.top, bottomRadius: radii.bottom)
+                .fill(NotchTokens.background)
+            content
+                .padding(.horizontal, radii.top)
+        }
+        .frame(width: size.width, height: size.height)
+        .contentShape(NotchShape(topRadius: radii.top, bottomRadius: radii.bottom))
+        .onTapGesture { model.click() }
+        .animation(NotchTokens.spring, value: state)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    @ViewBuilder private var content: some View {
+        switch state {
+        case .closed:
+            EmptyView()
+        case .compact:
+            if let entry = activities.current {
+                HStack(spacing: 0) {
+                    entry.activity.leading.frame(width: geometry.config.compactSideWidth)
+                    Spacer(minLength: geometry.notchSize.width)
+                    entry.activity.trailing.frame(width: geometry.config.compactSideWidth)
+                }
+                .frame(height: geometry.notchSize.height)
+                .transition(.opacity)
+            }
+        case .open:
+            expanded {
+                if registry.tabs.count &gt;= 2 {
+                    TabBar(tabs: registry.tabs, selected: selectedTab?.id) { model.open(tab: $0) }
+                        .padding(.bottom, 6)
+                }
+                if let selectedTab {
+                    selectedTab.content.frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Text(&quot;Chưa có module nào đang chạy&quot;)
+                        .foregroundStyle(NotchTokens.secondaryText)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        case .toast:
+            expanded { model.toastContent }
+        }
+    }
+
+    private func expanded&lt;Content: View&gt;(@ViewBuilder _ content: () -&gt; Content) -&gt; some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: geometry.notchSize.height)
+            content()
+        }
+        .padding([.horizontal, .bottom], NotchTokens.padding)
+        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)).animation(NotchTokens.spring.delay(0.08)))
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Build / kiểm chứng</strong></li>
+</ul>
+<pre><code class="language-bash">swift build --package-path Packages/NotchUI</code></pre>
+<p>Expected: <code>Build complete!</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Packages/NotchUI/Sources/NotchUI/Views/NotchTokens.swift Packages/NotchUI/Sources/NotchUI/Views/NotchShape.swift Packages/NotchUI/Sources/NotchUI/Views/TabBar.swift Packages/NotchUI/Sources/NotchUI/Views/NotchRootView.swift
+git commit -m &quot;feat(notch-ui): add notch shape and root view&quot;</code></pre>
+<h2 id="task-11-cửa-sổ-notch-và-quản-lý-màn-hình">Task 11: Cửa sổ notch và quản lý màn hình</h2>
+<p>Mỗi màn hình một <code>NotchPanel</code> cố định kích thước. Global/local mouse monitor báo vị trí con trỏ; panel chỉ nhận chuột khi con trỏ nằm trong <code>hitRect</code>, ngoài ra click xuyên qua. <code>ScreenManager</code> đồng bộ panel theo màn hình (UUID), chế độ hiển thị và fullscreen. <code>NotchCoordinator</code> là <code>NotchPresenter</code> thật.</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/Window/NotchPanel.swift</code></li>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/Window/NotchHoverTracker.swift</code></li>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/Window/NotchWindowController.swift</code></li>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/Screens/ScreenManager.swift</code></li>
+<li>Create: <code>Packages/NotchUI/Sources/NotchUI/Screens/NotchCoordinator.swift</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Viết code</strong></li>
+</ul>
+<p><code>Packages/NotchUI/Sources/NotchUI/Window/NotchPanel.swift</code>:</p>
+<pre><code class="language-swift">import AppKit
+import SwiftUI
+
+/// Borderless, non-activating panel that floats above the menu bar on every Space.
+final class NotchPanel: NSPanel {
+    init(frame: CGRect) {
+        super.init(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false
+        level = .mainMenu + 3
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        isMovable = false
+        ignoresMouseEvents = true
+        isReleasedWhenClosed = false
+    }
+
+    /// Tabs that need typing (e.g. a search field) can opt in later.
+    var allowsKeyStatus = false
+    override var canBecomeKey: Bool { allowsKeyStatus }
+    override var canBecomeMain: Bool { false }
+}
+
+/// Hosting view that accepts the first click even though the app is not active.
+final class FirstMouseHostingView&lt;Content: View&gt;: NSHostingView&lt;Content&gt; {
+    override func acceptsFirstMouse(for event: NSEvent?) -&gt; Bool { true }
+}</code></pre>
+<p><code>Packages/NotchUI/Sources/NotchUI/Window/NotchHoverTracker.swift</code>:</p>
+<pre><code class="language-swift">import AppKit
+
+/// Reports pointer movement anywhere on screen. Mouse monitors need no Accessibility permission.
+final class NotchHoverTracker {
+    private var monitors: [Any] = []
+    private let onMove: (CGPoint) -&gt; Void
+
+    init(onMove: @escaping (CGPoint) -&gt; Void) {
+        self.onMove = onMove
+    }
+
+    func start() {
+        guard monitors.isEmpty else { return }
+        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged]
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
+            MainActor.assumeIsolated { self?.onMove(NSEvent.mouseLocation) }
+        }) {
+            monitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            MainActor.assumeIsolated { self?.onMove(NSEvent.mouseLocation) }
+            return event
+        }) {
+            monitors.append(local)
+        }
+    }
+
+    func stop() {
+        monitors.forEach(NSEvent.removeMonitor)
+        monitors.removeAll()
+    }
+}</code></pre>
+<p><code>Packages/NotchUI/Sources/NotchUI/Window/NotchWindowController.swift</code>:</p>
+<pre><code class="language-swift">import AppKit
+import MyNotchCore
+import SwiftUI
+
+/// Owns one screen&#x27;s panel, view model and pointer hit-testing.
+final class NotchWindowController {
+    let displayID: CGDirectDisplayID
+    let model: NotchViewModel
+    private(set) var geometry: NotchGeometry
+    private var screenFrame: CGRect
+    private let panel: NotchPanel
+    private let registry: ModuleRegistry
+    private let activities: ActivityCenter
+    private var isVisible = false
+
+    init(
+        displayID: CGDirectDisplayID,
+        screen: ScreenDescriptor,
+        config: NotchLayoutConfig,
+        scheduler: any Scheduler,
+        registry: ModuleRegistry,
+        activities: ActivityCenter,
+        delays: @escaping () -&gt; (open: Duration, close: Duration)
+    ) {
+        self.displayID = displayID
+        self.registry = registry
+        self.activities = activities
+        screenFrame = screen.frame
+        geometry = NotchGeometry(screen: screen, config: config)
+        model = NotchViewModel(scheduler: scheduler, availableTabs: { [weak registry] in registry?.tabs.map(\.id) ?? [] }, delays: delays)
+        panel = NotchPanel(frame: geometry.panelFrame(in: screen.frame))
+        installContent()
+        observeActivities()
+    }
+
+    func update(screen: ScreenDescriptor, config: NotchLayoutConfig) {
+        screenFrame = screen.frame
+        geometry = NotchGeometry(screen: screen, config: config)
+        panel.setFrame(geometry.panelFrame(in: screen.frame), display: true)
+        installContent()
+    }
+
+    func setVisible(_ visible: Bool) {
+        guard visible != isVisible else { return }
+        isVisible = visible
+        if visible {
+            panel.alphaValue = 1
+            panel.orderFrontRegardless()
+        } else {
+            model.close()
+            panel.ignoresMouseEvents = true
+            panel.orderOut(nil)
+        }
+    }
+
+    /// Called for every pointer move; flips click-through and drives hover state.
+    func pointerMoved(to point: CGPoint) {
+        guard isVisible else { return }
+        let inside = currentHitRect().contains(point)
+        panel.ignoresMouseEvents = !inside
+        if inside, !model.isPointerInside {
+            model.pointerEntered()
+        } else if !inside, model.isPointerInside {
+            model.pointerExited()
+        }
+    }
+
+    func close() {
+        panel.orderOut(nil)
+        panel.close()
+    }
+
+    private func currentHitRect() -&gt; CGRect {
+        let state = model.displayState
+        var height = NotchTab.defaultHeight
+        if case .open(let id) = state, let tab = registry.tabs.first(where: { $0.id == id }) {
+            height = tab.contentHeight
+        }
+        return geometry.hitRect(for: state, contentHeight: height, in: screenFrame)
+    }
+
+    private func installContent() {
+        let root = NotchRootView(model: model, activities: activities, registry: registry, geometry: geometry)
+        let hosting = FirstMouseHostingView(rootView: root)
+        hosting.frame = CGRect(origin: .zero, size: geometry.panelSize)
+        panel.contentView = hosting
+    }
+
+    private func observeActivities() {
+        Task { [weak self, activities] in
+            for await hasActivity in Observations({ activities.current != nil }) {
+                self?.model.hasActivity = hasActivity
+            }
+        }
+    }
+}</code></pre>
+<p><code>Packages/NotchUI/Sources/NotchUI/Screens/ScreenManager.swift</code>:</p>
+<pre><code class="language-swift">import AppKit
+import MyNotchCore
+
+/// Creates one notch per screen, keeps them in sync with displays, settings and fullscreen state.
+public final class ScreenManager {
+    private let registry: ModuleRegistry
+    private let activities: ActivityCenter
+    private let settings: SettingsStore
+    private let scheduler: any Scheduler
+    private var controllers: [String: NotchWindowController] = [:]
+    private var fullscreenDisplays: Set&lt;CGDirectDisplayID&gt; = []
+    private var cursorDisplay: CGDirectDisplayID?
+    private var observers: [NSObjectProtocol] = []
+    private lazy var hoverTracker = NotchHoverTracker { [weak self] point in self?.pointerMoved(to: point) }
+    private lazy var fullscreenDetector = FullscreenDetector { [weak self] displays in
+        self?.fullscreenDisplays = displays
+        self?.applyVisibility()
+    }
+
+    /// User toggle from the menu bar (&quot;Show/Hide Notch&quot;).
+    public var isHiddenByUser = false {
+        didSet { applyVisibility() }
+    }
+
+    public init(registry: ModuleRegistry, activities: ActivityCenter, settings: SettingsStore, scheduler: any Scheduler) {
+        self.registry = registry
+        self.activities = activities
+        self.settings = settings
+        self.scheduler = scheduler
+    }
+
+    public func start() {
+        let app = NotificationCenter.default
+        observers.append(app.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.syncScreens() }
+        })
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.syncScreens() }
+        })
+        syncScreens()
+        hoverTracker.start()
+        fullscreenDetector.start()
+        observeSettings()
+    }
+
+    /// Controller for the screen under the pointer, falling back to the main screen.
+    func activeController() -&gt; NotchWindowController? {
+        let point = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.contains(point) } ?? NSScreen.main
+        return screen?.displayUUID.flatMap { controllers[$0] }
+    }
+
+    func allControllers() -&gt; [NotchWindowController] { Array(controllers.values) }
+
+    private func syncScreens() {
+        let config = NotchLayoutConfig(settings: settings)
+        var seen: Set&lt;String&gt; = []
+        for screen in NSScreen.screens {
+            guard let uuid = screen.displayUUID, let displayID = screen.displayID else { continue }
+            seen.insert(uuid)
+            let descriptor = ScreenDescriptor(screen)
+            if let controller = controllers[uuid] {
+                controller.update(screen: descriptor, config: config)
+            } else {
+                controllers[uuid] = NotchWindowController(
+                    displayID: displayID, screen: descriptor, config: config, scheduler: scheduler,
+                    registry: registry, activities: activities, delays: { [settings] in Self.delays(settings) }
+                )
+            }
+        }
+        for (uuid, controller) in controllers where !seen.contains(uuid) {
+            controller.close()
+            controllers[uuid] = nil
+        }
+        applyVisibility()
+    }
+
+    private func applyVisibility() {
+        let mode = settings.value(InterfaceSettings.displayMode)
+        let hideInFullscreen = settings.value(InterfaceSettings.hideInFullscreen)
+        let mainID = NSScreen.screens.first?.displayID
+        for controller in controllers.values {
+            let id = controller.displayID
+            let allowedByMode = switch mode {
+            case .all: true
+            case .main: id == mainID
+            case .cursor: id == (cursorDisplay ?? mainID)
+            }
+            let hiddenByFullscreen = hideInFullscreen &amp;&amp; fullscreenDisplays.contains(id)
+            controller.setVisible(allowedByMode &amp;&amp; !isHiddenByUser &amp;&amp; !hiddenByFullscreen)
+        }
+    }
+
+    private func pointerMoved(to point: CGPoint) {
+        let display = NSScreen.screens.first { $0.frame.contains(point) }?.displayID
+        if display != cursorDisplay {
+            cursorDisplay = display
+            if settings.value(InterfaceSettings.displayMode) == .cursor { applyVisibility() }
+        }
+        controllers.values.forEach { $0.pointerMoved(to: point) }
+    }
+
+    private func observeSettings() {
+        Task { [weak self, settings] in
+            for await _ in Observations({ NotchLayoutConfig(settings: settings) }) {
+                self?.syncScreens()
+            }
+        }
+        Task { [weak self, settings] in
+            for await _ in Observations({ (settings.value(InterfaceSettings.displayMode), settings.value(InterfaceSettings.hideInFullscreen)) }) {
+                self?.applyVisibility()
+            }
+        }
+    }
+
+    private static func delays(_ settings: SettingsStore) -&gt; (open: Duration, close: Duration) {
+        (.milliseconds(settings.value(InterfaceSettings.openDelayMs)), .milliseconds(settings.value(InterfaceSettings.closeDelayMs)))
+    }
+}</code></pre>
+<p><code>Packages/NotchUI/Sources/NotchUI/Screens/NotchCoordinator.swift</code>:</p>
+<pre><code class="language-swift">import MyNotchCore
+import SwiftUI
+
+/// `NotchPresenter` used by modules and the app; routes requests to the active screen&#x27;s notch.
+public final class NotchCoordinator: NotchPresenter {
+    public weak var screens: ScreenManager?
+
+    public init() {}
+
+    public func open(tab: ModuleID) { screens?.activeController()?.model.open(tab: tab) }
+
+    public func showToast(_ content: AnyView, duration: Duration) {
+        screens?.activeController()?.model.showToast(content, duration: duration)
+    }
+
+    public func close() { screens?.allControllers().forEach { $0.model.close() } }
+
+    /// Bound to the global &quot;Toggle notch&quot; shortcut.
+    public func toggle() { screens?.activeController()?.model.toggle() }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Build / kiểm chứng</strong></li>
+</ul>
+<pre><code class="language-bash">swift build --package-path Packages/NotchUI &amp;&amp; swift test --package-path Packages/NotchUI</code></pre>
+<p>Expected: <code>Build complete!</code> rồi <code>✔ Test run with 18 tests in 3 suites passed</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Packages/NotchUI/Sources/NotchUI/Window/NotchPanel.swift Packages/NotchUI/Sources/NotchUI/Window/NotchHoverTracker.swift Packages/NotchUI/Sources/NotchUI/Window/NotchWindowController.swift Packages/NotchUI/Sources/NotchUI/Screens/ScreenManager.swift Packages/NotchUI/Sources/NotchUI/Screens/NotchCoordinator.swift
+git commit -m &quot;feat(notch-ui): add per-screen notch panels and coordinator&quot;</code></pre>
+<h2 id="task-12-package-battery-đọc-thông-tin-pin">Task 12: Package Battery: đọc thông tin pin</h2>
+<p><code>PowerSourceParser</code> đọc dictionary IOKit bằng key dạng chuỗi (trong <code>IOPSKeys.h</code>) để test không cần IOKit. IOKit trả <code>-1</code> cho thời gian khi còn đang ước tính.</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>Packages/Modules/Battery/Package.swift</code></li>
+<li>Create: <code>Packages/Modules/Battery/Sources/BatteryModule/PowerSourceSnapshot.swift</code></li>
+<li>Create: <code>Packages/Modules/Battery/Sources/BatteryModule/PowerSourceParser.swift</code></li>
+<li>Test: <code>Packages/Modules/Battery/Tests/BatteryModuleTests/PowerSourceParserTests.swift</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Tạo khung package</strong></li>
+</ul>
+<p><code>Packages/Modules/Battery/Package.swift</code>:</p>
+<pre><code class="language-swift">// swift-tools-version: 6.2
+import PackageDescription
+
+let package = Package(
+    name: &quot;BatteryModule&quot;,
+    platforms: [.macOS(.v26)],
+    products: [.library(name: &quot;BatteryModule&quot;, targets: [&quot;BatteryModule&quot;])],
+    dependencies: [
+        .package(path: &quot;../../MyNotchCore&quot;),
+        .package(path: &quot;../../NotchUI&quot;),
+    ],
+    targets: [
+        .target(
+            name: &quot;BatteryModule&quot;,
+            dependencies: [&quot;MyNotchCore&quot;, &quot;NotchUI&quot;],
+            swiftSettings: [.defaultIsolation(MainActor.self)]
+        ),
+        .testTarget(
+            name: &quot;BatteryModuleTests&quot;,
+            dependencies: [&quot;BatteryModule&quot;, .product(name: &quot;MyNotchTestSupport&quot;, package: &quot;MyNotchCore&quot;)],
+            swiftSettings: [.defaultIsolation(MainActor.self)]
+        ),
+    ]
+)</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Viết test (chưa có code nên phải fail)</strong></li>
+</ul>
+<p><code>Packages/Modules/Battery/Tests/BatteryModuleTests/PowerSourceParserTests.swift</code>:</p>
+<pre><code class="language-swift">import Testing
+@testable import BatteryModule
+
+@Suite struct PowerSourceParserTests {
+    @Test func parsesInternalBattery() {
+        let snapshot = PowerSourceParser.parse([[
+            &quot;Type&quot;: &quot;InternalBattery&quot;,
+            &quot;Current Capacity&quot;: 41, &quot;Max Capacity&quot;: 50,
+            &quot;Is Charging&quot;: true, &quot;Power Source State&quot;: &quot;AC Power&quot;,
+            &quot;Time to Empty&quot;: -1, &quot;Time to Full Charge&quot;: 35,
+        ]])
+        #expect(snapshot == PowerSourceSnapshot(percent: 82, isCharging: true, isOnAC: true, minutesToEmpty: nil, minutesToFull: 35))
+    }
+
+    @Test func returnsNilWithoutInternalBattery() {
+        #expect(PowerSourceParser.parse([]) == nil)
+        #expect(PowerSourceParser.parse([[&quot;Type&quot;: &quot;UPS&quot;, &quot;Current Capacity&quot;: 10, &quot;Max Capacity&quot;: 100]]) == nil)
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Chạy test, xác nhận fail</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/Modules/Battery --filter &#x27;PowerSourceParserTests&#x27;</code></pre>
+<p>Expected: FAIL, lỗi biên dịch <code>cannot find &#x27;PowerSourceParser&#x27; in scope</code>.</p>
+<ul>
+<li>[ ] <strong>Step 4: Viết code</strong></li>
+</ul>
+<p><code>Packages/Modules/Battery/Sources/BatteryModule/PowerSourceSnapshot.swift</code>:</p>
+<pre><code class="language-swift">/// One reading of the internal battery.
+nonisolated public struct PowerSourceSnapshot: Equatable, Sendable {
+    public var percent: Int
+    public var isCharging: Bool
+    /// Plugged into a power adapter (may be &quot;not charging&quot; when held at a limit).
+    public var isOnAC: Bool
+    /// Minutes, nil while macOS is still estimating.
+    public var minutesToEmpty: Int?
+    public var minutesToFull: Int?
+
+    public init(percent: Int, isCharging: Bool, isOnAC: Bool, minutesToEmpty: Int? = nil, minutesToFull: Int? = nil) {
+        self.percent = percent
+        self.isCharging = isCharging
+        self.isOnAC = isOnAC
+        self.minutesToEmpty = minutesToEmpty
+        self.minutesToFull = minutesToFull
+    }
+}</code></pre>
+<p><code>Packages/Modules/Battery/Sources/BatteryModule/PowerSourceParser.swift</code>:</p>
+<pre><code class="language-swift">/// Converts IOKit power source descriptions (string keys from IOPSKeys.h) into snapshots.
+nonisolated enum PowerSourceParser {
+    /// Returns the internal battery, or nil when the Mac has none.
+    static func parse(_ descriptions: [[String: Any]]) -&gt; PowerSourceSnapshot? {
+        guard let battery = descriptions.first(where: { ($0[&quot;Type&quot;] as? String) == &quot;InternalBattery&quot; }),
+              let current = battery[&quot;Current Capacity&quot;] as? Int,
+              let max = battery[&quot;Max Capacity&quot;] as? Int, max &gt; 0 else { return nil }
+        return PowerSourceSnapshot(
+            percent: Int((Double(current) / Double(max) * 100).rounded()),
+            isCharging: battery[&quot;Is Charging&quot;] as? Bool ?? false,
+            isOnAC: (battery[&quot;Power Source State&quot;] as? String) == &quot;AC Power&quot;,
+            minutesToEmpty: positive(battery[&quot;Time to Empty&quot;]),
+            minutesToFull: positive(battery[&quot;Time to Full Charge&quot;])
+        )
+    }
+
+    /// IOKit reports -1 while estimating.
+    private static func positive(_ value: Any?) -&gt; Int? {
+        guard let minutes = value as? Int, minutes &gt;= 0 else { return nil }
+        return minutes
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 5: Chạy test, xác nhận pass</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/Modules/Battery --filter &#x27;PowerSourceParserTests&#x27;</code></pre>
+<p>Expected: <code>✔ Test run with 2 tests in 1 suite passed</code>.</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Packages/Modules/Battery/Package.swift Packages/Modules/Battery/Tests/BatteryModuleTests/PowerSourceParserTests.swift Packages/Modules/Battery/Sources/BatteryModule/PowerSourceSnapshot.swift Packages/Modules/Battery/Sources/BatteryModule/PowerSourceParser.swift
+git commit -m &quot;feat(battery): parse IOKit power source descriptions&quot;</code></pre>
+<h2 id="task-13-chính-sách-live-activity-của-pin">Task 13: Chính sách live activity của pin</h2>
+<p>Quyết định hiện activity "đang sạc" (chỉ khi vừa chuyển từ pin sang adapter) và "pin yếu" (có độ trễ 5% khi tắt để không nhấp nháy quanh ngưỡng).</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>Packages/Modules/Battery/Sources/BatteryModule/BatteryActivityPolicy.swift</code></li>
+<li>Test: <code>Packages/Modules/Battery/Tests/BatteryModuleTests/BatteryActivityPolicyTests.swift</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Viết test (chưa có code nên phải fail)</strong></li>
+</ul>
+<p><code>Packages/Modules/Battery/Tests/BatteryModuleTests/BatteryActivityPolicyTests.swift</code>:</p>
+<pre><code class="language-swift">import Testing
+@testable import BatteryModule
+
+@Suite struct BatteryActivityPolicyTests {
+    let policy = BatteryActivityPolicy(lowThreshold: 20, notifyOnCharge: true)
+
+    func onBattery(_ percent: Int) -&gt; PowerSourceSnapshot { PowerSourceSnapshot(percent: percent, isCharging: false, isOnAC: false) }
+    func onAC(_ percent: Int) -&gt; PowerSourceSnapshot { PowerSourceSnapshot(percent: percent, isCharging: true, isOnAC: true) }
+
+    @Test func pluggingInShowsChargingOnlyOnTransition() {
+        #expect(policy.decide(previous: onBattery(50), current: onAC(50), lowActive: false).showCharging)
+        #expect(!policy.decide(previous: onAC(50), current: onAC(51), lowActive: false).showCharging)
+        #expect(!policy.decide(previous: nil, current: onAC(50), lowActive: false).showCharging)
+    }
+
+    @Test func chargingNotificationCanBeDisabled() {
+        let quiet = BatteryActivityPolicy(lowThreshold: 20, notifyOnCharge: false)
+        #expect(!quiet.decide(previous: onBattery(50), current: onAC(50), lowActive: false).showCharging)
+    }
+
+    @Test func lowBatteryUsesThresholdAndHysteresis() {
+        #expect(policy.decide(previous: nil, current: onBattery(20), lowActive: false).lowActive)
+        #expect(!policy.decide(previous: nil, current: onBattery(21), lowActive: false).lowActive)
+        #expect(policy.decide(previous: nil, current: onBattery(25), lowActive: true).lowActive)
+        #expect(!policy.decide(previous: nil, current: onBattery(26), lowActive: true).lowActive)
+        #expect(!policy.decide(previous: nil, current: onAC(10), lowActive: true).lowActive)
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Chạy test, xác nhận fail</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/Modules/Battery --filter &#x27;BatteryActivityPolicyTests&#x27;</code></pre>
+<p>Expected: FAIL, lỗi biên dịch <code>cannot find &#x27;BatteryActivityPolicy&#x27; in scope</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Viết code</strong></li>
+</ul>
+<p><code>Packages/Modules/Battery/Sources/BatteryModule/BatteryActivityPolicy.swift</code>:</p>
+<pre><code class="language-swift">/// Decides which battery live activities should be visible.
+nonisolated struct BatteryActivityPolicy: Equatable, Sendable {
+    /// Low-battery stays visible until the level rises this far above the threshold.
+    static let hysteresis = 5
+
+    var lowThreshold: Int
+    var notifyOnCharge: Bool
+
+    struct Decision: Equatable, Sendable {
+        var showCharging: Bool
+        var lowActive: Bool
+    }
+
+    func decide(previous: PowerSourceSnapshot?, current: PowerSourceSnapshot, lowActive: Bool) -&gt; Decision {
+        let pluggedIn = previous.map { !$0.isOnAC &amp;&amp; current.isOnAC } ?? false
+        let low: Bool
+        if current.isOnAC {
+            low = false
+        } else if current.percent &lt;= lowThreshold {
+            low = true
+        } else if lowActive, current.percent &lt;= lowThreshold + Self.hysteresis {
+            low = true
+        } else {
+            low = false
+        }
+        return Decision(showCharging: notifyOnCharge &amp;&amp; pluggedIn, lowActive: low)
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Chạy test, xác nhận pass</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/Modules/Battery --filter &#x27;BatteryActivityPolicyTests&#x27;</code></pre>
+<p>Expected: <code>✔ Test run with 3 tests in 1 suite passed</code>.</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Packages/Modules/Battery/Tests/BatteryModuleTests/BatteryActivityPolicyTests.swift Packages/Modules/Battery/Sources/BatteryModule/BatteryActivityPolicy.swift
+git commit -m &quot;feat(battery): add charging and low-battery policy&quot;</code></pre>
+<h2 id="task-14-batterymodule">Task 14: BatteryModule</h2>
+<p>Module mẫu hoàn chỉnh: đọc pin qua IOKit, đăng ký run loop source để nhận thay đổi, phát activity, cung cấp tab và trang cài đặt. Test chạy module thật qua <code>RegistryHarness</code> với nguồn pin giả.</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>Packages/Modules/Battery/Sources/BatteryModule/PowerSourceReading.swift</code></li>
+<li>Create: <code>Packages/Modules/Battery/Sources/BatteryModule/BatteryViews.swift</code></li>
+<li>Create: <code>Packages/Modules/Battery/Sources/BatteryModule/BatteryModule.swift</code></li>
+<li>Test: <code>Packages/Modules/Battery/Tests/BatteryModuleTests/BatteryModuleTests.swift</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Viết test (chưa có code nên phải fail)</strong></li>
+</ul>
+<p><code>Packages/Modules/Battery/Tests/BatteryModuleTests/BatteryModuleTests.swift</code>:</p>
+<pre><code class="language-swift">import MyNotchCore
+import MyNotchTestSupport
+import Testing
+@testable import BatteryModule
+
+final class FakePowerSource: PowerSourceReading {
+    var snapshot: PowerSourceSnapshot?
+    private var onChange: (@MainActor () -&gt; Void)?
+
+    init(_ snapshot: PowerSourceSnapshot?) { self.snapshot = snapshot }
+
+    func read() -&gt; PowerSourceSnapshot? { snapshot }
+    func startObserving(_ onChange: @escaping @MainActor () -&gt; Void) { self.onChange = onChange }
+    func stopObserving() { onChange = nil }
+
+    func emit(_ snapshot: PowerSourceSnapshot) {
+        self.snapshot = snapshot
+        onChange?()
+    }
+}
+
+@Suite struct BatteryModuleTests {
+    @Test func desktopMacReportsUnavailable() async {
+        let harness = RegistryHarness([BatteryModule(reader: FakePowerSource(nil))])
+        await harness.registry.bootstrap()
+        #expect(harness.registry.state(of: &quot;battery&quot;) == .unavailable(reason: &quot;Máy không có pin&quot;))
+    }
+
+    @Test func pluggingInPublishesChargingActivityThatExpires() async {
+        let source = FakePowerSource(PowerSourceSnapshot(percent: 60, isCharging: false, isOnAC: false))
+        let harness = RegistryHarness([BatteryModule(reader: source)])
+        await harness.registry.bootstrap()
+        #expect(harness.registry.state(of: &quot;battery&quot;) == .running)
+        #expect(harness.activities.current == nil)
+
+        source.emit(PowerSourceSnapshot(percent: 60, isCharging: true, isOnAC: true))
+        #expect(harness.activities.current?.id == &quot;battery/charging&quot;)
+        harness.scheduler.advance(by: .seconds(4))
+        #expect(harness.activities.current == nil)
+    }
+
+    @Test func lowBatteryActivityClearsWhenPluggedIn() async {
+        let source = FakePowerSource(PowerSourceSnapshot(percent: 15, isCharging: false, isOnAC: false))
+        let harness = RegistryHarness([BatteryModule(reader: source)])
+        await harness.registry.bootstrap()
+        #expect(harness.activities.current?.id == &quot;battery/low&quot;)
+        source.emit(PowerSourceSnapshot(percent: 15, isCharging: true, isOnAC: true))
+        #expect(harness.activities.entries.map(\.id) == [&quot;battery/charging&quot;])
+    }
+
+    @Test func disablingRemovesActivitiesAndStopsObserving() async {
+        let source = FakePowerSource(PowerSourceSnapshot(percent: 15, isCharging: false, isOnAC: false))
+        let harness = RegistryHarness([BatteryModule(reader: source)])
+        await harness.registry.bootstrap()
+        await harness.registry.setEnabled(false, for: &quot;battery&quot;)
+        #expect(harness.activities.current == nil)
+        source.emit(PowerSourceSnapshot(percent: 10, isCharging: false, isOnAC: false))
+        #expect(harness.activities.current == nil)
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Chạy test, xác nhận fail</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/Modules/Battery</code></pre>
+<p>Expected: FAIL, lỗi biên dịch <code>cannot find &#x27;BatteryModule&#x27; in scope</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Viết code</strong></li>
+</ul>
+<p><code>Packages/Modules/Battery/Sources/BatteryModule/PowerSourceReading.swift</code>:</p>
+<pre><code class="language-swift">import IOKit.ps
+
+/// Source of battery readings; faked in tests.
+public protocol PowerSourceReading: AnyObject {
+    func read() -&gt; PowerSourceSnapshot?
+    /// Calls `onChange` whenever macOS reports a power source change, until `stopObserving()`.
+    func startObserving(_ onChange: @escaping @MainActor () -&gt; Void)
+    func stopObserving()
+}
+
+/// Reads the internal battery through IOKit power source APIs.
+public final class IOKitPowerSource: PowerSourceReading {
+    private var runLoopSource: CFRunLoopSource?
+    private var onChange: (@MainActor () -&gt; Void)?
+
+    public init() {}
+
+    public func read() -&gt; PowerSourceSnapshot? {
+        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let list = IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef] else { return nil }
+        let descriptions = list.compactMap { source in
+            IOPSGetPowerSourceDescription(info, source)?.takeUnretainedValue() as? [String: Any]
+        }
+        return PowerSourceParser.parse(descriptions)
+    }
+
+    public func startObserving(_ onChange: @escaping @MainActor () -&gt; Void) {
+        stopObserving()
+        self.onChange = onChange
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        guard let source = IOPSNotificationCreateRunLoopSource({ context in
+            guard let context else { return }
+            let reader = Unmanaged&lt;IOKitPowerSource&gt;.fromOpaque(context).takeUnretainedValue()
+            MainActor.assumeIsolated { reader.onChange?() }
+        }, context)?.takeRetainedValue() else { return }
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
+        runLoopSource = source
+    }
+
+    public func stopObserving() {
+        if let runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .defaultMode) }
+        runLoopSource = nil
+        onChange = nil
+    }
+}</code></pre>
+<p><code>Packages/Modules/Battery/Sources/BatteryModule/BatteryViews.swift</code>:</p>
+<pre><code class="language-swift">import NotchUI
+import SwiftUI
+
+struct BatteryTabView: View {
+    let state: BatteryState
+
+    var body: some View {
+        if let snapshot = state.snapshot {
+            HStack(spacing: 18) {
+                Image(systemName: Self.symbol(for: snapshot))
+                    .font(.system(size: 44, weight: .regular))
+                    .foregroundStyle(snapshot.percent &lt;= 20 &amp;&amp; !snapshot.isOnAC ? .red : NotchTokens.primaryText)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(&quot;\(snapshot.percent)%&quot;)
+                        .font(.system(size: 28, weight: .semibold, design: .rounded))
+                        .foregroundStyle(NotchTokens.primaryText)
+                    Text(Self.status(for: snapshot))
+                        .font(.callout)
+                        .foregroundStyle(NotchTokens.secondaryText)
+                    Text(snapshot.isOnAC ? &quot;Nguồn: bộ sạc&quot; : &quot;Nguồn: pin&quot;)
+                        .font(.caption)
+                        .foregroundStyle(NotchTokens.secondaryText)
+                }
+                Spacer()
+            }
+            .padding(.top, 8)
+        }
+    }
+
+    static func symbol(for snapshot: PowerSourceSnapshot) -&gt; String {
+        if snapshot.isCharging { return &quot;battery.100percent.bolt&quot; }
+        return switch snapshot.percent {
+        case ..&lt;13: &quot;battery.0percent&quot;
+        case ..&lt;38: &quot;battery.25percent&quot;
+        case ..&lt;63: &quot;battery.50percent&quot;
+        case ..&lt;88: &quot;battery.75percent&quot;
+        default: &quot;battery.100percent&quot;
+        }
+    }
+
+    static func status(for snapshot: PowerSourceSnapshot) -&gt; String {
+        if snapshot.isCharging {
+            return snapshot.minutesToFull.map { &quot;Đang sạc · đầy sau \(format($0))&quot; } ?? &quot;Đang sạc&quot;
+        }
+        if snapshot.isOnAC { return &quot;Đã cắm sạc · không sạc&quot; }
+        return snapshot.minutesToEmpty.map { &quot;Còn khoảng \(format($0))&quot; } ?? &quot;Đang tính thời gian còn lại&quot;
+    }
+
+    static func format(_ minutes: Int) -&gt; String {
+        minutes &gt;= 60 ? &quot;\(minutes / 60) giờ \(minutes % 60) phút&quot; : &quot;\(minutes) phút&quot;
+    }
+}
+
+struct BatteryActivityIcon: View {
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(tint)
+    }
+}
+
+struct BatteryActivityPercent: View {
+    let percent: Int
+    let tint: Color
+
+    var body: some View {
+        Text(&quot;\(percent)%&quot;)
+            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .foregroundStyle(tint)
+    }
+}
+
+struct BatterySettingsView: View {
+    @Binding var lowThreshold: Int
+    @Binding var notifyOnCharge: Bool
+
+    var body: some View {
+        Form {
+            Stepper(&quot;Ngưỡng pin yếu: \(lowThreshold)%&quot;, value: $lowThreshold, in: 5...50, step: 5)
+            Toggle(&quot;Thông báo khi cắm sạc&quot;, isOn: $notifyOnCharge)
+        }
+        .formStyle(.grouped)
+    }
+}</code></pre>
+<p><code>Packages/Modules/Battery/Sources/BatteryModule/BatteryModule.swift</code>:</p>
+<pre><code class="language-swift">import MyNotchCore
+import NotchUI
+import Observation
+import SwiftUI
+
+@Observable
+final class BatteryState {
+    var snapshot: PowerSourceSnapshot?
+}
+
+/// Reference module: battery tab plus &quot;charging&quot; and &quot;low battery&quot; live activities.
+public final class BatteryModule: FeatureModule {
+    public let descriptor = ModuleDescriptor(
+        id: &quot;battery&quot;,
+        displayName: &quot;Battery&quot;,
+        systemImage: &quot;battery.100percent.bolt&quot;,
+        defaultEnabled: true,
+        order: 900
+    )
+
+    let state = BatteryState()
+    private let reader: any PowerSourceReading
+    private var context: ModuleContext?
+    private var lowActive = false
+    private var settingKeys: (lowThreshold: SettingKey&lt;Int&gt;, notifyOnCharge: SettingKey&lt;Bool&gt;)?
+
+    public init(reader: any PowerSourceReading = IOKitPowerSource()) {
+        self.reader = reader
+    }
+
+    public func start(_ context: ModuleContext) async throws(ModuleError) {
+        guard let snapshot = reader.read() else {
+            throw .unavailable(reason: &quot;Máy không có pin&quot;)
+        }
+        self.context = context
+        settingKeys = (
+            context.settings.key(&quot;lowThreshold&quot;, default: 20, clampedTo: 5...50),
+            context.settings.key(&quot;notifyOnCharge&quot;, default: true)
+        )
+        lowActive = false
+        apply(snapshot, previous: nil)
+        reader.startObserving { [weak self] in self?.refresh() }
+    }
+
+    public func stop() async {
+        reader.stopObserving()
+        context = nil
+        state.snapshot = nil
+        lowActive = false
+    }
+
+    public func makeTab() -&gt; NotchTab? {
+        NotchTab(id: descriptor.id, title: &quot;Battery&quot;, systemImage: &quot;battery.100percent&quot;, preferredHeight: 120, content: AnyView(BatteryTabView(state: state)))
+    }
+
+    public func makeSettingsView() -&gt; AnyView? {
+        guard let context, let keys = settingKeys else {
+            return AnyView(Text(&quot;Bật module để chỉnh cài đặt&quot;).foregroundStyle(.secondary))
+        }
+        return AnyView(BatterySettingsView(
+            lowThreshold: context.settings.binding(keys.lowThreshold),
+            notifyOnCharge: context.settings.binding(keys.notifyOnCharge)
+        ))
+    }
+
+    func refresh() {
+        guard let snapshot = reader.read() else { return }
+        apply(snapshot, previous: state.snapshot)
+    }
+
+    private func apply(_ snapshot: PowerSourceSnapshot, previous: PowerSourceSnapshot?) {
+        state.snapshot = snapshot
+        guard let context, let keys = settingKeys else { return }
+        let policy = BatteryActivityPolicy(
+            lowThreshold: context.settings.value(keys.lowThreshold),
+            notifyOnCharge: context.settings.value(keys.notifyOnCharge)
+        )
+        let decision = policy.decide(previous: previous, current: snapshot, lowActive: lowActive)
+        if decision.showCharging {
+            context.activities.set(LiveActivity(
+                id: &quot;charging&quot;, priority: .normal, expiresAfter: .seconds(4),
+                leading: AnyView(BatteryActivityIcon(systemImage: &quot;bolt.fill&quot;, tint: .green)),
+                trailing: AnyView(BatteryActivityPercent(percent: snapshot.percent, tint: .green))
+            ))
+        }
+        if decision.lowActive {
+            context.activities.set(LiveActivity(
+                id: &quot;low&quot;, priority: .high,
+                leading: AnyView(BatteryActivityIcon(systemImage: &quot;battery.25percent&quot;, tint: .red)),
+                trailing: AnyView(BatteryActivityPercent(percent: snapshot.percent, tint: .red))
+            ))
+        } else if lowActive {
+            context.activities.clear(id: &quot;low&quot;)
+        }
+        lowActive = decision.lowActive
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 4: Chạy test, xác nhận pass</strong></li>
+</ul>
+<pre><code class="language-bash">swift test --package-path Packages/Modules/Battery</code></pre>
+<p>Expected: <code>✔ Test run with 9 tests in 3 suites passed</code>.</p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Packages/Modules/Battery/Tests/BatteryModuleTests/BatteryModuleTests.swift Packages/Modules/Battery/Sources/BatteryModule/PowerSourceReading.swift Packages/Modules/Battery/Sources/BatteryModule/BatteryViews.swift Packages/Modules/Battery/Sources/BatteryModule/BatteryModule.swift
+git commit -m &quot;feat(battery): add Battery reference module&quot;</code></pre>
+<h2 id="task-15-target-app-menu-bar-và-settings">Task 15: Target app, menu bar và Settings</h2>
+<p><code>project.yml</code> sinh <code>MyNotch.xcodeproj</code> (không commit). <code>main.swift</code> chạy app ở chế độ <code>.accessory</code> (không có Dock). <code>AppDelegate</code> là composition root; <code>ModuleList.swift</code> là nơi duy nhất ghép module.</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>project.yml</code></li>
+<li>Create: <code>App/main.swift</code></li>
+<li>Create: <code>App/AppSettings.swift</code></li>
+<li>Create: <code>App/ModuleList.swift</code></li>
+<li>Create: <code>App/LaunchAtLogin.swift</code></li>
+<li>Create: <code>App/StatusItemController.swift</code></li>
+<li>Create: <code>App/AppDelegate.swift</code></li>
+<li>Create: <code>App/Settings/SettingsWindowController.swift</code></li>
+<li>Create: <code>App/Settings/SettingsRootView.swift</code></li>
+<li>Create: <code>App/Settings/GeneralSettingsPage.swift</code></li>
+<li>Create: <code>App/Settings/InterfaceSettingsPage.swift</code></li>
+<li>Create: <code>App/Settings/ModuleSettingsPage.swift</code></li>
+<li>Create: <code>App/Settings/AboutPage.swift</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Viết code</strong></li>
+</ul>
+<p><code>project.yml</code>:</p>
+<pre><code class="language-yaml">name: MyNotch
+options:
+  bundleIdPrefix: io.lucasvu
+  deploymentTarget:
+    macOS: &quot;26.0&quot;
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: &quot;6.0&quot;
+    SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: &quot;0.1.0&quot;
+    CURRENT_PROJECT_VERSION: &quot;1&quot;
+packages:
+  MyNotchCore:
+    path: Packages/MyNotchCore
+  NotchUI:
+    path: Packages/NotchUI
+  BatteryModule:
+    path: Packages/Modules/Battery
+  KeyboardShortcuts:
+    url: https://github.com/sindresorhus/KeyboardShortcuts
+    exactVersion: 3.1.0
+targets:
+  MyNotch:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+    dependencies:
+      - package: MyNotchCore
+      - package: NotchUI
+      - package: BatteryModule
+      - package: KeyboardShortcuts
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: MyNotch
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSUIElement: true
+        LSMinimumSystemVersion: &quot;26.0&quot;
+        NSHumanReadableCopyright: &quot;MyNotch — personal build&quot;
+    entitlements:
+      path: App/MyNotch.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.lucasvu.mynotch
+        PRODUCT_NAME: MyNotch
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Automatic
+        # Ad-hoc (&quot;Sign to Run Locally&quot;). Set DEVELOPMENT_TEAM once modules need stable TCC permissions.
+        CODE_SIGN_IDENTITY: &quot;-&quot;
+        COMBINE_HIDPI_IMAGES: YES</code></pre>
+<p><code>App/main.swift</code>:</p>
+<pre><code class="language-swift">import AppKit
+
+let app = NSApplication.shared
+let delegate = AppDelegate()
+app.delegate = delegate
+app.setActivationPolicy(.accessory)
+app.run()</code></pre>
+<p><code>App/AppSettings.swift</code>:</p>
+<pre><code class="language-swift">import MyNotchCore
+
+/// App-wide settings (`app.*`).
+enum AppSettings {
+    static let showMenuBarIcon = SettingKey(&quot;app.showMenuBarIcon&quot;, default: true)
+}</code></pre>
+<p><code>App/ModuleList.swift</code>:</p>
+<pre><code class="language-swift">import BatteryModule
+import MyNotchCore
+
+/// The ONLY place modules are wired into the app. Add one line per new module.
+enum ModuleList {
+    static func make() -&gt; [any FeatureModule] {
+        [
+            BatteryModule(),
+        ]
+    }
+}</code></pre>
+<p><code>App/LaunchAtLogin.swift</code>:</p>
+<pre><code class="language-swift">import ServiceManagement
+
+/// Thin wrapper over `SMAppService.mainApp`.
+enum LaunchAtLogin {
+    static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
+
+    /// Returns an error message when macOS refuses the change.
+    static func set(_ enabled: Bool) -&gt; String? {
+        do {
+            enabled ? try SMAppService.mainApp.register() : try SMAppService.mainApp.unregister()
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+}</code></pre>
+<p><code>App/StatusItemController.swift</code>:</p>
+<pre><code class="language-swift">import AppKit
+import MyNotchCore
+import NotchUI
+
+/// Menu bar icon and menu.
+final class StatusItemController: NSObject {
+    private let settings: SettingsStore
+    private let registry: ModuleRegistry
+    private let screens: ScreenManager
+    private let openSettings: () -&gt; Void
+    private var item: NSStatusItem?
+
+    init(settings: SettingsStore, registry: ModuleRegistry, screens: ScreenManager, openSettings: @escaping () -&gt; Void) {
+        self.settings = settings
+        self.registry = registry
+        self.screens = screens
+        self.openSettings = openSettings
+        super.init()
+        observeVisibility()
+    }
+
+    private func observeVisibility() {
+        Task { [weak self, settings] in
+            for await visible in Observations({ settings.value(AppSettings.showMenuBarIcon) }) {
+                self?.setVisible(visible)
+            }
+        }
+    }
+
+    private func setVisible(_ visible: Bool) {
+        if visible, item == nil {
+            let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+            item.button?.image = NSImage(systemSymbolName: &quot;rectangle.topthird.inset.filled&quot;, accessibilityDescription: &quot;MyNotch&quot;)
+            item.menu = makeMenu()
+            self.item = item
+        } else if !visible, let item {
+            NSStatusBar.system.removeStatusItem(item)
+            self.item = nil
+        }
+    }
+
+    private func makeMenu() -&gt; NSMenu {
+        let menu = NSMenu()
+        menu.delegate = self
+        menu.addItem(withTitle: &quot;Open Settings…&quot;, action: #selector(openSettingsAction), keyEquivalent: &quot;,&quot;).target = self
+        menu.addItem(withTitle: &quot;Hide Notch&quot;, action: #selector(toggleNotchVisibility), keyEquivalent: &quot;&quot;).target = self
+        menu.addItem(withTitle: &quot;Pause All Modules&quot;, action: #selector(togglePause), keyEquivalent: &quot;&quot;).target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: &quot;Quit MyNotch&quot;, action: #selector(NSApplication.terminate(_:)), keyEquivalent: &quot;q&quot;)
+        return menu
+    }
+
+    @objc private func openSettingsAction() { openSettings() }
+
+    @objc private func toggleNotchVisibility() { screens.isHiddenByUser.toggle() }
+
+    @objc private func togglePause() {
+        Task { [registry] in registry.isPaused ? await registry.resumeAll() : await registry.pauseAll() }
+    }
+}
+
+extension StatusItemController: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.item(at: 1)?.title = screens.isHiddenByUser ? &quot;Show Notch&quot; : &quot;Hide Notch&quot;
+        menu.item(at: 2)?.state = registry.isPaused ? .on : .off
+    }
+}</code></pre>
+<p><code>App/AppDelegate.swift</code>:</p>
+<pre><code class="language-swift">import AppKit
+import KeyboardShortcuts
+import MyNotchCore
+import NotchUI
+
+/// Composition root: builds the shared services and wires them together.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let settings = SettingsStore()
+    private let scheduler = TaskScheduler()
+    private let permissions = SystemPermissionCenter()
+    private let hotkeys = HotkeyRegistry()
+    private let coordinator = NotchCoordinator()
+    private lazy var activities = ActivityCenter(scheduler: scheduler)
+    private lazy var registry = ModuleRegistry(
+        modules: ModuleList.make(), settings: settings, activities: activities,
+        permissions: permissions, hotkeys: hotkeys, presenter: coordinator
+    )
+    private lazy var screens = ScreenManager(registry: registry, activities: activities, settings: settings, scheduler: scheduler)
+    private lazy var settingsWindow = SettingsWindowController(
+        settings: settings, registry: registry, permissions: permissions, hotkeys: hotkeys
+    )
+    private var statusItem: StatusItemController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        coordinator.screens = screens
+        hotkeys.register(
+            &quot;toggleNotch&quot;, title: &quot;Mở/đóng notch&quot;, owner: nil,
+            initial: KeyboardShortcuts.Shortcut(.n, modifiers: [.control, .option])
+        ) { [weak self] in self?.coordinator.toggle() }
+        statusItem = StatusItemController(
+            settings: settings, registry: registry, screens: screens,
+            openSettings: { [weak self] in self?.settingsWindow.show() }
+        )
+        screens.start()
+        Task { await registry.bootstrap() }
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshPermissions() }
+        }
+    }
+
+    /// Re-launching the app (e.g. from Finder) opens Settings, so it stays reachable without a menu bar icon.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -&gt; Bool {
+        settingsWindow.show()
+        return true
+    }
+
+    private func refreshPermissions() {
+        Task { await registry.refreshPermissions() }
+    }
+}</code></pre>
+<p><code>App/Settings/SettingsWindowController.swift</code>:</p>
+<pre><code class="language-swift">import AppKit
+import MyNotchCore
+import SwiftUI
+
+/// Hosts the SwiftUI settings UI in a regular window and brings it to the front.
+final class SettingsWindowController {
+    private let settings: SettingsStore
+    private let registry: ModuleRegistry
+    private let permissions: any PermissionCenter
+    private let hotkeys: HotkeyRegistry
+    private var window: NSWindow?
+
+    init(settings: SettingsStore, registry: ModuleRegistry, permissions: any PermissionCenter, hotkeys: HotkeyRegistry) {
+        self.settings = settings
+        self.registry = registry
+        self.permissions = permissions
+        self.hotkeys = hotkeys
+    }
+
+    func show() {
+        if window == nil {
+            let root = SettingsRootView(settings: settings, registry: registry, permissions: permissions, hotkeys: hotkeys)
+            let window = NSWindow(contentViewController: NSHostingController(rootView: root))
+            window.title = &quot;MyNotch Settings&quot;
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+            window.setContentSize(NSSize(width: 760, height: 520))
+            window.isReleasedWhenClosed = false
+            window.center()
+            self.window = window
+        }
+        NSApp.activate()
+        window?.makeKeyAndOrderFront(nil)
+    }
+}</code></pre>
+<p><code>App/Settings/SettingsRootView.swift</code>:</p>
+<pre><code class="language-swift">import MyNotchCore
+import SwiftUI
+
+enum SettingsPage: Hashable {
+    case general, interface, module(ModuleID), about
+}
+
+struct SettingsRootView: View {
+    let settings: SettingsStore
+    let registry: ModuleRegistry
+    let permissions: any PermissionCenter
+    let hotkeys: HotkeyRegistry
+    @State private var selection: SettingsPage? = .general
+
+    var body: some View {
+        NavigationSplitView {
+            List(selection: $selection) {
+                Label(&quot;General&quot;, systemImage: &quot;gearshape&quot;).tag(SettingsPage.general)
+                Label(&quot;Interface&quot;, systemImage: &quot;rectangle.topthird.inset.filled&quot;).tag(SettingsPage.interface)
+                Section(&quot;Modules&quot;) {
+                    ForEach(registry.modules, id: \.descriptor.id) { module in
+                        Label(module.descriptor.displayName, systemImage: module.descriptor.systemImage)
+                            .tag(SettingsPage.module(module.descriptor.id))
+                    }
+                }
+                Section {
+                    Label(&quot;About&quot;, systemImage: &quot;info.circle&quot;).tag(SettingsPage.about)
+                }
+            }
+            .navigationSplitViewColumnWidth(200)
+        } detail: {
+            switch selection ?? .general {
+            case .general: GeneralSettingsPage(settings: settings, hotkeys: hotkeys)
+            case .interface: InterfaceSettingsPage(settings: settings)
+            case .module(let id): ModuleSettingsPage(id: id, registry: registry, permissions: permissions)
+            case .about: AboutPage()
+            }
+        }
+    }
+}</code></pre>
+<p><code>App/Settings/GeneralSettingsPage.swift</code>:</p>
+<pre><code class="language-swift">import KeyboardShortcuts
+import MyNotchCore
+import SwiftUI
+
+struct GeneralSettingsPage: View {
+    let settings: SettingsStore
+    let hotkeys: HotkeyRegistry
+    @State private var launchAtLogin = LaunchAtLogin.isEnabled
+    @State private var launchError: String?
+    @State private var shortcutRevision = 0
+
+    var body: some View {
+        Form {
+            Section(&quot;Khởi động&quot;) {
+                Toggle(&quot;Khởi động cùng máy&quot;, isOn: $launchAtLogin)
+                    .onChange(of: launchAtLogin) { _, enabled in
+                        launchError = LaunchAtLogin.set(enabled)
+                        launchAtLogin = LaunchAtLogin.isEnabled
+                    }
+                if let launchError {
+                    Text(launchError).foregroundStyle(.red).font(.caption)
+                }
+                Toggle(&quot;Hiện icon trên menu bar&quot;, isOn: settings.binding(AppSettings.showMenuBarIcon))
+                Text(&quot;Khi ẩn icon, mở lại MyNotch từ Finder để vào Settings.&quot;)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section(&quot;Phím tắt&quot;) {
+                ForEach(hotkeys.registrations) { registration in
+                    KeyboardShortcuts.Recorder(registration.title, name: registration.name) { _ in shortcutRevision += 1 }
+                }
+                let conflicts = shortcutRevision &gt;= 0 ? hotkeys.conflicts() : []
+                ForEach(conflicts.indices, id: \.self) { index in
+                    Label(&quot;Trùng phím: &quot; + conflicts[index].map(\.title).joined(separator: &quot;, &quot;), systemImage: &quot;exclamationmark.triangle&quot;)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle(&quot;General&quot;)
+    }
+}</code></pre>
+<p><code>App/Settings/InterfaceSettingsPage.swift</code>:</p>
+<pre><code class="language-swift">import MyNotchCore
+import NotchUI
+import SwiftUI
+
+struct InterfaceSettingsPage: View {
+    let settings: SettingsStore
+
+    var body: some View {
+        Form {
+            Section(&quot;Hiển thị&quot;) {
+                Picker(&quot;Màn hình&quot;, selection: settings.binding(InterfaceSettings.displayMode)) {
+                    Text(&quot;Tất cả màn hình&quot;).tag(DisplayMode.all)
+                    Text(&quot;Màn hình chính&quot;).tag(DisplayMode.main)
+                    Text(&quot;Màn hình có con trỏ&quot;).tag(DisplayMode.cursor)
+                }
+                Toggle(&quot;Ẩn khi app đang fullscreen&quot;, isOn: settings.binding(InterfaceSettings.hideInFullscreen))
+            }
+            Section(&quot;Notch ảo (màn hình không có notch)&quot;) {
+                slider(&quot;Chiều rộng&quot;, InterfaceSettings.virtualNotchWidth, 120...300, unit: &quot;pt&quot;)
+                slider(&quot;Chiều cao (0 = bằng menu bar)&quot;, InterfaceSettings.virtualNotchHeight, 0...40, unit: &quot;pt&quot;)
+            }
+            Section(&quot;Khi mở rộng&quot;) {
+                slider(&quot;Chiều rộng&quot;, InterfaceSettings.openWidth, 480...720, unit: &quot;pt&quot;)
+                Stepper(&quot;Trễ khi mở: \(settings.value(InterfaceSettings.openDelayMs)) ms&quot;,
+                        value: settings.binding(InterfaceSettings.openDelayMs), in: 0...1000, step: 50)
+                Stepper(&quot;Trễ khi đóng: \(settings.value(InterfaceSettings.closeDelayMs)) ms&quot;,
+                        value: settings.binding(InterfaceSettings.closeDelayMs), in: 0...1000, step: 50)
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle(&quot;Interface&quot;)
+    }
+
+    private func slider(_ title: String, _ key: SettingKey&lt;Double&gt;, _ range: ClosedRange&lt;Double&gt;, unit: String) -&gt; some View {
+        LabeledContent(&quot;\(title): \(Int(settings.value(key))) \(unit)&quot;) {
+            Slider(value: settings.binding(key), in: range, step: 1)
+        }
+    }
+}</code></pre>
+<p><code>App/Settings/ModuleSettingsPage.swift</code>:</p>
+<pre><code class="language-swift">import MyNotchCore
+import SwiftUI
+
+struct ModuleSettingsPage: View {
+    let id: ModuleID
+    let registry: ModuleRegistry
+    let permissions: any PermissionCenter
+
+    private var module: (any FeatureModule)? { registry.modules.first { $0.descriptor.id == id } }
+
+    var body: some View {
+        if let descriptor = module?.descriptor {
+            Form {
+                Section {
+                    Toggle(&quot;Bật \(descriptor.displayName)&quot;, isOn: Binding(
+                        get: { registry.isEnabled(id) },
+                        set: { enabled in Task { await registry.setEnabled(enabled, for: id) } }
+                    ))
+                    LabeledContent(&quot;Trạng thái&quot;) { StateBadge(state: registry.state(of: id)) }
+                    if case .failed = registry.state(of: id) { retryButton }
+                    if case .unavailable = registry.state(of: id) { retryButton }
+                }
+                if !descriptor.permissions.isEmpty {
+                    Section(&quot;Quyền hệ thống&quot;) {
+                        ForEach(descriptor.permissions, id: \.self) { permission in
+                            LabeledContent(permission.displayName) {
+                                if permissions.status(of: permission) == .granted {
+                                    Text(&quot;Đã cấp&quot;).foregroundStyle(.green)
+                                } else {
+                                    Button(&quot;Cấp quyền&quot;) { permissions.openSystemSettings(for: permission) }
+                                }
+                            }
+                        }
+                    }
+                }
+                if let settingsView = registry.settingsView(for: id) {
+                    Section(&quot;Cài đặt&quot;) { settingsView }
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle(descriptor.displayName)
+        }
+    }
+
+    private var retryButton: some View {
+        Button(&quot;Thử lại&quot;) { Task { await registry.retry(id) } }
+    }
+}
+
+private struct StateBadge: View {
+    let state: ModuleState
+
+    var body: some View {
+        switch state {
+        case .running: Text(&quot;Đang chạy&quot;).foregroundStyle(.green)
+        case .disabled: Text(&quot;Đã tắt&quot;).foregroundStyle(.secondary)
+        case .starting: Text(&quot;Đang khởi động…&quot;)
+        case .stopping: Text(&quot;Đang dừng…&quot;)
+        case .needsPermission(let permission): Text(&quot;Thiếu quyền \(permission.displayName)&quot;).foregroundStyle(.orange)
+        case .unavailable(let reason): Text(reason).foregroundStyle(.secondary)
+        case .failed(let reason): Text(&quot;Lỗi: \(reason)&quot;).foregroundStyle(.red)
+        }
+    }
+}</code></pre>
+<p><code>App/Settings/AboutPage.swift</code>:</p>
+<pre><code class="language-swift">import SwiftUI
+
+struct AboutPage: View {
+    private let libraries: [(name: String, license: String, url: String)] = [
+        (&quot;KeyboardShortcuts&quot;, &quot;MIT&quot;, &quot;https://github.com/sindresorhus/KeyboardShortcuts&quot;),
+    ]
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent(&quot;Phiên bản&quot;, value: Bundle.main.shortVersion)
+                LabeledContent(&quot;Bundle ID&quot;, value: Bundle.main.bundleIdentifier ?? &quot;-&quot;)
+            }
+            Section(&quot;Thư viện bên thứ ba&quot;) {
+                ForEach(libraries, id: \.name) { library in
+                    LabeledContent(library.name) {
+                        Link(library.license, destination: URL(string: library.url)!)
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle(&quot;About&quot;)
+    }
+}
+
+private extension Bundle {
+    var shortVersion: String {
+        let version = object(forInfoDictionaryKey: &quot;CFBundleShortVersionString&quot;) as? String ?? &quot;?&quot;
+        let build = object(forInfoDictionaryKey: &quot;CFBundleVersion&quot;) as? String ?? &quot;?&quot;
+        return &quot;\(version) (\(build))&quot;
+    }
+}</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Bỏ qua file XcodeGen sinh ra</strong></li>
+</ul>
+<p>Thêm vào cuối <code>.gitignore</code>:</p>
+<pre><code># Generated by XcodeGen from project.yml
+App/Info.plist
+App/MyNotch.entitlements</code></pre>
+<ul>
+<li>[ ] <strong>Step 3: Build / kiểm chứng</strong></li>
+</ul>
+<pre><code class="language-bash">xcodegen generate &amp;&amp; xcodebuild -project MyNotch.xcodeproj -scheme MyNotch -configuration Debug -destination &#x27;platform=macOS&#x27; -derivedDataPath .build/xcode build -quiet</code></pre>
+<p>Expected: lệnh kết thúc với exit code 0, không in <code>error:</code>.</p>
+<ul>
+<li>[ ] <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add project.yml App/main.swift App/AppSettings.swift App/ModuleList.swift App/LaunchAtLogin.swift App/StatusItemController.swift App/AppDelegate.swift App/Settings/SettingsWindowController.swift App/Settings/SettingsRootView.swift App/Settings/GeneralSettingsPage.swift App/Settings/InterfaceSettingsPage.swift App/Settings/ModuleSettingsPage.swift App/Settings/AboutPage.swift .gitignore
+git commit -m &quot;feat(app): add app shell, menu bar and settings window&quot;</code></pre>
+<h2 id="task-16-script-kiểm-chứng-và-tài-liệu">Task 16: Script kiểm chứng và tài liệu</h2>
+<p><code>verify.sh</code> là cổng kiểm tra cục bộ duy nhất: sinh project, test mọi package, build app.</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>scripts/verify.sh</code></li>
+<li>Create: <code>README.md</code></li>
+<li>Create: <code>docs/manual-test-checklist.md</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Viết code</strong></li>
+</ul>
+<p><code>scripts/verify.sh</code>:</p>
+<pre><code class="language-bash">#!/bin/bash
+# Full local gate: regenerate the project, test every package, build the app.
+set -euo pipefail
+cd &quot;$(dirname &quot;$0&quot;)/..&quot;
+
+echo &quot;==&gt; xcodegen generate&quot;
+xcodegen generate --quiet
+
+for package in Packages/MyNotchCore Packages/NotchUI Packages/Modules/*/; do
+    echo &quot;==&gt; swift test ($package)&quot;
+    (cd &quot;$package&quot; &amp;&amp; swift test --quiet)
+done
+
+echo &quot;==&gt; xcodebuild build&quot;
+xcodebuild -project MyNotch.xcodeproj -scheme MyNotch -configuration Debug \
+    -destination &#x27;platform=macOS&#x27; -derivedDataPath .build/xcode build -quiet
+
+echo &quot;All checks passed.&quot;</code></pre>
+<p><code>README.md</code>:</p>
+<pre><code class="language-markdown"># MyNotch
+
+Ứng dụng notch cá nhân cho macOS 26+, viết mới từ đầu, chia thành các module bật/tắt độc lập.
+
+## Yêu cầu
+
+- macOS 26.0 trở lên
+- Xcode 26.6 (`xcode-select -p` phải trỏ vào Xcode, không phải Command Line Tools)
+- XcodeGen: `brew install xcodegen`
+
+## Build và chạy
+
+```bash
+xcodegen generate
+open MyNotch.xcodeproj
+```
+
+Chọn scheme **MyNotch** rồi Run (⌘R). App không có icon Dock; tìm icon trên menu bar.
+
+Kiểm tra toàn bộ (test mọi package rồi build app):
+
+```bash
+./scripts/verify.sh
+```
+
+## Cấu trúc
+
+| Thư mục | Vai trò |
+|---|---|
+| `App/` | Target app: khởi động, ghép module (`ModuleList.swift`), menu bar, Settings |
+| `Packages/MyNotchCore` | Hợp đồng module, registry, settings, quyền, phím tắt, live activity |
+| `Packages/NotchUI` | Cửa sổ notch, hình học, state machine, đa màn hình |
+| `Packages/Modules/*` | Mỗi tính năng một package; chỉ phụ thuộc MyNotchCore + NotchUI |
+| `docs/superpowers/` | Spec và kế hoạch triển khai |
+
+## Thêm một module
+
+1. Tạo package trong `Packages/Modules/&lt;Tên&gt;/`, viết một class theo `FeatureModule`.
+2. Khai báo package trong `project.yml` (mục `packages` và `dependencies` của target MyNotch).
+3. Thêm một dòng vào `App/ModuleList.swift`.
+4. `xcodegen generate`.
+
+## Ký app
+
+Mặc định app được ký ad-hoc (&quot;Sign to Run Locally&quot;), đủ cho các module không cần quyền hệ thống.
+Khi làm module cần quyền (Accessibility, Screen Recording…), đặt `DEVELOPMENT_TEAM` trong `project.yml`
+bằng Team ID của Apple ID (Xcode → Settings → Accounts) để macOS nhớ quyền giữa các lần build.
+
+## Xử lý sự cố
+
+- `cannot find &#x27;&lt;Tên&gt;&#x27; in scope` cho symbol nằm ở một package local khác: xoá thư mục `.build` của package đang build rồi chạy lại.</code></pre>
+<p><code>docs/manual-test-checklist.md</code>:</p>
+<pre><code class="language-markdown"># Checklist kiểm thử tay — Nền tảng
+
+Điền **Đạt / Không đạt / Không kiểm được (lý do)** và ngày kiểm.
+
+| # | Kịch bản | Kết quả | Ghi chú |
+|---|---|---|---|
+| 1 | Chạy app: không có icon Dock, có icon menu bar, menu hiện đủ 4 mục | | |
+| 2 | Notch thật trên MacBook: notch đen trùng khít notch phần cứng | | |
+| 3 | Màn ngoài: notch ảo ở giữa cạnh trên, kích thước theo Settings | | |
+| 4 | Interface → Màn hình = Màn hình chính / Có con trỏ / Tất cả: notch hiện đúng màn | | |
+| 5 | Rê chuột vào notch ~150ms thì mở; rời ra ~300ms thì đóng | | |
+| 6 | Click vào notch thì mở ngay | | |
+| 7 | ⌃⌥N mở/đóng notch trên màn đang có con trỏ | | |
+| 8 | Khi notch đóng: click menu bar và cửa sổ ngay dưới vùng notch vẫn hoạt động | | |
+| 9 | Video fullscreen trên Safari: notch ẩn; thoát fullscreen: hiện lại | | |
+| 10 | Keynote khi trình chiếu: notch ẩn | | |
+| 11 | Cho máy ngủ rồi đánh thức: notch vẫn đúng vị trí | | |
+| 12 | Rút rồi cắm lại màn ngoài: notch biến mất rồi xuất hiện lại đúng chỗ | | |
+| 13 | Tab Battery hiển thị %, trạng thái, nguồn điện | | |
+| 14 | Cắm sạc: activity tia sét + % hiện khoảng 4 giây | | |
+| 15 | Settings → Battery: tắt thì tab/activity biến mất; bật lại thì xuất hiện | | |
+| 16 | Settings → General → Khởi động cùng máy: app có trong Login Items và tự chạy sau khi đăng nhập lại | | |
+| 17 | Menu bar → Hide Notch / Show Notch; Pause All Modules có dấu tích và dừng Battery | | |
+| 18 | Activity Monitor: CPU của MyNotch khi rê chuột liên tục 30 giây | | |
+| 19 | Menu và popover của hệ thống (Control Center, Wi-Fi) không bị notch che | | |</code></pre>
+<ul>
+<li>[ ] <strong>Step 2: Build / kiểm chứng</strong></li>
+</ul>
+<pre><code class="language-bash">chmod +x scripts/verify.sh &amp;&amp; ./scripts/verify.sh</code></pre>
+<p>Expected: ba dòng <code>✔ Test run ... passed</code> (20, 18 và 9 test) rồi <code>All checks passed.</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add scripts/verify.sh README.md docs/manual-test-checklist.md
+git commit -m &quot;chore: add verify script, README and manual test checklist&quot;</code></pre>
+<h2 id="task-17-kiểm-thử-tay-trên-máy-thật">Task 17: Kiểm thử tay trên máy thật</h2>
+<p>Unit test không phủ được hiển thị, chuột, đa màn hình và fullscreen. Task này chạy app thật và điền checklist.</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Modify: <code>docs/manual-test-checklist.md</code></li>
+</ul>
+<ul>
+<li>[ ] <strong>Step 1: Thoát OneNotch và build bản chạy thử</strong></li>
+</ul>
+<p>OneNotch cũng chiếm vùng notch nên phải thoát trước (menu bar của OneNotch → Quit).</p>
+<pre><code class="language-bash">xcodegen generate &amp;&amp; xcodebuild -project MyNotch.xcodeproj -scheme MyNotch -configuration Debug -destination &#x27;platform=macOS&#x27; -derivedDataPath .build/xcode build -quiet &amp;&amp; open .build/xcode/Build/Products/Debug/MyNotch.app</code></pre>
+<p>Expected: icon MyNotch xuất hiện trên menu bar, không có icon Dock.</p>
+<ul>
+<li>[ ] <strong>Step 2: Kiểm tra cửa sổ notch không cần nhìn màn hình</strong></li>
+</ul>
+<pre><code class="language-bash">cat &gt; /tmp/winlist.swift &lt;&lt;&#x27;EOF&#x27;
+import CoreGraphics
+let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as! [[String: Any]]
+for w in list where (w[kCGWindowOwnerName as String] as? String) == &quot;MyNotch&quot; {
+    print(w[kCGWindowLayer as String]!, w[kCGWindowBounds as String]!)
+}
+EOF
+swift /tmp/winlist.swift</code></pre>
+<p>Expected: mỗi màn hình một dòng layer <code>27</code>, rộng <code>720</code>, nằm giữa cạnh trên màn đó.</p>
+<ul>
+<li>[ ] <strong>Step 3: Đi qua từng mục trong <code>docs/manual-test-checklist.md</code></strong></li>
+</ul>
+<p>Điền cột Kết quả (Đạt / Không đạt / Không kiểm được + lý do) và ngày. Mục nào <strong>Không đạt</strong> thì dùng superpowers:systematic-debugging, sửa, chạy lại <code>./scripts/verify.sh</code>, rồi kiểm lại mục đó.</p>
+<ul>
+<li>[ ] <strong>Step 4: Chạy lại cổng kiểm tra</strong></li>
+</ul>
+<pre><code class="language-bash">./scripts/verify.sh</code></pre>
+<p>Expected: <code>All checks passed.</code></p>
+<ul>
+<li>[ ] <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add docs/manual-test-checklist.md
+git commit -m &quot;test: record manual verification of the foundation&quot;</code></pre>
+<h2 id="đối-chiếu-với-tiêu-chí-hoàn-thành-spec-mục-10">Đối chiếu với tiêu chí hoàn thành (spec mục 10)</h2>
+<table><thead><tr><th>Tiêu chí</th><th>Task</th></tr></thead><tbody>
+<tr><td>1. <code>verify.sh</code> chạy hết, không lỗi</td><td>16, 17</td></tr>
+<tr><td>2. Không icon Dock, menu bar hoạt động</td><td>15, 17 (mục 1, 17)</td></tr>
+<tr><td>3. Kích thước notch đúng trên MacBook và màn ngoài; đổi <code>displayMode</code></td><td>7, 11, 17 (mục 2–4)</td></tr>
+<tr><td>4. Mở/đóng bằng rê chuột, click, ⌃⌥N; click xuyên vùng trong suốt</td><td>8, 11, 15, 17 (mục 5–8)</td></tr>
+<tr><td>5. Ẩn khi video fullscreen trên Safari</td><td>9, 11, 17 (mục 9)</td></tr>
+<tr><td>6. Battery: tab, activity sạc, bật/tắt</td><td>12–15, 17 (mục 13–15)</td></tr>
+<tr><td>7. Khởi động cùng máy</td><td>15, 17 (mục 16)</td></tr>
+<tr><td>8. Checklist được điền kết quả</td><td>17</td></tr>
+</tbody></table></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>

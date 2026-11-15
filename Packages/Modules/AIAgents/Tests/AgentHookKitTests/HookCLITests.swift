@@ -1,0 +1,104 @@
+import Foundation
+import MyNotchTestSupport
+import Testing
+@testable import AgentHookKit
+
+@Suite struct HookCLITests {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let stopJSON = Data(#"{"hook_event_name":"Stop","session_id":"s1"}"#.utf8)
+
+    func missingSocketPath() -> String { SocketFolder.reservedPath() + "/agent.sock" }
+
+    @Test func badArgumentsBadJSONAndAMissingSocketAllExitZero() {
+        let path = missingSocketPath()
+        #expect(HookCLI.run(arguments: [], stdin: stopJSON, socketPath: path, now: now) == 0)
+        #expect(HookCLI.run(arguments: ["--source"], stdin: stopJSON, socketPath: path, now: now) == 0)
+        #expect(HookCLI.run(arguments: ["--source", "gemini"], stdin: stopJSON, socketPath: path, now: now) == 0)
+        #expect(HookCLI.run(arguments: ["--source", "claude"], stdin: Data("garbage".utf8), socketPath: path, now: now) == 0)
+        #expect(HookCLI.run(arguments: ["--source", "claude"], stdin: stopJSON, socketPath: path, now: now) == 0)
+        #expect(HookCLI.run(arguments: ["--source", "claude"], stdin: stopJSON, socketPath: String(repeating: "a", count: 300), now: now) == 0)
+    }
+
+    @Test func aValidInvocationSendsTheFilteredPayload() throws {
+        let directory = SocketFolder.reservedPath()
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(atPath: directory) }
+        let path = directory + "/agent.sock"
+        let receiver = try TestDatagramReceiver(path: path)
+        #expect(HookCLI.run(arguments: ["--source", "codex"], stdin: stopJSON, socketPath: path, now: now) == 0)
+        let payload = try HookPayload.decode(try #require(receiver.receive()))
+        #expect(payload.source == "codex")
+        #expect(payload.event == "Stop")
+        #expect(payload.sessionID == "s1")
+    }
+}
+
+extension HookCLITests {
+    func receiver() throws -> (path: String, receiver: TestDatagramReceiver, cleanUp: () -> Void) {
+        let directory = SocketFolder.reservedPath()
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let path = directory + "/agent.sock"
+        return (path, try TestDatagramReceiver(path: path), { try? FileManager.default.removeItem(atPath: directory) })
+    }
+
+    @Test func aSubagentEventReachesTheAppWithItsAgentAndTheProcessThatRanTheHook() throws {
+        let (path, app, cleanUp) = try receiver()
+        defer { cleanUp() }
+        let stdin = Data("""
+        {"hook_event_name":"SubagentStop","session_id":"s1","cwd":"/p","agent_id":"def456","agent_type":"Explore",
+         "agent_transcript_path":"/x/SECRET.jsonl","last_assistant_message":"SECRET answer"}
+        """.utf8)
+        #expect(HookCLI.run(arguments: ["--source", "claude"], stdin: stdin, socketPath: path, now: now, parentProcessID: 4_242) == 0)
+        let datagram = try #require(app.receive())
+        let payload = try HookPayload.decode(datagram)
+        #expect(payload.event == "SubagentStop")
+        #expect(payload.agentID == "def456")
+        #expect(payload.agentType == "Explore")
+        #expect(payload.processID == 4_242)
+        #expect(!String(decoding: datagram, as: UTF8.self).contains("SECRET"))
+    }
+
+    @Test func noProcessIdIsSentForTheInitProcessOrNone() throws {
+        for parent: Int32 in [1, 0, -1] {
+            let (path, app, cleanUp) = try receiver()
+            defer { cleanUp() }
+            #expect(HookCLI.run(arguments: ["--source", "codex"], stdin: stopJSON, socketPath: path, now: now, parentProcessID: parent) == 0)
+            #expect(try HookPayload.decode(try #require(app.receive())).processID == nil, "\(parent)")
+        }
+    }
+
+    @Test func theRealHelperUsesItsOwnParent() throws {
+        let (path, app, cleanUp) = try receiver()
+        defer { cleanUp() }
+        #expect(HookCLI.run(arguments: ["--source", "claude"], stdin: stopJSON, socketPath: path, now: now) == 0)
+        #expect(try HookPayload.decode(try #require(app.receive())).processID == getppid())
+    }
+}
+
+/// A bound datagram socket that reads synchronously, standing in for the app.
+final class TestDatagramReceiver {
+    private let fd: Int32
+
+    init(path: String) throws {
+        fd = socket(AF_UNIX, SOCK_DGRAM, 0)
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: Array(path.utf8) + [0]) }
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        guard bound == 0 else { throw CocoaError(.fileWriteUnknown) }
+        var timeout = timeval(tv_sec: 2, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+    }
+
+    deinit { close(fd) }
+
+    func receive(timeout: TimeInterval = 2) -> Data? {
+        var wait = timeval(tv_sec: Int(timeout), tv_usec: Int32((timeout - Double(Int(timeout))) * 1_000_000))
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        let count = recv(fd, &buffer, buffer.count, 0)
+        return count > 0 ? Data(buffer[0..<count]) : nil
+    }
+}

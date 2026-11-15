@@ -1,0 +1,112 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MyNotch — Trạng thái AI agent (dự án con 5)</title><style>
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#e5e5ea;--card:#f5f5f7;--accent:#7c5cff;--code:#f2f2f7}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#f2f2f7;--muted:#a1a1a6;--line:#2c2c30;--card:#1c1c1f;--accent:#a78bfa;--code:#232327}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);max-width:1200px;margin:0 auto}
+nav{position:sticky;top:0;height:100vh;overflow:auto;padding:28px 16px;border-right:1px solid var(--line);font-size:14px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:6px}
+nav a:hover{background:var(--card);color:var(--fg)}
+nav a.h3{padding-left:22px;font-size:13px}
+main{padding:28px 40px 80px;min-width:0}
+h1{font-size:30px;margin:0 0 12px}h2{margin-top:44px;padding-top:8px;border-top:1px solid var(--line)}h3{margin-top:28px}
+a{color:var(--accent)}
+code{font:13px/1.5 "SF Mono",Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{padding:0;background:none}
+.copy{position:absolute;top:8px;right:8px;font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--card)}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}main{padding:20px}}
+</style></head><body><div class="layout"><nav><a class="h2" href="#1-mục-tiêu">1. Mục tiêu</a><a class="h2" href="#2-nguồn-dữ-liệu">2. Nguồn dữ liệu</a><a class="h3" href="#mức-0-mặc-định-không-cấu-hình">Mức 0 (mặc định, không cấu hình)</a><a class="h3" href="#mức-1-tuỳ-chọn-nút-bật-trạng-thái-chính-xác">Mức 1 (tuỳ chọn, nút "Bật trạng thái chính xác")</a><a class="h2" href="#3-trạng-thái-phiên">3. Trạng thái phiên</a><a class="h2" href="#4-thiết-kế">4. Thiết kế</a><a class="h3" href="#4-1-giao-diện">4.1 Giao diện</a><a class="h3" href="#4-2-cài-đặt-module-aiagents">4.2 Cài đặt (<code>module.aiagents.*</code>)</a><a class="h2" href="#5-kiểm-thử">5. Kiểm thử</a></nav><main><h1 id="mynotch-trạng-thái-ai-agent-dự-án-con-5">MyNotch — Trạng thái AI agent (dự án con 5)</h1>
+<ul>
+<li><strong>Ngày:</strong> 2026-10-13</li>
+<li><strong>Trạng thái:</strong> Thiết kế</li>
+<li><strong>Nguồn:</strong> tài liệu hooks của Claude Code và Codex CLI. Cấu trúc file thật trên máy được đọc ở chế độ chỉ đọc, chỉ xem tên khoá, không xem nội dung hội thoại.</li>
+</ul>
+<h2 id="1-mục-tiêu">1. Mục tiêu</h2>
+<p>Thấy ngay trong notch khi Claude Code hoặc Codex đang làm việc, đang chờ mình, hay vừa xong. Kèm token và chi phí của từng phiên và trong ngày.</p>
+<p><strong>Nguyên tắc:</strong></p>
+<ul>
+<li>Mặc định không sửa cấu hình của người dùng.</li>
+<li>Chế độ "trạng thái chính xác" (biết lúc agent chờ duyệt quyền) là tuỳ chọn và chỉ cài khi người dùng bấm nút. Trước khi cài, app hiện rõ thay đổi và tạo bản sao lưu.</li>
+<li>Không hiển thị hay lưu nội dung prompt hoặc câu trả lời. Chỉ hiện tên tool và một tóm tắt ngắn: phần đầu lệnh Bash hoặc tên file.</li>
+<li><code>~/.claude/settings.json</code> của máy này đã có hook của Orca và rtk. MyNotch chỉ được <strong>thêm cạnh</strong> chúng, không bao giờ thay thế, và không đụng <code>statusLine</code>.</li>
+</ul>
+<h2 id="2-nguồn-dữ-liệu">2. Nguồn dữ liệu</h2>
+<h3 id="mức-0-mặc-định-không-cấu-hình">Mức 0 (mặc định, không cấu hình)</h3>
+<table><thead><tr><th>Nguồn</th><th>Dùng để</th></tr></thead><tbody>
+<tr><td><code>~/.claude/sessions/&lt;pid&gt;.json</code> (<code>sessionId</code>, <code>cwd</code>, <code>status</code> busy/idle, <code>name</code>, <code>startedAt</code>)</td><td>Danh sách phiên đang chạy, bận/rảnh</td></tr>
+<tr><td><code>~/.claude/projects/&lt;slug&gt;/&lt;sessionId&gt;.jsonl</code></td><td>Tool hiện tại (khối <code>tool_use</code> cuối), thời điểm bắt đầu lượt (record <code>user</code> cuối), kết thúc (<code>stop_reason == &quot;end_turn&quot;</code>), token (<code>message.usage</code>, <strong>khử trùng theo <code>message.id</code></strong>), chi phí (<code>cost-state.totalCostUSD</code> nếu có)</td></tr>
+<tr><td><code>~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl</code></td><td><code>task_started</code>, <code>task_complete</code>, <code>turn_aborted</code>, <code>token_count</code> (token + rate limit)</td></tr>
+</tbody></table>
+<ul>
+<li>Theo dõi bằng FSEvents (thư mục) và <code>DispatchSource</code> (file đang ghi).</li>
+<li>Đọc tiếp từ offset đã lưu, giữ phần dòng chưa trọn.</li>
+<li>Các định dạng này không được công bố và có thể đổi. Parser phải phòng thủ: thiếu trường nào thì bỏ trường đó, không bỏ cả record.</li>
+</ul>
+<h3 id="mức-1-tuỳ-chọn-nút-bật-trạng-thái-chính-xác">Mức 1 (tuỳ chọn, nút "Bật trạng thái chính xác")</h3>
+<ul>
+<li>Helper <code>mynotch-hook</code>:</li>
+<li>là CLI Swift nhỏ, nằm trong app bundle; được chép tới <code>~/Library/Application Support/io.lucasvu.mynotch/bin/</code> để có đường dẫn ổn định;</li>
+<li>đọc JSON hook từ stdin, chỉ giữ các trường trong danh sách cho phép: nguồn, sự kiện, session, cwd, tool, tóm tắt ≤ 120 ký tự, <code>notification_type</code>, thời điểm;</li>
+<li>gửi <strong>một datagram</strong> (≤ 2 KB) không chặn tới socket <code>agent.sock</code> của app;</li>
+<li>luôn thoát mã 0 và không in gì, vì stdout của một số hook bị chèn vào context của Claude;</li>
+<li>app không chạy thì bỏ qua.</li>
+<li>Claude Code, cách ưu tiên:</li>
+<li>app sinh một plugin cục bộ (<code>hooks/hooks.json</code>);</li>
+<li>Settings hiện hai lệnh <code>claude plugin marketplace add …</code> và <code>claude plugin install …</code> để người dùng tự chạy;</li>
+<li>gỡ bằng <code>claude plugin uninstall</code>.</li>
+<li>Claude Code, cách thay thế "Ghi vào settings.json":</li>
+<li>hiện diff và tạo bản sao lưu <code>settings.json.mynotch-&lt;thời điểm&gt;.bak</code>;</li>
+<li>thêm nhóm matcher riêng cho mỗi sự kiện, đánh dấu bằng đường dẫn helper để gỡ sạch;</li>
+<li>ghi atomic.</li>
+<li>Codex: gộp <code>~/.codex/hooks.json</code> (có sao lưu), rồi nhắc người dùng tin cậy hook trong <code>/hooks</code>. Không đụng <code>notify</code>.</li>
+</ul>
+<h2 id="3-trạng-thái-phiên">3. Trạng thái phiên</h2>
+<table><thead><tr><th>Sự kiện</th><th>Trạng thái</th></tr></thead><tbody>
+<tr><td>Lượt mới / <code>PreToolUse</code> / <code>PostToolUse</code> / registry <code>busy</code></td><td><code>working(tool?)</code></td></tr>
+<tr><td><code>PermissionRequest</code>, <code>Notification</code> loại <code>permission_prompt</code>/<code>elicitation_dialog</code></td><td><code>waitingForInput</code> (chỉ có ở mức 1)</td></tr>
+<tr><td><code>Stop</code> / <code>end_turn</code> / <code>task_complete</code></td><td><code>finished</code> (5 giây) → <code>idle</code></td></tr>
+<tr><td><code>StopFailure</code> / <code>turn_aborted</code></td><td><code>error</code> / <code>idle</code></td></tr>
+<tr><td><code>SessionEnd</code> / PID chết / file registry bị xoá</td><td>xoá phiên</td></tr>
+</tbody></table>
+<p>Có ngắt lượt mà không có <code>Stop</code>: sau 90 giây không có sự kiện và registry báo <code>idle</code> thì chuyển về <code>idle</code>.</p>
+<h2 id="4-thiết-kế">4. Thiết kế</h2>
+<p>Package <code>Packages/Modules/AIAgents</code>, product <code>AIAgentsModule</code>; target CLI <code>mynotch-hook</code> trong <code>project.yml</code>.</p>
+<table><thead><tr><th>Thành phần</th><th>Vai trò</th></tr></thead><tbody>
+<tr><td><code>JSONLTailer</code></td><td>Đọc tiếp file JSONL theo offset, dòng chưa trọn được giữ lại, xử lý file bị cắt hoặc đổi tên</td></tr>
+<tr><td><code>ClaudeTranscriptParser</code>, <code>CodexRolloutParser</code></td><td>Thuần: record → sự kiện chuẩn hoá (<code>AgentEvent</code>) và usage</td></tr>
+<tr><td><code>ClaudeSessionRegistry</code></td><td>Đọc <code>~/.claude/sessions/*.json</code>, kiểm tra PID còn sống</td></tr>
+<tr><td><code>AgentSessionStore</code></td><td><code>@Observable</code>: phiên theo <code>(nguồn, sessionId)</code>, máy trạng thái, thời gian đã chạy, usage hôm nay</td></tr>
+<tr><td><code>AgentEventServer</code></td><td>Mức 1: socket datagram Unix, thư mục 0700, <code>DispatchSource.makeReadSource</code></td></tr>
+<tr><td><code>HookInstaller</code></td><td>Mức 1: sinh plugin, gộp/gỡ hook có sao lưu (thuần + test với thư mục tạm)</td></tr>
+<tr><td><code>UsageCalculator</code></td><td>Token theo model; chi phí từ <code>cost-state</code>, nếu không có thì ước tính theo bảng giá đi kèm (ghi rõ "ước tính")</td></tr>
+<tr><td><code>AIAgentsModule</code></td><td>Activity, tab, cài đặt</td></tr>
+</tbody></table>
+<h3 id="4-1-giao-diện">4.1 Giao diện</h3>
+<ul>
+<li><strong>Activity:</strong></li>
+<li>đang làm việc: icon agent (Claude/Codex) + vòng xoay, bên phải là thời gian đã chạy;</li>
+<li>chờ người dùng: icon + dấu "!" màu cam, ưu tiên <code>.high</code>;</li>
+<li>vừa xong: dấu ✓ trong 5 giây.</li>
+<li><strong>Tab "AI":</strong></li>
+<li>mỗi phiên một dòng: dự án (tên thư mục + nhánh git), trạng thái, tool hiện tại, thời gian;</li>
+<li>cuối tab: token và chi phí hôm nay theo từng agent.</li>
+<li>Click một phiên mở thư mục dự án trong Terminal. Mặc định không làm gì khác; có tuỳ chọn mở bằng app khác.</li>
+</ul>
+<h3 id="4-2-cài-đặt-module-aiagents">4.2 Cài đặt (<code>module.aiagents.*</code>)</h3>
+<p><code>claudeEnabled</code> (true), <code>codexEnabled</code> (true), <code>showWorkingActivity</code> (true), <code>finishedSeconds</code> (5), <code>preciseStatusInstalled</code> (chỉ đọc, do installer ghi).</p>
+<h2 id="5-kiểm-thử">5. Kiểm thử</h2>
+<table><thead><tr><th>Phần</th><th>Test tự động</th></tr></thead><tbody>
+<tr><td>Tailer</td><td>Ghi thêm từng phần, dòng chưa trọn, file bị cắt</td></tr>
+<tr><td>Parser</td><td>Dòng JSONL mẫu (tự viết theo cấu trúc, không chép hội thoại thật): tool, end_turn, usage khử trùng theo <code>message.id</code>, Codex <code>token_count</code></td></tr>
+<tr><td>Store</td><td>Chuỗi sự kiện → trạng thái; finished → idle sau 5 giây (ManualScheduler); ngắt không có Stop</td></tr>
+<tr><td>HookInstaller</td><td>Gộp vào settings giả có hook của bên khác: giữ nguyên hook cũ, tạo bản sao lưu, gỡ sạch</td></tr>
+<tr><td>Helper</td><td>Lọc trường, cắt tóm tắt, gói ≤ 2 KB, không in stdout</td></tr>
+</tbody></table>
+<p><strong>Kiểm thử tay:</strong> chạy Claude Code thật ở hai dự án; activity khi làm việc và khi xong; bật mức 1 rồi chờ duyệt quyền; Codex nếu được cài.</p></main></div><script>
+document.querySelectorAll('pre').forEach(pre=>{const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)};pre.appendChild(b)});
+</script></body></html>

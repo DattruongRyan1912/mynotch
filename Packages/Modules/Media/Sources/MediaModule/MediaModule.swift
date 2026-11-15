@@ -1,0 +1,1531 @@
+import Foundation
+import MyNotchCore
+import NotchUI
+import Observation
+import SwiftUI
+import YouTubeBridgeKit
+
+/// Setting names and defaults in one place, shared by the running module and the Settings rows.
+struct MediaSettingsKeys {
+    static let pauseGraceRange = 0...60
+
+    let showActivity: SettingKey<Bool>
+    let pauseGraceSeconds: SettingKey<Int>
+    /// Bundle IDs whose playback never shows the live activity.
+    let hiddenApps: SettingKey<[String]>
+    /// Bars follow the music through a system audio tap, which needs the system audio recording permission.
+    let realSpectrum: SettingKey<Bool>
+    /// Synced lyrics from lrclib.net. Off by default: it sends each new track's name, artist, album and length there.
+    let lyrics: SettingKey<Bool>
+    /// Lyrics from the captions the user turned on in a YouTube video in Chrome, which the extension hands over on this
+    /// Mac. Off by default; it opens a socket for the helper that Chrome starts, and sends nothing anywhere.
+    let youtubeCaptions: SettingKey<Bool>
+    /// The current and the next lyric line in a strip under the closed notch. Off by default: it makes the notch taller.
+    let lyricsUnderNotch: SettingKey<Bool>
+    /// The buttons beside play and pause in the Media tab.
+    let controlButtons: SettingKey<MediaControlLayout>
+    /// The sung part of a line is filled word by word where the lyrics have the timing for it.
+    let karaoke: SettingKey<Bool>
+    /// The player's progress bar, glow and (in the cover's mode) spectrum bars take their colours from the album cover.
+    let tintFromArtwork: SettingKey<Bool>
+    /// Where the spectrum bars' colours come from: the cover, white, or two colours the user picks.
+    let spectrumColorMode: SettingKey<SpectrumColorMode>
+    let spectrumGradientStart: SettingKey<SRGBColor>
+    let spectrumGradientEnd: SettingKey<SRGBColor>
+    /// The floating lyrics panel is up. Off by default; the Media tab's button and the hotkey flip it.
+    let lyricsPanel: SettingKey<Bool>
+    /// The current line's size in the panel, in points; the lines around it are smaller.
+    let lyricsPanelFontSize: SettingKey<Double>
+    /// How opaque the whole panel is.
+    let lyricsPanelOpacity: SettingKey<Double>
+    /// How dark the panel's background is, down to none: the lines alone over a film.
+    let lyricsPanelBackground: SettingKey<Double>
+    /// The pointer goes through the panel to what is under it, so it can be left over a window.
+    let lyricsPanelClickThrough: SettingKey<Bool>
+    /// Where the panel was left on each display. Written by the panel, not by a settings row.
+    let lyricsPanelFrames: SettingKey<LyricsPanelPlacement>
+    /// A film with subtitles the user loaded has them over it, as a player shows them, while its player fills a screen; the
+    /// strip under the notch leaves them out meanwhile. Off by default.
+    let fullscreenSubtitles: SettingKey<Bool>
+    /// How high above the bottom of the screen those lines sit, as a share of its height. Written by dragging them, not by a row.
+    let fullscreenSubtitlesHeight: SettingKey<Double>
+    /// The subtitles are set right again while the film plays whenever they drift (an advertisement in the video). Off by default;
+    /// the subtitle menu flips it.
+    let subtitleWatch: SettingKey<Bool>
+    /// The subtitles floating over the film all the time, fullscreen or not: flipped in the subtitle menu.
+    let floatingSubtitles: SettingKey<Bool>
+    /// How large those lines are against a player's, pinched or scrolled on them.
+    let floatingSubtitlesScale: SettingKey<Double>
+
+    init(_ settings: ModuleSettings) {
+        showActivity = settings.key("showActivity", default: true)
+        pauseGraceSeconds = settings.key("pauseGraceSeconds", default: 5, clampedTo: Self.pauseGraceRange)
+        hiddenApps = settings.key("hiddenApps", default: [])
+        realSpectrum = settings.key("realSpectrum", default: false)
+        lyrics = settings.key("lyrics", default: false)
+        youtubeCaptions = settings.key("youtubeCaptions", default: false)
+        lyricsUnderNotch = settings.key("lyricsUnderNotch", default: false)
+        controlButtons = settings.key("controlButtons", default: .standard)
+        karaoke = settings.key("karaoke", default: true)
+        tintFromArtwork = settings.key("tintFromArtwork", default: true)
+        spectrumColorMode = settings.key("spectrumColorMode", default: .artwork)
+        spectrumGradientStart = settings.key("spectrumGradientStart", default: SpectrumColorMode.defaultStart)
+        spectrumGradientEnd = settings.key("spectrumGradientEnd", default: SpectrumColorMode.defaultEnd)
+        lyricsPanel = settings.key("lyricsPanel", default: false)
+        lyricsPanelFontSize = settings.key("lyricsPanelFontSize", default: LyricsPanelModel.defaultFontSize, clampedTo: LyricsPanelModel.fontSizeRange)
+        lyricsPanelOpacity = settings.key("lyricsPanelOpacity", default: 0.9, clampedTo: LyricsPanelController.opacityRange)
+        lyricsPanelBackground = settings.key(
+            "lyricsPanelBackground", default: LyricsPanelModel.defaultBackground, clampedTo: LyricsPanelModel.backgroundRange
+        )
+        lyricsPanelClickThrough = settings.key("lyricsPanelClickThrough", default: false)
+        lyricsPanelFrames = settings.key("lyricsPanelFrames", default: LyricsPanelPlacement())
+        fullscreenSubtitles = settings.key("fullscreenSubtitles", default: false)
+        subtitleWatch = settings.key("subtitleWatch", default: false)
+        floatingSubtitles = settings.key("floatingSubtitles", default: false)
+        floatingSubtitlesScale = settings.key("floatingSubtitlesScale", default: 1, clampedTo: FullscreenSubtitleRule.scaleRange)
+        fullscreenSubtitlesHeight = settings.key(
+            "fullscreenSubtitlesHeight", default: FullscreenSubtitleRule.bottomGap, clampedTo: FullscreenSubtitleRule.bottomGapRange
+        )
+    }
+}
+
+/// What the tab's controls do, without handing the views the module or the source.
+struct MediaActions {
+    var send: (MediaCommand) -> Void
+    var seek: (Double) -> Void
+    /// A button beside play and pause was pressed.
+    var press: (MediaControlButton) -> Void = { _ in }
+    /// Puts the floating lyrics panel up or takes it down.
+    var toggleLyricsPanel: () -> Void = {}
+    /// Brings the playing application window to the front.
+    var openPlayer: () -> Void = {}
+    /// Restores or unhides subtitles under notch.
+    var restoreLyrics: () -> Void = {}
+}
+
+/// A next or previous that went to the extension and waits for its answer.
+private struct UnansweredSkip {
+    var id: Int
+    var command: MediaCommand
+    var action: YouTubeCommand
+    var timer: ScheduledAction
+}
+
+/// Now playing from any app: a live activity while music plays and a "Media" tab with the player controls.
+public final class MediaModule: FeatureModule {
+    public let descriptor = ModuleDescriptor(
+        id: "media",
+        displayName: "Media",
+        systemImage: "music.note",
+        defaultEnabled: true,
+        // Only the real-spectrum switch (off by default) taps system audio; now-playing needs nothing.
+        optionalPermissions: [.systemAudio],
+        permissionReasons: [.systemAudio: "Vẽ phổ nhạc thật; chỉ cần khi bật “Cột sóng theo phổ âm thanh thật”."],
+        order: 200
+    )
+
+    static let activityID = "nowPlaying"
+    static let blockedMessage = "Không đọc được thông tin phát nhạc (macOS đã chặn adapter)"
+
+    /// What the notch follows: the closed notch's activity, the lock screen, the hotkeys, the lyrics and the spectrum. It shows the
+    /// primary source (see `MediaSourceBook`), whoever reports it.
+    let store: NowPlayingStore
+    /// What the player shows while the user has chosen a source that is not the primary one; empty otherwise. Only the player's own
+    /// views read it: the bars and the lyrics stay with `store`.
+    let displayStore: NowPlayingStore
+    /// Every source of sound, merged: what the system, Music and Spotify, and the tabs of Chrome say.
+    let sources: MediaSourceHub
+    /// nil when the app was built without the adapter; `start` then reports the module unavailable.
+    /// Finds the app behind a bundle id for the chips' icons; tests give their own, so none reaches LaunchServices.
+    private let lookUpApp: @MainActor (String) -> PlayerApp?
+    private let makeSource: ((any Scheduler) -> any NowPlayingSource)?
+    private let spectrum: any SpectrumSource
+    private let lyricsClient: any HTTPClient
+    /// The system output volume the row's slider shows and sets; Core Audio is only called on its queue.
+    let volume: VolumeModel
+    /// The profiles and the switch the Âm thanh module shares with this tab, for the EQ row; nil when the app has none.
+    let equalizer: EqualizerState?
+    /// The user's Apple Music sign-in, which Settings shows and lyrics lookups use.
+    let appleAccount: AppleMusicAccount
+    let appleClient: AppleMusicLyricsClient
+    private let signIn: any AppleMusicSignIn
+    private var appleWasConnected = false
+    #if DEBUG
+    /// Runs an Apple lookup for a song id posted from outside, while the module runs.
+    private(set) var appleDebugTrigger: AppleLyricsDebugTrigger?
+    /// Where the trigger listens; tests put their own in place of the distributed notification center.
+    var debugObserve = AppleLyricsDebugTrigger.systemObserve
+    #endif
+    private var source: (any NowPlayingSource)?
+    /// Folds the adapter's lines into the system's session, which `sources` merges with the rest.
+    private var systemReducer = NowPlayingReducer()
+    private var spectrumFeed: SpectrumFeed?
+    private var context: ModuleContext?
+    private var policy = ActivityPolicy()
+    private var showActivity = true
+    private var realSpectrum = false
+    private var lyricsEnabled = false
+    private var lyricsUnderNotch = false
+    /// Works out the tint of each cover once and keeps it by track; hands it to `store`.
+    private let tinter: ArtworkTinter
+    private var tintEnabled = true
+    /// Works out the tint of the source the player shows when that is not the primary one.
+    private let displayTinter: ArtworkTinter
+    private var lyricsService: LyricsService?
+    /// Track the lyrics were asked for (or are shown for); nil while lyrics are off or the track has no key.
+    private var lyricsTrack: TrackKey?
+    private var lyricsTask: Task<Void, Never>?
+    /// Waits for the title of what a browser plays to hold still before lyrics are asked for it.
+    private var lyricsDebounce: ScheduledAction?
+    /// A page chooses its own title, and could make a lookup at lrclib.net of each one it tries: the lookup waits this long for a title
+    /// that has held still.
+    static let browserLyricsDelay: Duration = .seconds(2)
+    /// Counts track changes, so a retry planned for an earlier track finds out it is stale.
+    private var lyricsEpoch = 0
+    /// What the Settings rows show of the Chrome bridge, and where its buttons put the files.
+    let youtubeBridge = YouTubeBridgeModel()
+    /// nil is the standard place in the module's storage.
+    private let youtubeSocketPath: String?
+    /// nil is the real installer, which needs the module's storage and so is made with the Settings rows.
+    private let youtubeSetup: YouTubeBridgeSetup?
+    /// Whether the module brings an installed Chrome bridge up to date when it starts. The app's own module does, with the real
+    /// folders; a module made for a test never does unless the test asks, with folders of its own.
+    private let updatesInstalledBridge: Bool
+    private var youtubeCaptionsEnabled = false
+    /// Where the bridge's diagnostics go (category `youtube-bridge`): the receiver's, the matching decisions, the drift.
+    private let youtubeLog: YouTubeBridgeLog
+    /// What the last logged matching decision was, so that a decision is logged when it changes and not at every update.
+    private var loggedMatchDecision: String?
+    /// When the drift of the extension's clock against the notch's was last logged.
+    private var lastDriftLoggedAt: Date?
+    /// What the extension has sent; memory only.
+    private var captionStore = YouTubeCaptionStore()
+    /// Set while the setting is on and the socket could be opened.
+    private var youtubeServer: YouTubeBridgeServer?
+    /// The socket could not be opened; it is tried again only after the setting was switched off and on.
+    private var youtubeListenFailed = false
+    /// The captions the lyric row shows, nil while it shows something else. Compared, so the row is assigned once per
+    /// arrival rather than with every position update.
+    private var shownCaptions: (videoID: String, revision: Int)?
+    /// The subtitle files the user loaded, by film; the Media tab reads the one for what plays now.
+    let subtitles = SubtitleBook()
+    /// The subtitles the lyric row shows, nil while it shows something else. Compared, like `shownCaptions`.
+    private var shownSubtitles: SubtitleBook.Entry?
+    /// A subtitle file is some hundreds of kilobytes; anything much larger is not one.
+    static let maxSubtitleBytes = 10_000_000
+    /// Track the published activity belongs to; nil while none is published. Compared so the activity is
+    /// set once per track: everything that changes while a track plays is read by its views from `store`.
+    private var publishedTrack: TrackIdentity?
+    /// Whether the published activity carries the lyric strip. Unlike the track it can change while a track plays
+    /// (lyrics arrive, playback pauses), and each change republishes the activity.
+    private var publishedStrip = false
+    /// Keeps the strip up through a track change, a seek or a stall, so the notch does not shrink and grow again.
+    private var stripHold = LyricStripHold()
+    private var stripHoldTimer: ScheduledAction?
+    private var scheduledStripDeadline: Date?
+    /// Skips sent to the extension and not answered yet, oldest first.
+    private var unansweredSkips: [UnansweredSkip] = []
+    private var unansweredSkipCount = 0
+    /// The latest seek, until the player reports the position it moved to: quick taps on a seek button start from it. It is for one
+    /// source: another source's progress is not waiting for it.
+    private var pendingSeek: PendingSeek?
+    private var pendingSeekSource: MediaSourceID?
+    /// The latest press the extension took; it explains a title that is about to change (see `SkipRoute.titleChangeWindow`).
+    private var bridgedSkip: SkipRoute.BridgedSkip?
+    /// Whether the lock screen view is on offer; its view reads `store`, so it is set once and cleared once.
+    private var lockScreenOffered = false
+    private var deadlineTimer: ScheduledAction?
+    private var scheduledDeadline: Date?
+    /// The floating lyrics panel and what it follows, while the module runs.
+    private var lyricsPanel: LyricsPanelHost?
+    /// Puts the lyrics panel on the screen; tests record it instead.
+    var presentLyricsPanel: (NSPanel) -> Void = { $0.orderFrontRegardless() }
+    /// Activates the playing application window; tests mock it instead.
+    var activateApp: @MainActor (String, String?) -> Bool = { bundleID, title in
+        PlayerApp.activate(bundleIdentifier: bundleID, title: title)
+    }
+    /// The displays the panel is placed on, the main one first; tests give their own.
+    var lyricsPanelDisplays: @MainActor () -> [PanelDisplay] = LyricsPanelController.screens
+    var lyricsPanelController: LyricsPanelController? { lyricsPanel?.controller }
+    var lyricsPanelModel: LyricsPanelModel? { lyricsPanel?.model }
+    /// The subtitles over a fullscreen film, while the module runs.
+    private(set) var subtitleOverlay: FullscreenSubtitleOverlay?
+    /// The subtitles drawn in the film's own page, when it is a tab the extension sees.
+    private var pageSubtitles: PageSubtitles?
+    /// Whether the settings for them are on, as last read.
+    private var fullscreenSubtitlesEnabled = false
+    private var floatingSubtitlesEnabled = false
+    /// What the overlay reads of the system and how it puts its window up; tests give their own.
+    var subtitleOverlayEnvironment = FullscreenSubtitleOverlay.Environment.system
+    var presentSubtitleOverlay: (NSPanel) -> Void = { $0.orderFrontRegardless() }
+    /// Listening to the film to move its subtitles onto the speech, while the module runs.
+    private(set) var subtitleAlignment: SubtitleAlignment?
+    /// The language model another module lends (the Translation module's LLM), asked which film a page plays when subtitles are
+    /// searched for; without one the page's title is searched for as it is. The app sets it.
+    public var languageModel: (any LanguageModel)?
+    /// Finding subtitles for the film on subtitlecat, while the module runs.
+    private(set) var subtitleFinder: SubtitleFinder?
+    /// What listens; tests give their own.
+    var makeSpeechSource: (_ watching: Bool) -> any SpeechSource = { watching in
+        DialogueListener(overlap: watching ? DialogueListener.watchingOverlap : DialogueListener.listeningOverlap)
+    }
+
+    /// The app passes the bundled mediaremote-adapter script and framework; nil when the build did not include them, and the
+    /// equalizer state it shares with the Âm thanh module, which the tab's EQ row switches profiles in.
+    public convenience init(adapterScript: URL?, adapterFramework: URL?, equalizer: EqualizerState? = nil) {
+        // Creating the tap object does nothing yet: it touches Core Audio only when it starts.
+        let spectrum = SystemAudioTap(bandCount: NowPlayingBars.barCount)
+        let client = URLSessionHTTPClient()
+        // Reading Music and Spotify sends them Apple Events only once the user lets MyNotch (see `MediaSourceHub`).
+        let controls = Self.systemControls()
+        if let adapterScript, let adapterFramework {
+            self.init(
+                makeSource: { scheduler in AdapterProcess(script: adapterScript, framework: adapterFramework, scheduler: scheduler) },
+                spectrum: spectrum,
+                lyricsClient: client,
+                tokens: KeychainTokenStore(),
+                signIn: AppleMusicLoginWindow(),
+                volume: .system(),
+                appControls: controls, appEnvironment: .system, updatesInstalledBridge: true, equalizer: equalizer
+            )
+        } else {
+            self.init(
+                makeSource: nil, spectrum: spectrum, lyricsClient: client,
+                tokens: KeychainTokenStore(), signIn: AppleMusicLoginWindow(), volume: .system(),
+                appControls: controls, appEnvironment: .system, updatesInstalledBridge: true, equalizer: equalizer
+            )
+        }
+    }
+
+    /// For tests: lines come from `source` instead of perl, levels from `spectrum` instead of a system audio tap,
+    /// lyrics from `lyricsClient` instead of lrclib.net and Apple, the sign-in from `tokens` instead of the Keychain,
+    /// the sign-in window is `signIn`, the output volume is `volume`. No defaults for those but the volume, which is a device
+    /// without one, so no test reaches the network, the Keychain or the speakers by accident.
+    convenience init(
+        source: any NowPlayingSource,
+        spectrum: any SpectrumSource,
+        lyricsClient: any HTTPClient,
+        tokens: any TokenStore,
+        signIn: any AppleMusicSignIn,
+        lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed,
+        youtubeSocketPath: String? = nil,
+        youtubeSetup: YouTubeBridgeSetup? = nil,
+        youtubeLog: YouTubeBridgeLog = .silent,
+        volume: VolumeModel = VolumeModel(hardware: NoVolumeHardware(), queue: SerialVolumeQueue()),
+        tintExtract: @escaping ArtworkTinter.Extract = ArtworkTinter.backgroundExtract,
+        appControls: [any AppPlayerControl] = [],
+        appEnvironment: MediaAppEnvironment = .inert,
+        updatesInstalledBridge: Bool = false,
+        equalizer: EqualizerState? = nil
+    ) {
+        self.init(
+            makeSource: { _ in source }, spectrum: spectrum, lyricsClient: lyricsClient,
+            tokens: tokens, signIn: signIn, volume: volume, lookUpApp: lookUpApp, youtubeSocketPath: youtubeSocketPath,
+            youtubeSetup: youtubeSetup, youtubeLog: youtubeLog, tintExtract: tintExtract,
+            appControls: appControls, appEnvironment: appEnvironment, updatesInstalledBridge: updatesInstalledBridge,
+            equalizer: equalizer
+        )
+    }
+
+    /// Music and Spotify through Apple Events, on the system's script queue; Spotify's cover is fetched from its own image service.
+    private static func systemControls() -> [any AppPlayerControl] {
+        let runner = SystemPlayerScriptRunner()
+        let fetcher = SpotifyArtworkFetcher()
+        return KnownPlayer.allCases.map { player in
+            AppleScriptPlayerControl(player: player, runner: runner, fetchArtwork: { await fetcher.fetch($0) })
+        }
+    }
+
+    private init(
+        makeSource: ((any Scheduler) -> any NowPlayingSource)?,
+        spectrum: any SpectrumSource,
+        lyricsClient: any HTTPClient,
+        tokens: any TokenStore,
+        signIn: any AppleMusicSignIn,
+        volume: VolumeModel,
+        lookUpApp: @escaping @MainActor (String) -> PlayerApp? = PlayerApp.installed,
+        youtubeSocketPath: String? = nil,
+        youtubeSetup: YouTubeBridgeSetup? = nil,
+        youtubeLog: YouTubeBridgeLog = .system,
+        tintExtract: @escaping ArtworkTinter.Extract = ArtworkTinter.backgroundExtract,
+        appControls: [any AppPlayerControl] = [],
+        appEnvironment: MediaAppEnvironment = .inert,
+        updatesInstalledBridge: Bool = false,
+        equalizer: EqualizerState? = nil
+    ) {
+        self.volume = volume
+        self.equalizer = equalizer
+        self.lookUpApp = lookUpApp
+        self.youtubeSocketPath = youtubeSocketPath
+        self.youtubeSetup = youtubeSetup
+        self.updatesInstalledBridge = updatesInstalledBridge
+        self.youtubeLog = youtubeLog
+        self.makeSource = makeSource
+        self.spectrum = spectrum
+        self.lyricsClient = lyricsClient
+        appleAccount = AppleMusicAccount(tokens: tokens)
+        appleClient = AppleMusicLyricsClient(client: lyricsClient, account: appleAccount)
+        self.signIn = signIn
+        let store = NowPlayingStore(lookUpApp: lookUpApp)
+        self.store = store
+        tinter = ArtworkTinter(extract: tintExtract) { [weak store] palette in store?.showTint(palette) }
+        let displayStore = NowPlayingStore(lookUpApp: lookUpApp)
+        self.displayStore = displayStore
+        displayTinter = ArtworkTinter(extract: tintExtract) { [weak displayStore] palette in displayStore?.showTint(palette) }
+        sources = MediaSourceHub(environment: appEnvironment, controls: appControls)
+    }
+
+    public func start(_ context: ModuleContext) async throws(ModuleError) {
+        guard let makeSource else {
+            throw .unavailable(reason: "Thiếu MediaRemoteAdapter trong app")
+        }
+        self.context = context
+        store.reset()
+        displayStore.reset()
+        systemReducer = NowPlayingReducer()
+        policy = ActivityPolicy()
+        publishedTrack = nil
+        publishedStrip = false
+        resetStripHold()
+        lockScreenOffered = false
+        spectrumFeed = SpectrumFeed(source: spectrum, store: store, scheduler: context.scheduler, logger: context.logger)
+        lyricsTrack = nil
+        subtitles.open(directory: context.storage.directory)
+        appleAccount.load()
+        lyricsService = LyricsService(
+            client: lyricsClient,
+            cacheDirectory: context.storage.cachesDirectory.appending(path: "lyrics", directoryHint: .isDirectory),
+            scheduler: context.scheduler,
+            apple: appleClient
+        )
+        #if DEBUG
+        if let lyricsService {
+            let trigger = AppleLyricsDebugTrigger(
+                lookUp: { [weak lyricsService] id in await lyricsService?.appleLookup(forSongID: id) ?? .unavailable("Lyrics service stopped") },
+                observe: debugObserve
+            )
+            trigger.start()
+            appleDebugTrigger = trigger
+        }
+        #endif
+        applySettings(context.settings)
+        registerHotkeys(context.hotkeys)
+        let settings = context.settings
+        let keys = MediaSettingsKeys(settings)
+        let panel = LyricsPanelHost(
+            store: store, settings: settings, scheduler: context.scheduler, displays: lyricsPanelDisplays, present: presentLyricsPanel,
+            alsoTells: displayStore
+        )
+        lyricsPanel = panel
+        panel.apply()
+        let overlay = FullscreenSubtitleOverlay(
+            store: store, scheduler: context.scheduler, environment: subtitleOverlayEnvironment, present: presentSubtitleOverlay
+        )
+        // The strip under the notch leaves the subtitles out while they are over the film.
+        overlay.onChange = { [weak self] in
+            self?.refreshActivity()
+            self?.updatePageSubtitles()
+        }
+        subtitleOverlay = overlay
+        overlay.setBottomGap(settings.value(keys.fullscreenSubtitlesHeight))
+        overlay.setScale(settings.value(keys.floatingSubtitlesScale))
+        // Dragged, pinched or scrolled on the film: remembered for the next one.
+        overlay.onBottomGapChanged = { settings.set($0, for: keys.fullscreenSubtitlesHeight) }
+        overlay.onScaleChanged = { settings.set($0, for: keys.floatingSubtitlesScale) }
+        pageSubtitles = PageSubtitles(store: store, scheduler: context.scheduler) { [weak self] subtitle, connection in
+            self?.youtubeServer?.send(subtitle, toConnection: connection) ?? false
+        }
+        pageSubtitles?.gap = settings.value(keys.fullscreenSubtitlesHeight)
+        pageSubtitles?.scale = settings.value(keys.floatingSubtitlesScale)
+        updateSubtitleOverlay()
+        let alignment = SubtitleAlignment(scheduler: context.scheduler, makeSource: makeSpeechSource)
+        alignment.watchWanted = settings.value(keys.subtitleWatch)
+        alignment.onRealigned = { [weak context] delay in
+            context?.presenter.showToast(AnyView(SubtitleAlignmentToast(text: SubtitleAlignmentToast.realignedText(delay: delay))), duration: .seconds(4))
+        }
+        alignment.onFinish = { [weak self, weak context] phase in
+            // Watching again once "Tự căn" is over, whatever it came to.
+            self?.updateSubtitleWatch()
+            guard let text = SubtitleAlignmentToast.text(for: phase) else { return }
+            context?.logger.info("Subtitle alignment: \(text, privacy: .public)")
+            context?.presenter.showToast(AnyView(SubtitleAlignmentToast(text: text)), duration: .seconds(5))
+        }
+        alignment.log = { [weak context] text in context?.logger.notice("Subtitle alignment: \(text, privacy: .public)") }
+        subtitleAlignment = alignment
+        let finder = SubtitleFinder(client: lyricsClient, model: { [weak self] in self?.languageModel }, alignment: alignment)
+        finder.log = { [weak context] text in context?.logger.notice("Subtitle search: \(text, privacy: .public)") }
+        finder.onFinish = { [weak self, weak context] text in
+            context?.logger.notice("Subtitle search: \(text, privacy: .public)")
+            context?.presenter.showToast(AnyView(SubtitleAlignmentToast(text: text)), duration: .seconds(5))
+            self?.updateSubtitleWatch()
+        }
+        subtitleFinder = finder
+        context.run { [weak self] in
+            let changes = Observations {
+                (
+                    settings.value(keys.showActivity), settings.value(keys.pauseGraceSeconds),
+                    settings.value(keys.hiddenApps), settings.value(keys.realSpectrum), settings.value(keys.lyrics),
+                    settings.value(keys.youtubeCaptions), settings.value(keys.lyricsUnderNotch), settings.value(keys.controlButtons),
+                    settings.value(keys.karaoke), settings.value(keys.tintFromArtwork), settings.value(keys.spectrumColorMode),
+                    settings.value(keys.spectrumGradientStart), settings.value(keys.spectrumGradientEnd),
+                    settings.value(keys.fullscreenSubtitles), settings.value(keys.fullscreenSubtitlesHeight),
+                    settings.value(keys.subtitleWatch), settings.value(keys.floatingSubtitles),
+                    settings.value(keys.floatingSubtitlesScale)
+                )
+            }
+            for await _ in changes { self?.settingsChanged() }
+        }
+        // Not in the loop above: moving the panel writes its frame, which must not make the module look at its activity again.
+        context.run { [weak self] in
+            let changes = Observations {
+                (
+                    settings.value(keys.lyricsPanel), settings.value(keys.lyricsPanelFontSize),
+                    settings.value(keys.lyricsPanelOpacity), settings.value(keys.lyricsPanelBackground),
+                    settings.value(keys.lyricsPanelClickThrough)
+                )
+            }
+            for await _ in changes { self?.lyricsPanel?.apply() }
+        }
+        let store = store
+        context.run { [weak self] in
+            for await _ in Observations({ store.spectrumViewCount }) { self?.updateSpectrum() }
+        }
+        let account = appleAccount
+        context.run { [weak self] in
+            for await _ in Observations({ account.status }) { self?.appleStatusChanged() }
+        }
+        sources.onChange = { [weak self] change in self?.sourcesChanged(change) }
+        sources.start(scheduler: context.scheduler, permissions: context.permissions)
+        let source = makeSource(context.scheduler)
+        self.source = source
+        store.setCanLike(source.canLike)
+        source.start(
+            onLine: { [weak self] line in self?.receive(line) },
+            onFailure: { [weak self] reason in self?.sourceFailed(reason) }
+        )
+        updateInstalledBridge(context)
+    }
+
+    /// A bridge the user installed before is brought up to the app's (see `YouTubeBridgeInstaller.updateIfNeeded`): done here, at the
+    /// start, because nobody presses "Cài cầu nối cho Chrome" again after an update of the app. Then the user is told once what to do:
+    /// Chrome keeps running the old extension until it is reloaded. Never installs for a user who did not, and never fails the start.
+    private func updateInstalledBridge(_ context: ModuleContext) {
+        guard updatesInstalledBridge else { return }
+        let setup = youtubeSetup ?? .system(storageDirectory: context.storage.directory)
+        do {
+            guard let update = try setup.installer.updateIfNeeded() else { return }
+            youtubeLog("bridge updated extension=\(update.installedVersion ?? "unknown") now=\(update.bundledVersion) host=\(update.refreshedHost ? "refreshed" : "same")")
+            youtubeBridge.noteUpdated(to: update.bundledVersion)
+            context.presenter.showToast(
+                AnyView(YouTubeBridgeUpdateToast(text: YouTubeBridgeModel.updateMessage(version: update.bundledVersion))), duration: .seconds(6)
+            )
+        } catch {
+            // Only a number: an error's text can hold a path.
+            youtubeLog("bridge update failed code=\((error as NSError).code)")
+        }
+    }
+
+    public func stop() async {
+        tinter.stop()
+        displayTinter.stop()
+        sources.onChange = { _ in }
+        sources.stop()
+        displayStore.reset()
+        lyricsPanel?.close()
+        lyricsPanel = nil
+        subtitleOverlay?.close()
+        subtitleOverlay = nil
+        pageSubtitles?.update(target: nil)
+        pageSubtitles = nil
+        subtitleFinder?.cancel()
+        subtitleFinder = nil
+        subtitleAlignment?.reset()
+        subtitleAlignment = nil
+        source?.stop()
+        source = nil
+        store.setCanLike(false)
+        pendingSeek = nil
+        pendingSeekSource = nil
+        volume.stopWatching()
+        spectrumFeed?.shutDown()
+        spectrumFeed = nil
+        lyricsTask?.cancel()
+        lyricsTask = nil
+        lyricsDebounce?.cancel()
+        lyricsDebounce = nil
+        lyricsTrack = nil
+        shownCaptions = nil
+        shownSubtitles = nil
+        subtitles.close()
+        #if DEBUG
+        appleDebugTrigger?.stop()
+        appleDebugTrigger = nil
+        #endif
+        lyricsService?.shutDown()
+        lyricsService = nil
+        youtubeCaptionsEnabled = false
+        stopYouTubeBridge()
+        signIn.close()
+        context = nil
+        cancelDeadline()
+        policy = ActivityPolicy()
+        publishedTrack = nil
+        publishedStrip = false
+        resetStripHold()
+        lockScreenOffered = false
+        store.reset()
+    }
+
+    public func makeTab() -> NotchTab? {
+        NotchTab(
+            id: descriptor.id, title: "Media", systemImage: "music.note", preferredHeight: MediaTabView.preferredHeight,
+            content: AnyView(MediaTabView(
+                store: store, actions: tabActions, volume: volume, sources: sources.model, displayStore: displayStore,
+                icons: PlayerAppCache(lookUp: lookUpApp), equalizer: equalizer, subtitles: subtitleControls
+            ))
+        )
+    }
+
+    public func makeSettingsView(_ environment: ModuleSettingsEnvironment) -> AnyView? {
+        let keys = MediaSettingsKeys(environment.settings)
+        return AnyView(MediaSettingsView(
+            showActivity: environment.settings.binding(keys.showActivity),
+            pauseGraceSeconds: environment.settings.binding(keys.pauseGraceSeconds),
+            hiddenApps: environment.settings.binding(keys.hiddenApps),
+            realSpectrum: environment.settings.binding(keys.realSpectrum),
+            tintFromArtwork: environment.settings.binding(keys.tintFromArtwork),
+            spectrumColorMode: environment.settings.binding(keys.spectrumColorMode),
+            spectrumGradientStart: environment.settings.binding(keys.spectrumGradientStart),
+            spectrumGradientEnd: environment.settings.binding(keys.spectrumGradientEnd),
+            lyrics: environment.settings.binding(keys.lyrics),
+            youtubeCaptions: environment.settings.binding(keys.youtubeCaptions),
+            lyricsUnderNotch: environment.settings.binding(keys.lyricsUnderNotch),
+            controlButtons: environment.settings.binding(keys.controlButtons),
+            karaoke: environment.settings.binding(keys.karaoke),
+            lyricsPanel: environment.settings.binding(keys.lyricsPanel),
+            lyricsPanelFontSize: environment.settings.binding(keys.lyricsPanelFontSize),
+            lyricsPanelOpacity: environment.settings.binding(keys.lyricsPanelOpacity),
+            lyricsPanelBackground: environment.settings.binding(keys.lyricsPanelBackground),
+            lyricsPanelClickThrough: environment.settings.binding(keys.lyricsPanelClickThrough),
+            fullscreenSubtitles: environment.settings.binding(keys.fullscreenSubtitles),
+            youtubeBridge: youtubeBridgeModel(for: environment),
+            store: store,
+            sources: sources.model,
+            appleAccount: appleAccount,
+            connectAppleMusic: { [weak self] in self?.connectAppleMusic() },
+            disconnectAppleMusic: { [weak self] in Task { await self?.disconnectAppleMusic() } }
+        ))
+    }
+
+    /// Installing the bridge turns `youtubeCaptions` on, since the captions come over a socket that is open only while it is.
+    func youtubeBridgeModel(for environment: ModuleSettingsEnvironment) -> YouTubeBridgeModel {
+        let settings = environment.settings
+        let key = MediaSettingsKeys(settings).youtubeCaptions
+        youtubeBridge.configure(
+            setup: youtubeSetup ?? .system(storageDirectory: environment.storage.directory),
+            didInstall: { settings.set(true, for: key) }
+        )
+        return youtubeBridge
+    }
+
+    /// Opens the sign-in window; the account is connected once the window has found the tokens. The page is only how
+    /// they are found: when the window is gone (signed in, failed, or given up) the tokens are in the Keychain or
+    /// never will be, so nothing of the web session stays behind, where the Settings rows offer no way to clear it.
+    func connectAppleMusic() {
+        signIn.open(
+            connect: { [appleClient] credentials in await appleClient.connect(credentials) },
+            closed: { [signIn] in await signIn.removeWebsiteData() }
+        )
+    }
+
+    /// Forgets the sign-in: the tokens in the Keychain and everything the sign-in window's web view stored.
+    func disconnectAppleMusic() async {
+        signIn.close()
+        appleAccount.disconnect()
+        await signIn.removeWebsiteData()
+    }
+
+    /// The lock screen's buttons: the Media tab's, through the same actions, but for the primary source whatever the tab shows, and
+    /// never asking the user for anything: nobody can answer a prompt on the lock screen.
+    var lockScreenTransport: LockScreenTransport { LockScreenTransport(store: store, actions: lockScreenActions) }
+
+    var lockScreenActions: MediaActions {
+        MediaActions(
+            send: { [weak self] command in self?.send(command, mayAsk: false) },
+            seek: { [weak self] seconds in self?.seek(toSeconds: seconds) },
+            press: { [weak self] button in self?.press(button, mayAsk: false) },
+            toggleLyricsPanel: { [weak self] in self?.lyricsPanel?.toggle() },
+            openPlayer: {},
+            restoreLyrics: { [weak self] in self?.setNotchSubtitles(true) }
+        )
+    }
+
+    /// What the notch follows acts on: the lock screen, the hotkeys. The primary source, whichever the Media tab is showing.
+    var actions: MediaActions {
+        MediaActions(
+            send: { [weak self] command in self?.send(command) },
+            seek: { [weak self] seconds in self?.seek(toSeconds: seconds) },
+            press: { [weak self] button in self?.press(button) },
+            toggleLyricsPanel: { [weak self] in self?.lyricsPanel?.toggle() },
+            openPlayer: { [weak self] in self?.openPlayer() },
+            restoreLyrics: { [weak self] in self?.setNotchSubtitles(true) }
+        )
+    }
+
+    /// What the Media tab's controls act on: the source the player shows, which is the primary one until the user chooses another.
+    var tabActions: MediaActions {
+        MediaActions(
+            send: { [weak self] command in self?.send(command, to: self?.sources.book.displayedID) },
+            seek: { [weak self] seconds in self?.seek(toSeconds: seconds, to: self?.sources.book.displayedID) },
+            press: { [weak self] button in self?.press(button, to: self?.sources.book.displayedID) },
+            toggleLyricsPanel: { [weak self] in self?.lyricsPanel?.toggle() },
+            openPlayer: { [weak self] in self?.openPlayer(for: self?.sources.book.displayedID) },
+            restoreLyrics: { [weak self] in self?.setNotchSubtitles(true) }
+        )
+    }
+
+    /// Brings the playing application window to the front.
+    func openPlayer(for id: MediaSourceID? = nil) {
+        let targetBundleID: String?
+        let title: String?
+        if let id, let entry = sources.book.entry(id) {
+            targetBundleID = entry.app ?? entry.state.playerBundleIdentifier
+            title = entry.state.title
+        } else if let displayedID = sources.book.displayedID, let entry = sources.book.entry(displayedID) {
+            targetBundleID = entry.app ?? entry.state.playerBundleIdentifier
+            title = entry.state.title
+        } else {
+            targetBundleID = displayStore.state.playerBundleIdentifier ?? store.state.playerBundleIdentifier
+            title = displayStore.state.title ?? store.state.title
+        }
+        guard let bundleID = targetBundleID, !bundleID.isEmpty else { return }
+        _ = activateApp(bundleID, title)
+    }
+
+    /// Where a command goes, for the source it is for.
+    private enum Route {
+        /// The system's now-playing session (MediaRemote through the adapter, and for a YouTube video the extension's skip).
+        case system(NowPlayingState)
+        case app(String)
+        case tab(TabRef)
+    }
+
+    /// The source a command is for (the primary one by default) and how to reach it: through the system when the system plays it,
+    /// else through the app's own Apple Events or the extension. With no source at all the system is asked, as it always was.
+    private func route(for id: MediaSourceID?) -> Route {
+        guard let entry = id.flatMap({ sources.book.entry($0) }) ?? sources.book.primary else { return .system(store.state) }
+        if entry.isSystemBacked { return .system(entry.state) }
+        if let tab = entry.tab { return .tab(tab) }
+        if let app = entry.app { return .app(app) }
+        return .system(entry.state)
+    }
+
+    /// Next and previous of a video that plays in Chrome go to the extension, which presses the player's own button, when it
+    /// has a live session for that video: Chrome ignores MediaRemote's next and previous there. Whatever else is sent
+    /// goes to MediaRemote, as does a press the extension does not take (see `sendToExtension`). A source the system does not play
+    /// is controlled through its own: Music and Spotify by Apple Events (the first press asks the user), a tab by the extension.
+    /// - Parameter mayAsk: the user can be asked for the Automation permission now; the lock screen's buttons pass false, and a press of
+    ///   theirs on an app that was not allowed yet does nothing and is asked of the user at the next interaction with the open notch.
+    func send(_ command: MediaCommand, to id: MediaSourceID? = nil, mayAsk: Bool = true) {
+        switch route(for: id) {
+        case .system(let state):
+            if let action = command.youTubeCommand, skipRoute(for: state) == .bridge {
+                sendToExtension(command, as: action)
+                return
+            }
+            source?.send(command)
+        case .app(let bundleID):
+            if let command = command.appCommand { sources.perform(command, onApp: bundleID, mayAsk: mayAsk) }
+        case .tab(let ref):
+            if let action = command.tabAction { sendToTab(ref, action) }
+        }
+    }
+
+    /// Where Next and Previous go for what plays now.
+    func skipRoute(at now: Date = Date()) -> SkipRoute {
+        skipRoute(for: store.state, at: now)
+    }
+
+    private func skipRoute(for state: NowPlayingState, at now: Date = Date()) -> SkipRoute {
+        SkipRoute.decide(for: state, in: captionStore, now: now, after: bridgedSkip)
+    }
+
+    /// The hosts connected to the socket (for tests).
+    var youtubeServerConnectionCount: Int { youtubeServer?.connectionCount ?? 0 }
+
+    /// Asks the Chrome that owns the tab to do something to it. Nothing answers for a tab the way the extension does for a skip: the
+    /// page reports what it did, and the player follows.
+    private func sendToTab(_ ref: TabRef, _ action: TabCommand.Action) {
+        guard let youtubeServer, youtubeServer.send(TabCommand(tab: ref.tab, action: action), toConnection: ref.connection) else {
+            youtubeLog("tab command not sent action=\(action.word)")
+            return
+        }
+        youtubeLog("tab command sent action=\(action.word)")
+    }
+
+    /// Sends a volume adjustment command to all Chrome tabs across all active extension connections.
+    @discardableResult
+    public func sendChromeVolume(volume: Double, isMuted: Bool) -> Bool {
+        guard let youtubeServer else { return false }
+        let command = TabCommand(tab: 0, action: .volume(volume: volume, muted: isMuted))
+        let sent = youtubeServer.sendToAll(command)
+        if sent {
+            youtubeLog("broadcast volume sent volume=\(volume) muted=\(isMuted)")
+        }
+        return sent
+    }
+
+    /// Writes the command to the host and waits `SkipRoute.answerTimeout` for the extension to answer it (it does, with a
+    /// diagnostic, whether or not it could do it). Nothing answers when the host or the extension is of a version that does not
+    /// know commands, which an app update can leave behind; that press goes to MediaRemote instead. So does a press the
+    /// extension's service worker could not hand to a tab, since nothing was done. Any other answer, "unavailable" included,
+    /// ends it: nothing else is tried.
+    private func sendToExtension(_ command: MediaCommand, as action: YouTubeCommand) {
+        guard let youtubeServer, youtubeServer.send(action) else {
+            fallBackToMediaRemote(command, reason: "no-host")
+            return
+        }
+        youtubeLog("command sent action=\(action.rawValue)")
+        // The state can be empty between two videos, when the player is the one of the press before.
+        bridgedSkip = SkipRoute.BridgedSkip(at: Date(), player: store.state.playerBundleIdentifier ?? bridgedSkip?.player)
+        guard let context else { return }
+        unansweredSkipCount += 1
+        let id = unansweredSkipCount
+        let timer = context.scheduler.schedule(after: SkipRoute.answerTimeout) { [weak self] in self?.skipUnanswered(id) }
+        unansweredSkips.append(UnansweredSkip(id: id, command: command, action: action, timer: timer))
+    }
+
+    private func skipUnanswered(_ id: Int) {
+        guard let index = unansweredSkips.firstIndex(where: { $0.id == id }) else { return }
+        let skip = unansweredSkips.remove(at: index)
+        fallBackToMediaRemote(skip.command, reason: "no-answer")
+    }
+
+    /// MediaRemote does what the extension did not, so no title change of the extension's is expected any more.
+    private func fallBackToMediaRemote(_ command: MediaCommand, reason: String) {
+        bridgedSkip = nil
+        youtubeLog("skip fallback=mediaremote reason=\(reason)")
+        source?.send(command)
+    }
+
+    /// The extension answered a command: the oldest press waiting for that answer is done. A worker's answer says that the
+    /// command was not delivered, so that press goes to MediaRemote, which cannot double a skip nothing performed.
+    private func commandAnswered(_ answer: YouTubeDiag.CommandAnswer) {
+        let index = unansweredSkips.firstIndex { skip in
+            if case .content(let action, _) = answer { skip.action == action } else { true }
+        }
+        guard let index else { return }
+        let skip = unansweredSkips.remove(at: index)
+        skip.timer.cancel()
+        if case .worker = answer { fallBackToMediaRemote(skip.command, reason: "worker") }
+    }
+
+    private func dropUnansweredSkips() {
+        for skip in unansweredSkips { skip.timer.cancel() }
+        unansweredSkips = []
+        bridgedSkip = nil
+    }
+
+    func seek(toSeconds seconds: Double, to id: MediaSourceID? = nil, at now: Date = Date()) {
+        let target = id ?? sources.book.primaryID
+        let state = (id.flatMap { sources.book.entry($0) } ?? sources.book.primary)?.state ?? store.state
+        pendingSeek = PendingSeek(seconds: seconds, anchor: state.elapsedAnchor, date: now)
+        pendingSeekSource = target
+        switch route(for: id) {
+        case .system: source?.seek(toSeconds: seconds)
+        case .app(let bundleID): sources.perform(.seek(seconds: seconds), onApp: bundleID)
+        case .tab(let ref): sendToTab(ref, .seek(seconds: seconds))
+        }
+    }
+
+    /// A button beside play and pause: what it does depends on what the player reports (see `MediaControlButton`), and a
+    /// button that cannot be used does nothing. Next and previous go through `send`, so they take the same route as the hotkeys.
+    /// `id` is the source it is pressed for: the primary one unless the Media tab shows another.
+    func press(_ button: MediaControlButton, to id: MediaSourceID? = nil, mayAsk: Bool = true, at now: Date = Date()) {
+        let target = id ?? sources.book.primaryID
+        let entry = id.flatMap { sources.book.entry($0) } ?? sources.book.primary
+        let state = entry?.state ?? store.state
+        // The volume slider is the row's own: it has no effect on the player and is never open from here.
+        let waiting = pendingSeek.flatMap { pendingSeekSource == target && $0.isPending(for: state, at: now) ? $0.seconds : nil }
+        let controlContext = MediaControlContext(
+            state: state, lyricsAreOn: store.lyricsAreOn, lyricsHidden: store.lyricsHidden, canLike: store.canLike && (entry?.isSystemBacked ?? true),
+            hasVolume: volume.isAvailable, volumeIsOpen: false, pendingSeek: waiting
+        )
+        switch button.effect(in: controlContext, at: now) {
+        case .command(let command): send(command, to: id, mayAsk: mayAsk)
+        case .seek(let seconds): seek(toSeconds: seconds, to: id, at: now)
+        case .shuffle(let mode): if isSystemBacked(id) { source?.setShuffle(mode) }
+        case .repeatMode(let mode): if isSystemBacked(id) { source?.setRepeat(mode) }
+        case .toggleLyrics:
+            store.toggleLyricsHidden()
+            refreshActivity()
+        case nil: break
+        }
+    }
+
+    /// Whether the system plays the source (the primary one by default), so that its shuffle and repeat are the system's to set.
+    private func isSystemBacked(_ id: MediaSourceID?) -> Bool {
+        if case .system = route(for: id) { return true }
+        return false
+    }
+
+    private func registerHotkeys(_ hotkeys: ModuleHotkeys) {
+        // No defaults: the keyboard's media keys already do this; these are for users who want other keys.
+        hotkeys.register("mediaPlayPause", title: "Phát/dừng nhạc") { [weak self] in self?.send(.togglePlayPause) }
+        hotkeys.register("mediaNext", title: "Bài sau") { [weak self] in self?.send(.nextTrack) }
+        hotkeys.register("mediaPrevious", title: "Bài trước") { [weak self] in self?.send(.previousTrack) }
+        hotkeys.register("lyricsPanel", title: "Bật/tắt bảng lời nổi") { [weak self] in self?.lyricsPanel?.toggle() }
+        hotkeys.register("toggleSubtitles", title: "Bật/tắt phụ đề dưới notch") { [weak self] in self?.toggleNotchSubtitles() }
+    }
+
+    /// A line of the adapter: the system's session changed. It joins the other sources, which work out what the notch follows.
+    private func receive(_ line: String) {
+        let now = Date()
+        guard systemReducer.apply(line: line, receivedAt: now) == .applied else { return }
+        sources.setSystem(systemReducer.state)
+    }
+
+    /// The sources changed: the primary one is what `store` shows, and the player shows the one the user chose. The notch looks again
+    /// at what it follows for every line of the system's session, as it always did, and for anything else only when that changed.
+    private func sourcesChanged(_ change: MediaSourceHub.Change) {
+        let primary = sources.book.primary
+        let changed = store.show(primary?.state ?? .empty, source: primary?.id.rawValue ?? "none")
+        refreshDisplay()
+        guard context != nil, change == .system || changed else { return }
+        evaluate(at: Date())
+    }
+
+    /// The player's own store shows the chosen source while it is not the primary one, and nothing otherwise (the player then reads
+    /// `store`), so that no cover is kept twice.
+    private func refreshDisplay() {
+        guard let shown = sources.book.displayed, shown.id != sources.book.primaryID else {
+            displayStore.show(.empty, source: "none")
+            displayTinter.stop()
+            displayStore.showTint(nil)
+            return
+        }
+        displayStore.show(shown.state, source: shown.id.rawValue)
+        if tintEnabled, shown.state.isActive {
+            displayTinter.update(track: shown.state.trackIdentity, artwork: shown.state.artwork)
+        } else {
+            displayTinter.stop()
+            displayStore.showTint(nil)
+        }
+    }
+
+    private func sourceFailed(_ reason: String) {
+        context?.logger.error("Now playing stopped: \(reason, privacy: .public)")
+        // Commands would only start perl processes that fail like the stream did; a restart makes a new source.
+        source = nil
+        systemReducer = NowPlayingReducer()
+        sources.onChange = { _ in }
+        sources.setSystem(nil)
+        sources.onChange = { [weak self] change in self?.sourcesChanged(change) }
+        // The other sources do not depend on the adapter: they stay, and the tab shows them. Only a notch with nothing else to
+        // show says that the system's now playing could not be read.
+        if let primary = sources.book.primary {
+            store.show(primary.state, source: primary.id.rawValue)
+        } else {
+            store.fail(message: Self.blockedMessage)
+        }
+        refreshDisplay()
+        policy = ActivityPolicy(pauseGrace: policy.pauseGrace, hiddenBundleIDs: policy.hiddenBundleIDs)
+        cancelDeadline()
+        refreshActivity()
+        updateSpectrum()
+        refreshLyrics()
+    }
+
+    private func settingsChanged() {
+        guard let context else { return }
+        applySettings(context.settings)
+        evaluate(at: Date())
+    }
+
+    private func applySettings(_ settings: ModuleSettings) {
+        let keys = MediaSettingsKeys(settings)
+        showActivity = settings.value(keys.showActivity)
+        policy.pauseGrace = TimeInterval(settings.value(keys.pauseGraceSeconds))
+        policy.hiddenBundleIDs = Set(settings.value(keys.hiddenApps))
+        realSpectrum = settings.value(keys.realSpectrum)
+        lyricsEnabled = settings.value(keys.lyrics)
+        lyricsUnderNotch = settings.value(keys.lyricsUnderNotch)
+        youtubeCaptionsEnabled = settings.value(keys.youtubeCaptions)
+        fullscreenSubtitlesEnabled = settings.value(keys.fullscreenSubtitles)
+        subtitleOverlay?.setBottomGap(settings.value(keys.fullscreenSubtitlesHeight))
+        subtitleAlignment?.watchWanted = settings.value(keys.subtitleWatch)
+        floatingSubtitlesEnabled = settings.value(keys.floatingSubtitles)
+        subtitleOverlay?.setScale(settings.value(keys.floatingSubtitlesScale))
+        pageSubtitles?.gap = settings.value(keys.fullscreenSubtitlesHeight)
+        pageSubtitles?.scale = settings.value(keys.floatingSubtitlesScale)
+        for shown in [store, displayStore] {
+            shown.setControlLayout(settings.value(keys.controlButtons))
+            shown.setKaraokeEnabled(settings.value(keys.karaoke))
+        }
+        tintEnabled = settings.value(keys.tintFromArtwork)
+        store.setTintEnabled(tintEnabled)
+        displayStore.setTintEnabled(tintEnabled)
+        store.setSpectrumColors(
+            mode: settings.value(keys.spectrumColorMode), start: settings.value(keys.spectrumGradientStart),
+            end: settings.value(keys.spectrumGradientEnd)
+        )
+        updateLyricsOn()
+        updateYouTubeBridge()
+        refreshDisplay()
+    }
+
+    private func evaluate(at now: Date) {
+        policy.update(store.state, at: now)
+        subtitleAlignment?.noteState(store.state, at: now)
+        scheduleDeadline(from: now)
+        // The lyrics first: the activity's strip depends on which track's lyrics are in the store.
+        refreshLyrics()
+        refreshActivity()
+        updateSpectrum()
+        refreshTint()
+    }
+
+    /// Hands the tinter what plays, which it only looks at again when the track or its cover changes. Nothing is worked out while
+    /// the setting is off. The state is empty for a moment between two tracks, and the player keeps its tint through it, so that
+    /// it does not flash.
+    private func refreshTint() {
+        guard tintEnabled else {
+            tinter.stop()
+            store.showTint(nil)
+            return
+        }
+        guard store.state.isActive else { return }
+        tinter.update(track: store.state.trackIdentity, artwork: store.state.artwork)
+    }
+
+    /// Connecting changes what can be found for the track playing now, so it is looked up again. Losing the sign-in does
+    /// not: lyrics already shown stay, and the service stops asking Apple on its own.
+    private func appleStatusChanged() {
+        let isConnected = appleAccount.status.isConnected
+        defer { appleWasConnected = isConnected }
+        guard isConnected, !appleWasConnected else { return }
+        lyricsTrack = nil
+        refreshLyrics()
+    }
+
+    /// Asks for lyrics when another track starts while the setting is on; drops them when the setting turns off,
+    /// the track has no key (an advertisement, no length) or nothing plays. Position and play-state updates leave
+    /// the key as it is, so they never fetch.
+    private func refreshLyrics() {
+        defer {
+            updateSubtitleOverlay()
+            updateSubtitleWatch()
+        }
+        subtitles.setCurrentKey(SubtitleBook.key(for: store.state))
+        updateLyricsOn()
+        if let entry = subtitles.current {
+            showSubtitles(entry)
+            return
+        }
+        if shownSubtitles != nil {
+            // The film's subtitles were removed or another track started: what the track has otherwise is looked for again.
+            shownSubtitles = nil
+            lyricsTrack = nil
+            show(lyrics: nil)
+        }
+        if let captions = matchedCaptions() {
+            showCaptions(captions)
+            return
+        }
+        if shownCaptions != nil {
+            // What was fetched for the track was replaced by the captions, so the lookup starts again (from the cache if it can).
+            shownCaptions = nil
+            lyricsTrack = nil
+            show(lyrics: nil)
+        }
+        let track = lyricsEnabled ? TrackKey(store.state) : nil
+        guard track != lyricsTrack else { return }
+        lyricsTask?.cancel()
+        lyricsTask = nil
+        lyricsDebounce?.cancel()
+        lyricsDebounce = nil
+        lyricsTrack = track
+        lyricsEpoch += 1
+        // The lookup is under way before the activity looks at the lyrics, so a strip held for them knows they are coming.
+        if let track {
+            if store.state.isFromBrowser, let context {
+                // The title is the page's to choose: once per title that has held still, not once per title it tries.
+                lyricsDebounce = context.scheduler.schedule(after: Self.browserLyricsDelay) { [weak self] in self?.lyricsTitleHeld(track) }
+            } else {
+                fetchLyrics(for: track, mayRetry: true)
+            }
+        }
+        show(lyrics: nil)
+    }
+
+    private func lyricsTitleHeld(_ track: TrackKey) {
+        lyricsDebounce = nil
+        guard track == lyricsTrack else { return }
+        fetchLyrics(for: track, mayRetry: true)
+    }
+
+    /// Hands the lyrics to the store and the activity gets its say: its strip exists only while there are synced lyrics
+    /// (or is held for a moment while they are on their way).
+    private func show(lyrics: [LyricLine]?) {
+        store.showLyrics(lyrics)
+        refreshActivity()
+    }
+
+    private func fetchLyrics(for track: TrackKey, mayRetry: Bool) {
+        guard let lyricsService else { return }
+        lyricsTask = Task { [weak self] in
+            let result = await lyricsService.lyrics(for: track)
+            self?.receiveLyrics(result, for: track, mayRetry: mayRetry)
+        }
+    }
+
+    private func receiveLyrics(_ result: LyricsResult, for track: TrackKey, mayRetry: Bool) {
+        // The track may have changed while the answer was on its way.
+        guard track == lyricsTrack else { return }
+        // The lookup is over: nothing is pending any more, which lets a strip held for it go.
+        lyricsTask = nil
+        switch result {
+        case .synced(let lines):
+            show(lyrics: lines)
+        case .unavailable(let reason):
+            context?.logger.info("Lyrics unavailable: \(reason, privacy: .public)")
+            refreshActivity()
+            // A rate limit is no verdict on the track: ask once more when lrclib is open again.
+            guard mayRetry, let lyricsService, lyricsService.isCoolingDown else { return }
+            let epoch = lyricsEpoch
+            lyricsService.afterCooldown { [weak self] in
+                guard let self, lyricsEpoch == epoch else { return }
+                fetchLyrics(for: track, mayRetry: false)
+            }
+        case .plain:
+            store.showUnsyncedLyrics()
+            refreshActivity()
+        case .instrumental, .notFound:
+            refreshActivity()
+        }
+    }
+
+    /// Stops a lookup of lyrics from the web that is going or waiting, and forgets which track it was for.
+    private func stopLyricsLookup() {
+        guard lyricsTrack != nil else { return }
+        lyricsTask?.cancel()
+        lyricsTask = nil
+        lyricsDebounce?.cancel()
+        lyricsDebounce = nil
+        lyricsTrack = nil
+        lyricsEpoch += 1
+    }
+
+    /// The row is there while a setting gives it lyrics, or while what plays has subtitles the user loaded.
+    private func updateLyricsOn() {
+        let isOn = lyricsEnabled || youtubeCaptionsEnabled || subtitles.current != nil
+        store.setLyricsOn(isOn)
+        // Kept in step so that the player keeps its place under the controls (the row is reserved, empty) while it shows another source.
+        displayStore.setLyricsOn(isOn)
+    }
+
+    // MARK: Subtitles
+
+    /// What the Media tab's subtitle control acts on.
+    var subtitleControls: SubtitleControls {
+        SubtitleControls(
+            book: subtitles,
+            load: { [weak self] url in self?.loadSubtitles(from: url) },
+            shift: { [weak self] seconds in self?.shiftSubtitles(by: seconds) },
+            resetDelay: { [weak self] in self?.resetSubtitleDelay() },
+            remove: { [weak self] in self?.removeSubtitles() },
+            alignment: subtitleAlignment,
+            align: { [weak self] in self?.alignSubtitles() },
+            cancelAlign: { [weak self] in self?.subtitleAlignment?.cancel() },
+            setWatching: { [weak self] isOn in self?.setSubtitleWatching(isOn) },
+            floating: { [weak self] in self?.floatingSubtitlesEnabled ?? false },
+            setFloating: { [weak self] isOn in self?.setFloatingSubtitles(isOn) },
+            notchSubtitles: { [weak self] in self?.notchSubtitlesShown ?? false },
+            setNotchSubtitles: { [weak self] isOn in self?.setNotchSubtitles(isOn) },
+            finder: subtitleFinder,
+            find: { [weak self] in self?.findSubtitles() }
+        )
+    }
+
+    /// Whether subtitles / lyrics under the notch are currently enabled and shown.
+    var notchSubtitlesShown: Bool {
+        lyricsUnderNotch && !store.lyricsHidden
+    }
+
+    /// Turns the notch subtitles on or off, keeping user settings and store in sync.
+    func setNotchSubtitles(_ shown: Bool) {
+        if let settings = context?.settings {
+            if shown && !lyricsUnderNotch {
+                settings.set(true, for: MediaSettingsKeys(settings).lyricsUnderNotch)
+                lyricsUnderNotch = true
+            }
+        }
+        store.setLyricsHidden(!shown)
+        refreshActivity()
+    }
+
+    /// Toggles notch subtitles on/off.
+    func toggleNotchSubtitles() {
+        setNotchSubtitles(!notchSubtitlesShown)
+    }
+
+    /// Loads a subtitle file for what plays now and shows it. False when nothing plays or the file holds no subtitle (the book then
+    /// names it, for the tab).
+    @discardableResult
+    func loadSubtitles(from url: URL) -> Bool {
+        subtitles.setCurrentKey(SubtitleBook.key(for: store.state))
+        let data = (try? Data(contentsOf: url)).flatMap { $0.count <= Self.maxSubtitleBytes ? $0 : nil } ?? Data()
+        let loaded = subtitles.load(data, name: url.lastPathComponent)
+        refreshLyrics()
+        return loaded
+    }
+
+    /// Moves the subtitles of what plays now: positive shows them later.
+    func shiftSubtitles(by seconds: Double) {
+        // The part of the film playing now: what an advertisement did to the parts before it stays as it was.
+        subtitles.shift(by: seconds, at: store.position(at: Date()))
+        refreshLyrics()
+    }
+
+    func resetSubtitleDelay() {
+        subtitles.resetDelay()
+        refreshLyrics()
+    }
+
+    /// The subtitles floating over the film all the time, or only over a fullscreen one (when that option is on).
+    func setFloatingSubtitles(_ isOn: Bool) {
+        guard let settings = context?.settings else { return }
+        settings.set(isOn, for: MediaSettingsKeys(settings).floatingSubtitles)
+        floatingSubtitlesEnabled = isOn
+        updateSubtitleOverlay()
+    }
+
+    func setSubtitleWatching(_ isOn: Bool) {
+        guard let settings = context?.settings else { return }
+        settings.set(isOn, for: MediaSettingsKeys(settings).subtitleWatch)
+        // At once, not when the settings loop gets to it: the menu's tick and the listening go together.
+        subtitleAlignment?.watchWanted = isOn
+        updateSubtitleWatch()
+    }
+
+    /// Watching for drift while the user wants it, the film plays with its subtitles shown, and "Tự căn" is not listening.
+    private func updateSubtitleWatch() {
+        guard let alignment = subtitleAlignment else { return }
+        let state = store.state
+        guard alignment.watchWanted, shownSubtitles != nil, state.isPlaying, !alignment.isListening else { return alignment.stopWatching() }
+        alignment.noteState(state)
+        alignment.watch(state: state, entry: { [weak self] in self?.subtitles.current }) { [weak self] delay, from in
+            self?.applyFoundDelay(delay, from: from)
+        }
+    }
+
+    /// Searches subtitlecat for the film playing and loads the subtitles that fit it best, moved by the delay they fit with.
+    func findSubtitles() {
+        let state = store.state
+        let names = sources.pageNames(playing: state.title)
+        context?.logger.notice("Subtitle search: the page gives \(names == nil ? "no other names" : "other names", privacy: .public)")
+        subtitleFinder?.start(state: state, pageNames: names) { [weak self] data, name, delay, from in
+            guard let self else { return }
+            subtitles.setCurrentKey(SubtitleBook.key(for: state))
+            guard subtitles.load(data, name: name) else { return }
+            subtitles.setDelay(delay, from: from, at: store.position(at: Date()) ?? from)
+            refreshLyrics()
+        }
+    }
+
+    private func applyFoundDelay(_ delay: Double, from: Double) {
+        subtitles.setDelay(delay, from: from, at: store.position(at: Date()) ?? from)
+        refreshLyrics()
+    }
+
+    /// Listens to the film for a while and moves its subtitles onto the speech it hears.
+    func alignSubtitles() {
+        subtitles.setCurrentKey(SubtitleBook.key(for: store.state))
+        guard let entry = subtitles.current else { return }
+        subtitleAlignment?.start(entry: entry, state: store.state) { [weak self] delay, from in
+            self?.applyFoundDelay(delay, from: from)
+        }
+    }
+
+    func removeSubtitles() {
+        subtitleAlignment?.reset()
+        subtitles.remove()
+        refreshLyrics()
+    }
+
+    /// The user's subtitles win over captions and lyrics from the web, as captions win over the web.
+    /// The overlay is on while the setting is and the film has subtitles; the film plays in the app the state names, a browser by
+    /// its own name rather than its helper's.
+    private func updateSubtitleOverlay() {
+        let state = store.state
+        // A film in a tab the extension sees has its lines drawn in its page; the window is for the others.
+        subtitleOverlay?.setDrawsInPage(subtitleTab != nil)
+        subtitleOverlay?.update(
+            enabled: fullscreenSubtitlesEnabled && shownSubtitles != nil, forced: floatingSubtitlesEnabled && shownSubtitles != nil,
+            playerBundleIDs: [state.parentApplicationBundleIdentifier, state.bundleIdentifier].compactMap { $0 }
+        )
+        updatePageSubtitles()
+    }
+
+    /// The tab of the film whose subtitles are shown, when it is one the extension sees.
+    private var subtitleTab: TabRef? {
+        guard shownSubtitles != nil, fullscreenSubtitlesEnabled || floatingSubtitlesEnabled else { return nil }
+        return sources.book.primary?.tab
+    }
+
+    /// In the page while the window would be up (over the fullscreen film, or all the time when shown by hand).
+    private func updatePageSubtitles() {
+        pageSubtitles?.update(target: subtitleOverlay?.isShown == true ? subtitleTab : nil)
+    }
+
+    private func showSubtitles(_ entry: SubtitleBook.Entry) {
+        stopLyricsLookup()
+        shownCaptions = nil
+        guard entry != shownSubtitles else { return }
+        shownSubtitles = entry
+        show(lyrics: SubtitleParser.lines(for: entry))
+    }
+
+    // MARK: YouTube captions
+
+    private static let driftLogInterval: TimeInterval = 10
+
+    /// Listens for the Chrome helper only while the setting is on.
+    private func updateYouTubeBridge() {
+        guard let context else { return }
+        guard youtubeCaptionsEnabled else {
+            stopYouTubeBridge()
+            return
+        }
+        guard youtubeServer == nil, !youtubeListenFailed else { return }
+        let path = youtubeSocketPath ?? YouTubeSocket.path(inStorageDirectory: context.storage.directory)
+        let server = YouTubeBridgeServer(
+            socketPath: path, log: youtubeLog,
+            onMessage: { [weak self] message, connection in self?.receiveYouTube(message, connection: connection) },
+            onDisconnect: { [weak self] connection in self?.sources.connectionEnded(connection) }
+        )
+        do {
+            try server.start()
+            youtubeServer = server
+            youtubeBridge.listenFailed = false
+        } catch {
+            youtubeListenFailed = true
+            youtubeBridge.listenFailed = true
+            context.logger.error("Cannot listen for YouTube captions: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// Closes the socket and forgets everything the extension sent. Runs with every change of a setting, so it assigns
+    /// only what is not already so: the Settings rows watch these.
+    private func stopYouTubeBridge() {
+        youtubeServer?.stop()
+        youtubeServer = nil
+        dropUnansweredSkips()
+        sources.forgetTabs()
+        youtubeListenFailed = false
+        if youtubeBridge.listenFailed { youtubeBridge.listenFailed = false }
+        if youtubeBridge.lastPageMessageAt != nil { youtubeBridge.lastPageMessageAt = nil }
+        if youtubeBridge.accessWithheld { youtubeBridge.accessWithheld = false }
+        captionStore.removeAll()
+        loggedMatchDecision = nil
+        lastDriftLoggedAt = nil
+    }
+
+    /// What the helper passed on. Ignored while the setting is off, as a message still on its way when it was switched
+    /// off would be.
+    func receiveYouTube(_ message: YouTubeMessage, connection: Int = 0, at now: Date = Date()) {
+        guard youtubeCaptionsEnabled else { return }
+        captionStore.apply(message, at: now)
+        if message.isFromPage {
+            youtubeBridge.lastPageMessageAt = now
+            // The page is sending, so Chrome lets the extension read YouTube, whatever was reported before: the notice
+            // would otherwise stay when Chrome gives the access without telling the extension.
+            if youtubeBridge.accessWithheld { youtubeBridge.accessWithheld = false }
+        }
+        // A page with media of any site is a source of its own; it has no captions, and says nothing of the video the system plays.
+        switch message {
+        case .tab(let tab):
+            sources.receive(tab, connection: connection)
+            return
+        case .tabGone(let tab):
+            sources.tabGone(tab, connection: connection)
+            return
+        case .pageNames(let page):
+            sources.receive(page, connection: connection)
+            return
+        default:
+            break
+        }
+        // A diagnostic decides nothing about lyrics; the service worker's says whether Chrome lets the extension read YouTube.
+        if case .diag(let diag) = message {
+            if let answer = diag.commandAnswer { commandAnswered(answer) }
+            if let access = diag.siteAccess, youtubeBridge.accessWithheld != (access == .withheld) {
+                youtubeBridge.accessWithheld = access == .withheld
+            }
+            return
+        }
+        refreshLyrics()
+        logDrift(of: message, at: now)
+    }
+
+    /// The captions for the track playing now, nil while the setting is off or nothing fits. A decision is logged
+    /// when it changes, with the rule that failed and never a title.
+    private func matchedCaptions() -> YouTubeCaptionStore.Track? {
+        guard youtubeCaptionsEnabled else { return nil }
+        let decision = YouTubeCaptionMatcher.decision(for: store.state, in: captionStore, now: Date(), keeping: shownCaptions?.videoID)
+        let line: String
+        switch decision {
+        case .matched: line = "match matched"
+        case .notMatched(let reason): line = "match not-matched reason=\(reason.rawValue)"
+        }
+        if line != loggedMatchDecision {
+            loggedMatchDecision = line
+            youtubeLog(line)
+        }
+        return decision.track
+    }
+
+    /// How far the extension's clock is from the notch's, when a playback of the video whose captions are shown arrives:
+    /// the video's time minus the position the system's now-playing clock gives at that moment (positive: the video is
+    /// ahead of the notch). It tells whether the clock or the lyric source is off. At most one line every 10 s.
+    private func logDrift(of message: YouTubeMessage, at now: Date) {
+        guard case .playback(let playback) = message, playback.videoID == shownCaptions?.videoID,
+              let position = store.position(at: now) else { return }
+        if let last = lastDriftLoggedAt, now.timeIntervalSince(last) < Self.driftLogInterval { return }
+        lastDriftLoggedAt = now
+        youtubeLog("playback " + String(format: "drift=%+.2fs", playback.time - position))
+    }
+
+    /// The captions win over lyrics from the web: a lookup still going is stopped, and one that was shown is replaced.
+    private func showCaptions(_ captions: YouTubeCaptionStore.Track) {
+        stopLyricsLookup()
+        guard shownCaptions?.videoID != captions.videoID || shownCaptions?.revision != captions.revision else { return }
+        shownCaptions = (captions.videoID, captions.revision)
+        show(lyrics: captions.lines)
+    }
+
+    /// The tap runs only while the setting is on, something plays and some bars are on screen.
+    private func updateSpectrum() {
+        spectrumFeed?.update(isEnabled: realSpectrum, isPlaying: store.state.isPlaying, isShown: store.spectrumViewCount > 0)
+    }
+
+    /// One timer for the policy's next deadline (end of the pause grace or of the track-change debounce).
+    private func scheduleDeadline(from now: Date) {
+        guard policy.nextDeadline != scheduledDeadline else { return }
+        cancelDeadline()
+        guard let deadline = policy.nextDeadline, let context else { return }
+        scheduledDeadline = deadline
+        // Whole milliseconds, so a 5 s grace is exactly 5 s rather than a hair over it after floating-point math.
+        let delay = Duration.milliseconds(Int64((max(deadline.timeIntervalSince(now), 0) * 1000).rounded()))
+        deadlineTimer = context.scheduler.schedule(after: delay) { [weak self] in self?.deadlineReached(deadline) }
+    }
+
+    private func deadlineReached(_ deadline: Date) {
+        deadlineTimer = nil
+        scheduledDeadline = nil
+        // The timer may fire a little early after rounding; the deadline itself is when the policy expects the tick.
+        let now = max(Date(), deadline)
+        policy.tick(at: now)
+        scheduleDeadline(from: now)
+        refreshActivity()
+    }
+
+    private func cancelDeadline() {
+        deadlineTimer?.cancel()
+        deadlineTimer = nil
+        scheduledDeadline = nil
+    }
+
+    /// On offer while the policy shows playback, whatever the live activity setting says: the lock screen module
+    /// has its own switch for Media.
+    private func refreshLockScreen(_ context: ModuleContext) {
+        guard policy.visible != lockScreenOffered else { return }
+        lockScreenOffered = policy.visible
+        if lockScreenOffered {
+            context.lockScreen.set(AnyView(NowPlayingLockScreenView(transport: lockScreenTransport)), priority: .normal, isInteractive: true)
+        } else {
+            context.lockScreen.clear()
+        }
+    }
+
+    /// Lyrics for the current track may still arrive: a lookup is out, the next track has not shown up yet, or captions
+    /// from the Chrome extension may still come.
+    private var lyricsArePending: Bool {
+        lyricsTask != nil || lyricsDebounce != nil || !store.state.isActive || (youtubeCaptionsEnabled && shownCaptions == nil && shownSubtitles == nil)
+    }
+
+    /// Whether the activity carries the strip: the setting is on and the track plays with synced lyrics, from whichever
+    /// source (a paused track has no line being sung). Once up it also stays through a track change (up to 3 s, while
+    /// the new lyrics are looked up) and a stall of playback (up to 1 s), so the notch does not collapse and grow again.
+    private func updateStripHold() -> Bool {
+        stripHold.update(
+            LyricStripHold.Inputs(
+                enabled: lyricsUnderNotch && !store.lyricsHidden && !(subtitleOverlay?.isShown ?? false), playing: store.state.isPlaying,
+                hasLyrics: store.syncedLyrics?.isEmpty == false, lyricsPending: lyricsArePending
+            ),
+            at: Date()
+        )
+        scheduleStripHold()
+        return stripHold.isShown
+    }
+
+    /// One timer for the end of the hold, like the policy's deadline.
+    private func scheduleStripHold() {
+        guard stripHold.nextDeadline != scheduledStripDeadline else { return }
+        cancelStripHold()
+        guard let deadline = stripHold.nextDeadline, let context else { return }
+        scheduledStripDeadline = deadline
+        let delay = Duration.milliseconds(Int64((max(deadline.timeIntervalSince(Date()), 0) * 1000).rounded()))
+        stripHoldTimer = context.scheduler.schedule(after: delay) { [weak self] in self?.stripHoldEnded(at: deadline) }
+    }
+
+    private func stripHoldEnded(at deadline: Date) {
+        stripHoldTimer = nil
+        scheduledStripDeadline = nil
+        stripHold.tick(at: max(Date(), deadline))
+        refreshActivity()
+    }
+
+    private func cancelStripHold() {
+        stripHoldTimer?.cancel()
+        stripHoldTimer = nil
+        scheduledStripDeadline = nil
+    }
+
+    private func resetStripHold() {
+        stripHold = LyricStripHold()
+        cancelStripHold()
+    }
+
+    /// Sets the activity when it becomes visible, another track starts or its strip comes or goes; clears it when it
+    /// hides; nothing else, so frequent position updates neither redraw nor reorder it.
+    private func refreshActivity() {
+        guard let context else { return }
+        refreshLockScreen(context)
+        guard showActivity, policy.visible else {
+            if publishedTrack != nil {
+                context.activities.clear(id: Self.activityID)
+                publishedTrack = nil
+                publishedStrip = false
+            }
+            resetStripHold()
+            return
+        }
+        let track = store.state.trackIdentity
+        // Before the guard below: the hold starts at the track change, while the state is still empty.
+        let strip = updateStripHold()
+        // While a track change is debounced the state is briefly empty: an activity already up keeps showing
+        // the last track (the store's snapshot), and none is published until a track is there to show.
+        guard store.state.isActive, publishedTrack == nil || track != publishedTrack || strip != publishedStrip else { return }
+        context.activities.set(LiveActivity(
+            id: Self.activityID,
+            priority: .normal,
+            leading: AnyView(NowPlayingActivityArtwork(store: store)),
+            trailing: AnyView(NowPlayingBars(store: store)),
+            bottom: strip ? AnyView(NowPlayingLyricStrip(store: store, onHide: { [weak self] in self?.setNotchSubtitles(false) })) : nil,
+            bottomHeight: strip ? NowPlayingLyricStrip.height : 0
+        ))
+        publishedTrack = track
+        publishedStrip = strip
+    }
+}
